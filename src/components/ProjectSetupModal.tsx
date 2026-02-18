@@ -8,7 +8,7 @@ import { EnvStatusResponse } from "@/app/api/env-status/route";
 import { loadNodeDefaults, saveNodeDefaults } from "@/store/utils/localStorage";
 import { ProviderModel } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
-import { DirectoryBrowser } from "@/components/DirectoryBrowser";
+
 
 // LLM provider and model options (mirrored from LLMGenerateNode)
 const LLM_PROVIDERS: { value: LLMProvider; label: string }[] = [
@@ -108,7 +108,6 @@ export function ProjectSetupModal({
   const [directoryPath, setDirectoryPath] = useState("");
   const [externalStorage, setExternalStorage] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
-  const [showDirectoryBrowser, setShowDirectoryBrowser] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Provider tab state
@@ -170,7 +169,6 @@ export function ProjectSetupModal({
         wavespeed: !!providerSettings.providers.wavespeed?.apiKey,
       });
       setError(null);
-      setShowDirectoryBrowser(false);
 
       // Load node defaults
       setLocalNodeDefaults(loadNodeDefaults());
@@ -187,15 +185,6 @@ export function ProjectSetupModal({
         .catch(() => setEnvStatus(null));
     }
   }, [isOpen, mode, workflowName, saveDirectoryPath, useExternalImageStorage, providerSettings, canvasNavigationSettings]);
-
-  const handleBrowse = () => {
-    setShowDirectoryBrowser((prev) => !prev);
-  };
-
-  const handleDirectorySelected = (path: string) => {
-    setDirectoryPath(path);
-    setShowDirectoryBrowser(false);
-  };
 
   const handleSaveProject = async () => {
     if (!name.trim()) {
@@ -383,30 +372,13 @@ export function ProjectSetupModal({
               <label className="block text-sm text-neutral-400 mb-1">
                 Project Directory
               </label>
-              <div className="relative">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={directoryPath}
-                    onChange={(e) => setDirectoryPath(e.target.value)}
-                    placeholder="//server/share/projects/my-project"
-                    className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleBrowse}
-                    className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 text-neutral-200 text-sm rounded transition-colors"
-                  >
-                    Browse
-                  </button>
-                </div>
-                <DirectoryBrowser
-                  isOpen={showDirectoryBrowser}
-                  onClose={() => setShowDirectoryBrowser(false)}
-                  onSelect={handleDirectorySelected}
-                  initialPath={directoryPath || undefined}
-                />
-              </div>
+              <input
+                type="text"
+                value={directoryPath}
+                onChange={(e) => setDirectoryPath(e.target.value)}
+                placeholder="//server/share/projects/my-project"
+                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
+              />
               <p className="text-xs text-neutral-500 mt-1">
                 Use a network path (e.g. //server/share/...) for remote access. Subfolders for inputs and generations will be auto-created.
               </p>
