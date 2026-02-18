@@ -389,7 +389,7 @@ export function ProjectSetupModal({
                     type="text"
                     value={directoryPath}
                     onChange={(e) => setDirectoryPath(e.target.value)}
-                    placeholder="/Users/username/projects/my-project"
+                    placeholder="//server/share/projects/my-project"
                     className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
                   />
                   <button
@@ -408,7 +408,7 @@ export function ProjectSetupModal({
                 />
               </div>
               <p className="text-xs text-neutral-500 mt-1">
-                Workflow files and images will be saved here. Subfolders for inputs and generations will be auto-created.
+                Use a network path (e.g. //server/share/...) for remote access. Subfolders for inputs and generations will be auto-created.
               </p>
             </div>
 
