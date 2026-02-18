@@ -75,6 +75,7 @@ export async function executeNanoBanana(
     inputPrompt: promptText,
     status: "loading",
     error: null,
+    lastGenerationCost: null,
   });
 
   const provider = nodeData.selectedModel?.provider || "gemini";
@@ -163,11 +164,16 @@ export async function executeNanoBanana(
         });
 
       // Track cost
+      let cost: number | null = null;
       if (nodeData.selectedModel?.provider === "fal" && nodeData.selectedModel?.pricing) {
-        addIncurredCost(nodeData.selectedModel.pricing.amount);
+        cost = nodeData.selectedModel.pricing.amount;
+        addIncurredCost(cost);
       } else if (!nodeData.selectedModel || nodeData.selectedModel.provider === "gemini") {
-        const generationCost = calculateGenerationCost(nodeData.model, nodeData.resolution);
-        addIncurredCost(generationCost);
+        cost = calculateGenerationCost(nodeData.model, nodeData.resolution);
+        addIncurredCost(cost);
+      }
+      if (cost !== null) {
+        updateNodeData(node.id, { lastGenerationCost: cost });
       }
 
       // Auto-save to generations folder if configured

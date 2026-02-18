@@ -67,6 +67,7 @@ export async function executeGenerate3D(
     inputPrompt: promptText,
     status: "loading",
     error: null,
+    lastGenerationCost: null,
   });
 
   const provider = nodeData.selectedModel?.provider || "fal";
@@ -117,7 +118,9 @@ export async function executeGenerate3D(
 
       // Track cost if applicable
       if (nodeData.selectedModel?.pricing) {
-        addIncurredCost(nodeData.selectedModel.pricing.amount);
+        const cost = nodeData.selectedModel.pricing.amount;
+        addIncurredCost(cost);
+        updateNodeData(node.id, { lastGenerationCost: cost });
       }
 
       // Auto-save 3D model to generations folder if configured

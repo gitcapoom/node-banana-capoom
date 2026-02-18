@@ -159,6 +159,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
       headerAction={headerAction}
       titlePrefix={titlePrefix}
       commentNavigation={commentNavigation ?? undefined}
+      lastCost={nodeData.lastGenerationCost}
     >
       {/* Dynamic input handles based on model schema */}
       {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (

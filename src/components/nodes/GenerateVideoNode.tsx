@@ -378,6 +378,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       headerAction={headerAction}
       titlePrefix={titlePrefix}
       commentNavigation={commentNavigation ?? undefined}
+      lastCost={nodeData.lastGenerationCost}
     >
       {/* Dynamic input handles based on model schema */}
       {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
