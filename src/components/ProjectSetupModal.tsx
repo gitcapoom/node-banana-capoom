@@ -8,6 +8,7 @@ import { EnvStatusResponse } from "@/app/api/env-status/route";
 import { loadNodeDefaults, saveNodeDefaults } from "@/store/utils/localStorage";
 import { ProviderModel } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
+import { DirectoryBrowser } from "@/components/DirectoryBrowser";
 
 // LLM provider and model options (mirrored from LLMGenerateNode)
 const LLM_PROVIDERS: { value: LLMProvider; label: string }[] = [
@@ -107,7 +108,7 @@ export function ProjectSetupModal({
   const [directoryPath, setDirectoryPath] = useState("");
   const [externalStorage, setExternalStorage] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
-  const [isBrowsing, setIsBrowsing] = useState(false);
+  const [showDirectoryBrowser, setShowDirectoryBrowser] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Provider tab state
@@ -169,6 +170,7 @@ export function ProjectSetupModal({
         wavespeed: !!providerSettings.providers.wavespeed?.apiKey,
       });
       setError(null);
+      setShowDirectoryBrowser(false);
 
       // Load node defaults
       setLocalNodeDefaults(loadNodeDefaults());
@@ -186,33 +188,13 @@ export function ProjectSetupModal({
     }
   }, [isOpen, mode, workflowName, saveDirectoryPath, useExternalImageStorage, providerSettings, canvasNavigationSettings]);
 
-  const handleBrowse = async () => {
-    setIsBrowsing(true);
-    setError(null);
+  const handleBrowse = () => {
+    setShowDirectoryBrowser((prev) => !prev);
+  };
 
-    try {
-      const response = await fetch("/api/browse-directory");
-      const result = await response.json();
-
-      if (!result.success) {
-        setError(result.error || "Failed to open directory picker");
-        return;
-      }
-
-      if (result.cancelled) {
-        return;
-      }
-
-      if (result.path) {
-        setDirectoryPath(result.path);
-      }
-    } catch (err) {
-      setError(
-        `Failed to open directory picker: ${err instanceof Error ? err.message : "Unknown error"}`
-      );
-    } finally {
-      setIsBrowsing(false);
-    }
+  const handleDirectorySelected = (path: string) => {
+    setDirectoryPath(path);
+    setShowDirectoryBrowser(false);
   };
 
   const handleSaveProject = async () => {
@@ -312,7 +294,7 @@ export function ProjectSetupModal({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !isValidating && !isBrowsing) {
+    if (e.key === "Enter" && !isValidating) {
       handleSave();
     }
     if (e.key === "Escape") {
@@ -401,22 +383,29 @@ export function ProjectSetupModal({
               <label className="block text-sm text-neutral-400 mb-1">
                 Project Directory
               </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={directoryPath}
-                  onChange={(e) => setDirectoryPath(e.target.value)}
-                  placeholder="/Users/username/projects/my-project"
-                  className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
+              <div className="relative">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={directoryPath}
+                    onChange={(e) => setDirectoryPath(e.target.value)}
+                    placeholder="/Users/username/projects/my-project"
+                    className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleBrowse}
+                    className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 text-neutral-200 text-sm rounded transition-colors"
+                  >
+                    Browse
+                  </button>
+                </div>
+                <DirectoryBrowser
+                  isOpen={showDirectoryBrowser}
+                  onClose={() => setShowDirectoryBrowser(false)}
+                  onSelect={handleDirectorySelected}
+                  initialPath={directoryPath || undefined}
                 />
-                <button
-                  type="button"
-                  onClick={handleBrowse}
-                  disabled={isBrowsing}
-                  className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-700 disabled:opacity-50 text-neutral-200 text-sm rounded transition-colors"
-                >
-                  {isBrowsing ? "..." : "Browse"}
-                </button>
               </div>
               <p className="text-xs text-neutral-500 mt-1">
                 Workflow files and images will be saved here. Subfolders for inputs and generations will be auto-created.
@@ -1107,7 +1096,7 @@ export function ProjectSetupModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={activeTab === "project" && (isValidating || isBrowsing)}
+            disabled={activeTab === "project" && isValidating}
             className="px-4 py-2 text-sm bg-white text-neutral-900 rounded hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {activeTab === "project"
