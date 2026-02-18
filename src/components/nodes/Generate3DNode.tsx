@@ -11,6 +11,21 @@ import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
 
+function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text);
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+  return Promise.resolve();
+}
+
 // Provider badge component
 function ProviderBadge({ provider }: { provider: ProviderType }) {
   const providerName = provider === "gemini" ? "Gemini" : provider === "replicate" ? "Replicate" : provider === "kie" ? "Kie.ai" : provider === "wavespeed" ? "WaveSpeed" : "fal.ai";
@@ -368,7 +383,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
                 onClick={(e) => {
                   e.stopPropagation();
                   if (!nodeData.savedFilePath) return;
-                  navigator.clipboard.writeText(nodeData.savedFilePath).then(() => {
+                  copyToClipboard(nodeData.savedFilePath).then(() => {
                     useToast.getState().show("Path copied — paste in Explorer to open", "success");
                   });
                 }}
