@@ -8,7 +8,6 @@
 import type {
   NanoBananaNodeData,
 } from "@/types";
-import { calculateGenerationCost } from "@/utils/costCalculator";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
 import type { NodeExecutionContext } from "./types";
 
@@ -75,6 +74,7 @@ export async function executeNanoBanana(
     inputPrompt: promptText,
     status: "loading",
     error: null,
+    lastGenerationCost: null,
   });
 
   const provider = nodeData.selectedModel?.provider || "gemini";
@@ -162,12 +162,10 @@ export async function executeNanoBanana(
           }
         });
 
-      // Track cost
-      if (nodeData.selectedModel?.provider === "fal" && nodeData.selectedModel?.pricing) {
-        addIncurredCost(nodeData.selectedModel.pricing.amount);
-      } else if (!nodeData.selectedModel || nodeData.selectedModel.provider === "gemini") {
-        const generationCost = calculateGenerationCost(nodeData.model, nodeData.resolution);
-        addIncurredCost(generationCost);
+      // Track cost from server response
+      if (result.cost != null) {
+        addIncurredCost(result.cost);
+        updateNodeData(node.id, { lastGenerationCost: result.cost });
       }
 
       // Auto-save to generations folder if configured

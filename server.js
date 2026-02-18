@@ -6,7 +6,7 @@ const { createServer } = require('http');
 const next = require('next');
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
+const hostname = process.env.HOST || '0.0.0.0';
 const port = process.env.PORT || 3000;
 
 const app = next({ dev, hostname, port });
@@ -22,7 +22,7 @@ app.prepare().then(() => {
   server.headersTimeout = 610000; // Slightly longer than requestTimeout
 
   server.listen(port, () => {
-    console.log(`> Ready on http://${hostname}:${port}`);
+    console.log(`> Ready on http://${hostname}:${port} (accessible on LAN via your machine's IP)`);
     console.log(`> Server timeout set to ${server.requestTimeout / 1000 / 60} minutes`);
   });
 });

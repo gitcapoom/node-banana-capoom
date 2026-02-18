@@ -155,6 +155,7 @@ export interface NanoBananaNodeData extends BaseNodeData {
   error: string | null;
   imageHistory: CarouselImageItem[]; // Carousel history (IDs only)
   selectedHistoryIndex: number; // Currently selected image in carousel
+  lastGenerationCost?: number | null; // Cost of the last generation run
 }
 
 /**
@@ -173,6 +174,7 @@ export interface GenerateVideoNodeData extends BaseNodeData {
   error: string | null;
   videoHistory: CarouselVideoItem[]; // Carousel history (IDs only)
   selectedVideoHistoryIndex: number; // Currently selected video in carousel
+  lastGenerationCost?: number | null; // Cost of the last generation run
 }
 
 /**
@@ -190,6 +192,7 @@ export interface Generate3DNodeData extends BaseNodeData {
   inputSchema?: ModelInputDef[];
   status: NodeStatus;
   error: string | null;
+  lastGenerationCost?: number | null; // Cost of the last generation run
 }
 
 /**
@@ -206,6 +209,7 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   maxTokens: number;
   status: NodeStatus;
   error: string | null;
+  lastGenerationCost?: number | null; // Cost of the last generation run
 }
 
 /**

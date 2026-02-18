@@ -100,6 +100,12 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
       provider: model.provider,
       modelId: model.id,
       displayName: model.name,
+      ...(model.pricing && {
+        pricing: {
+          type: model.pricing.type,
+          amount: model.pricing.amount,
+        },
+      }),
     };
     updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
     setIsBrowseDialogOpen(false);
@@ -159,6 +165,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
       headerAction={headerAction}
       titlePrefix={titlePrefix}
       commentNavigation={commentNavigation ?? undefined}
+      lastCost={nodeData.lastGenerationCost}
     >
       {/* Dynamic input handles based on model schema */}
       {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (

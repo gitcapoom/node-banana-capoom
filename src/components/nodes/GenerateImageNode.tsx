@@ -385,6 +385,12 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       modelId: model.id,
       displayName: model.name,
       capabilities: model.capabilities,
+      ...(model.pricing && {
+        pricing: {
+          type: model.pricing.type,
+          amount: model.pricing.amount,
+        },
+      }),
     };
     updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
     setIsBrowseDialogOpen(false);
@@ -491,6 +497,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       headerAction={headerAction}
       titlePrefix={titlePrefix}
       commentNavigation={commentNavigation ?? undefined}
+      lastCost={nodeData.lastGenerationCost}
     >
       {/* Input handles - ALWAYS use same IDs and positions for connection stability */}
       {/* Image input at 35%, Text input at 65% - never changes regardless of model */}

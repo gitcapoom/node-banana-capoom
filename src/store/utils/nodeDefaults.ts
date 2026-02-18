@@ -132,6 +132,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         error: null,
         imageHistory: [],
         selectedHistoryIndex: 0,
+        lastGenerationCost: null,
       } as NanoBananaNodeData;
     }
     case "generateVideo": {
@@ -145,6 +146,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         error: null,
         videoHistory: [],
         selectedVideoHistoryIndex: 0,
+        lastGenerationCost: null,
       } as GenerateVideoNodeData;
     }
     case "generate3d": {
@@ -158,6 +160,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         selectedModel: nodeDefaults.generate3d?.selectedModel,
         status: "idle",
         error: null,
+        lastGenerationCost: null,
       } as Generate3DNodeData;
     }
     case "llmGenerate": {
@@ -173,6 +176,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         maxTokens: llmDefaults?.maxTokens ?? 8192,
         status: "idle",
         error: null,
+        lastGenerationCost: null,
       } as LLMGenerateNodeData;
     }
     case "splitGrid":

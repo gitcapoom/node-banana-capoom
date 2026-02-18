@@ -27,6 +27,7 @@ export interface GenerateResponse {
   model3dUrl?: string; // For 3D models, return GLB URL directly
   contentType?: "image" | "video" | "3d";
   error?: string;
+  cost?: number; // Generation cost in USD (from provider pricing)
 }
 
 // API Request/Response types for LLM Text Generation

@@ -242,7 +242,7 @@ export function CostDialog({ predictedCost, incurredCost, onClose }: CostDialogP
               </span>
             </div>
             <p className="text-xs text-neutral-500">
-              Actual API spend from Gemini generations
+              Actual API spend across all providers
             </p>
 
             {incurredCost > 0 && (

@@ -33,6 +33,63 @@ export function clearFalInputMappingCache() {
 }
 
 /**
+ * In-memory cache for fal.ai model pricing to avoid extra API calls per generation
+ */
+const falPricingCache = new Map<string, { unitPrice: number; timestamp: number }>();
+const FAL_PRICING_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Estimate per-run cost for a fal.ai model using the Cost Estimation API.
+ * Uses "historical_api_price" which reflects actual average cost per call
+ * based on usage history — accounts for resolution, duration, and other factors.
+ * Much more accurate than raw unit_price from the Pricing API.
+ * Results are cached in-memory for 5 minutes per model.
+ *
+ * @see https://docs.fal.ai/platform-apis/v1/models/pricing/estimate
+ */
+export async function getFalModelPricing(modelId: string, apiKey: string): Promise<number | null> {
+  // Check cache first
+  const cached = falPricingCache.get(modelId);
+  if (cached && Date.now() - cached.timestamp < FAL_PRICING_CACHE_TTL) {
+    return cached.unitPrice;
+  }
+
+  try {
+    // Use the Cost Estimation API with historical pricing for accurate per-run cost
+    const response = await fetch("https://api.fal.ai/v1/models/pricing/estimate", {
+      method: "POST",
+      headers: {
+        Authorization: `Key ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        estimate_type: "historical_api_price",
+        endpoints: {
+          [modelId]: { call_quantity: 1 },
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn(`[fal pricing] Failed to estimate cost for ${modelId}: HTTP ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+
+    if (typeof data.total_cost === "number" && data.total_cost > 0) {
+      falPricingCache.set(modelId, { unitPrice: data.total_cost, timestamp: Date.now() });
+      return data.total_cost;
+    }
+
+    return null;
+  } catch (err) {
+    console.warn(`[fal pricing] Error estimating cost for ${modelId}:`, err);
+    return null;
+  }
+}
+
+/**
  * Fetch fal.ai model schema and extract input parameter mappings
  * Uses the Model Search API with OpenAPI expansion (same as /api/models/[modelId])
  * Results are cached in-memory for 30 minutes per model.

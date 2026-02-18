@@ -830,10 +830,12 @@ describe("/api/generate route", () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      expect(data).toEqual({
+      expect(data).toMatchObject({
         success: true,
         image: "data:image/jpeg;base64,jpegOutputData",
       });
+      // Server now injects cost for Gemini models
+      expect(typeof data.cost).toBe("number");
     });
 
     it("should handle response with default MIME type", async () => {

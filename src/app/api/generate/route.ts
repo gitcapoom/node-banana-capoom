@@ -15,9 +15,10 @@ import { GenerateRequest, GenerateResponse, ModelType, SelectedModel, ProviderTy
 import { GenerationInput } from "@/lib/providers/types";
 import { generateWithGemini } from "./providers/gemini";
 import { generateWithReplicate } from "./providers/replicate";
-import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFalQueue } from "./providers/fal";
+import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFalQueue, getFalModelPricing } from "./providers/fal";
 import { generateWithKie } from "./providers/kie";
 import { generateWithWaveSpeed } from "./providers/wavespeed";
+import { calculateGenerationCost } from "@/utils/costCalculator";
 
 // Re-export for backward compatibility (test file imports from route)
 export const clearFalInputMappingCache = _clearFalInputMappingCache;
@@ -253,12 +254,18 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Fetch cost from fal.ai Pricing API (non-blocking — returns undefined if unavailable)
+      const falCost = falApiKey
+        ? await getFalModelPricing(selectedModel!.modelId, falApiKey).catch(() => null)
+        : null;
+
       // Return appropriate fields based on output type
       if (output.type === "3d") {
         return NextResponse.json<GenerateResponse>({
           success: true,
           model3dUrl: output.url,
           contentType: "3d",
+          ...(falCost != null && { cost: falCost }),
         });
       }
 
@@ -270,6 +277,7 @@ export async function POST(request: NextRequest) {
           video: isLargeVideo ? undefined : output.data,
           videoUrl: isLargeVideo ? output.url : undefined,
           contentType: "video",
+          ...(falCost != null && { cost: falCost }),
         });
       }
 
@@ -277,6 +285,7 @@ export async function POST(request: NextRequest) {
         success: true,
         image: output.data,
         contentType: "image",
+        ...(falCost != null && { cost: falCost }),
       });
     }
 
@@ -352,12 +361,16 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Get cost from selectedModel pricing (Kie models have hardcoded pricing)
+      const kieCost = selectedModel?.pricing?.amount;
+
       // Return appropriate fields based on output type
       if (output.type === "3d") {
         return NextResponse.json<GenerateResponse>({
           success: true,
           model3dUrl: output.url,
           contentType: "3d",
+          ...(kieCost != null && { cost: kieCost }),
         });
       }
 
@@ -369,6 +382,7 @@ export async function POST(request: NextRequest) {
           video: isLargeVideo ? undefined : output.data,
           videoUrl: isLargeVideo ? output.url : undefined,
           contentType: "video",
+          ...(kieCost != null && { cost: kieCost }),
         });
       }
 
@@ -376,6 +390,7 @@ export async function POST(request: NextRequest) {
         success: true,
         image: output.data,
         contentType: "image",
+        ...(kieCost != null && { cost: kieCost }),
       });
     }
 
@@ -451,12 +466,16 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Get cost from selectedModel pricing (WaveSpeed models may have pricing from API)
+      const wavespeedCost = selectedModel?.pricing?.amount;
+
       // Return appropriate fields based on output type
       if (output.type === "3d") {
         return NextResponse.json<GenerateResponse>({
           success: true,
           model3dUrl: output.url,
           contentType: "3d",
+          ...(wavespeedCost != null && { cost: wavespeedCost }),
         });
       }
 
@@ -468,6 +487,7 @@ export async function POST(request: NextRequest) {
           video: isLargeVideo ? undefined : output.data,
           videoUrl: isLargeVideo ? output.url : undefined,
           contentType: "video",
+          ...(wavespeedCost != null && { cost: wavespeedCost }),
         });
       }
 
@@ -475,6 +495,7 @@ export async function POST(request: NextRequest) {
         success: true,
         image: output.data,
         contentType: "image",
+        ...(wavespeedCost != null && { cost: wavespeedCost }),
       });
     }
 
@@ -495,7 +516,7 @@ export async function POST(request: NextRequest) {
     // Use selectedModel.modelId if available (new format), fallback to legacy model field
     const geminiModel = (selectedModel?.modelId as ModelType) || model;
 
-    return await generateWithGemini(
+    const geminiResponse = await generateWithGemini(
       requestId,
       geminiApiKey,
       prompt,
@@ -505,6 +526,21 @@ export async function POST(request: NextRequest) {
       resolution,
       useGoogleSearch
     );
+
+    // Inject cost into Gemini response
+    try {
+      const geminiBody = await geminiResponse.json();
+      if (geminiBody.success) {
+        const geminiCost = calculateGenerationCost(geminiModel, resolution || "1K");
+        return NextResponse.json<GenerateResponse>({
+          ...geminiBody,
+          cost: geminiCost,
+        }, { status: geminiResponse.status });
+      }
+      return NextResponse.json(geminiBody, { status: geminiResponse.status });
+    } catch {
+      return geminiResponse;
+    }
   } catch (error) {
     // Extract error information
     let errorMessage = "Generation failed";
