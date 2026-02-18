@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["http://otoserve10:3000"],
+  allowedDevOrigins: ["otoserve10"],
   reactStrictMode: true,
   experimental: {
     serverActions: {
