@@ -377,30 +377,23 @@ describe("Header", () => {
       expect(screen.getByTitle("Open Project Folder")).toBeInTheDocument();
     });
 
-    it("should call fetch to open-directory API when clicked", async () => {
+    it("should open file:// URL in new tab when clicked", async () => {
       mockUseWorkflowStore.mockImplementation((selector) => {
         return selector(createDefaultState({
           workflowName: "My Project",
           workflowId: "project-123",
-          saveDirectoryPath: "/path/to/project",
+          saveDirectoryPath: "//OTOSERVE10/share/project",
         }));
       });
 
-      const mockFetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ success: true }),
-      });
-      global.fetch = mockFetch;
+      const mockOpen = vi.fn();
+      window.open = mockOpen;
 
       render(<Header />);
       const folderButton = screen.getByTitle("Open Project Folder");
       fireEvent.click(folderButton);
 
-      expect(mockFetch).toHaveBeenCalledWith("/api/open-directory", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: "/path/to/project" }),
-      });
+      expect(mockOpen).toHaveBeenCalledWith("file://OTOSERVE10/share/project", "_blank");
     });
   });
 

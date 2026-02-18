@@ -10,6 +10,7 @@ import { Generate3DNodeData, ProviderType, SelectedModel, ModelInputDef } from "
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
+import { pathToFileUrl } from "@/utils/pathToFileUrl";
 
 // Provider badge component
 function ProviderBadge({ provider }: { provider: ProviderType }) {
@@ -365,18 +366,10 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
             <span className="text-[11px] text-orange-400 font-medium">3D Model Generated</span>
             {nodeData.savedFilename ? (
               <button
-                onClick={async (e) => {
+                onClick={(e) => {
                   e.stopPropagation();
                   if (!nodeData.savedFilePath) return;
-                  try {
-                    await fetch("/api/open-file", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ filePath: nodeData.savedFilePath }),
-                    });
-                  } catch (err) {
-                    console.error("Failed to open file location:", err);
-                  }
+                  window.open(pathToFileUrl(nodeData.savedFilePath), "_blank");
                 }}
                 className="nodrag nopan text-[10px] text-neutral-400 hover:text-orange-300 truncate max-w-full cursor-pointer transition-colors flex items-center gap-1"
                 title={`Open in explorer: ${nodeData.savedFilePath}`}

@@ -5,6 +5,7 @@ import { useWorkflowStore, WorkflowFile } from "@/store/workflowStore";
 import { ProjectSetupModal } from "./ProjectSetupModal";
 import { CostIndicator } from "./CostIndicator";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
+import { pathToFileUrl } from "@/utils/pathToFileUrl";
 
 function CommentsNavigationIcon() {
   // Subscribe to nodes so we re-render when comments change
@@ -137,29 +138,9 @@ export function Header() {
     }, 50);
   };
 
-  const handleOpenDirectory = async () => {
+  const handleOpenDirectory = () => {
     if (!saveDirectoryPath) return;
-
-    try {
-      const response = await fetch("/api/open-directory", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ path: saveDirectoryPath }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        console.error("Failed to open directory:", result.error);
-        alert(`Failed to open project folder: ${result.error || "Unknown error"}`);
-        return;
-      }
-    } catch (error) {
-      console.error("Failed to open directory:", error);
-      alert("Failed to open project folder. Please try again.");
-    }
+    window.open(pathToFileUrl(saveDirectoryPath), "_blank");
   };
 
   const handleRevertAIChanges = useCallback(() => {
