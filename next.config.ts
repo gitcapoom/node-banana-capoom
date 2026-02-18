@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["otoserve10"],
+  allowedDevOrigins: ["otoserve10:3000"],
   reactStrictMode: true,
   experimental: {
     serverActions: {
