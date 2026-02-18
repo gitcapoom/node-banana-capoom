@@ -240,6 +240,7 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         error: null,
         imageHistory: [],
         selectedHistoryIndex: 0,
+        lastGenerationCost: null,
       };
     case "generateVideo":
       return {
@@ -251,6 +252,7 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         error: null,
         videoHistory: [],
         selectedVideoHistoryIndex: 0,
+        lastGenerationCost: null,
       };
     case "generate3d":
       return {
@@ -262,6 +264,7 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         selectedModel: undefined,
         status: "idle",
         error: null,
+        lastGenerationCost: null,
       };
     case "llmGenerate":
       return {
@@ -274,6 +277,7 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         maxTokens: 8192,
         status: "idle",
         error: null,
+        lastGenerationCost: null,
       };
     case "splitGrid":
       return {
