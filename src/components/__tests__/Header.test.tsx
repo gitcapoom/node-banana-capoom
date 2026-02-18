@@ -393,7 +393,7 @@ describe("Header", () => {
       const folderButton = screen.getByTitle("Open Project Folder");
       fireEvent.click(folderButton);
 
-      expect(mockOpen).toHaveBeenCalledWith("file://OTOSERVE10/share/project", "_blank");
+      expect(mockOpen).toHaveBeenCalledWith("file:////OTOSERVE10/share/project", "_blank");
     });
   });
 

@@ -4,8 +4,8 @@
  * instead of running shell commands on the server.
  *
  * Handles:
- * - UNC paths: //SERVER/share → file://SERVER/share
- * - UNC paths with backslashes: \\SERVER\share → file://SERVER/share
+ * - UNC paths: //SERVER/share → file:////SERVER/share
+ * - UNC paths with backslashes: \\SERVER\share → file:////SERVER/share
  * - Windows drive paths: C:\path → file:///C:/path
  * - Unix paths: /path → file:///path
  */
@@ -13,9 +13,9 @@ export function pathToFileUrl(inputPath: string): string {
   // Normalize backslashes to forward slashes
   const normalized = inputPath.replace(/\\/g, "/");
 
-  // UNC path: //SERVER/share → file://SERVER/share
+  // UNC path: //SERVER/share → file:////SERVER/share (empty authority + UNC path)
   if (normalized.startsWith("//")) {
-    return "file:" + normalized;
+    return "file://" + normalized;
   }
 
   // Windows drive: C:/path → file:///C:/path
