@@ -14,6 +14,8 @@ import {
   WorkflowEdge,
   NodeType,
   NanoBananaNodeData,
+  Generate3DNodeData,
+  GLBViewerNodeData,
   OutputGalleryNodeData,
   WorkflowNodeData,
   ImageHistoryItem,
@@ -1436,6 +1438,72 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       // Reset viewed comments when loading new workflow
       viewedCommentNodeIds: new Set<string>(),
     });
+
+    // Post-load: restore 3D models in GLB viewers with stale blob URLs
+    // Blob URLs (blob:http://...) are ephemeral and become invalid after page reload.
+    // Find glbViewer nodes with dead blob URLs and auto-restore from connected generate3d nodes.
+    const loadedNodes = get().nodes;
+    const loadedEdges = get().edges;
+
+    for (const node of loadedNodes) {
+      if (node.type !== "glbViewer") continue;
+      const viewerData = node.data as GLBViewerNodeData;
+
+      // Only act on stale blob URLs or null — skip valid remote URLs
+      const hasStaleUrl = viewerData.glbUrl?.startsWith("blob:") || false;
+      const hasNoUrl = !viewerData.glbUrl;
+
+      if (!hasStaleUrl && !hasNoUrl) continue;
+
+      // Clear dead blob URL immediately so the viewer shows placeholder (not broken state)
+      if (hasStaleUrl) {
+        get().updateNodeData(node.id, { glbUrl: null, capturedImage: null });
+      }
+
+      // Find connected generate3d node via edges (edge targeting this viewer's "3d" handle)
+      const incomingEdge = loadedEdges.find(
+        (e) => e.target === node.id && e.targetHandle === "3d"
+      );
+      if (!incomingEdge) continue;
+
+      const sourceNode = loadedNodes.find((n) => n.id === incomingEdge.source);
+      if (!sourceNode || sourceNode.type !== "generate3d") continue;
+
+      const gen3dData = sourceNode.data as Generate3DNodeData;
+      const remoteUrl = gen3dData.output3dUrl;
+
+      // Only restore from valid remote URLs (not blob URLs)
+      if (!remoteUrl || remoteUrl.startsWith("blob:")) continue;
+
+      // Fire-and-forget async restore — doesn't block workflow loading
+      (async () => {
+        try {
+          const response = await fetch("/api/proxy-fetch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: remoteUrl }),
+          });
+
+          if (!response.ok) {
+            console.warn(`[3D restore] Failed to fetch ${remoteUrl}: HTTP ${response.status}`);
+            return;
+          }
+
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const filename = gen3dData.savedFilename || "restored.glb";
+
+          get().updateNodeData(node.id, {
+            glbUrl: blobUrl,
+            filename,
+            capturedImage: null,
+          });
+          console.log(`[3D restore] Restored ${filename} in GLB viewer ${node.id}`);
+        } catch (err) {
+          console.warn(`[3D restore] Failed to restore 3D model for viewer ${node.id}:`, err);
+        }
+      })();
+    }
 
     // Clear snapshot unless explicitly preserving (e.g., AI workflow generation)
     if (!options?.preserveSnapshot) {
