@@ -608,7 +608,7 @@ describe("ProjectSetupModal", () => {
   });
 
   describe("Browse Button", () => {
-    it("should call browse-directory API when Browse is clicked", async () => {
+    it("should open directory browser panel when Browse is clicked", async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url === "/api/env-status") {
           return Promise.resolve({
@@ -616,10 +616,16 @@ describe("ProjectSetupModal", () => {
             json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
           });
         }
-        if (url === "/api/browse-directory") {
+        if (typeof url === "string" && url.startsWith("/api/browse-directory")) {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ success: true, path: "/selected/path" }),
+            json: () => Promise.resolve({
+              success: true,
+              path: "/home/user",
+              parent: "/home",
+              separator: "/",
+              entries: [{ name: "projects" }, { name: "Documents" }],
+            }),
           });
         }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
@@ -636,12 +642,13 @@ describe("ProjectSetupModal", () => {
 
       fireEvent.click(screen.getByText("Browse"));
 
+      // Directory browser panel should appear and fetch directory listing
       await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith("/api/browse-directory");
+        expect(screen.getByText("Select")).toBeInTheDocument();
       });
     });
 
-    it("should update directory input when path is selected", async () => {
+    it("should toggle directory browser panel off when Browse is clicked again", async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url === "/api/env-status") {
           return Promise.resolve({
@@ -649,10 +656,16 @@ describe("ProjectSetupModal", () => {
             json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
           });
         }
-        if (url === "/api/browse-directory") {
+        if (typeof url === "string" && url.startsWith("/api/browse-directory")) {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ success: true, path: "/selected/path" }),
+            json: () => Promise.resolve({
+              success: true,
+              path: "/home/user",
+              parent: "/home",
+              separator: "/",
+              entries: [],
+            }),
           });
         }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
@@ -667,51 +680,20 @@ describe("ProjectSetupModal", () => {
         />
       );
 
+      // Open the browser
       fireEvent.click(screen.getByText("Browse"));
-
       await waitFor(() => {
-        const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
-        expect(directoryInput.value).toBe("/selected/path");
-      });
-    });
-
-    it("should show '...' while browsing", async () => {
-      let resolvePromise: ((value: unknown) => void) | undefined;
-      mockFetch.mockImplementation((url: string) => {
-        if (url === "/api/env-status") {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
-          });
-        }
-        if (url === "/api/browse-directory") {
-          return new Promise((resolve) => {
-            resolvePromise = resolve;
-          });
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
+        expect(screen.getByText("Select")).toBeInTheDocument();
       });
 
-      render(
-        <ProjectSetupModal
-          isOpen={true}
-          onClose={vi.fn()}
-          onSave={vi.fn()}
-          mode="new"
-        />
-      );
-
+      // Click Browse again to close
       fireEvent.click(screen.getByText("Browse"));
-
-      expect(screen.getByText("...")).toBeInTheDocument();
-
-      resolvePromise!({
-        ok: true,
-        json: () => Promise.resolve({ success: true, cancelled: true }),
+      await waitFor(() => {
+        expect(screen.queryByText("Select")).not.toBeInTheDocument();
       });
     });
 
-    it("should handle cancelled browse dialog", async () => {
+    it("should keep original directory value when browser is closed without selecting", async () => {
       mockFetch.mockImplementation((url: string) => {
         if (url === "/api/env-status") {
           return Promise.resolve({
@@ -719,10 +701,16 @@ describe("ProjectSetupModal", () => {
             json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
           });
         }
-        if (url === "/api/browse-directory") {
+        if (typeof url === "string" && url.startsWith("/api/browse-directory")) {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ success: true, cancelled: true }),
+            json: () => Promise.resolve({
+              success: true,
+              path: "/home/user",
+              parent: "/home",
+              separator: "/",
+              entries: [],
+            }),
           });
         }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
@@ -741,12 +729,17 @@ describe("ProjectSetupModal", () => {
       const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
       fireEvent.change(directoryInput, { target: { value: "/original/path" } });
 
+      // Open and close without selecting
+      fireEvent.click(screen.getByText("Browse"));
+      await waitFor(() => {
+        expect(screen.getByText("Select")).toBeInTheDocument();
+      });
+
+      // Close via Browse toggle
       fireEvent.click(screen.getByText("Browse"));
 
-      await waitFor(() => {
-        // Should keep original value when cancelled
-        expect(directoryInput.value).toBe("/original/path");
-      });
+      // Original value should be preserved
+      expect(directoryInput.value).toBe("/original/path");
     });
   });
 
