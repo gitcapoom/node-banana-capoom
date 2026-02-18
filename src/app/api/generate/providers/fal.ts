@@ -33,6 +33,52 @@ export function clearFalInputMappingCache() {
 }
 
 /**
+ * In-memory cache for fal.ai model pricing to avoid extra API calls per generation
+ */
+const falPricingCache = new Map<string, { unitPrice: number; timestamp: number }>();
+const FAL_PRICING_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Fetch per-model pricing from fal.ai's Pricing API.
+ * Returns the unit_price (cost per generation unit) or null if unavailable.
+ * Results are cached in-memory for 5 minutes per model.
+ *
+ * @see https://docs.fal.ai/platform-apis/v1/models/pricing
+ */
+export async function getFalModelPricing(modelId: string, apiKey: string): Promise<number | null> {
+  // Check cache first
+  const cached = falPricingCache.get(modelId);
+  if (cached && Date.now() - cached.timestamp < FAL_PRICING_CACHE_TTL) {
+    return cached.unitPrice;
+  }
+
+  try {
+    const url = `https://api.fal.ai/v1/models/pricing?endpoint_id=${encodeURIComponent(modelId)}`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Key ${apiKey}` },
+    });
+
+    if (!response.ok) {
+      console.warn(`[fal pricing] Failed to fetch pricing for ${modelId}: HTTP ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const price = data.prices?.[0];
+
+    if (price && typeof price.unit_price === "number") {
+      falPricingCache.set(modelId, { unitPrice: price.unit_price, timestamp: Date.now() });
+      return price.unit_price;
+    }
+
+    return null;
+  } catch (err) {
+    console.warn(`[fal pricing] Error fetching pricing for ${modelId}:`, err);
+    return null;
+  }
+}
+
+/**
  * Fetch fal.ai model schema and extract input parameter mappings
  * Uses the Model Search API with OpenAPI expansion (same as /api/models/[modelId])
  * Results are cached in-memory for 30 minutes per model.

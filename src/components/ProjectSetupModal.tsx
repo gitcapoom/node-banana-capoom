@@ -1132,6 +1132,12 @@ export function ProjectSetupModal({
                   provider: model.provider,
                   modelId: model.id,
                   displayName: model.name,
+                  ...(model.pricing && {
+                    pricing: {
+                      type: model.pricing.type,
+                      amount: model.pricing.amount,
+                    },
+                  }),
                 }
               }
             }));
@@ -1153,6 +1159,12 @@ export function ProjectSetupModal({
                   provider: model.provider,
                   modelId: model.id,
                   displayName: model.name,
+                  ...(model.pricing && {
+                    pricing: {
+                      type: model.pricing.type,
+                      amount: model.pricing.amount,
+                    },
+                  }),
                 }
               }
             }));

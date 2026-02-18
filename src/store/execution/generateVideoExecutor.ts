@@ -148,15 +148,10 @@ export async function executeGenerateVideo(
         selectedVideoHistoryIndex: 0,
       });
 
-      // Track cost
-      if (nodeData.selectedModel?.provider === "fal" && nodeData.selectedModel?.pricing) {
-        const cost = nodeData.selectedModel.pricing.amount;
-        addIncurredCost(cost);
-        updateNodeData(node.id, { lastGenerationCost: cost });
-      } else if (nodeData.selectedModel?.pricing) {
-        const cost = nodeData.selectedModel.pricing.amount;
-        addIncurredCost(cost);
-        updateNodeData(node.id, { lastGenerationCost: cost });
+      // Track cost from server response
+      if (result.cost != null) {
+        addIncurredCost(result.cost);
+        updateNodeData(node.id, { lastGenerationCost: result.cost });
       }
 
       // Auto-save to generations folder if configured

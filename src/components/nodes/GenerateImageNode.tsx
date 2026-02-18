@@ -385,6 +385,12 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       modelId: model.id,
       displayName: model.name,
       capabilities: model.capabilities,
+      ...(model.pricing && {
+        pricing: {
+          type: model.pricing.type,
+          amount: model.pricing.amount,
+        },
+      }),
     };
     updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
     setIsBrowseDialogOpen(false);

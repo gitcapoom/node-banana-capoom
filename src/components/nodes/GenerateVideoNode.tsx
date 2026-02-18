@@ -286,6 +286,12 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       provider: model.provider,
       modelId: model.id,
       displayName: model.name,
+      ...(model.pricing && {
+        pricing: {
+          type: model.pricing.type,
+          amount: model.pricing.amount,
+        },
+      }),
     };
     updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
     setIsBrowseDialogOpen(false);
