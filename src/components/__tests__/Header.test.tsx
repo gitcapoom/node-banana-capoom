@@ -377,7 +377,7 @@ describe("Header", () => {
       expect(screen.getByTitle("Open Project Folder")).toBeInTheDocument();
     });
 
-    it("should open file:// URL in new tab when clicked", async () => {
+    it("should copy path to clipboard when clicked", async () => {
       mockUseWorkflowStore.mockImplementation((selector) => {
         return selector(createDefaultState({
           workflowName: "My Project",
@@ -386,14 +386,14 @@ describe("Header", () => {
         }));
       });
 
-      const mockOpen = vi.fn();
-      window.open = mockOpen;
+      const mockWriteText = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText: mockWriteText } });
 
       render(<Header />);
       const folderButton = screen.getByTitle("Open Project Folder");
       fireEvent.click(folderButton);
 
-      expect(mockOpen).toHaveBeenCalledWith("file:////OTOSERVE10/share/project", "_blank");
+      expect(mockWriteText).toHaveBeenCalledWith("//OTOSERVE10/share/project");
     });
   });
 

@@ -10,7 +10,6 @@ import { Generate3DNodeData, ProviderType, SelectedModel, ModelInputDef } from "
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
-import { pathToFileUrl } from "@/utils/pathToFileUrl";
 
 // Provider badge component
 function ProviderBadge({ provider }: { provider: ProviderType }) {
@@ -369,10 +368,12 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
                 onClick={(e) => {
                   e.stopPropagation();
                   if (!nodeData.savedFilePath) return;
-                  window.open(pathToFileUrl(nodeData.savedFilePath), "_blank");
+                  navigator.clipboard.writeText(nodeData.savedFilePath).then(() => {
+                    useToast.getState().show("Path copied — paste in Explorer to open", "success");
+                  });
                 }}
                 className="nodrag nopan text-[10px] text-neutral-400 hover:text-orange-300 truncate max-w-full cursor-pointer transition-colors flex items-center gap-1"
-                title={`Open in explorer: ${nodeData.savedFilePath}`}
+                title={`Copy path: ${nodeData.savedFilePath}`}
               >
                 <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />

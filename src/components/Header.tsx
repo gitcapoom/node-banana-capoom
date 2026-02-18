@@ -5,7 +5,7 @@ import { useWorkflowStore, WorkflowFile } from "@/store/workflowStore";
 import { ProjectSetupModal } from "./ProjectSetupModal";
 import { CostIndicator } from "./CostIndicator";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
-import { pathToFileUrl } from "@/utils/pathToFileUrl";
+import { useToast } from "@/components/Toast";
 
 function CommentsNavigationIcon() {
   // Subscribe to nodes so we re-render when comments change
@@ -75,6 +75,7 @@ export function Header() {
     setShortcutsDialogOpen,
   } = useWorkflowStore();
 
+  const toast = useToast();
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projectModalMode, setProjectModalMode] = useState<"new" | "settings">("new");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -140,7 +141,9 @@ export function Header() {
 
   const handleOpenDirectory = () => {
     if (!saveDirectoryPath) return;
-    window.open(pathToFileUrl(saveDirectoryPath), "_blank");
+    navigator.clipboard.writeText(saveDirectoryPath).then(() => {
+      toast.show("Path copied — paste in Explorer to open", "success");
+    });
   };
 
   const handleRevertAIChanges = useCallback(() => {
