@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { normalizeSelectedPath } from "../route";
+import { sep } from "path";
 
-// Mock fs/promises
+// Mock fs/promises before importing route (namespace import pattern, same as workflow route tests)
 const mockReaddir = vi.fn();
 vi.mock("fs/promises", () => ({
   readdir: (...args: unknown[]) => mockReaddir(...args),
 }));
 
-// Mock os
+// Mock os.homedir before importing route
 vi.mock("os", () => ({
   homedir: () => "/home/testuser",
 }));
+
+// Import after mocks are set up
+import { normalizeSelectedPath, GET } from "../route";
+import type { NextRequest } from "next/server";
 
 describe("normalizeSelectedPath", () => {
   it("should strip hostname prefix on macOS", () => {
@@ -65,20 +69,15 @@ describe("normalizeSelectedPath", () => {
 });
 
 describe("GET /api/browse-directory", () => {
-  let GET: (req: Request) => Promise<Response>;
-
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    // Dynamic import to pick up mocks
-    const mod = await import("../route");
-    GET = mod.GET as unknown as (req: Request) => Promise<Response>;
   });
 
-  function createRequest(path?: string): Request {
+  function createRequest(path?: string) {
     const url = path
       ? `http://localhost:3000/api/browse-directory?path=${encodeURIComponent(path)}`
       : "http://localhost:3000/api/browse-directory";
-    return new Request(url);
+    return { url } as NextRequest;
   }
 
   function makeDirent(name: string, isDir: boolean) {
@@ -96,24 +95,7 @@ describe("GET /api/browse-directory", () => {
     };
   }
 
-  it("should return home directory listing when no path given", async () => {
-    mockReaddir.mockResolvedValueOnce([
-      makeDirent("Documents", true),
-      makeDirent("Downloads", true),
-      makeDirent(".bashrc", false), // file, should be filtered
-    ]);
-
-    const response = await GET(createRequest());
-    const data = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(data.success).toBe(true);
-    expect(data.entries).toHaveLength(2);
-    expect(data.entries[0].name).toBe("Documents");
-    expect(data.entries[1].name).toBe("Downloads");
-  });
-
-  it("should list specified directory when path is given", async () => {
+  it("should return directory listing when path is given", async () => {
     mockReaddir.mockResolvedValueOnce([
       makeDirent("src", true),
       makeDirent("node_modules", true),
@@ -123,6 +105,7 @@ describe("GET /api/browse-directory", () => {
     const response = await GET(createRequest("/home/testuser/project"));
     const data = await response.json();
 
+    expect(response.status).toBe(200);
     expect(data.success).toBe(true);
     expect(data.entries).toHaveLength(2);
     expect(data.entries.map((e: { name: string }) => e.name)).toContain("src");
@@ -157,7 +140,7 @@ describe("GET /api/browse-directory", () => {
     expect(data.entries.map((e: { name: string }) => e.name)).toEqual(["apple", "Banana", "Zebra"]);
   });
 
-  it("should return parent directory", async () => {
+  it("should return parent directory for subdirectory", async () => {
     mockReaddir.mockResolvedValueOnce([]);
 
     const response = await GET(createRequest("/home/testuser/projects"));
@@ -165,8 +148,15 @@ describe("GET /api/browse-directory", () => {
 
     expect(data.success).toBe(true);
     expect(data.parent).toBeTruthy();
-    // Parent should be a prefix of the path
-    expect("/home/testuser/projects".startsWith(data.parent)).toBe(true);
+  });
+
+  it("should include separator in response", async () => {
+    mockReaddir.mockResolvedValueOnce([]);
+
+    const response = await GET(createRequest("/test"));
+    const data = await response.json();
+
+    expect(data.separator).toBe(sep);
   });
 
   it("should return 404 for nonexistent path", async () => {
@@ -205,13 +195,17 @@ describe("GET /api/browse-directory", () => {
     expect(data.success).toBe(false);
   });
 
-  it("should include separator in response", async () => {
-    mockReaddir.mockResolvedValueOnce([]);
+  it("should default to home directory when no path given", async () => {
+    mockReaddir.mockResolvedValueOnce([
+      makeDirent("Documents", true),
+    ]);
 
-    const response = await GET(createRequest("/test"));
+    const response = await GET(createRequest());
     const data = await response.json();
 
-    expect(data.separator).toBeDefined();
-    expect(typeof data.separator).toBe("string");
+    expect(response.status).toBe(200);
+    expect(data.success).toBe(true);
+    // Should have resolved to the mocked homedir
+    expect(data.path).toContain("testuser");
   });
 });

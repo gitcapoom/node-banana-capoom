@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readdir } from "fs/promises";
-import { resolve, dirname, sep } from "path";
-import { homedir } from "os";
+import * as fs from "fs/promises";
+import * as path from "path";
+import * as os from "os";
 
 /**
  * Normalize a path returned by native directory pickers.
@@ -45,10 +45,10 @@ export async function GET(request: NextRequest) {
     const requestedPath = searchParams.get("path");
 
     // Resolve to absolute path, default to home directory
-    const resolvedPath = resolve(requestedPath || homedir());
+    const resolvedPath = path.resolve(requestedPath || os.homedir());
 
     // Read directory contents
-    const dirents = await readdir(resolvedPath, { withFileTypes: true });
+    const dirents = await fs.readdir(resolvedPath, { withFileTypes: true });
 
     // Filter to directories only, sort alphabetically (case-insensitive)
     const entries = dirents
@@ -57,14 +57,14 @@ export async function GET(request: NextRequest) {
       .map((d) => ({ name: d.name }));
 
     // Compute parent (null if we're at root)
-    const parent = dirname(resolvedPath);
+    const parent = path.dirname(resolvedPath);
     const isRoot = parent === resolvedPath;
 
     return NextResponse.json({
       success: true,
       path: resolvedPath,
       parent: isRoot ? null : parent,
-      separator: sep,
+      separator: path.sep,
       entries,
     });
   } catch (error) {
