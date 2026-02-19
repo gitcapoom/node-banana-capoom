@@ -8,7 +8,8 @@ import {
   NanoBananaNodeData,
   GenerateVideoNodeData,
   Generate3DNodeData,
-  WorldLabsNodeData,
+  WorldLabsPanoNodeData,
+  WorldLabsWorldNodeData,
   LLMGenerateNodeData,
   SplitGridNodeData,
   OutputNodeData,
@@ -45,7 +46,8 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   easeCurve: { width: 340, height: 480 },
   glbViewer: { width: 360, height: 380 },
   spzViewer: { width: 300, height: 280 },
-  worldLabs: { width: 320, height: 380 },
+  worldLabsPano: { width: 320, height: 380 },
+  worldLabsWorld: { width: 320, height: 360 },
 };
 
 /**
@@ -251,7 +253,24 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         capturedImage: null,
         viewerOpen: false,
       } as SpzViewerNodeData;
-    case "worldLabs":
+    case "worldLabsPano":
+      return {
+        worldName: "Untitled World",
+        model: "Marble 0.1-mini",
+        seed: null,
+        inputImages: [],
+        inputPrompt: null,
+        operationId: null,
+        worldId: null,
+        status: "idle",
+        error: null,
+        progress: null,
+        panoUrl: null,
+        thumbnailUrl: null,
+        caption: null,
+        imageAzimuths: {},
+      } as WorldLabsPanoNodeData;
+    case "worldLabsWorld":
       return {
         worldName: "Untitled World",
         model: "Marble 0.1-plus",
@@ -269,7 +288,6 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         marbleViewerUrl: null,
         caption: null,
         viewerWindowOpen: false,
-        imageAzimuths: {},
-      } as WorldLabsNodeData;
+      } as WorldLabsWorldNodeData;
   }
 };

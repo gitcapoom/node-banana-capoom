@@ -40,7 +40,8 @@ export type NodeType =
   | "generate3d"
   | "glbViewer"
   | "spzViewer"
-  | "worldLabs";
+  | "worldLabsPano"
+  | "worldLabsWorld";
 
 /**
  * Node execution status
@@ -198,11 +199,34 @@ export interface Generate3DNodeData extends BaseNodeData {
 }
 
 /**
- * WorldLabs node - 3D world generation via Marble API
- * Creates 3D Gaussian Splat environments from text/image input.
- * Opens a Spark.js viewer in a new window for cinematic framing and capture.
+ * WorldLabs Panorama node - generates equirectangular panoramas via Marble API.
+ * Quick preview step (defaults to Marble 0.1-mini for speed/cost).
+ * Supports text, single-image, and multi-image prompts with azimuth control.
  */
-export interface WorldLabsNodeData extends BaseNodeData {
+export interface WorldLabsPanoNodeData extends BaseNodeData {
+  worldName: string;
+  model: "Marble 0.1-plus" | "Marble 0.1-mini";
+  seed: number | null;
+  inputImages: string[];
+  inputPrompt: string | null;
+  operationId: string | null;
+  worldId: string | null;
+  status: NodeStatus;
+  error: string | null;
+  progress: string | null;
+  panoUrl: string | null;
+  thumbnailUrl: string | null;
+  caption: string | null;
+  /** Per-image azimuth angles for multi-image generation. Maps connection index → degrees. */
+  imageAzimuths: Record<number, number>;
+}
+
+/**
+ * WorldLabs World node - generates full 3D Gaussian Splat world from a 2:1 panorama.
+ * Production quality step (defaults to Marble 0.1-plus).
+ * Accepts a single panorama image input, outputs 3D SPZ data.
+ */
+export interface WorldLabsWorldNodeData extends BaseNodeData {
   worldName: string;
   model: "Marble 0.1-plus" | "Marble 0.1-mini";
   seed: number | null;
@@ -219,8 +243,6 @@ export interface WorldLabsNodeData extends BaseNodeData {
   marbleViewerUrl: string | null;
   caption: string | null;
   viewerWindowOpen: boolean;
-  /** Per-image azimuth angles for multi-image generation. Maps connection index → degrees. */
-  imageAzimuths: Record<number, number>;
 }
 
 /**
@@ -363,7 +385,8 @@ export type WorkflowNodeData =
   | NanoBananaNodeData
   | GenerateVideoNodeData
   | Generate3DNodeData
-  | WorldLabsNodeData
+  | WorldLabsPanoNodeData
+  | WorldLabsWorldNodeData
   | LLMGenerateNodeData
   | SplitGridNodeData
   | OutputNodeData
