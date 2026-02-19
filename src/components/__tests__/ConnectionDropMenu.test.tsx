@@ -217,8 +217,8 @@ describe("ConnectionDropMenu", () => {
       // Press ArrowUp to go to last item (wrapping)
       fireEvent.keyDown(document, { key: "ArrowUp" });
 
-      // Last item should now be highlighted
-      const lastButton = screen.getByText("Image Compare").closest("button");
+      // Last item should now be highlighted (Generate World added after Image Compare)
+      const lastButton = screen.getByText("Generate World").closest("button");
       expect(lastButton).toHaveClass("bg-neutral-700");
     });
 
@@ -245,8 +245,9 @@ describe("ConnectionDropMenu", () => {
     it("should wrap around when navigating past last item", () => {
       render(<ConnectionDropMenu {...defaultProps} handleType="text" connectionType="source" />);
 
-      // Text target options: Prompt, Prompt Constructor, nanoBanana, generateVideo, llmGenerate (5 items)
-      // Navigate down 5 times to wrap to first
+      // Text target options: Prompt, Prompt Constructor, nanoBanana, generateVideo, llmGenerate, worldLabs (6 items)
+      // Navigate down 6 times to wrap to first
+      fireEvent.keyDown(document, { key: "ArrowDown" });
       fireEvent.keyDown(document, { key: "ArrowDown" });
       fireEvent.keyDown(document, { key: "ArrowDown" });
       fireEvent.keyDown(document, { key: "ArrowDown" });
