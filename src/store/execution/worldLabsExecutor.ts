@@ -2,7 +2,8 @@
  * WorldLabs Executor
  *
  * Executes WorldLabs "Generate World" nodes via the Marble API.
- * Flow: upload image (if needed) → submit generation → poll until done → fetch world assets.
+ * Flow: upload image(s) → submit generation → poll until done → fetch world assets.
+ * Supports single-image, multi-image (with azimuth), and text-only prompts.
  * Supports cancellation via AbortSignal.
  */
 
@@ -15,6 +16,17 @@ const POLL_INTERVAL_MS = 5_000;
 
 /** Maximum poll attempts (5s × 120 = 10 minutes max) */
 const MAX_POLL_ATTEMPTS = 120;
+
+/** Default azimuths for multi-image (front, right, back, left) */
+const DEFAULT_AZIMUTHS = [0, 90, 180, 270];
+
+interface MultiImagePrompt {
+  azimuth: number;
+  content: {
+    source: "media_asset";
+    media_asset_id: string;
+  };
+}
 
 export async function executeWorldLabs(
   ctx: NodeExecutionContext
@@ -43,10 +55,15 @@ export async function executeWorldLabs(
     throw new Error("Missing text or image input");
   }
 
-  // Determine prompt type: "text" or "image"
+  // Determine prompt type: "text", "image" (single), or "multi-image" (2+)
   const hasText = !!connectedText;
   const hasImage = connectedImages.length > 0;
-  const promptType: "text" | "image" = hasImage ? "image" : "text";
+  const isMultiImage = connectedImages.length >= 2;
+  const promptType: "text" | "image" | "multi-image" = isMultiImage
+    ? "multi-image"
+    : hasImage
+      ? "image"
+      : "text";
 
   // UI model names match API model names exactly
   const apiModel = nodeData.model;
@@ -60,6 +77,7 @@ export async function executeWorldLabs(
     operationId: null,
     worldId: null,
     spzUrls: null,
+    panoUrl: null,
     thumbnailUrl: null,
     marbleViewerUrl: null,
     caption: null,
@@ -68,32 +86,43 @@ export async function executeWorldLabs(
   const headers = buildGenerateHeaders("worldlabs", providerSettings);
 
   try {
-    // ─── Step 1: Upload image via media assets if needed ─────
+    // ─── Step 1: Upload image(s) via media assets ────────────
     let mediaAssetId: string | undefined;
+    const multiImagePrompts: MultiImagePrompt[] = [];
+
     if (hasImage) {
-      updateNodeData(node.id, { progress: "Uploading image..." });
+      if (isMultiImage) {
+        // Multi-image: upload ALL images and build azimuth array
+        updateNodeData(node.id, { progress: `Uploading ${connectedImages.length} images...` });
 
-      const uploadResponse = await fetch("/api/worldlabs", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          action: "uploadImage",
-          imageData: connectedImages[0],
-          extension: "png",
-        }),
-        ...(signal ? { signal } : {}),
-      });
+        for (let i = 0; i < connectedImages.length; i++) {
+          if (signal?.aborted) {
+            throw new DOMException("Operation cancelled", "AbortError");
+          }
 
-      if (!uploadResponse.ok) {
-        const err = await uploadResponse.text();
-        throw new Error(`Image upload failed: ${err}`);
+          updateNodeData(node.id, {
+            progress: `Uploading image ${i + 1} of ${connectedImages.length}...`,
+          });
+
+          const uploadResult = await uploadImage(headers, connectedImages[i], signal);
+
+          // Get azimuth: use user-set value or default by index
+          const azimuth = nodeData.imageAzimuths[i] ?? DEFAULT_AZIMUTHS[i % DEFAULT_AZIMUTHS.length];
+
+          multiImagePrompts.push({
+            azimuth,
+            content: {
+              source: "media_asset",
+              media_asset_id: uploadResult.mediaAssetId,
+            },
+          });
+        }
+      } else {
+        // Single image: upload just the first
+        updateNodeData(node.id, { progress: "Uploading image..." });
+        const uploadResult = await uploadImage(headers, connectedImages[0], signal);
+        mediaAssetId = uploadResult.mediaAssetId;
       }
-
-      const uploadResult = await uploadResponse.json();
-      if (!uploadResult.success) {
-        throw new Error(uploadResult.error || "Image upload failed");
-      }
-      mediaAssetId = uploadResult.mediaAssetId;
     }
 
     // ─── Step 2: Submit generation ──────────────────────────────
@@ -111,6 +140,9 @@ export async function executeWorldLabs(
     }
     if (mediaAssetId) {
       generateBody.mediaAssetId = mediaAssetId;
+    }
+    if (multiImagePrompts.length > 0) {
+      generateBody.multiImagePrompts = multiImagePrompts;
     }
     if (nodeData.seed != null) {
       generateBody.seed = nodeData.seed;
@@ -232,6 +264,7 @@ export async function executeWorldLabs(
     updateNodeData(node.id, {
       worldId: worldResult.worldId,
       spzUrls: worldResult.spzUrls,
+      panoUrl: worldResult.panoUrl,
       thumbnailUrl: worldResult.thumbnailUrl,
       marbleViewerUrl: worldResult.marbleViewerUrl,
       caption: worldResult.caption,
@@ -259,4 +292,35 @@ export async function executeWorldLabs(
     });
     throw new Error(errorMessage);
   }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────
+
+async function uploadImage(
+  headers: Record<string, string>,
+  imageData: string,
+  signal?: AbortSignal | null
+): Promise<{ mediaAssetId: string }> {
+  const uploadResponse = await fetch("/api/worldlabs", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      action: "uploadImage",
+      imageData,
+      extension: "png",
+    }),
+    ...(signal ? { signal } : {}),
+  });
+
+  if (!uploadResponse.ok) {
+    const err = await uploadResponse.text();
+    throw new Error(`Image upload failed: ${err}`);
+  }
+
+  const uploadResult = await uploadResponse.json();
+  if (!uploadResult.success) {
+    throw new Error(uploadResult.error || "Image upload failed");
+  }
+
+  return { mediaAssetId: uploadResult.mediaAssetId };
 }
