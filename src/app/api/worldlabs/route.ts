@@ -4,9 +4,9 @@
  * Handles 3D world generation via the WorldLabs Marble API.
  * Supports four actions:
  *   - "uploadImage" — Upload an image via media-assets:prepare_upload
- *   - "generate"    — Submit a world generation request
+ *   - "generate"    — Submit a world generation request (text, image, or multi-image)
  *   - "poll"        — Check operation status
- *   - "getWorld"    — Retrieve completed world assets (SPZ URLs, thumbnail, etc.)
+ *   - "getWorld"    — Retrieve completed world assets (SPZ URLs, pano, thumbnail, etc.)
  *
  * Auth: Uses WLT-Api-Key header per WorldLabs API spec.
  * Key source: X-WorldLabs-Key header from client, or WORLDLABS_API_KEY env var.
@@ -39,13 +39,23 @@ interface UploadImageAction {
   extension?: string;
 }
 
+interface MultiImagePrompt {
+  azimuth: number;
+  content: {
+    source: "media_asset";
+    media_asset_id: string;
+  };
+}
+
 interface GenerateAction {
   action: "generate";
-  /** "text" or "image" */
-  promptType: "text" | "image";
+  /** "text", "image", or "multi-image" */
+  promptType: "text" | "image" | "multi-image";
   textPrompt?: string;
-  /** media_asset_id from uploadImage action */
+  /** media_asset_id from uploadImage action (single image) */
   mediaAssetId?: string;
+  /** Array of per-image prompts with azimuth (multi-image) */
+  multiImagePrompts?: MultiImagePrompt[];
   model: string;
   seed?: number | null;
   worldName?: string;
@@ -215,30 +225,27 @@ async function handleGenerate(
   requestId: string
 ) {
   // Build the world_prompt based on prompt type
-  interface WorldPrompt {
-    type: string;
-    text_prompt?: string;
-    image_prompt?: {
-      source: string;
-      media_asset_id: string;
-    };
-  }
-
-  const worldPrompt: WorldPrompt = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const worldPrompt: Record<string, any> = {
     type: body.promptType,
   };
 
-  // Text prompt (works for both "text" and "image" types — optional caption for images)
+  // Text prompt (works for all types — optional caption for images)
   if (body.textPrompt) {
     worldPrompt.text_prompt = body.textPrompt;
   }
 
-  // Image prompt via media asset
+  // Single image prompt via media asset
   if (body.mediaAssetId && body.promptType === "image") {
     worldPrompt.image_prompt = {
       source: "media_asset",
       media_asset_id: body.mediaAssetId,
     };
+  }
+
+  // Multi-image prompt with per-image azimuth angles
+  if (body.promptType === "multi-image" && body.multiImagePrompts?.length) {
+    worldPrompt.multi_image_prompt = body.multiImagePrompts;
   }
 
   const requestBody: Record<string, unknown> = {
@@ -321,10 +328,18 @@ async function handlePoll(
 
   const data = await response.json();
 
-  // Extract world ID from the response if done
+  // Log full response when done for debugging
+  if (data.done) {
+    console.log(`[WorldLabs:${requestId}] Poll done response:`, JSON.stringify(data, null, 2));
+  }
+
+  // Extract world ID — API returns response.id (NOT response.world_id)
   let worldId: string | null = null;
-  if (data.done && data.response?.world_id) {
-    worldId = data.response.world_id;
+  if (data.done && data.response) {
+    worldId =
+      data.response.id ||           // Primary: API returns "id" in response
+      data.response.world_id ||     // Fallback: in case API changes
+      null;
   }
 
   console.log(
@@ -367,21 +382,32 @@ async function handleGetWorld(
   }
 
   const data = await response.json();
-  console.log(`[WorldLabs:${requestId}] World data retrieved:`, data.world_id);
+  console.log(`[WorldLabs:${requestId}] GetWorld raw response:`, JSON.stringify(data, null, 2));
 
-  // Extract SPZ URLs from different quality levels
+  // Response is nested under data.world
+  const world = data.world || data;
+
+  console.log(`[WorldLabs:${requestId}] World data retrieved: ${world.id || world.world_id}`);
+
+  // Extract SPZ URLs — nested under world.assets.splats.spz_urls
+  // Keys are full_res, 500k, 100k (NOT full/medium/low)
+  const splats = world.assets?.splats;
   const spzUrls = {
-    full: data.spz_urls?.full || null,
-    medium: data.spz_urls?.medium || null,
-    low: data.spz_urls?.low || null,
+    full_res: splats?.spz_urls?.full_res || null,
+    "500k": splats?.spz_urls?.["500k"] || null,
+    "100k": splats?.spz_urls?.["100k"] || null,
   };
+
+  // Panorama URL at world.assets.imagery.pano_url
+  const panoUrl = world.assets?.imagery?.pano_url || null;
 
   return NextResponse.json({
     success: true,
-    worldId: data.world_id,
+    worldId: world.id || world.world_id || null,
     spzUrls,
-    thumbnailUrl: data.thumbnail_url || null,
-    marbleViewerUrl: data.marble_viewer_url || null,
-    caption: data.caption || null,
+    panoUrl,
+    thumbnailUrl: world.assets?.thumbnail_url || null,
+    marbleViewerUrl: world.world_marble_url || null,
+    caption: world.assets?.caption || null,
   });
 }
