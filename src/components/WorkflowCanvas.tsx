@@ -141,7 +141,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "glbViewer":
       return { inputs: ["3d"], outputs: ["image"] };
     case "worldLabs":
-      return { inputs: ["image", "text"], outputs: [] };
+      return { inputs: ["image", "text"], outputs: ["image"] };
     default:
       return { inputs: [], outputs: [] };
   }
