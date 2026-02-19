@@ -148,6 +148,18 @@ function GenerateComboButton() {
             3D
           </button>
           <button
+            onClick={() => handleAddNode("worldLabs")}
+            draggable
+            onDragStart={(e) => handleDragStart(e, "worldLabs")}
+            className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+              <circle cx="12" cy="12" r="10" />
+              <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </svg>
+            World
+          </button>
+          <button
             onClick={() => handleAddNode("llmGenerate")}
             draggable
             onDragStart={(e) => handleDragStart(e, "llmGenerate")}

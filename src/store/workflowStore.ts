@@ -75,6 +75,7 @@ import {
   executeVideoStitch,
   executeEaseCurve,
   executeGlbViewer,
+  executeWorldLabs,
 } from "./execution";
 import type { NodeExecutionContext } from "./execution";
 export type { LevelGroup } from "./utils/executionUtils";
@@ -1062,6 +1063,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         set({ isRunning: false, currentNodeIds: [] });
         await logger.endSession();
         return;
+      } else if (node.type === "worldLabs") {
+        await executeWorldLabs(executionCtx);
       }
 
       // After regeneration, execute directly connected downstream consumer nodes
