@@ -153,33 +153,37 @@ async function handleUploadImage(
   }
 
   const prepareData = await prepareResponse.json();
-  const { media_asset_id, upload_url, upload_headers } = prepareData;
 
-  if (!media_asset_id || !upload_url) {
-    console.error(`[WorldLabs:${requestId}] Prepare upload returned incomplete data:`, prepareData);
+  // Response is nested: { media_asset: { media_asset_id, ... }, upload_info: { upload_url, required_headers, ... } }
+  const mediaAssetId = prepareData.media_asset?.media_asset_id;
+  const uploadUrl = prepareData.upload_info?.upload_url;
+  const requiredHeaders = prepareData.upload_info?.required_headers;
+
+  if (!mediaAssetId || !uploadUrl) {
+    console.error(`[WorldLabs:${requestId}] Prepare upload returned incomplete data:`, JSON.stringify(prepareData, null, 2));
     return NextResponse.json(
       { success: false, error: "Prepare upload returned incomplete data" },
       { status: 500 }
     );
   }
 
-  console.log(`[WorldLabs:${requestId}] Media asset prepared: ${media_asset_id}`);
+  console.log(`[WorldLabs:${requestId}] Media asset prepared: ${mediaAssetId}`);
 
   // Step 2: Upload the file to the signed URL
   const uploadHeaders: Record<string, string> = {
     "Content-Type": contentType,
   };
 
-  // Merge any headers returned by the prepare endpoint
-  if (upload_headers && typeof upload_headers === "object") {
-    for (const [key, value] of Object.entries(upload_headers)) {
+  // Merge required headers from the prepare endpoint (e.g. x-goog-content-length-range)
+  if (requiredHeaders && typeof requiredHeaders === "object") {
+    for (const [key, value] of Object.entries(requiredHeaders)) {
       if (typeof value === "string") {
         uploadHeaders[key] = value;
       }
     }
   }
 
-  const uploadResponse = await fetch(upload_url, {
+  const uploadResponse = await fetch(uploadUrl, {
     method: "PUT",
     headers: uploadHeaders,
     body: buffer,
@@ -195,11 +199,11 @@ async function handleUploadImage(
     );
   }
 
-  console.log(`[WorldLabs:${requestId}] Image uploaded to media asset ${media_asset_id}`);
+  console.log(`[WorldLabs:${requestId}] Image uploaded to media asset ${mediaAssetId}`);
 
   return NextResponse.json({
     success: true,
-    mediaAssetId: media_asset_id,
+    mediaAssetId,
   });
 }
 
