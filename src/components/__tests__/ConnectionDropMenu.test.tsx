@@ -83,7 +83,8 @@ describe("ConnectionDropMenu", () => {
     it("should show 3D-accepting nodes when dragging from 3D output", () => {
       render(<ConnectionDropMenu {...defaultProps} handleType="3d" connectionType="source" />);
 
-      expect(screen.getByText("3D Viewer")).toBeInTheDocument();
+      expect(screen.getByText("GLB Viewer")).toBeInTheDocument();
+      expect(screen.getByText("SPZ Viewer")).toBeInTheDocument();
       // Should NOT show image/text/video nodes
       expect(screen.queryByText("Annotate")).not.toBeInTheDocument();
       expect(screen.queryByText("Generate Image")).not.toBeInTheDocument();
@@ -125,6 +126,7 @@ describe("ConnectionDropMenu", () => {
       render(<ConnectionDropMenu {...defaultProps} handleType="3d" connectionType="target" />);
 
       expect(screen.getByText("Generate 3D")).toBeInTheDocument();
+      expect(screen.getByText("WorldLabs")).toBeInTheDocument();
       // Should NOT show other nodes
       expect(screen.queryByText("Image Input")).not.toBeInTheDocument();
       expect(screen.queryByText("Generate Image")).not.toBeInTheDocument();
