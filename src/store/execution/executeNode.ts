@@ -22,6 +22,7 @@ import { executeGenerate3D } from "./generate3dExecutor";
 import { executeLlmGenerate } from "./llmGenerateExecutor";
 import { executeSplitGrid } from "./splitGridExecutor";
 import { executeVideoStitch, executeEaseCurve } from "./videoProcessingExecutors";
+import { executeWorldLabs } from "./worldLabsExecutor";
 
 export interface ExecuteNodeOptions {
   /** When true, executors that support it will fall back to stored inputs. */
@@ -85,6 +86,9 @@ export async function executeNode(
       break;
     case "glbViewer":
       await executeGlbViewer(ctx);
+      break;
+    case "worldLabs":
+      await executeWorldLabs(ctx);
       break;
   }
 }

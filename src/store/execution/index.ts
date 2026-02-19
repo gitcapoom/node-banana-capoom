@@ -36,3 +36,5 @@ export {
   executeVideoStitch,
   executeEaseCurve,
 } from "./videoProcessingExecutors";
+
+export { executeWorldLabs } from "./worldLabsExecutor";
