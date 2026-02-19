@@ -273,11 +273,22 @@ async function handleGenerate(
   }
 
   const data = await response.json();
-  console.log(`[WorldLabs:${requestId}] Generation submitted, operationId:`, data.name);
+  console.log(`[WorldLabs:${requestId}] Generate response:`, JSON.stringify(data, null, 2));
+
+  // The operation ID may be nested — try common locations
+  const operationId =
+    data.name ||                           // Standard LRO format
+    data.operation_id ||                   // Snake-case variant
+    data.operationId ||                    // Camel-case variant
+    data.operation?.name ||                // Nested under operation
+    data.operation?.operation_id ||        // Nested snake-case
+    null;
+
+  console.log(`[WorldLabs:${requestId}] Generation submitted, operationId: ${operationId}`);
 
   return NextResponse.json({
     success: true,
-    operationId: data.name, // The operation ID for polling
+    operationId,
   });
 }
 
