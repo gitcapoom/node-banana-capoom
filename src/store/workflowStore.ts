@@ -75,6 +75,7 @@ import {
   executeVideoStitch,
   executeEaseCurve,
   executeGlbViewer,
+  executeSpzViewer,
   executeWorldLabs,
 } from "./execution";
 import type { NodeExecutionContext } from "./execution";
@@ -878,6 +879,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           case "glbViewer":
             await executeGlbViewer(executionCtx);
             break;
+          case "spzViewer":
+            await executeSpzViewer(executionCtx);
+            break;
           case "annotation":
             await executeAnnotation(executionCtx);
             break;
@@ -1079,6 +1083,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           case "glbViewer":
             await executeGlbViewer(targetCtx);
             break;
+          case "spzViewer":
+            await executeSpzViewer(targetCtx);
+            break;
           case "output":
             await executeOutput(targetCtx);
             break;
@@ -1166,6 +1173,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           break;
         case "glbViewer":
           await executeGlbViewer(executionCtx);
+          break;
+        case "spzViewer":
+          await executeSpzViewer(executionCtx);
           break;
         case "annotation":
           await executeAnnotation(executionCtx);
@@ -1278,6 +1288,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             switch (targetNode.type) {
               case "glbViewer":
                 await executeGlbViewer(targetCtx);
+                propagated.add(edge.target);
+                break;
+              case "spzViewer":
+                await executeSpzViewer(targetCtx);
                 propagated.add(edge.target);
                 break;
               case "output":

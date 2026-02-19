@@ -15,6 +15,7 @@ import {
   executeOutputGallery,
   executeImageCompare,
   executeGlbViewer,
+  executeSpzViewer,
 } from "./simpleNodeExecutors";
 import { executeNanoBanana } from "./nanoBananaExecutor";
 import { executeGenerateVideo } from "./generateVideoExecutor";
@@ -86,6 +87,9 @@ export async function executeNode(
       break;
     case "glbViewer":
       await executeGlbViewer(ctx);
+      break;
+    case "spzViewer":
+      await executeSpzViewer(ctx);
       break;
     case "worldLabs":
       await executeWorldLabs(ctx);

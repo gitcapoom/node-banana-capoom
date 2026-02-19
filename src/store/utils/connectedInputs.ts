@@ -20,6 +20,7 @@ import {
   PromptConstructorNodeData,
   LLMGenerateNodeData,
   GLBViewerNodeData,
+  SpzViewerNodeData,
   WorldLabsNodeData,
 } from "@/types";
 
@@ -83,6 +84,8 @@ function getSourceOutput(sourceNode: WorkflowNode): { type: "image" | "text" | "
     return { type: "text", value: (sourceNode.data as LLMGenerateNodeData).outputText };
   } else if (sourceNode.type === "glbViewer") {
     return { type: "image", value: (sourceNode.data as GLBViewerNodeData).capturedImage };
+  } else if (sourceNode.type === "spzViewer") {
+    return { type: "image", value: (sourceNode.data as SpzViewerNodeData).capturedImage };
   } else if (sourceNode.type === "worldLabs") {
     // WorldLabs outputs its panorama or thumbnail as an image
     const wlData = sourceNode.data as WorldLabsNodeData;

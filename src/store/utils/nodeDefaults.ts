@@ -16,6 +16,7 @@ import {
   ImageCompareNodeData,
   EaseCurveNodeData,
   GLBViewerNodeData,
+  SpzViewerNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -43,6 +44,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   videoStitch: { width: 400, height: 280 },
   easeCurve: { width: 340, height: 480 },
   glbViewer: { width: 360, height: 380 },
+  spzViewer: { width: 300, height: 280 },
   worldLabs: { width: 320, height: 380 },
 };
 
@@ -242,6 +244,13 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         filename: null,
         capturedImage: null,
       } as GLBViewerNodeData;
+    case "spzViewer":
+      return {
+        spzUrl: null,
+        filename: null,
+        capturedImage: null,
+        viewerOpen: false,
+      } as SpzViewerNodeData;
     case "worldLabs":
       return {
         worldName: "Untitled World",

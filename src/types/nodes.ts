@@ -39,6 +39,7 @@ export type NodeType =
   | "easeCurve"
   | "generate3d"
   | "glbViewer"
+  | "spzViewer"
   | "worldLabs";
 
 /**
@@ -341,6 +342,16 @@ export interface GLBViewerNodeData extends BaseNodeData {
 }
 
 /**
+ * SPZ/PLY Viewer node - opens external 3D Gaussian Splat viewer, captures screenshots
+ */
+export interface SpzViewerNodeData extends BaseNodeData {
+  spzUrl: string | null;         // SPZ/PLY file URL (HTTP or blob)
+  filename: string | null;       // Display name
+  capturedImage: string | null;  // Latest captured screenshot from viewer
+  viewerOpen: boolean;           // Whether the viewer window is currently open
+}
+
+/**
  * Union of all node data types
  */
 export type WorkflowNodeData =
@@ -360,7 +371,8 @@ export type WorkflowNodeData =
   | ImageCompareNodeData
   | VideoStitchNodeData
   | EaseCurveNodeData
-  | GLBViewerNodeData;
+  | GLBViewerNodeData
+  | SpzViewerNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)

@@ -256,6 +256,20 @@ function extractFilenameFromUrl(url: string, fallback = "generated.glb"): string
 }
 
 /**
+ * SPZ Viewer node: receives SPZ/PLY URL from upstream and stores it for the external viewer.
+ */
+export async function executeSpzViewer(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  const { model3d } = getConnectedInputs(node.id);
+  if (model3d) {
+    updateNodeData(node.id, {
+      spzUrl: model3d,
+      filename: extractFilenameFromUrl(model3d, "world.spz"),
+    });
+  }
+}
+
+/**
  * GLB Viewer node: receives 3D model URL from upstream, fetches via server proxy and loads it.
  */
 export async function executeGlbViewer(ctx: NodeExecutionContext): Promise<void> {
