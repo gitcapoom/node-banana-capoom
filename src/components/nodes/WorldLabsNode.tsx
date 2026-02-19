@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useState, useEffect, useRef } from "react";
+import React, { useCallback, useState, useEffect, useRef, useMemo } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
@@ -9,6 +9,17 @@ import { WorldLabsNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 
 type WorldLabsNodeType = Node<WorldLabsNodeData, "worldLabs">;
+
+/** Azimuth presets for multi-image generation */
+const AZIMUTH_OPTIONS = [
+  { label: "Front", value: 0 },
+  { label: "Right", value: 90 },
+  { label: "Back", value: 180 },
+  { label: "Left", value: 270 },
+] as const;
+
+/** Default azimuths by index */
+const DEFAULT_AZIMUTHS = [0, 90, 180, 270];
 
 /**
  * WorldLabs "Generate World" node.
@@ -22,10 +33,20 @@ export function WorldLabsNode({ id, data, selected }: NodeProps<WorldLabsNodeTyp
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const addNode = useWorkflowStore((state) => state.addNode);
   const nodes = useWorkflowStore((state) => state.nodes);
+  const edges = useWorkflowStore((state) => state.edges);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
   const viewerWindowRef = useRef<Window | null>(null);
   const [captureCount, setCaptureCount] = useState(0);
+
+  // Count connected image edges
+  const connectedImageCount = useMemo(() => {
+    return edges.filter(
+      (e) => e.target === id && e.targetHandle === "image"
+    ).length;
+  }, [edges, id]);
+
+  const showAzimuthControls = connectedImageCount >= 2;
 
   // ─── Viewer window postMessage listener ─────────────────────
   useEffect(() => {
@@ -100,23 +121,45 @@ export function WorldLabsNode({ id, data, selected }: NodeProps<WorldLabsNodeTyp
     [id, updateNodeData]
   );
 
+  const handleAzimuthChange = useCallback(
+    (index: number, value: number) => {
+      updateNodeData(id, {
+        imageAzimuths: {
+          ...nodeData.imageAzimuths,
+          [index]: value,
+        },
+      });
+    },
+    [id, nodeData.imageAzimuths, updateNodeData]
+  );
+
   const handleRegenerate = useCallback(() => {
     regenerateNode(id);
   }, [id, regenerateNode]);
 
   const handleOpenViewer = useCallback(() => {
-    if (!nodeData.worldId) return;
+    if (!nodeData.worldId || !nodeData.spzUrls) return;
 
-    // Pass world name via URL param for the viewer title
+    // Find the best available SPZ URL
+    const spzUrl =
+      nodeData.spzUrls["500k"] ||
+      nodeData.spzUrls.full_res ||
+      nodeData.spzUrls["100k"];
+
+    if (!spzUrl) return;
+
+    // Use standalone viewer with direct SPZ URL
     const params = new URLSearchParams({
+      url: spzUrl,
       name: nodeData.worldName || "Untitled World",
+      worldId: nodeData.worldId,
     });
 
-    const viewerUrl = `/viewer/${nodeData.worldId}?${params.toString()}`;
+    const viewerUrl = `/viewer?${params.toString()}`;
     const w = window.open(viewerUrl, `worldlabs-viewer-${nodeData.worldId}`, "width=1280,height=720");
     viewerWindowRef.current = w;
     updateNodeData(id, { viewerWindowOpen: true });
-  }, [id, nodeData.worldId, nodeData.worldName, updateNodeData]);
+  }, [id, nodeData.worldId, nodeData.worldName, nodeData.spzUrls, updateNodeData]);
 
   const handleOpenMarbleViewer = useCallback(() => {
     if (nodeData.marbleViewerUrl) {
@@ -129,6 +172,9 @@ export function WorldLabsNode({ id, data, selected }: NodeProps<WorldLabsNodeTyp
   const isLoading = nodeData.status === "loading";
   const isComplete = nodeData.status === "complete";
   const isError = nodeData.status === "error";
+
+  // Determine preview image: prefer panorama, fallback to thumbnail
+  const previewUrl = nodeData.panoUrl || nodeData.thumbnailUrl;
 
   return (
     <BaseNode
@@ -200,6 +246,35 @@ export function WorldLabsNode({ id, data, selected }: NodeProps<WorldLabsNodeTyp
           />
         </div>
 
+        {/* Azimuth Controls (shown when 2+ images connected) */}
+        {showAzimuthControls && (
+          <div>
+            <label className="text-[10px] text-neutral-500 block mb-1.5">
+              Image Azimuths ({connectedImageCount} images)
+            </label>
+            <div className="space-y-1">
+              {Array.from({ length: connectedImageCount }, (_, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-[10px] text-neutral-600 w-10 shrink-0">
+                    Img {i + 1}
+                  </span>
+                  <select
+                    value={nodeData.imageAzimuths[i] ?? DEFAULT_AZIMUTHS[i % DEFAULT_AZIMUTHS.length]}
+                    onChange={(e) => handleAzimuthChange(i, Number(e.target.value))}
+                    className="flex-1 bg-neutral-800 text-neutral-200 text-[11px] rounded px-1.5 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
+                  >
+                    {AZIMUTH_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label} ({opt.value}°)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Status / Preview Area */}
         <div className="bg-neutral-900 rounded-lg overflow-hidden min-h-[80px] flex items-center justify-center">
           {/* Idle state */}
@@ -228,22 +303,25 @@ export function WorldLabsNode({ id, data, selected }: NodeProps<WorldLabsNodeTyp
             </div>
           )}
 
-          {/* Complete state — show thumbnail */}
-          {isComplete && nodeData.thumbnailUrl && (
+          {/* Complete state — show panorama or thumbnail */}
+          {isComplete && previewUrl && (
             <div className="w-full">
               <img
-                src={nodeData.thumbnailUrl}
+                src={previewUrl}
                 alt={nodeData.worldName}
                 className="w-full h-auto object-cover"
               />
+              {nodeData.panoUrl && (
+                <p className="text-[9px] text-indigo-400/60 px-2 pt-1">Panorama preview</p>
+              )}
               {nodeData.caption && (
                 <p className="text-[10px] text-neutral-500 p-2 line-clamp-2">{nodeData.caption}</p>
               )}
             </div>
           )}
 
-          {/* Complete but no thumbnail */}
-          {isComplete && !nodeData.thumbnailUrl && (
+          {/* Complete but no preview */}
+          {isComplete && !previewUrl && (
             <div className="text-center p-3">
               <p className="text-xs text-green-400">World generated</p>
               <p className="text-[10px] text-neutral-500 mt-1">ID: {nodeData.worldId}</p>
