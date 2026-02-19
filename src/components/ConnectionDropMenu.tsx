@@ -369,6 +369,16 @@ const THREE_D_SOURCE_OPTIONS: MenuOption[] = [
       </svg>
     ),
   },
+  {
+    type: "worldLabs",
+    label: "WorldLabs",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    ),
+  },
 ];
 
 interface ConnectionDropMenuProps {

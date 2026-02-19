@@ -199,12 +199,21 @@ export function WorldLabsNode({ id, data, selected }: NodeProps<WorldLabsNodeTyp
         className="!w-3 !h-3 !bg-amber-500 !border-amber-700"
       />
 
+      {/* Output Handle — 3D SPZ data */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="3d"
+        style={{ top: "30%" }}
+        className="!w-3 !h-3 !bg-emerald-500 !border-emerald-700"
+      />
+
       {/* Output Handle — panorama/thumbnail image */}
       <Handle
         type="source"
         position={Position.Right}
         id="image"
-        style={{ top: "50%" }}
+        style={{ top: "70%" }}
         className="!w-3 !h-3 !bg-violet-500 !border-violet-700"
       />
 
@@ -386,7 +395,10 @@ export function WorldLabsNode({ id, data, selected }: NodeProps<WorldLabsNodeTyp
         <div className="absolute left-5 text-[9px] text-neutral-600" style={{ top: "65%", transform: "translateY(-50%)" }}>
           text
         </div>
-        <div className="absolute right-5 text-[9px] text-neutral-600" style={{ top: "50%", transform: "translateY(-50%)" }}>
+        <div className="absolute right-5 text-[9px] text-neutral-600" style={{ top: "30%", transform: "translateY(-50%)" }}>
+          3d
+        </div>
+        <div className="absolute right-5 text-[9px] text-neutral-600" style={{ top: "70%", transform: "translateY(-50%)" }}>
           image
         </div>
       </div>

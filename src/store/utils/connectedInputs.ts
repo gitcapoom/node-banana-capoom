@@ -54,9 +54,10 @@ function isTextHandle(handleId: string | null | undefined): boolean {
 }
 
 /**
- * Extract output data and type from a source node
+ * Extract output data and type from a source node.
+ * sourceHandleId is used for multi-output nodes (e.g. WorldLabs outputs both "image" and "3d").
  */
-function getSourceOutput(sourceNode: WorkflowNode): { type: "image" | "text" | "video" | "audio" | "3d"; value: string | null } {
+function getSourceOutput(sourceNode: WorkflowNode, sourceHandleId?: string | null): { type: "image" | "text" | "video" | "audio" | "3d"; value: string | null } {
   if (sourceNode.type === "imageInput") {
     return { type: "image", value: (sourceNode.data as ImageInputNodeData).image };
   } else if (sourceNode.type === "audioInput") {
@@ -87,8 +88,12 @@ function getSourceOutput(sourceNode: WorkflowNode): { type: "image" | "text" | "
   } else if (sourceNode.type === "spzViewer") {
     return { type: "image", value: (sourceNode.data as SpzViewerNodeData).capturedImage };
   } else if (sourceNode.type === "worldLabs") {
-    // WorldLabs outputs its panorama or thumbnail as an image
     const wlData = sourceNode.data as WorldLabsNodeData;
+    // WorldLabs outputs "3d" (SPZ URL) or "image" (panorama/thumbnail) depending on handle
+    if (sourceHandleId === "3d") {
+      const bestSpz = wlData.spzUrls?.["500k"] || wlData.spzUrls?.full_res || wlData.spzUrls?.["100k"] || null;
+      return { type: "3d", value: bestSpz };
+    }
     return { type: "image", value: wlData.panoUrl || wlData.thumbnailUrl || null };
   }
   return { type: "image", value: null };
@@ -142,7 +147,7 @@ export function getConnectedInputsPure(
       if (!sourceNode) return;
 
       const handleId = edge.targetHandle;
-      const { type, value } = getSourceOutput(sourceNode);
+      const { type, value } = getSourceOutput(sourceNode, edge.sourceHandle);
 
       if (!value) return;
 
