@@ -372,10 +372,11 @@ export default function StandaloneViewerPage() {
     const files = e.dataTransfer.files;
     if (files.length > 0) {
       const file = files[0];
-      if (file.name.endsWith(".spz")) {
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".spz") || lower.endsWith(".ply")) {
         loadSplatFromFile(file);
       } else {
-        setError("Please drop a .spz file");
+        setError("Please drop a .spz or .ply file");
       }
     }
   }, [loadSplatFromFile]);
@@ -383,10 +384,11 @@ export default function StandaloneViewerPage() {
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.name.endsWith(".spz")) {
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith(".spz") || lower.endsWith(".ply")) {
         loadSplatFromFile(file);
       } else {
-        setError("Please select a .spz file");
+        setError("Please select a .spz or .ply file");
       }
     }
   }, [loadSplatFromFile]);
@@ -424,7 +426,8 @@ export default function StandaloneViewerPage() {
             SPZ Viewer
           </h1>
           <p className="text-neutral-500 text-sm mb-6">
-            Drag and drop a <code className="text-indigo-400">.spz</code> file here
+            Drag and drop a <code className="text-indigo-400">.spz</code> or{" "}
+            <code className="text-indigo-400">.ply</code> file here
             <br />
             or click to browse
           </p>
@@ -436,7 +439,7 @@ export default function StandaloneViewerPage() {
             Choose File
             <input
               type="file"
-              accept=".spz"
+              accept=".spz,.ply"
               onChange={handleFileSelect}
               className="hidden"
             />
@@ -489,7 +492,7 @@ export default function StandaloneViewerPage() {
       {/* Drag overlay */}
       {isDragging && (
         <div className="absolute inset-0 bg-indigo-500/20 border-2 border-dashed border-indigo-500 flex items-center justify-center z-20">
-          <p className="text-indigo-300 text-lg font-medium">Drop .spz file here</p>
+          <p className="text-indigo-300 text-lg font-medium">Drop .spz or .ply file here</p>
         </div>
       )}
 
@@ -592,7 +595,7 @@ export default function StandaloneViewerPage() {
       <div className="absolute top-4 right-4 pointer-events-none z-5">
         <p className="text-neutral-600 text-[9px]">
           Press H to {showControls ? "hide" : "show"} controls · Space to capture
-          {!worldId && " · Drop .spz to load"}
+          {!worldId && " · Drop .spz/.ply to load"}
         </p>
       </div>
     </div>
