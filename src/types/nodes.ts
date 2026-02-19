@@ -38,7 +38,8 @@ export type NodeType =
   | "videoStitch"
   | "easeCurve"
   | "generate3d"
-  | "glbViewer";
+  | "glbViewer"
+  | "worldLabs";
 
 /**
  * Node execution status
@@ -196,6 +197,29 @@ export interface Generate3DNodeData extends BaseNodeData {
 }
 
 /**
+ * WorldLabs node - 3D world generation via Marble API
+ * Creates 3D Gaussian Splat environments from text/image input.
+ * Opens a Spark.js viewer in a new window for cinematic framing and capture.
+ */
+export interface WorldLabsNodeData extends BaseNodeData {
+  worldName: string;
+  model: "Marble 0.1-plus" | "Marble 0.1-mini";
+  seed: number | null;
+  inputImages: string[];
+  inputPrompt: string | null;
+  operationId: string | null;
+  worldId: string | null;
+  status: NodeStatus;
+  error: string | null;
+  progress: string | null;
+  spzUrls: { full: string | null; medium: string | null; low: string | null } | null;
+  thumbnailUrl: string | null;
+  marbleViewerUrl: string | null;
+  caption: string | null;
+  viewerWindowOpen: boolean;
+}
+
+/**
  * LLM Generate node - AI text generation
  */
 export interface LLMGenerateNodeData extends BaseNodeData {
@@ -325,6 +349,7 @@ export type WorkflowNodeData =
   | NanoBananaNodeData
   | GenerateVideoNodeData
   | Generate3DNodeData
+  | WorldLabsNodeData
   | LLMGenerateNodeData
   | SplitGridNodeData
   | OutputNodeData
