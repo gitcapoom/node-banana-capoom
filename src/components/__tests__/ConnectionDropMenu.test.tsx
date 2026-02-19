@@ -57,6 +57,8 @@ describe("ConnectionDropMenu", () => {
       expect(screen.getByText("Split Grid Node")).toBeInTheDocument();
       expect(screen.getByText("Split Grid Now")).toBeInTheDocument();
       expect(screen.getByText("Output")).toBeInTheDocument();
+      expect(screen.getByText("Generate Panorama")).toBeInTheDocument();
+      expect(screen.getByText("Generate World")).toBeInTheDocument();
     });
 
     it("should show text-accepting nodes when dragging from text output", () => {
@@ -65,6 +67,7 @@ describe("ConnectionDropMenu", () => {
       expect(screen.getByText("Generate Image")).toBeInTheDocument();
       expect(screen.getByText("Generate Video")).toBeInTheDocument();
       expect(screen.getByText("LLM Generate")).toBeInTheDocument();
+      expect(screen.getByText("Generate Panorama")).toBeInTheDocument();
       // Should NOT show image-only nodes
       expect(screen.queryByText("Annotate")).not.toBeInTheDocument();
       expect(screen.queryByText("Output")).not.toBeInTheDocument();
@@ -99,6 +102,8 @@ describe("ConnectionDropMenu", () => {
       expect(screen.getByText("Image Input")).toBeInTheDocument();
       expect(screen.getByText("Annotate")).toBeInTheDocument();
       expect(screen.getByText("Generate Image")).toBeInTheDocument();
+      expect(screen.getByText("Panorama")).toBeInTheDocument();
+      expect(screen.getByText("WorldLabs World")).toBeInTheDocument();
       // Should NOT show text nodes
       expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
     });
@@ -126,7 +131,7 @@ describe("ConnectionDropMenu", () => {
       render(<ConnectionDropMenu {...defaultProps} handleType="3d" connectionType="target" />);
 
       expect(screen.getByText("Generate 3D")).toBeInTheDocument();
-      expect(screen.getByText("WorldLabs")).toBeInTheDocument();
+      expect(screen.getByText("WorldLabs World")).toBeInTheDocument();
       // Should NOT show other nodes
       expect(screen.queryByText("Image Input")).not.toBeInTheDocument();
       expect(screen.queryByText("Generate Image")).not.toBeInTheDocument();
