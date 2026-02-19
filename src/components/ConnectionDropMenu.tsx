@@ -89,7 +89,17 @@ const IMAGE_TARGET_OPTIONS: MenuOption[] = [
     ),
   },
   {
-    type: "worldLabs",
+    type: "worldLabsPano",
+    label: "Generate Panorama",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    ),
+  },
+  {
+    type: "worldLabsWorld",
     label: "Generate World",
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -147,8 +157,8 @@ const TEXT_TARGET_OPTIONS: MenuOption[] = [
     ),
   },
   {
-    type: "worldLabs",
-    label: "Generate World",
+    type: "worldLabsPano",
+    label: "Generate Panorama",
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <circle cx="12" cy="12" r="10" />
@@ -190,6 +200,26 @@ const IMAGE_SOURCE_OPTIONS: MenuOption[] = [
   {
     type: "spzViewer",
     label: "SPZ Viewer",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    ),
+  },
+  {
+    type: "worldLabsPano",
+    label: "Panorama",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    ),
+  },
+  {
+    type: "worldLabsWorld",
+    label: "WorldLabs World",
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <circle cx="12" cy="12" r="10" />
@@ -370,8 +400,8 @@ const THREE_D_SOURCE_OPTIONS: MenuOption[] = [
     ),
   },
   {
-    type: "worldLabs",
-    label: "WorldLabs",
+    type: "worldLabsWorld",
+    label: "WorldLabs World",
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <circle cx="12" cy="12" r="10" />

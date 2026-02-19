@@ -36,7 +36,8 @@ import {
   ImageCompareNode,
   VideoStitchNode,
   EaseCurveNode,
-  WorldLabsNode,
+  WorldLabsPanoNode,
+  WorldLabsWorldNode,
   SpzViewerNode,
 } from "./nodes";
 
@@ -76,7 +77,8 @@ const nodeTypes: NodeTypes = {
   easeCurve: EaseCurveNode,
   glbViewer: GLBViewerNode,
   spzViewer: SpzViewerNode,
-  worldLabs: WorldLabsNode,
+  worldLabsPano: WorldLabsPanoNode,
+  worldLabsWorld: WorldLabsWorldNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -144,8 +146,10 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["3d"], outputs: ["image"] };
     case "spzViewer":
       return { inputs: ["3d"], outputs: ["image"] };
-    case "worldLabs":
-      return { inputs: ["image", "text"], outputs: ["image", "3d"] };
+    case "worldLabsPano":
+      return { inputs: ["image", "text"], outputs: ["image"] };
+    case "worldLabsWorld":
+      return { inputs: ["image"], outputs: ["image", "3d"] };
     default:
       return { inputs: [], outputs: [] };
   }
@@ -1089,7 +1093,7 @@ export function WorkflowCanvas() {
             nodeType = "annotation";
             break;
           case "w":
-            nodeType = "worldLabs";
+            nodeType = "worldLabsPano";
             break;
         }
 
@@ -1114,7 +1118,9 @@ export function WorkflowCanvas() {
             videoStitch: { width: 400, height: 280 },
             easeCurve: { width: 340, height: 480 },
             glbViewer: { width: 360, height: 380 },
-            worldLabs: { width: 320, height: 380 },
+            spzViewer: { width: 300, height: 280 },
+            worldLabsPano: { width: 320, height: 380 },
+            worldLabsWorld: { width: 320, height: 360 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });
@@ -1702,8 +1708,10 @@ export function WorkflowCanvas() {
                 return "#38bdf8"; // sky-400 (3D viewport)
               case "spzViewer":
                 return "#34d399"; // emerald-400 (SPZ/PLY viewer)
-              case "worldLabs":
-                return "#818cf8"; // indigo-400 (3D world generation)
+              case "worldLabsPano":
+                return "#818cf8"; // indigo-400 (panorama generation)
+              case "worldLabsWorld":
+                return "#6366f1"; // indigo-500 (3D world generation)
               default:
                 return "#94a3b8";
             }

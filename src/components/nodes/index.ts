@@ -13,6 +13,7 @@ export { OutputGalleryNode } from "./OutputGalleryNode";
 export { ImageCompareNode } from "./ImageCompareNode";
 export { VideoStitchNode } from "./VideoStitchNode";
 export { EaseCurveNode } from "./EaseCurveNode";
-export { WorldLabsNode } from "./WorldLabsNode";
+export { WorldLabsPanoNode } from "./WorldLabsPanoNode";
+export { WorldLabsWorldNode } from "./WorldLabsWorldNode";
 export { SpzViewerNode } from "./SpzViewerNode";
 export { GroupNode } from "./GroupNode";

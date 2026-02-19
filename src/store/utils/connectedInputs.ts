@@ -21,7 +21,8 @@ import {
   LLMGenerateNodeData,
   GLBViewerNodeData,
   SpzViewerNodeData,
-  WorldLabsNodeData,
+  WorldLabsPanoNodeData,
+  WorldLabsWorldNodeData,
 } from "@/types";
 
 /**
@@ -87,14 +88,16 @@ function getSourceOutput(sourceNode: WorkflowNode, sourceHandleId?: string | nul
     return { type: "image", value: (sourceNode.data as GLBViewerNodeData).capturedImage };
   } else if (sourceNode.type === "spzViewer") {
     return { type: "image", value: (sourceNode.data as SpzViewerNodeData).capturedImage };
-  } else if (sourceNode.type === "worldLabs") {
-    const wlData = sourceNode.data as WorldLabsNodeData;
-    // WorldLabs outputs "3d" (SPZ URL) or "image" (panorama/thumbnail) depending on handle
+  } else if (sourceNode.type === "worldLabsPano") {
+    const pData = sourceNode.data as WorldLabsPanoNodeData;
+    return { type: "image", value: pData.panoUrl || pData.thumbnailUrl || null };
+  } else if (sourceNode.type === "worldLabsWorld") {
+    const wData = sourceNode.data as WorldLabsWorldNodeData;
     if (sourceHandleId === "3d") {
-      const bestSpz = wlData.spzUrls?.["500k"] || wlData.spzUrls?.full_res || wlData.spzUrls?.["100k"] || null;
+      const bestSpz = wData.spzUrls?.["500k"] || wData.spzUrls?.full_res || wData.spzUrls?.["100k"] || null;
       return { type: "3d", value: bestSpz };
     }
-    return { type: "image", value: wlData.panoUrl || wlData.thumbnailUrl || null };
+    return { type: "image", value: wData.panoUrl || wData.thumbnailUrl || null };
   }
   return { type: "image", value: null };
 }
