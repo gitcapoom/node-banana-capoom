@@ -1084,6 +1084,9 @@ export function WorkflowCanvas() {
           case "a":
             nodeType = "annotation";
             break;
+          case "w":
+            nodeType = "worldLabs";
+            break;
         }
 
         if (nodeType) {
@@ -1107,6 +1110,7 @@ export function WorkflowCanvas() {
             videoStitch: { width: 400, height: 280 },
             easeCurve: { width: 340, height: 480 },
             glbViewer: { width: 360, height: 380 },
+            worldLabs: { width: 320, height: 380 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });
