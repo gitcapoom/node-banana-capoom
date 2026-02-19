@@ -8,6 +8,7 @@ import {
   NanoBananaNodeData,
   GenerateVideoNodeData,
   Generate3DNodeData,
+  WorldLabsNodeData,
   LLMGenerateNodeData,
   SplitGridNodeData,
   OutputNodeData,
@@ -42,6 +43,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   videoStitch: { width: 400, height: 280 },
   easeCurve: { width: 340, height: 480 },
   glbViewer: { width: 360, height: 380 },
+  worldLabs: { width: 320, height: 380 },
 };
 
 /**
@@ -240,5 +242,23 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         filename: null,
         capturedImage: null,
       } as GLBViewerNodeData;
+    case "worldLabs":
+      return {
+        worldName: "Untitled World",
+        model: "Marble 0.1-plus",
+        seed: null,
+        inputImages: [],
+        inputPrompt: null,
+        operationId: null,
+        worldId: null,
+        status: "idle",
+        error: null,
+        progress: null,
+        spzUrls: null,
+        thumbnailUrl: null,
+        marbleViewerUrl: null,
+        caption: null,
+        viewerWindowOpen: false,
+      } as WorldLabsNodeData;
   }
 };
