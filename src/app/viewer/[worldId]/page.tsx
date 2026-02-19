@@ -7,7 +7,7 @@
  * Features:
  *   - Sensor/lens/aspect ratio presets → real-time FOV updates
  *   - Capture button → sends screenshot to parent window as ImageInput node
- *   - Quality selector for SPZ resolution (low/medium/full)
+ *   - Quality selector for SPZ resolution (100k/500k/full_res)
  *   - OrbitControls for camera interaction
  */
 
@@ -29,12 +29,19 @@ import {
 
 interface WorldData {
   worldId: string;
-  spzUrls: { full: string | null; medium: string | null; low: string | null };
+  spzUrls: { full_res: string | null; "500k": string | null; "100k": string | null };
   thumbnailUrl: string | null;
+  panoUrl: string | null;
   caption: string | null;
 }
 
-type QualityLevel = "low" | "medium" | "full";
+type QualityLevel = "100k" | "500k" | "full_res";
+
+const QUALITY_LABELS: Record<QualityLevel, string> = {
+  "100k": "100K",
+  "500k": "500K",
+  "full_res": "Full",
+};
 
 // ─── Page Component ─────────────────────────────────────────────
 
@@ -52,7 +59,7 @@ export default function ViewerPage({
   const [sensorIndex, setSensorIndex] = useState(DEFAULT_SENSOR_INDEX);
   const [lensIndex, setLensIndex] = useState(DEFAULT_LENS_INDEX);
   const [aspectIndex, setAspectIndex] = useState(DEFAULT_ASPECT_RATIO_INDEX);
-  const [quality, setQuality] = useState<QualityLevel>("medium");
+  const [quality, setQuality] = useState<QualityLevel>("500k");
   const [splatLoaded, setSplatLoaded] = useState(false);
   const [captureFlash, setCaptureFlash] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -100,6 +107,7 @@ export default function ViewerPage({
           worldId: data.worldId,
           spzUrls: data.spzUrls,
           thumbnailUrl: data.thumbnailUrl,
+          panoUrl: data.panoUrl,
           caption: data.caption,
         });
       } catch (err) {
@@ -192,7 +200,7 @@ export default function ViewerPage({
   // ─── Load splat file ──────────────────────────────────────────
 
   async function loadSplat(scene: THREE.Scene, data: WorldData, q: QualityLevel) {
-    const url = data.spzUrls[q] || data.spzUrls.medium || data.spzUrls.low || data.spzUrls.full;
+    const url = data.spzUrls[q] || data.spzUrls["500k"] || data.spzUrls["100k"] || data.spzUrls.full_res;
     if (!url) {
       setError("No SPZ URL available for this world");
       return;
@@ -421,7 +429,7 @@ export default function ViewerPage({
               <div className="mt-2 flex items-center gap-2">
                 <label className="text-[9px] text-neutral-500">Quality</label>
                 <div className="flex gap-1">
-                  {(["low", "medium", "full"] as const).map((q) => (
+                  {(["100k", "500k", "full_res"] as const).map((q) => (
                     <button
                       key={q}
                       onClick={() => setQuality(q)}
@@ -431,7 +439,7 @@ export default function ViewerPage({
                           : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
                       } transition-colors`}
                     >
-                      {q.charAt(0).toUpperCase() + q.slice(1)}
+                      {QUALITY_LABELS[q]}
                     </button>
                   ))}
                 </div>
