@@ -226,19 +226,14 @@ export default function ViewerPage({
       scene.add(splatMesh);
       splatMeshRef.current = splatMesh;
 
-      // Auto-fit camera to splat bounds
+      // Auto-fit camera — position at center of bounding box (inside panorama sphere)
       const box = splatMesh.getBoundingBox?.();
       if (box && cameraRef.current && controlsRef.current) {
         const center = new THREE.Vector3();
         box.getCenter(center);
-        const size = new THREE.Vector3();
-        box.getSize(size);
-        const maxDim = Math.max(size.x, size.y, size.z);
 
-        controlsRef.current.target.copy(center);
-        cameraRef.current.position.copy(
-          center.clone().add(new THREE.Vector3(0, maxDim * 0.3, maxDim * 1.2))
-        );
+        cameraRef.current.position.copy(center.clone().add(new THREE.Vector3(0, 0, 0.01)));
+        controlsRef.current.target.copy(center.clone().add(new THREE.Vector3(0, 0, -1)));
         controlsRef.current.update();
       }
     } catch (err) {
@@ -273,7 +268,29 @@ export default function ViewerPage({
     rendererRef.current.render(sceneRef.current, cameraRef.current);
 
     const canvas = rendererRef.current.domElement;
-    const image = canvas.toDataURL("image/png");
+    const selectedAspect = aspectRatio.ratio;
+    const canvasW = canvas.width;
+    const canvasH = canvas.height;
+    const canvasAspect = canvasW / canvasH;
+
+    // Crop to selected aspect ratio
+    let cropX = 0, cropY = 0, cropW = canvasW, cropH = canvasH;
+    if (selectedAspect > canvasAspect) {
+      cropH = Math.round(canvasW / selectedAspect);
+      cropY = Math.round((canvasH - cropH) / 2);
+    } else if (selectedAspect < canvasAspect) {
+      cropW = Math.round(canvasH * selectedAspect);
+      cropX = Math.round((canvasW - cropW) / 2);
+    }
+
+    const offscreen = document.createElement("canvas");
+    offscreen.width = cropW;
+    offscreen.height = cropH;
+    const offCtx = offscreen.getContext("2d");
+    if (!offCtx) return;
+    offCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    const image = offscreen.toDataURL("image/png");
     const id = Math.random().toString(36).substring(2, 6);
     const cameraSegment = getCameraFilenameSegment(sensor, focalLength);
     const nameSlug = worldName.replace(/[^a-zA-Z0-9]/g, "");
@@ -291,13 +308,13 @@ export default function ViewerPage({
           worldId,
           image,
           filename,
-          width: canvas.width,
-          height: canvas.height,
+          width: cropW,
+          height: cropH,
         },
         window.location.origin
       );
     }
-  }, [worldId, worldName, sensor, focalLength]);
+  }, [worldId, worldName, sensor, focalLength, aspectRatio.ratio]);
 
   // ─── Keyboard shortcuts ───────────────────────────────────────
 
@@ -345,6 +362,43 @@ export default function ViewerPage({
     <div className="fixed inset-0 bg-neutral-950 overflow-hidden select-none">
       {/* Three.js canvas container */}
       <div ref={containerRef} className="absolute inset-0" />
+
+      {/* Framing overlay — letterbox/pillarbox bars for selected aspect ratio */}
+      {splatLoaded && (() => {
+        const viewW = containerRef.current?.clientWidth ?? 16;
+        const viewH = containerRef.current?.clientHeight ?? 9;
+        const viewportAspect = viewW / viewH;
+        const selectedAspect = aspectRatio.ratio;
+        if (Math.abs(viewportAspect - selectedAspect) < 0.01) return null;
+
+        if (selectedAspect > viewportAspect) {
+          const activeH = viewW / selectedAspect;
+          const barH = Math.max(0, (viewH - activeH) / 2);
+          return (
+            <>
+              <div className="absolute left-0 right-0 top-0 pointer-events-none z-[4]" style={{ height: barH, background: "rgba(0,0,0,0.55)" }}>
+                <div className="absolute bottom-0 left-0 right-0 h-px bg-neutral-500/40" />
+              </div>
+              <div className="absolute left-0 right-0 bottom-0 pointer-events-none z-[4]" style={{ height: barH, background: "rgba(0,0,0,0.55)" }}>
+                <div className="absolute top-0 left-0 right-0 h-px bg-neutral-500/40" />
+              </div>
+            </>
+          );
+        } else {
+          const activeW = viewH * selectedAspect;
+          const barW = Math.max(0, (viewW - activeW) / 2);
+          return (
+            <>
+              <div className="absolute top-0 bottom-0 left-0 pointer-events-none z-[4]" style={{ width: barW, background: "rgba(0,0,0,0.55)" }}>
+                <div className="absolute right-0 top-0 bottom-0 w-px bg-neutral-500/40" />
+              </div>
+              <div className="absolute top-0 bottom-0 right-0 pointer-events-none z-[4]" style={{ width: barW, background: "rgba(0,0,0,0.55)" }}>
+                <div className="absolute left-0 top-0 bottom-0 w-px bg-neutral-500/40" />
+              </div>
+            </>
+          );
+        }
+      })()}
 
       {/* Capture flash overlay */}
       {captureFlash && (
