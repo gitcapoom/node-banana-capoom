@@ -255,10 +255,12 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         error: null,
         progress: null,
         spzUrls: null,
+        panoUrl: null,
         thumbnailUrl: null,
         marbleViewerUrl: null,
         caption: null,
         viewerWindowOpen: false,
+        imageAzimuths: {},
       } as WorldLabsNodeData;
   }
 };

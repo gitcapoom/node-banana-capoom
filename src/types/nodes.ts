@@ -212,11 +212,14 @@ export interface WorldLabsNodeData extends BaseNodeData {
   status: NodeStatus;
   error: string | null;
   progress: string | null;
-  spzUrls: { full: string | null; medium: string | null; low: string | null } | null;
+  spzUrls: { full_res: string | null; "500k": string | null; "100k": string | null } | null;
+  panoUrl: string | null;
   thumbnailUrl: string | null;
   marbleViewerUrl: string | null;
   caption: string | null;
   viewerWindowOpen: boolean;
+  /** Per-image azimuth angles for multi-image generation. Maps connection index → degrees. */
+  imageAzimuths: Record<number, number>;
 }
 
 /**
