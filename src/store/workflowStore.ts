@@ -76,7 +76,8 @@ import {
   executeEaseCurve,
   executeGlbViewer,
   executeSpzViewer,
-  executeWorldLabs,
+  executeWorldLabsPano,
+  executeWorldLabsWorld,
 } from "./execution";
 import type { NodeExecutionContext } from "./execution";
 export type { LevelGroup } from "./utils/executionUtils";
@@ -1067,8 +1068,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         set({ isRunning: false, currentNodeIds: [] });
         await logger.endSession();
         return;
-      } else if (node.type === "worldLabs") {
-        await executeWorldLabs(executionCtx);
+      } else if (node.type === "worldLabsPano") {
+        await executeWorldLabsPano(executionCtx);
+      } else if (node.type === "worldLabsWorld") {
+        await executeWorldLabsWorld(executionCtx);
       }
 
       // After regeneration, execute directly connected downstream consumer nodes

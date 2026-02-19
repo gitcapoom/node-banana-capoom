@@ -38,4 +38,5 @@ export {
   executeEaseCurve,
 } from "./videoProcessingExecutors";
 
-export { executeWorldLabs } from "./worldLabsExecutor";
+export { executeWorldLabsPano } from "./worldLabsPanoExecutor";
+export { executeWorldLabsWorld } from "./worldLabsWorldExecutor";

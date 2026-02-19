@@ -23,7 +23,8 @@ import { executeGenerate3D } from "./generate3dExecutor";
 import { executeLlmGenerate } from "./llmGenerateExecutor";
 import { executeSplitGrid } from "./splitGridExecutor";
 import { executeVideoStitch, executeEaseCurve } from "./videoProcessingExecutors";
-import { executeWorldLabs } from "./worldLabsExecutor";
+import { executeWorldLabsPano } from "./worldLabsPanoExecutor";
+import { executeWorldLabsWorld } from "./worldLabsWorldExecutor";
 
 export interface ExecuteNodeOptions {
   /** When true, executors that support it will fall back to stored inputs. */
@@ -91,8 +92,11 @@ export async function executeNode(
     case "spzViewer":
       await executeSpzViewer(ctx);
       break;
-    case "worldLabs":
-      await executeWorldLabs(ctx);
+    case "worldLabsPano":
+      await executeWorldLabsPano(ctx);
+      break;
+    case "worldLabsWorld":
+      await executeWorldLabsWorld(ctx);
       break;
   }
 }
