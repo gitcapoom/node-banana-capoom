@@ -74,6 +74,9 @@ function getModelUrl(provider: ProviderType, modelId: string): string | null {
     // modelId format: "wavespeed-ai/model-name"
     return `https://wavespeed.ai`;
   }
+  if (provider === "worldlabs") {
+    return `https://platform.worldlabs.ai`;
+  }
   return null;
 }
 
