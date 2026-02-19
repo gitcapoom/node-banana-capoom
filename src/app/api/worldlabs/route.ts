@@ -2,12 +2,14 @@
  * WorldLabs API Route
  *
  * Handles 3D world generation via the WorldLabs Marble API.
- * Supports three actions:
- *   - "generate" — Submit a world generation request
- *   - "poll"     — Check operation status
- *   - "getWorld" — Retrieve completed world assets (SPZ URLs, thumbnail, etc.)
+ * Supports four actions:
+ *   - "uploadImage" — Upload an image via media-assets:prepare_upload
+ *   - "generate"    — Submit a world generation request
+ *   - "poll"        — Check operation status
+ *   - "getWorld"    — Retrieve completed world assets (SPZ URLs, thumbnail, etc.)
  *
- * Auth: Reads WORLDLABS_API_KEY from env or X-WorldLabs-Key header.
+ * Auth: Uses WLT-Api-Key header per WorldLabs API spec.
+ * Key source: X-WorldLabs-Key header from client, or WORLDLABS_API_KEY env var.
  */
 import { NextRequest, NextResponse } from "next/server";
 
@@ -29,15 +31,24 @@ function getApiKey(request: NextRequest): string | null {
 
 // ─── Request Types ──────────────────────────────────────────────
 
+interface UploadImageAction {
+  action: "uploadImage";
+  /** Base64-encoded image data (with or without data URL prefix) */
+  imageData: string;
+  /** File extension without dot, e.g. "png", "jpg" */
+  extension?: string;
+}
+
 interface GenerateAction {
   action: "generate";
-  /** "text_prompt", "image_source", or "text_and_image" */
-  promptType: "text_prompt" | "image_source" | "text_and_image";
+  /** "text" or "image" */
+  promptType: "text" | "image";
   textPrompt?: string;
-  /** Public URL of the source image (must be accessible by WorldLabs) */
-  imageUrl?: string;
-  model: "wl-marble-0.1-plus" | "wl-marble-0.1-mini";
+  /** media_asset_id from uploadImage action */
+  mediaAssetId?: string;
+  model: string;
   seed?: number | null;
+  worldName?: string;
 }
 
 interface PollAction {
@@ -50,7 +61,7 @@ interface GetWorldAction {
   worldId: string;
 }
 
-type WorldLabsRequest = GenerateAction | PollAction | GetWorldAction;
+type WorldLabsRequest = UploadImageAction | GenerateAction | PollAction | GetWorldAction;
 
 // ─── POST Handler ───────────────────────────────────────────────
 
@@ -70,6 +81,8 @@ export async function POST(request: NextRequest) {
     console.log(`[WorldLabs:${requestId}] Action: ${body.action}`);
 
     switch (body.action) {
+      case "uploadImage":
+        return handleUploadImage(apiKey, body, requestId);
       case "generate":
         return handleGenerate(apiKey, body, requestId);
       case "poll":
@@ -91,6 +104,105 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// ─── Upload Image via Media Assets ──────────────────────────────
+
+async function handleUploadImage(
+  apiKey: string,
+  body: UploadImageAction,
+  requestId: string
+) {
+  const { imageData, extension = "png" } = body;
+
+  // Strip data URL prefix if present
+  const base64 = imageData.includes(",") ? imageData.split(",")[1] : imageData;
+  const buffer = Buffer.from(base64, "base64");
+
+  // Determine content type from extension
+  const mimeMap: Record<string, string> = {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+  };
+  const contentType = mimeMap[extension] || "image/png";
+
+  // Step 1: Prepare upload — get media_asset_id and signed upload URL
+  console.log(`[WorldLabs:${requestId}] Preparing media asset upload (${(buffer.length / 1024).toFixed(1)}KB, ${extension})`);
+
+  const prepareResponse = await fetch(`${WORLDLABS_API_BASE}/media-assets:prepare_upload`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "WLT-Api-Key": apiKey,
+    },
+    body: JSON.stringify({
+      file_name: `input.${extension}`,
+      extension,
+      kind: "image",
+    }),
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!prepareResponse.ok) {
+    const errorText = await prepareResponse.text();
+    console.error(`[WorldLabs:${requestId}] Prepare upload failed (${prepareResponse.status}):`, errorText);
+    return NextResponse.json(
+      { success: false, error: `Prepare upload failed (${prepareResponse.status}): ${errorText}` },
+      { status: prepareResponse.status }
+    );
+  }
+
+  const prepareData = await prepareResponse.json();
+  const { media_asset_id, upload_url, upload_headers } = prepareData;
+
+  if (!media_asset_id || !upload_url) {
+    console.error(`[WorldLabs:${requestId}] Prepare upload returned incomplete data:`, prepareData);
+    return NextResponse.json(
+      { success: false, error: "Prepare upload returned incomplete data" },
+      { status: 500 }
+    );
+  }
+
+  console.log(`[WorldLabs:${requestId}] Media asset prepared: ${media_asset_id}`);
+
+  // Step 2: Upload the file to the signed URL
+  const uploadHeaders: Record<string, string> = {
+    "Content-Type": contentType,
+  };
+
+  // Merge any headers returned by the prepare endpoint
+  if (upload_headers && typeof upload_headers === "object") {
+    for (const [key, value] of Object.entries(upload_headers)) {
+      if (typeof value === "string") {
+        uploadHeaders[key] = value;
+      }
+    }
+  }
+
+  const uploadResponse = await fetch(upload_url, {
+    method: "PUT",
+    headers: uploadHeaders,
+    body: buffer,
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!uploadResponse.ok) {
+    const errorText = await uploadResponse.text();
+    console.error(`[WorldLabs:${requestId}] File upload failed (${uploadResponse.status}):`, errorText);
+    return NextResponse.json(
+      { success: false, error: `File upload failed (${uploadResponse.status}): ${errorText}` },
+      { status: uploadResponse.status }
+    );
+  }
+
+  console.log(`[WorldLabs:${requestId}] Image uploaded to media asset ${media_asset_id}`);
+
+  return NextResponse.json({
+    success: true,
+    mediaAssetId: media_asset_id,
+  });
+}
+
 // ─── Generate ───────────────────────────────────────────────────
 
 async function handleGenerate(
@@ -102,27 +214,33 @@ async function handleGenerate(
   interface WorldPrompt {
     type: string;
     text_prompt?: string;
-    source?: { type: string; url: string };
+    image_prompt?: {
+      source: string;
+      media_asset_id: string;
+    };
   }
 
   const worldPrompt: WorldPrompt = {
     type: body.promptType,
   };
 
-  if (body.textPrompt && (body.promptType === "text_prompt" || body.promptType === "text_and_image")) {
+  // Text prompt (works for both "text" and "image" types — optional caption for images)
+  if (body.textPrompt) {
     worldPrompt.text_prompt = body.textPrompt;
   }
 
-  if (body.imageUrl && (body.promptType === "image_source" || body.promptType === "text_and_image")) {
-    worldPrompt.source = {
-      type: "image_url",
-      url: body.imageUrl,
+  // Image prompt via media asset
+  if (body.mediaAssetId && body.promptType === "image") {
+    worldPrompt.image_prompt = {
+      source: "media_asset",
+      media_asset_id: body.mediaAssetId,
     };
   }
 
   const requestBody: Record<string, unknown> = {
-    world_prompt: worldPrompt,
+    display_name: body.worldName || "",
     model: body.model,
+    world_prompt: worldPrompt,
   };
 
   if (body.seed != null) {
@@ -135,7 +253,7 @@ async function handleGenerate(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      "WLT-Api-Key": apiKey,
     },
     body: JSON.stringify(requestBody),
     signal: AbortSignal.timeout(60_000), // 60s for the initial submission
@@ -171,7 +289,7 @@ async function handlePoll(
     {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "WLT-Api-Key": apiKey,
       },
       signal: AbortSignal.timeout(15_000),
     }
@@ -218,7 +336,7 @@ async function handleGetWorld(
     {
       method: "GET",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        "WLT-Api-Key": apiKey,
       },
       signal: AbortSignal.timeout(15_000),
     }

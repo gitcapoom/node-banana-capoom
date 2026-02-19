@@ -2,7 +2,7 @@
  * WorldLabs Executor
  *
  * Executes WorldLabs "Generate World" nodes via the Marble API.
- * Flow: submit generation → poll until done → fetch world assets.
+ * Flow: upload image (if needed) → submit generation → poll until done → fetch world assets.
  * Supports cancellation via AbortSignal.
  */
 
@@ -43,24 +43,13 @@ export async function executeWorldLabs(
     throw new Error("Missing text or image input");
   }
 
-  // Determine prompt type
+  // Determine prompt type: "text" or "image"
   const hasText = !!connectedText;
   const hasImage = connectedImages.length > 0;
-  let promptType: "text_prompt" | "image_source" | "text_and_image";
-  if (hasText && hasImage) {
-    promptType = "text_and_image";
-  } else if (hasImage) {
-    promptType = "image_source";
-  } else {
-    promptType = "text_prompt";
-  }
+  const promptType: "text" | "image" = hasImage ? "image" : "text";
 
-  // Map UI model name to API model ID
-  const modelMap: Record<string, string> = {
-    "Marble 0.1-plus": "wl-marble-0.1-plus",
-    "Marble 0.1-mini": "wl-marble-0.1-mini",
-  };
-  const apiModel = modelMap[nodeData.model] || "wl-marble-0.1-plus";
+  // UI model names match API model names exactly
+  const apiModel = nodeData.model;
 
   updateNodeData(node.id, {
     inputImages: connectedImages,
@@ -79,17 +68,18 @@ export async function executeWorldLabs(
   const headers = buildGenerateHeaders("worldlabs", providerSettings);
 
   try {
-    // ─── Step 1: Upload image if needed ─────────────────────────
-    let imageUrl: string | undefined;
+    // ─── Step 1: Upload image via media assets if needed ─────
+    let mediaAssetId: string | undefined;
     if (hasImage) {
       updateNodeData(node.id, { progress: "Uploading image..." });
 
-      const uploadResponse = await fetch("/api/worldlabs/image", {
+      const uploadResponse = await fetch("/api/worldlabs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
+          action: "uploadImage",
           imageData: connectedImages[0],
-          contentType: "image/png",
+          extension: "png",
         }),
         ...(signal ? { signal } : {}),
       });
@@ -103,7 +93,7 @@ export async function executeWorldLabs(
       if (!uploadResult.success) {
         throw new Error(uploadResult.error || "Image upload failed");
       }
-      imageUrl = uploadResult.imageUrl;
+      mediaAssetId = uploadResult.mediaAssetId;
     }
 
     // ─── Step 2: Submit generation ──────────────────────────────
@@ -113,13 +103,14 @@ export async function executeWorldLabs(
       action: "generate",
       promptType,
       model: apiModel,
+      worldName: nodeData.worldName || "",
     };
 
     if (connectedText) {
       generateBody.textPrompt = connectedText;
     }
-    if (imageUrl) {
-      generateBody.imageUrl = imageUrl;
+    if (mediaAssetId) {
+      generateBody.mediaAssetId = mediaAssetId;
     }
     if (nodeData.seed != null) {
       generateBody.seed = nodeData.seed;
