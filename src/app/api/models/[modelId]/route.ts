@@ -51,6 +51,8 @@ const IMAGE_INPUT_PATTERNS = [
   "reference_image",
   "init_image",
   "mask_image",
+  "mask_url",
+  "mask",
   "control_image",
 ];
 

@@ -465,6 +465,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
             onParametersChange={handleParametersChange}
             onExpandChange={handleParametersExpandChange}
             onInputsLoaded={handleInputsLoaded}
+            inputNames={nodeData.inputSchema?.map(i => i.name)}
           />
         )}
       </div>

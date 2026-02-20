@@ -757,6 +757,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             onParametersChange={handleParametersChange}
             onExpandChange={handleParametersExpandChange}
             onInputsLoaded={handleInputsLoaded}
+            inputNames={nodeData.inputSchema?.map(i => i.name)}
           />
         )}
       </div>

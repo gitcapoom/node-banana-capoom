@@ -98,47 +98,6 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
         </div>
       )}
 
-      {/* Controls: Brush Size, Blur, Invert */}
-      <div className="flex flex-col gap-1.5 mt-1.5">
-        {/* Brush Size */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-neutral-500 w-10 shrink-0">Brush</span>
-          <input
-            type="range"
-            min={10}
-            max={100}
-            value={nodeData.brushSize}
-            onChange={(e) => updateNodeData(id, { brushSize: Number(e.target.value) })}
-            className="flex-1 accent-white h-1"
-          />
-          <span className="text-[10px] text-neutral-400 w-7 text-right">{nodeData.brushSize}</span>
-        </div>
-
-        {/* Blur Radius */}
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-neutral-500 w-10 shrink-0">Blur</span>
-          <input
-            type="range"
-            min={0}
-            max={20}
-            value={nodeData.blurRadius}
-            onChange={(e) => updateNodeData(id, { blurRadius: Number(e.target.value) })}
-            className="flex-1 accent-white h-1"
-          />
-          <span className="text-[10px] text-neutral-400 w-7 text-right">{nodeData.blurRadius}px</span>
-        </div>
-
-        {/* Invert Mask */}
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={nodeData.invertMask}
-            onChange={(e) => updateNodeData(id, { invertMask: e.target.checked })}
-            className="w-3 h-3 rounded border-neutral-600 accent-white"
-          />
-          <span className="text-[10px] text-neutral-400">Invert mask</span>
-        </label>
-      </div>
     </BaseNode>
   );
 }

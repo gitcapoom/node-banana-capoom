@@ -47,6 +47,8 @@ interface ModelParametersProps {
   onParametersChange: (parameters: Record<string, unknown>) => void;
   onExpandChange?: (expanded: boolean, parameterCount: number) => void;
   onInputsLoaded?: (inputs: ModelInputDef[]) => void;
+  /** Names of inputs already handled as connection handles — these are filtered out from the parameter list */
+  inputNames?: string[];
 }
 
 /**
@@ -61,6 +63,7 @@ export function ModelParameters({
   onParametersChange,
   onExpandChange,
   onInputsLoaded,
+  inputNames,
 }: ModelParametersProps) {
   const [schema, setSchema] = useState<ModelParameter[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -163,13 +166,19 @@ export function ModelParameters({
     [parameters, onParametersChange]
   );
 
+  // Filter out parameters that are already handled as connection handles (e.g. image inputs like mask)
+  const inputNameSet = inputNames && inputNames.length > 0 ? new Set(inputNames) : null;
+  const filteredSchema = inputNameSet
+    ? schema.filter((param) => !inputNameSet.has(param.name))
+    : schema;
+
   // Don't render anything for Gemini or if no model selected
   if (provider === "gemini" || !modelId) {
     return null;
   }
 
   // Don't render if no schema available and not loading
-  if (!isLoading && schema.length === 0 && !error) {
+  if (!isLoading && filteredSchema.length === 0 && !error) {
     return null;
   }
 
@@ -225,10 +234,10 @@ export function ModelParameters({
             <span className="text-[9px] text-red-400">{error}</span>
           ) : isLoading ? (
             <span className="text-[9px] text-neutral-500">Loading parameters...</span>
-          ) : schema.length === 0 ? (
+          ) : filteredSchema.length === 0 ? (
             <span className="text-[9px] text-neutral-500">No parameters available</span>
           ) : (
-            schema.map((param) => (
+            filteredSchema.map((param) => (
               <ParameterInput
                 key={param.name}
                 param={param}

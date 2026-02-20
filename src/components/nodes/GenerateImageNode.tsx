@@ -748,6 +748,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
             onParametersChange={handleParametersChange}
             onExpandChange={handleParametersExpandChange}
             onInputsLoaded={handleInputsLoaded}
+            inputNames={nodeData.inputSchema?.map(i => i.name)}
           />
         )}
 

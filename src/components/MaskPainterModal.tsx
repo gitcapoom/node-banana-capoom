@@ -392,19 +392,54 @@ export function MaskPainterModal() {
 
         <div className="w-px h-6 bg-neutral-700" />
 
-        {/* Brush preview */}
-        <div className="flex items-center gap-2">
+        {/* Blur Radius Slider */}
+        <div className="flex items-center gap-3">
           <span className="text-[10px] text-neutral-500 uppercase tracking-wide">
-            Preview
+            Blur
           </span>
-          <div
-            className="rounded-full bg-black border border-neutral-600"
-            style={{
-              width: Math.min(brushSize * 0.5, 32),
-              height: Math.min(brushSize * 0.5, 32),
+          <input
+            type="range"
+            min={0}
+            max={20}
+            value={
+              sourceNodeId
+                ? (nodes.find((n) => n.id === sourceNodeId)?.data as MaskPainterNodeData)?.blurRadius ?? 0
+                : 0
+            }
+            onChange={(e) => {
+              if (sourceNodeId) {
+                updateNodeData(sourceNodeId, { blurRadius: Number(e.target.value) });
+              }
             }}
+            className="w-28 accent-white"
           />
+          <span className="text-xs text-neutral-400 w-10 text-right">
+            {sourceNodeId
+              ? (nodes.find((n) => n.id === sourceNodeId)?.data as MaskPainterNodeData)?.blurRadius ?? 0
+              : 0}px
+          </span>
         </div>
+
+        <div className="w-px h-6 bg-neutral-700" />
+
+        {/* Invert Mask Checkbox */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={
+              sourceNodeId
+                ? (nodes.find((n) => n.id === sourceNodeId)?.data as MaskPainterNodeData)?.invertMask ?? false
+                : false
+            }
+            onChange={(e) => {
+              if (sourceNodeId) {
+                updateNodeData(sourceNodeId, { invertMask: e.target.checked });
+              }
+            }}
+            className="w-3 h-3 rounded border-neutral-600 accent-white"
+          />
+          <span className="text-[10px] text-neutral-400 uppercase tracking-wide">Invert</span>
+        </label>
 
         {/* Zoom */}
         <div className="flex items-center gap-2 ml-auto">
