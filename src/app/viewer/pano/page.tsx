@@ -461,8 +461,10 @@ export default function PanoViewerPage() {
     const pitchOffset = Math.atan(ndcY * Math.tan(viewportVFov / 2));
 
     // Absolute yaw/pitch of rectangle center
-    // Offset yaw by π/2 for sphere UV alignment; negate pitch for convention match
-    const rectYaw = yawRef.current + yawOffset + Math.PI / 2;
+    // Negate yaw (Three.js left-handed yaw vs buildRotationMatrix right-handed)
+    // and offset by π/2 for SphereGeometry UV alignment.
+    // Negate pitch (Three.js positive = UP vs buildRotationMatrix positive = DOWN).
+    const rectYaw = -(yawRef.current + yawOffset) + Math.PI / 2;
     const rectPitch = -(pitchRef.current + pitchOffset);
 
     // Compute rectangle FOV
