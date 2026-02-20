@@ -377,7 +377,7 @@ describe("Header", () => {
       expect(screen.getByTitle("Open Project Folder")).toBeInTheDocument();
     });
 
-    it("should copy path to clipboard when clicked", async () => {
+    it("should call open-directory API when clicked", async () => {
       mockUseWorkflowStore.mockImplementation((selector) => {
         return selector(createDefaultState({
           workflowName: "My Project",
@@ -386,14 +386,23 @@ describe("Header", () => {
         }));
       });
 
-      const mockWriteText = vi.fn().mockResolvedValue(undefined);
-      Object.assign(navigator, { clipboard: { writeText: mockWriteText } });
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ success: true }),
+      });
+      globalThis.fetch = mockFetch;
 
       render(<Header />);
       const folderButton = screen.getByTitle("Open Project Folder");
       fireEvent.click(folderButton);
 
-      expect(mockWriteText).toHaveBeenCalledWith("//OTOSERVE10/share/project");
+      await vi.waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith("/api/open-directory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: "//OTOSERVE10/share/project" }),
+        });
+      });
     });
   });
 

@@ -110,6 +110,7 @@ export function ProjectSetupModal({
   const [directoryPath, setDirectoryPath] = useState("");
   const [externalStorage, setExternalStorage] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
+  const [isBrowsing, setIsBrowsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Provider tab state
@@ -190,6 +191,35 @@ export function ProjectSetupModal({
         .catch(() => setEnvStatus(null));
     }
   }, [isOpen, mode, workflowName, saveDirectoryPath, useExternalImageStorage, providerSettings, canvasNavigationSettings]);
+
+  const handleBrowse = async () => {
+    setIsBrowsing(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/browse-directory");
+      const result = await response.json();
+
+      if (!result.success) {
+        setError(result.error || "Failed to open directory picker");
+        return;
+      }
+
+      if (result.cancelled) {
+        return;
+      }
+
+      if (result.path) {
+        setDirectoryPath(result.path);
+      }
+    } catch (err) {
+      setError(
+        `Failed to open directory picker: ${err instanceof Error ? err.message : "Unknown error"}`
+      );
+    } finally {
+      setIsBrowsing(false);
+    }
+  };
 
   const handleSaveProject = async () => {
     if (!name.trim()) {
@@ -377,13 +407,23 @@ export function ProjectSetupModal({
               <label className="block text-sm text-neutral-400 mb-1">
                 Project Directory
               </label>
-              <input
-                type="text"
-                value={directoryPath}
-                onChange={(e) => setDirectoryPath(e.target.value)}
-                placeholder="//server/share/projects/my-project"
-                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={directoryPath}
+                  onChange={(e) => setDirectoryPath(e.target.value)}
+                  placeholder="/Users/username/projects/my-project"
+                  className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleBrowse}
+                  disabled={isBrowsing}
+                  className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-700 disabled:opacity-50 text-neutral-200 text-sm rounded transition-colors"
+                >
+                  {isBrowsing ? "..." : "Browse"}
+                </button>
+              </div>
               <p className="text-xs text-neutral-500 mt-1">
                 Use a network path (e.g. //server/share/...) for remote access. Subfolders for inputs and generations will be auto-created.
               </p>
