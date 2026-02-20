@@ -7,7 +7,7 @@ import { useProviderApiKeys } from "@/store/workflowStore";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 
 // localStorage cache for model schemas (persists across dev server restarts)
-const SCHEMA_CACHE_KEY = "node-banana-schema-cache";
+const SCHEMA_CACHE_KEY = "node-banana-schema-cache-v2";
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {
@@ -66,6 +66,7 @@ export function ModelParameters({
   inputNames,
 }: ModelParametersProps) {
   const [schema, setSchema] = useState<ModelParameter[]>([]);
+  const [fetchedInputs, setFetchedInputs] = useState<ModelInputDef[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(true);
@@ -76,6 +77,7 @@ export function ModelParameters({
   useEffect(() => {
     if (!modelId || provider === "gemini") {
       setSchema([]);
+      setFetchedInputs([]);
       onInputsLoaded?.([]);
       return;
     }
@@ -85,6 +87,7 @@ export function ModelParameters({
       const cached = getCachedSchema(modelId, provider);
       if (cached) {
         setSchema(cached.parameters);
+        setFetchedInputs(cached.inputs);
         onInputsLoaded?.(cached.inputs);
         return;
       }
@@ -122,6 +125,7 @@ export function ModelParameters({
         const params = data.parameters || [];
         const inputs = data.inputs || [];
         setSchema(params);
+        setFetchedInputs(inputs);
 
         // Cache the successful result
         setCachedSchema(modelId, provider, params, inputs);
@@ -167,9 +171,13 @@ export function ModelParameters({
   );
 
   // Filter out parameters that are already handled as connection handles (e.g. image inputs like mask)
-  const inputNameSet = inputNames && inputNames.length > 0 ? new Set(inputNames) : null;
-  const filteredSchema = inputNameSet
-    ? schema.filter((param) => !inputNameSet.has(param.name))
+  // Merges locally-fetched inputs (same render cycle, no race condition) with parent-provided inputNames (fallback)
+  const allInputNames = new Set([
+    ...fetchedInputs.map((i) => i.name),
+    ...(inputNames ?? []),
+  ]);
+  const filteredSchema = allInputNames.size > 0
+    ? schema.filter((param) => !allInputNames.has(param.name))
     : schema;
 
   // Don't render anything for Gemini or if no model selected

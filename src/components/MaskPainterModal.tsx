@@ -539,7 +539,7 @@ export function MaskPainterModal() {
           <input
             type="range"
             min={0}
-            max={20}
+            max={200}
             value={
               sourceNodeId
                 ? (nodes.find((n) => n.id === sourceNodeId)?.data as MaskPainterNodeData)?.blurRadius ?? 0
