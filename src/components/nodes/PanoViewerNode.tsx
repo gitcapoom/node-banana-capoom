@@ -102,10 +102,19 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
     if (!nodeData.panoUrl) return;
 
     const params = new URLSearchParams({
-      url: nodeData.panoUrl,
       name: "Panorama Viewer",
       nodeId: id,
     });
+
+    // For data URLs (large base64 from PanoEditor), use sessionStorage
+    // to avoid exceeding browser URL length limits
+    if (nodeData.panoUrl.startsWith("data:")) {
+      const storageKey = `pano-data-${id}-${Date.now()}`;
+      sessionStorage.setItem(storageKey, nodeData.panoUrl);
+      params.set("storageKey", storageKey);
+    } else {
+      params.set("url", nodeData.panoUrl);
+    }
 
     const viewerUrl = `/viewer/pano?${params.toString()}`;
     const w = window.open(viewerUrl, `pano-viewer-${id}`, "width=1280,height=720");

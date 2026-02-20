@@ -80,9 +80,23 @@ export default function PanoViewerPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const url = params.get("url");
+    const storageKey = params.get("storageKey");
     const name = params.get("name");
     const nid = params.get("nodeId");
-    if (url) setPanoUrl(url);
+
+    // Load panorama from URL param (HTTP) or sessionStorage (base64 data URL)
+    if (url) {
+      setPanoUrl(url);
+    } else if (storageKey) {
+      const stored = sessionStorage.getItem(storageKey);
+      if (stored) {
+        sessionStorage.removeItem(storageKey); // Clean up after reading
+        setPanoUrl(stored);
+      } else {
+        setError("Panorama data expired — please reopen the viewer");
+      }
+    }
+
     if (name) setDisplayName(name);
     if (nid) setNodeId(nid);
   }, []);
