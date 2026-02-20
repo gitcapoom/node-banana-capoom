@@ -16,6 +16,7 @@ export { EaseCurveNode } from "./EaseCurveNode";
 export { WorldLabsPanoNode } from "./WorldLabsPanoNode";
 export { WorldLabsWorldNode } from "./WorldLabsWorldNode";
 export { SpzViewerNode } from "./SpzViewerNode";
+export { PanoCropNode } from "./PanoCropNode";
 export { PanoViewerNode } from "./PanoViewerNode";
 export { PanoEditorNode } from "./PanoEditorNode";
 export { GroupNode } from "./GroupNode";
