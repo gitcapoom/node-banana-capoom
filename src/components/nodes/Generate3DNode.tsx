@@ -201,9 +201,10 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
           }> = [];
 
           if (hasImageInput) {
-            imageInputs.forEach((input, index) => {
+            imageInputs.forEach((input) => {
               handles.push({
-                id: `image-${index}`,
+                // Use schema name in handle ID for direct mapping in connectedInputs
+                id: `image-${input.name}`,
                 type: "image",
                 label: input.label,
                 schemaName: input.name,
@@ -223,9 +224,10 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
           }
 
           if (hasTextInput) {
-            textInputs.forEach((input, index) => {
+            textInputs.forEach((input) => {
               handles.push({
-                id: `text-${index}`,
+                // Use schema name in handle ID for direct mapping in connectedInputs
+                id: `text-${input.name}`,
                 type: "text",
                 label: input.label,
                 schemaName: input.name,

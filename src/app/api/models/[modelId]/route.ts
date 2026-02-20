@@ -189,6 +189,7 @@ function isImageInput(name: string, prop: Record<string, unknown>): boolean {
 
   // Finally, check name patterns for remaining string types
   return name.endsWith("_image") ||
+         name.endsWith("_image_url") ||
          name.startsWith("image_") ||
          name.includes("_image_");
 }

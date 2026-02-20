@@ -398,13 +398,15 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
 
   const isGeminiProvider = currentProvider === "gemini";
 
-  // Check if the model supports mask input (for inpainting)
-  const maskInput = useMemo(() => {
-    return nodeData.inputSchema?.find(
-      (i) => i.name.includes("mask") && i.type === "image"
-    ) || null;
+  // Dynamic image inputs from schema (mask, control images, depth maps, etc.)
+  // Exclude the primary "image" input which always has its own handle
+  const dynamicImageInputs = useMemo(() => {
+    if (!nodeData.inputSchema) return [];
+    return nodeData.inputSchema.filter(
+      (i) => i.type === "image" && i.name !== "image_url" && i.name !== "image"
+    );
   }, [nodeData.inputSchema]);
-  const hasMaskInput = maskInput !== null;
+  const hasDynamicImageInputs = dynamicImageInputs.length > 0;
 
   // Dynamic title based on selected model - just the model name
   const displayTitle = useMemo(() => {
@@ -507,68 +509,103 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       commentNavigation={commentNavigation ?? undefined}
       lastCost={nodeData.lastGenerationCost}
     >
-      {/* Input handles - positions shift when mask handle is present */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="image"
-        style={{ top: hasMaskInput ? "25%" : "35%" }}
-        data-handletype="image"
-        isConnectable={true}
-      />
-      {/* Image label */}
-      <div
-        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-        style={{
-          right: `calc(100% + 8px)`,
-          top: hasMaskInput ? "calc(25% - 18px)" : "calc(35% - 18px)",
-          color: "var(--handle-color-image)",
-        }}
-      >
-        Image
-      </div>
-      {/* Conditional mask handle - only shown when model supports mask input */}
-      {hasMaskInput && (
-        <>
+      {/* Input handles - dynamically positioned based on number of image inputs */}
+      {(() => {
+        // Calculate handle positions: Image (primary), dynamic image inputs, Text/Prompt
+        // Total inputs: 1 (image) + dynamicImageInputs.length + 1 (text) = N
+        const totalInputs = 1 + dynamicImageInputs.length + 1;
+        const step = 100 / (totalInputs + 1); // evenly space handles
+
+        const handles: React.ReactNode[] = [];
+        let idx = 0;
+
+        // Primary image handle
+        const imageTop = step * (idx + 1);
+        handles.push(
           <Handle
+            key="image"
             type="target"
             position={Position.Left}
-            id="image-mask"
-            style={{ top: "50%" }}
+            id="image"
+            style={{ top: `${imageTop}%` }}
             data-handletype="image"
             isConnectable={true}
-          />
+          />,
           <div
+            key="image-label"
             className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
             style={{
               right: `calc(100% + 8px)`,
-              top: "calc(50% - 18px)",
+              top: `calc(${imageTop}% - 18px)`,
               color: "var(--handle-color-image)",
             }}
           >
-            Mask
+            Image
           </div>
-        </>
-      )}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="text"
-        style={{ top: hasMaskInput ? "75%" : "65%" }}
-        data-handletype="text"
-        isConnectable={true}
-      />
-      {/* Prompt label */}
-      <div
-        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-        style={{
-          right: `calc(100% + 8px)`,
-          top: hasMaskInput ? "calc(75% - 18px)" : "calc(65% - 18px)",
-          color: "var(--handle-color-text)",
-        }}
-      >
-        Prompt
-      </div>
+        );
+        idx++;
+
+        // Dynamic image input handles (mask, control images, depth maps, etc.)
+        dynamicImageInputs.forEach((input) => {
+          const top = step * (idx + 1);
+          const handleId = `image-${input.name}`;
+          // Human-readable label: remove _url suffix, replace _ with space, capitalize
+          const label = input.label || input.name
+            .replace(/_url$/, "")
+            .replace(/_/g, " ")
+            .replace(/\b\w/g, (c: string) => c.toUpperCase());
+          handles.push(
+            <Handle
+              key={handleId}
+              type="target"
+              position={Position.Left}
+              id={handleId}
+              style={{ top: `${top}%` }}
+              data-handletype="image"
+              isConnectable={true}
+            />,
+            <div
+              key={`${handleId}-label`}
+              className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
+              style={{
+                right: `calc(100% + 8px)`,
+                top: `calc(${top}% - 18px)`,
+                color: "var(--handle-color-image)",
+              }}
+            >
+              {label}
+            </div>
+          );
+          idx++;
+        });
+
+        // Text/Prompt handle
+        const textTop = step * (idx + 1);
+        handles.push(
+          <Handle
+            key="text"
+            type="target"
+            position={Position.Left}
+            id="text"
+            style={{ top: `${textTop}%` }}
+            data-handletype="text"
+            isConnectable={true}
+          />,
+          <div
+            key="text-label"
+            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
+            style={{
+              right: `calc(100% + 8px)`,
+              top: `calc(${textTop}% - 18px)`,
+              color: "var(--handle-color-text)",
+            }}
+          >
+            Prompt
+          </div>
+        );
+
+        return handles;
+      })()}
       {/* Output handle */}
       <Handle
         type="source"

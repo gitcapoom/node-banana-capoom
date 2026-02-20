@@ -412,10 +412,10 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
           // Add image handles from schema, or a placeholder if none exist
           if (hasImageInput) {
-            imageInputs.forEach((input, index) => {
+            imageInputs.forEach((input) => {
               handles.push({
-                // Always use indexed IDs for schema inputs for consistency
-                id: `image-${index}`,
+                // Use schema name in handle ID for direct mapping in connectedInputs
+                id: `image-${input.name}`,
                 type: "image",
                 label: input.label,
                 schemaName: input.name,
@@ -437,10 +437,10 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
           // Add text handles from schema, or a placeholder if none exist
           if (hasTextInput) {
-            textInputs.forEach((input, index) => {
+            textInputs.forEach((input) => {
               handles.push({
-                // Always use indexed IDs for schema inputs for consistency
-                id: `text-${index}`,
+                // Use schema name in handle ID for direct mapping in connectedInputs
+                id: `text-${input.name}`,
                 type: "text",
                 label: input.label,
                 schemaName: input.name,
