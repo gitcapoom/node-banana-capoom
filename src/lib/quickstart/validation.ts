@@ -43,6 +43,11 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   videoStitch: { width: 400, height: 280 },
   easeCurve: { width: 340, height: 480 },
   glbViewer: { width: 360, height: 380 },
+  spzViewer: { width: 300, height: 280 },
+  worldLabsPano: { width: 320, height: 380 },
+  worldLabsWorld: { width: 320, height: 360 },
+  panoViewer: { width: 300, height: 280 },
+  panoEditor: { width: 300, height: 300 },
 };
 
 /**
@@ -338,6 +343,62 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         glbUrl: null,
         filename: null,
         capturedImage: null,
+      };
+    case "spzViewer":
+      return {
+        spzUrl: null,
+        filename: null,
+        capturedImage: null,
+        viewerOpen: false,
+      };
+    case "worldLabsPano":
+      return {
+        worldName: "Untitled World",
+        model: "Marble 0.1-mini",
+        seed: null,
+        inputImages: [],
+        inputPrompt: null,
+        operationId: null,
+        worldId: null,
+        status: "idle",
+        error: null,
+        progress: null,
+        panoUrl: null,
+        thumbnailUrl: null,
+        caption: null,
+        imageAzimuths: {},
+      };
+    case "worldLabsWorld":
+      return {
+        worldName: "Untitled World",
+        model: "Marble 0.1-plus",
+        seed: null,
+        inputImages: [],
+        inputPrompt: null,
+        operationId: null,
+        worldId: null,
+        status: "idle",
+        error: null,
+        progress: null,
+        spzUrls: null,
+        panoUrl: null,
+        thumbnailUrl: null,
+        marbleViewerUrl: null,
+        caption: null,
+        viewerWindowOpen: false,
+      };
+    case "panoViewer":
+      return {
+        panoUrl: null,
+        capturedImage: null,
+        cropMetadata: null,
+        viewerOpen: false,
+      };
+    case "panoEditor":
+      return {
+        outputImage: null,
+        status: "idle",
+        error: null,
       };
   }
 }

@@ -17,6 +17,7 @@ export {
   executeImageCompare,
   executeGlbViewer,
   executeSpzViewer,
+  executePanoViewer,
 } from "./simpleNodeExecutors";
 
 export { executeNanoBanana } from "./nanoBananaExecutor";
@@ -40,3 +41,5 @@ export {
 
 export { executeWorldLabsPano } from "./worldLabsPanoExecutor";
 export { executeWorldLabsWorld } from "./worldLabsWorldExecutor";
+
+export { executePanoEditor } from "./panoEditorExecutor";

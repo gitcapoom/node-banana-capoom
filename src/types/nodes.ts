@@ -41,7 +41,9 @@ export type NodeType =
   | "glbViewer"
   | "spzViewer"
   | "worldLabsPano"
-  | "worldLabsWorld";
+  | "worldLabsWorld"
+  | "panoViewer"
+  | "panoEditor";
 
 /**
  * Node execution status
@@ -374,6 +376,27 @@ export interface SpzViewerNodeData extends BaseNodeData {
 }
 
 /**
+ * Panorama Viewer node - views equirectangular panoramas with crop rectangle,
+ * captures perspective snapshots with camera metadata.
+ */
+export interface PanoViewerNodeData extends BaseNodeData {
+  panoUrl: string | null;          // Equirectangular image URL
+  capturedImage: string | null;    // Perspective snapshot (base64)
+  cropMetadata: string | null;     // JSON-serialized PanoCropMetadata
+  viewerOpen: boolean;             // Whether the viewer window is currently open
+}
+
+/**
+ * Panorama Editor node - composites an edited perspective image back onto
+ * an equirectangular panorama using camera metadata for reprojection.
+ */
+export interface PanoEditorNodeData extends BaseNodeData {
+  outputImage: string | null;      // Composited equirectangular (base64)
+  status: NodeStatus;
+  error: string | null;
+}
+
+/**
  * Union of all node data types
  */
 export type WorkflowNodeData =
@@ -395,7 +418,9 @@ export type WorkflowNodeData =
   | VideoStitchNodeData
   | EaseCurveNodeData
   | GLBViewerNodeData
-  | SpzViewerNodeData;
+  | SpzViewerNodeData
+  | PanoViewerNodeData
+  | PanoEditorNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)

@@ -39,6 +39,8 @@ import {
   WorldLabsPanoNode,
   WorldLabsWorldNode,
   SpzViewerNode,
+  PanoViewerNode,
+  PanoEditorNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -79,6 +81,8 @@ const nodeTypes: NodeTypes = {
   spzViewer: SpzViewerNode,
   worldLabsPano: WorldLabsPanoNode,
   worldLabsWorld: WorldLabsWorldNode,
+  panoViewer: PanoViewerNode,
+  panoEditor: PanoEditorNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -150,6 +154,10 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image", "text"], outputs: ["image"] };
     case "worldLabsWorld":
       return { inputs: ["image"], outputs: ["image", "3d"] };
+    case "panoViewer":
+      return { inputs: ["image"], outputs: ["image", "text"] };
+    case "panoEditor":
+      return { inputs: ["image-0", "image-1", "text"], outputs: ["image"] };
     default:
       return { inputs: [], outputs: [] };
   }
@@ -1121,6 +1129,8 @@ export function WorkflowCanvas() {
             spzViewer: { width: 300, height: 280 },
             worldLabsPano: { width: 320, height: 380 },
             worldLabsWorld: { width: 320, height: 360 },
+            panoViewer: { width: 300, height: 280 },
+            panoEditor: { width: 300, height: 300 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });
@@ -1712,6 +1722,10 @@ export function WorkflowCanvas() {
                 return "#818cf8"; // indigo-400 (panorama generation)
               case "worldLabsWorld":
                 return "#6366f1"; // indigo-500 (3D world generation)
+              case "panoViewer":
+                return "#f472b6"; // pink-400 (panorama viewer)
+              case "panoEditor":
+                return "#fb923c"; // orange-400 (panorama editor)
               default:
                 return "#94a3b8";
             }

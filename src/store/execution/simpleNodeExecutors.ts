@@ -270,6 +270,20 @@ export async function executeSpzViewer(ctx: NodeExecutionContext): Promise<void>
 }
 
 /**
+ * Panorama Viewer node: receives equirectangular panorama URL from upstream
+ * and stores it for the external panorama viewer.
+ */
+export async function executePanoViewer(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  const { images } = getConnectedInputs(node.id);
+  if (images.length > 0) {
+    updateNodeData(node.id, {
+      panoUrl: images[0],
+    });
+  }
+}
+
+/**
  * GLB Viewer node: receives 3D model URL from upstream, fetches via server proxy and loads it.
  */
 export async function executeGlbViewer(ctx: NodeExecutionContext): Promise<void> {

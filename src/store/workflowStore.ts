@@ -78,6 +78,8 @@ import {
   executeSpzViewer,
   executeWorldLabsPano,
   executeWorldLabsWorld,
+  executePanoViewer,
+  executePanoEditor,
 } from "./execution";
 import type { NodeExecutionContext } from "./execution";
 export type { LevelGroup } from "./utils/executionUtils";
@@ -883,6 +885,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           case "spzViewer":
             await executeSpzViewer(executionCtx);
             break;
+          case "panoViewer":
+            await executePanoViewer(executionCtx);
+            break;
+          case "panoEditor":
+            await executePanoEditor(executionCtx);
+            break;
           case "annotation":
             await executeAnnotation(executionCtx);
             break;
@@ -1072,6 +1080,10 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         await executeWorldLabsPano(executionCtx);
       } else if (node.type === "worldLabsWorld") {
         await executeWorldLabsWorld(executionCtx);
+      } else if (node.type === "panoViewer") {
+        await executePanoViewer(executionCtx);
+      } else if (node.type === "panoEditor") {
+        await executePanoEditor(executionCtx);
       }
 
       // After regeneration, execute directly connected downstream consumer nodes
@@ -1088,6 +1100,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             break;
           case "spzViewer":
             await executeSpzViewer(targetCtx);
+            break;
+          case "panoViewer":
+            await executePanoViewer(targetCtx);
+            break;
+          case "panoEditor":
+            await executePanoEditor(targetCtx);
             break;
           case "output":
             await executeOutput(targetCtx);
@@ -1179,6 +1197,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           break;
         case "spzViewer":
           await executeSpzViewer(executionCtx);
+          break;
+        case "panoViewer":
+          await executePanoViewer(executionCtx);
+          break;
+        case "panoEditor":
+          await executePanoEditor(executionCtx);
           break;
         case "annotation":
           await executeAnnotation(executionCtx);
@@ -1295,6 +1319,14 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
                 break;
               case "spzViewer":
                 await executeSpzViewer(targetCtx);
+                propagated.add(edge.target);
+                break;
+              case "panoViewer":
+                await executePanoViewer(targetCtx);
+                propagated.add(edge.target);
+                break;
+              case "panoEditor":
+                await executePanoEditor(targetCtx);
                 propagated.add(edge.target);
                 break;
               case "output":

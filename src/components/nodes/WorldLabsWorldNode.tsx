@@ -147,8 +147,8 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
     <BaseNode
       id={id}
       selected={selected}
-      type="worldLabsWorld"
-      commentNavigation={commentNavigation}
+      title="World Generator"
+      commentNavigation={commentNavigation || undefined}
       onRun={handleRegenerate}
       isExecuting={isRunning}
     >
