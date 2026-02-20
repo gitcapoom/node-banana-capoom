@@ -11,9 +11,11 @@ import type {
   AnnotationShape,
   BaseNodeData,
 } from "./annotation";
+import type { MaskPainterNodeData } from "./maskPainter";
 
-// Re-export types from annotation for convenience
+// Re-export types from annotation and mask painter for convenience
 export type { AnnotationNodeData, BaseNodeData };
+export type { MaskPainterNodeData };
 
 // Import from domain files to avoid circular dependencies
 import type { AspectRatio, Resolution, ModelType } from "./models";
@@ -44,7 +46,8 @@ export type NodeType =
   | "worldLabsWorld"
   | "panoCrop"
   | "panoViewer"
-  | "panoEditor";
+  | "panoEditor"
+  | "maskPainter";
 
 /**
  * Node execution status
@@ -431,7 +434,8 @@ export type WorkflowNodeData =
   | SpzViewerNodeData
   | PanoCropNodeData
   | PanoViewerNodeData
-  | PanoEditorNodeData;
+  | PanoEditorNodeData
+  | MaskPainterNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)
