@@ -90,6 +90,9 @@ function getSourceOutput(sourceNode: WorkflowNode, sourceHandleId?: string | nul
     return { type: "image", value: (sourceNode.data as SpzViewerNodeData).capturedImage };
   } else if (sourceNode.type === "worldLabsPano") {
     const pData = sourceNode.data as WorldLabsPanoNodeData;
+    if (sourceHandleId === "text") {
+      return { type: "text", value: pData.caption || null };
+    }
     return { type: "image", value: pData.panoUrl || pData.thumbnailUrl || null };
   } else if (sourceNode.type === "worldLabsWorld") {
     const wData = sourceNode.data as WorldLabsWorldNodeData;

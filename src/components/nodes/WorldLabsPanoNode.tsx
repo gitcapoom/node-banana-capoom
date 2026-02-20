@@ -27,7 +27,7 @@ const DEFAULT_AZIMUTHS = [0, 90, 180, 270];
  * using the WorldLabs Marble API (defaults to Marble 0.1-mini for speed).
  *
  * Inputs: image (left 35%), text (left 65%)
- * Output: image (right 50%) — the panorama
+ * Outputs: image (right 35%) — the panorama, text (right 65%) — generated caption
  */
 export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPanoNodeType>) {
   const nodeData = data;
@@ -128,8 +128,17 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
         type="source"
         position={Position.Right}
         id="image"
-        style={{ top: "50%" }}
+        style={{ top: "35%" }}
         className="!w-3 !h-3 !bg-violet-500 !border-violet-700"
+      />
+
+      {/* Output Handle — generated caption text */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="text"
+        style={{ top: "65%" }}
+        className="!w-3 !h-3 !bg-amber-500 !border-amber-700"
       />
 
       <div className="p-3 space-y-3">
@@ -260,8 +269,11 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
         <div className="absolute left-5 text-[9px] text-neutral-600" style={{ top: "65%", transform: "translateY(-50%)" }}>
           text
         </div>
-        <div className="absolute right-5 text-[9px] text-neutral-600" style={{ top: "50%", transform: "translateY(-50%)" }}>
+        <div className="absolute right-5 text-[9px] text-neutral-600" style={{ top: "35%", transform: "translateY(-50%)" }}>
           image
+        </div>
+        <div className="absolute right-5 text-[9px] text-neutral-600" style={{ top: "65%", transform: "translateY(-50%)" }}>
+          text
         </div>
       </div>
     </BaseNode>
