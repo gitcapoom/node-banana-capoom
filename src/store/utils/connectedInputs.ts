@@ -157,6 +157,12 @@ export function getConnectedInputsPure(
         handleToSchemaName["text"] = input.name;
       }
     });
+
+    // Map the special "image-mask" handle to the mask schema name
+    const maskInput = inputSchema.find(i => i.name.includes("mask") && i.type === "image");
+    if (maskInput) {
+      handleToSchemaName["image-mask"] = maskInput.name;
+    }
   }
 
   edges

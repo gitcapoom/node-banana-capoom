@@ -398,6 +398,14 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
 
   const isGeminiProvider = currentProvider === "gemini";
 
+  // Check if the model supports mask input (for inpainting)
+  const maskInput = useMemo(() => {
+    return nodeData.inputSchema?.find(
+      (i) => i.name.includes("mask") && i.type === "image"
+    ) || null;
+  }, [nodeData.inputSchema]);
+  const hasMaskInput = maskInput !== null;
+
   // Dynamic title based on selected model - just the model name
   const displayTitle = useMemo(() => {
     if (nodeData.selectedModel?.displayName && nodeData.selectedModel.modelId) {
@@ -499,13 +507,12 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       commentNavigation={commentNavigation ?? undefined}
       lastCost={nodeData.lastGenerationCost}
     >
-      {/* Input handles - ALWAYS use same IDs and positions for connection stability */}
-      {/* Image input at 35%, Text input at 65% - never changes regardless of model */}
+      {/* Input handles - positions shift when mask handle is present */}
       <Handle
         type="target"
         position={Position.Left}
         id="image"
-        style={{ top: "35%" }}
+        style={{ top: hasMaskInput ? "25%" : "35%" }}
         data-handletype="image"
         isConnectable={true}
       />
@@ -514,17 +521,40 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
         className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
         style={{
           right: `calc(100% + 8px)`,
-          top: "calc(35% - 18px)",
+          top: hasMaskInput ? "calc(25% - 18px)" : "calc(35% - 18px)",
           color: "var(--handle-color-image)",
         }}
       >
         Image
       </div>
+      {/* Conditional mask handle - only shown when model supports mask input */}
+      {hasMaskInput && (
+        <>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="image-mask"
+            style={{ top: "50%" }}
+            data-handletype="image"
+            isConnectable={true}
+          />
+          <div
+            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
+            style={{
+              right: `calc(100% + 8px)`,
+              top: "calc(50% - 18px)",
+              color: "var(--handle-color-image)",
+            }}
+          >
+            Mask
+          </div>
+        </>
+      )}
       <Handle
         type="target"
         position={Position.Left}
         id="text"
-        style={{ top: "65%" }}
+        style={{ top: hasMaskInput ? "75%" : "65%" }}
         data-handletype="text"
         isConnectable={true}
       />
@@ -533,7 +563,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
         className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
         style={{
           right: `calc(100% + 8px)`,
-          top: "calc(65% - 18px)",
+          top: hasMaskInput ? "calc(75% - 18px)" : "calc(65% - 18px)",
           color: "var(--handle-color-text)",
         }}
       >
