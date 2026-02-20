@@ -113,27 +113,17 @@ export default function StandaloneViewerPage() {
 
   // ─── Center camera helper ────────────────────────────────────────
 
-  const centerCamera = useCallback((splatMesh: { getBoundingBox?: () => THREE.Box3 }) => {
-    const box = splatMesh.getBoundingBox?.();
-    if (!box || !cameraRef.current) return;
-
-    const center = new THREE.Vector3();
-    box.getCenter(center);
+  const centerCamera = useCallback(() => {
+    if (!cameraRef.current) return;
 
     if (navModeRef.current === "fly") {
-      cameraRef.current.position.copy(center);
+      cameraRef.current.position.set(0, 0.1, 0);
       yawRef.current = 0;
       pitchRef.current = 0;
-      // Apply immediately
-      const euler = new THREE.Euler(0, 0, 0, "YXZ");
-      cameraRef.current.quaternion.setFromEuler(euler);
+      cameraRef.current.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, "YXZ"));
     } else if (controlsRef.current) {
-      cameraRef.current.position.copy(
-        center.clone().add(new THREE.Vector3(0, 0, 0.01))
-      );
-      controlsRef.current.target.copy(
-        center.clone().add(new THREE.Vector3(0, 0, -1))
-      );
+      cameraRef.current.position.set(0, 0.1, 0.01);
+      controlsRef.current.target.set(0, 0.1, -1);
       controlsRef.current.update();
     }
   }, []);
@@ -168,7 +158,7 @@ export default function StandaloneViewerPage() {
       0.01,
       1000
     );
-    camera.position.set(0, 0, 3);
+    camera.position.set(0, 0.1, 0);
     cameraRef.current = camera;
 
     // OrbitControls (disabled in fly mode)
@@ -326,8 +316,8 @@ export default function StandaloneViewerPage() {
           setSplatLoaded(true);
           setLoading(false);
 
-          // Center camera AFTER geometry is fully loaded
-          centerCamera(splatMesh);
+          // Center camera at origin
+          centerCamera();
         },
       });
 
@@ -376,8 +366,8 @@ export default function StandaloneViewerPage() {
           setLoading(false);
           URL.revokeObjectURL(objectUrl);
 
-          // Center camera AFTER geometry is fully loaded
-          centerCamera(splatMesh);
+          // Center camera at origin
+          centerCamera();
         },
       });
 
