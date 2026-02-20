@@ -80,7 +80,7 @@ async function compositeWithWebGL(
     void main() {
       // UV to equirectangular lon/lat
       float lon = v_uv.x * 2.0 * PI - PI;
-      float lat = (1.0 - v_uv.y) * PI - PI * 0.5;
+      float lat = v_uv.y * PI - PI * 0.5;
 
       // Direction on unit sphere
       vec3 dir = vec3(
@@ -112,7 +112,7 @@ async function compositeWithWebGL(
         }
       }
 
-      fragColor = texture(u_panoTex, vec2(v_uv.x, v_uv.y));
+      fragColor = texture(u_panoTex, vec2(v_uv.x, 1.0 - v_uv.y));
     }
   `;
 
