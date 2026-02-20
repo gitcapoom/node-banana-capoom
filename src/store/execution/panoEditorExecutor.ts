@@ -192,10 +192,12 @@ async function compositeWithWebGL(
   const m22 = cy * cp;
 
   // Inverse (transpose since it's orthogonal)
+  // WebGL column-major: each group of 3 is one column of the GLSL mat3.
+  // For M^T, column j of M^T = row j of M.
   const invMat = new Float32Array([
-    m00, m10, m20,  // column 0
-    m01, m11, m21,  // column 1
-    m02, m12, m22,  // column 2
+    m00, m01, m02,  // column 0 of M^T (= row 0 of M)
+    m10, m11, m12,  // column 1 of M^T (= row 1 of M)
+    m20, m21, m22,  // column 2 of M^T (= row 2 of M)
   ]);
   gl.uniformMatrix3fv(gl.getUniformLocation(program, "u_invRotMat"), false, invMat);
 
