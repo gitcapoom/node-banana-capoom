@@ -112,7 +112,7 @@ async function compositeWithWebGL(
         }
       }
 
-      fragColor = texture(u_panoTex, vec2(v_uv.x, 1.0 - v_uv.y));
+      fragColor = texture(u_panoTex, vec2(v_uv.x, v_uv.y));
     }
   `;
 
