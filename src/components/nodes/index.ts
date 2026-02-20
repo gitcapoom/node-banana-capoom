@@ -19,4 +19,5 @@ export { SpzViewerNode } from "./SpzViewerNode";
 export { PanoCropNode } from "./PanoCropNode";
 export { PanoViewerNode } from "./PanoViewerNode";
 export { PanoEditorNode } from "./PanoEditorNode";
+export { MaskPainterNode } from "./MaskPainterNode";
 export { GroupNode } from "./GroupNode";

@@ -25,6 +25,7 @@ import {
   WorldLabsWorldNodeData,
   PanoCropNodeData,
   PanoEditorNodeData,
+  MaskPainterNodeData,
 } from "@/types";
 
 /**
@@ -111,6 +112,8 @@ function getSourceOutput(sourceNode: WorkflowNode, sourceHandleId?: string | nul
     return { type: "image", value: pcData.image || null };
   } else if (sourceNode.type === "panoEditor") {
     return { type: "image", value: (sourceNode.data as PanoEditorNodeData).outputImage || null };
+  } else if (sourceNode.type === "maskPainter") {
+    return { type: "image", value: (sourceNode.data as MaskPainterNodeData).outputMask || null };
   }
   return { type: "image", value: null };
 }

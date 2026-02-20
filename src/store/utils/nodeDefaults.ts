@@ -21,6 +21,7 @@ import {
   PanoCropNodeData,
   PanoViewerNodeData,
   PanoEditorNodeData,
+  MaskPainterNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -54,6 +55,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   panoCrop: { width: 300, height: 280 },
   panoViewer: { width: 300, height: 280 },
   panoEditor: { width: 300, height: 300 },
+  maskPainter: { width: 260, height: 300 },
 };
 
 /**
@@ -313,5 +315,14 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         status: "idle",
         error: null,
       } as PanoEditorNodeData;
+    case "maskPainter":
+      return {
+        sourceImage: null,
+        strokes: [],
+        outputMask: null,
+        brushSize: 30,
+        blurRadius: 0,
+        invertMask: false,
+      } as MaskPainterNodeData;
   }
 };

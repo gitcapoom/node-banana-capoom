@@ -9,6 +9,7 @@
 import type { NodeExecutionContext } from "./types";
 import {
   executeAnnotation,
+  executeMaskPainter,
   executePrompt,
   executePromptConstructor,
   executeOutput,
@@ -97,6 +98,9 @@ export async function executeNode(
       break;
     case "worldLabsWorld":
       await executeWorldLabsWorld(ctx);
+      break;
+    case "maskPainter":
+      await executeMaskPainter(ctx);
       break;
   }
 }

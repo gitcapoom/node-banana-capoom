@@ -9,6 +9,7 @@
 
 import type {
   AnnotationNodeData,
+  MaskPainterNodeData,
   PromptConstructorNodeData,
   PromptNodeData,
   OutputNodeData,
@@ -325,5 +326,30 @@ export async function executeGlbViewer(ctx: NodeExecutionContext): Promise<void>
       console.error(`[Workflow] GLB Viewer node ${node.id} failed to load 3D model:`, message);
       updateNodeData(node.id, { error: message });
     }
+  }
+}
+
+/**
+ * Mask Painter node: receives upstream image, sets as sourceImage.
+ * Preserves outputMask if strokes exist (user has painted a mask).
+ */
+export async function executeMaskPainter(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const image = images[0] || null;
+    if (image) {
+      const nodeData = node.data as MaskPainterNodeData;
+      updateNodeData(node.id, { sourceImage: image });
+      // If no strokes yet, no mask to output
+      if (nodeData.strokes.length === 0) {
+        updateNodeData(node.id, { outputMask: null });
+      }
+      // If strokes exist, keep the existing outputMask (user must re-open modal to regenerate)
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Mask Painter node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
   }
 }

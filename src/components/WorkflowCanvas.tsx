@@ -42,6 +42,7 @@ import {
   PanoCropNode,
   PanoViewerNode,
   PanoEditorNode,
+  MaskPainterNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -85,6 +86,7 @@ const nodeTypes: NodeTypes = {
   panoCrop: PanoCropNode,
   panoViewer: PanoViewerNode,
   panoEditor: PanoEditorNode,
+  maskPainter: MaskPainterNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -162,6 +164,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image"], outputs: [] };
     case "panoEditor":
       return { inputs: ["image-0", "image-1", "text"], outputs: ["image"] };
+    case "maskPainter":
+      return { inputs: ["image"], outputs: ["image"] };
     default:
       return { inputs: [], outputs: [] };
   }
@@ -805,8 +809,8 @@ export function WorkflowCanvas() {
       // Create the new node at the drop position
       const newNodeId = addNode(nodeType, flowPosition);
 
-      // If creating an annotation node from an image source, populate it with the source image
-      if (nodeType === "annotation" && connectionType === "source" && handleType === "image" && sourceNodeId) {
+      // If creating an annotation or mask painter node from an image source, populate it with the source image
+      if ((nodeType === "annotation" || nodeType === "maskPainter") && connectionType === "source" && handleType === "image" && sourceNodeId) {
         const sourceImage = getImageFromNode(sourceNodeId);
         if (sourceImage) {
           updateNodeData(newNodeId, { sourceImage, outputImage: sourceImage });
@@ -1136,6 +1140,7 @@ export function WorkflowCanvas() {
             panoCrop: { width: 300, height: 280 },
             panoViewer: { width: 300, height: 280 },
             panoEditor: { width: 300, height: 300 },
+            maskPainter: { width: 260, height: 300 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });
@@ -1733,6 +1738,8 @@ export function WorkflowCanvas() {
                 return "#f472b6"; // pink-400 (panorama viewer)
               case "panoEditor":
                 return "#fb923c"; // orange-400 (panorama editor)
+              case "maskPainter":
+                return "#a3a3a3"; // neutral-400 (mask painting)
               default:
                 return "#94a3b8";
             }
