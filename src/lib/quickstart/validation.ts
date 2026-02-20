@@ -49,6 +49,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   panoCrop: { width: 300, height: 280 },
   panoViewer: { width: 300, height: 280 },
   panoEditor: { width: 300, height: 300 },
+  maskPainter: { width: 260, height: 300 },
 };
 
 /**
@@ -405,6 +406,15 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         outputImage: null,
         status: "idle",
         error: null,
+      };
+    case "maskPainter":
+      return {
+        sourceImage: null,
+        strokes: [],
+        outputMask: null,
+        brushSize: 30,
+        blurRadius: 0,
+        invertMask: false,
       };
   }
 }
