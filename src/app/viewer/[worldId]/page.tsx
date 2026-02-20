@@ -8,7 +8,7 @@
  *   - Sensor/lens/aspect ratio presets → real-time FOV updates
  *   - Capture button → sends screenshot to parent window as ImageInput node
  *   - Quality selector for SPZ resolution (100k/500k/full_res)
- *   - OrbitControls for camera interaction
+ *   - Fly mode (WASD + mouse look) and Orbit mode (OrbitControls)
  */
 
 import { useEffect, useRef, useState, useCallback, use } from "react";
@@ -63,6 +63,7 @@ export default function ViewerPage({
   const [splatLoaded, setSplatLoaded] = useState(false);
   const [captureFlash, setCaptureFlash] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [navMode, setNavMode] = useState<"orbit" | "fly">("fly");
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -73,6 +74,39 @@ export default function ViewerPage({
   const animationIdRef = useRef<number>(0);
   const splatMeshRef = useRef<unknown>(null);
 
+  // Fly mode refs
+  const keysPressedRef = useRef<Set<string>>(new Set());
+  const yawRef = useRef(0);
+  const pitchRef = useRef(0);
+  const isMouseDraggingRef = useRef(false);
+  const lastMouseRef = useRef({ x: 0, y: 0 });
+  const navModeRef = useRef<"orbit" | "fly">("fly");
+
+  // Keep navModeRef in sync
+  useEffect(() => {
+    navModeRef.current = navMode;
+
+    if (controlsRef.current) {
+      controlsRef.current.enabled = navMode === "orbit";
+    }
+
+    if (navMode === "fly" && cameraRef.current) {
+      // Extract yaw/pitch from current camera quaternion
+      const euler = new THREE.Euler();
+      euler.setFromQuaternion(cameraRef.current.quaternion, "YXZ");
+      yawRef.current = euler.y;
+      pitchRef.current = euler.x;
+    } else if (navMode === "orbit" && cameraRef.current && controlsRef.current) {
+      // Set orbit target 1 unit in front of camera
+      const dir = new THREE.Vector3();
+      cameraRef.current.getWorldDirection(dir);
+      controlsRef.current.target.copy(
+        cameraRef.current.position.clone().add(dir)
+      );
+      controlsRef.current.update();
+    }
+  }, [navMode]);
+
   // Read world name from URL params
   const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const worldName = searchParams?.get("name") || "Untitled World";
@@ -82,6 +116,32 @@ export default function ViewerPage({
   const focalLength = LENS_FOCAL_LENGTHS[lensIndex];
   const aspectRatio = ASPECT_RATIO_PRESETS[aspectIndex];
   const vFov = calculateCameraFOV(sensor.widthMm, focalLength, aspectRatio.ratio);
+
+  // ─── Center camera helper ────────────────────────────────────────
+
+  const centerCamera = useCallback((splatMesh: { getBoundingBox?: () => THREE.Box3 }) => {
+    const box = splatMesh.getBoundingBox?.();
+    if (!box || !cameraRef.current) return;
+
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+
+    if (navModeRef.current === "fly") {
+      cameraRef.current.position.copy(center);
+      yawRef.current = 0;
+      pitchRef.current = 0;
+      const euler = new THREE.Euler(0, 0, 0, "YXZ");
+      cameraRef.current.quaternion.setFromEuler(euler);
+    } else if (controlsRef.current) {
+      cameraRef.current.position.copy(
+        center.clone().add(new THREE.Vector3(0, 0, 0.01))
+      );
+      controlsRef.current.target.copy(
+        center.clone().add(new THREE.Vector3(0, 0, -1))
+      );
+      controlsRef.current.update();
+    }
+  }, []);
 
   // ─── Fetch world data ─────────────────────────────────────────
 
@@ -152,13 +212,14 @@ export default function ViewerPage({
     camera.position.set(0, 0, 3);
     cameraRef.current = camera;
 
-    // OrbitControls
+    // OrbitControls (disabled in fly mode)
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.rotateSpeed = 0.5;
     controls.zoomSpeed = 0.8;
     controls.panSpeed = 0.5;
+    controls.enabled = navModeRef.current === "orbit";
     controlsRef.current = controls;
 
     // Ambient light
@@ -167,10 +228,87 @@ export default function ViewerPage({
     // Load SPZ via Spark.js (dynamic import to avoid SSR)
     loadSplat(scene, worldData, quality);
 
+    // ─── Fly mode mouse listeners ────────────────────────────
+    const canvas = renderer.domElement;
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (navModeRef.current !== "fly") return;
+      isMouseDraggingRef.current = true;
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isMouseDraggingRef.current || navModeRef.current !== "fly") return;
+      const dx = e.clientX - lastMouseRef.current.x;
+      const dy = e.clientY - lastMouseRef.current.y;
+      lastMouseRef.current = { x: e.clientX, y: e.clientY };
+
+      const sensitivity = 0.003;
+      yawRef.current -= dx * sensitivity;
+      pitchRef.current -= dy * sensitivity;
+      pitchRef.current = Math.max(
+        -Math.PI / 2 + 0.01,
+        Math.min(Math.PI / 2 - 0.01, pitchRef.current)
+      );
+    };
+    const onMouseUp = () => {
+      isMouseDraggingRef.current = false;
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (navModeRef.current !== "fly") return;
+      e.preventDefault();
+      if (!cameraRef.current) return;
+      const dir = new THREE.Vector3();
+      cameraRef.current.getWorldDirection(dir);
+      cameraRef.current.position.addScaledVector(dir, -e.deltaY * 0.01);
+    };
+
+    canvas.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+
     // Animation loop
     function animate() {
       animationIdRef.current = requestAnimationFrame(animate);
-      controls.update();
+
+      if (navModeRef.current === "fly") {
+        // Apply yaw/pitch
+        const euler = new THREE.Euler(
+          pitchRef.current,
+          yawRef.current,
+          0,
+          "YXZ"
+        );
+        camera.quaternion.setFromEuler(euler);
+
+        // WASD translation
+        const keys = keysPressedRef.current;
+        if (keys.size > 0) {
+          const speed = keys.has("shift") ? 0.15 : 0.05;
+          const dir = new THREE.Vector3();
+          camera.getWorldDirection(dir);
+          const right = new THREE.Vector3()
+            .crossVectors(dir, camera.up)
+            .normalize();
+          const move = new THREE.Vector3();
+
+          if (keys.has("w")) move.add(dir);
+          if (keys.has("s")) move.sub(dir);
+          if (keys.has("a")) move.sub(right);
+          if (keys.has("d")) move.add(right);
+          if (keys.has("e")) move.y += 1;
+          if (keys.has("q")) move.y -= 1;
+
+          if (move.lengthSq() > 0) {
+            move.normalize().multiplyScalar(speed);
+            camera.position.add(move);
+          }
+        }
+      } else {
+        controls.update();
+      }
+
       renderer.render(scene, camera);
     }
     animate();
@@ -188,6 +326,10 @@ export default function ViewerPage({
     return () => {
       cancelAnimationFrame(animationIdRef.current);
       window.removeEventListener("resize", handleResize);
+      canvas.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      canvas.removeEventListener("wheel", onWheel);
       controls.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
@@ -219,23 +361,15 @@ export default function ViewerPage({
         url,
         onLoad: () => {
           setSplatLoaded(true);
+
+          // Center camera AFTER geometry is fully loaded
+          centerCamera(splatMesh);
         },
       });
 
       await splatMesh.initialized;
       scene.add(splatMesh);
       splatMeshRef.current = splatMesh;
-
-      // Auto-fit camera — position at center of bounding box (inside panorama sphere)
-      const box = splatMesh.getBoundingBox?.();
-      if (box && cameraRef.current && controlsRef.current) {
-        const center = new THREE.Vector3();
-        box.getCenter(center);
-
-        cameraRef.current.position.copy(center.clone().add(new THREE.Vector3(0, 0, 0.01)));
-        controlsRef.current.target.copy(center.clone().add(new THREE.Vector3(0, 0, -1)));
-        controlsRef.current.update();
-      }
     } catch (err) {
       console.error("Failed to load splat:", err);
       setError(`Failed to load 3D scene: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -316,20 +450,52 @@ export default function ViewerPage({
     }
   }, [worldId, worldName, sensor, focalLength, aspectRatio.ratio]);
 
-  // ─── Keyboard shortcuts ───────────────────────────────────────
+  // ─── Keyboard shortcuts + WASD navigation ─────────────────────
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Capture
       if (e.key === " " || e.key === "Enter") {
         e.preventDefault();
         handleCapture();
       }
+      // Toggle controls visibility
       if (e.key === "h" || e.key === "H") {
         setShowControls((s) => !s);
       }
+      // Toggle nav mode
+      if (e.key === "f" || e.key === "F") {
+        setNavMode((m) => (m === "fly" ? "orbit" : "fly"));
+      }
+      // WASD + QE navigation keys
+      const navKeys = ["w", "a", "s", "d", "q", "e"];
+      const lower = e.key.toLowerCase();
+      if (navKeys.includes(lower)) {
+        keysPressedRef.current.add(lower);
+      }
+      if (e.key === "Shift") {
+        keysPressedRef.current.add("shift");
+      }
     };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      const lower = e.key.toLowerCase();
+      keysPressedRef.current.delete(lower);
+      if (e.key === "Shift") {
+        keysPressedRef.current.delete("shift");
+      }
+    };
+    const handleBlur = () => {
+      keysPressedRef.current.clear();
+    };
+
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("blur", handleBlur);
+    };
   }, [handleCapture]);
 
   // ─── Loading / Error States ───────────────────────────────────
@@ -479,23 +645,45 @@ export default function ViewerPage({
                 </div>
               </div>
 
-              {/* Quality */}
-              <div className="mt-2 flex items-center gap-2">
-                <label className="text-[9px] text-neutral-500">Quality</label>
-                <div className="flex gap-1">
-                  {(["100k", "500k", "full_res"] as const).map((q) => (
-                    <button
-                      key={q}
-                      onClick={() => setQuality(q)}
-                      className={`text-[10px] px-2 py-0.5 rounded ${
-                        quality === q
-                          ? "bg-indigo-600 text-white"
-                          : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
-                      } transition-colors`}
-                    >
-                      {QUALITY_LABELS[q]}
-                    </button>
-                  ))}
+              {/* Quality + Nav mode */}
+              <div className="mt-2 flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <label className="text-[9px] text-neutral-500">Quality</label>
+                  <div className="flex gap-1">
+                    {(["100k", "500k", "full_res"] as const).map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => setQuality(q)}
+                        className={`text-[10px] px-2 py-0.5 rounded ${
+                          quality === q
+                            ? "bg-indigo-600 text-white"
+                            : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                        } transition-colors`}
+                      >
+                        {QUALITY_LABELS[q]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="text-[9px] text-neutral-500">Nav</label>
+                  <div className="flex gap-1">
+                    {(["fly", "orbit"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setNavMode(mode)}
+                        className={`text-[10px] px-2 py-0.5 rounded ${
+                          navMode === mode
+                            ? "bg-indigo-600 text-white"
+                            : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                        } transition-colors`}
+                      >
+                        {mode === "fly" ? "Fly" : "Orbit"}
+                      </button>
+                    ))}
+                    <span className="text-[9px] text-neutral-600 ml-1 self-center">F</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -518,7 +706,7 @@ export default function ViewerPage({
       {/* Toggle controls hint */}
       <div className="absolute top-4 right-4 pointer-events-none">
         <p className="text-neutral-600 text-[9px]">
-          Press H to {showControls ? "hide" : "show"} controls · Space to capture
+          {navMode === "fly" ? "WASD to move · Drag to look" : "Drag to orbit"} · F toggle · H {showControls ? "hide" : "show"} · Space capture
         </p>
       </div>
     </div>
