@@ -39,6 +39,7 @@ import {
   WorldLabsPanoNode,
   WorldLabsWorldNode,
   SpzViewerNode,
+  PanoCropNode,
   PanoViewerNode,
   PanoEditorNode,
 } from "./nodes";
@@ -81,6 +82,7 @@ const nodeTypes: NodeTypes = {
   spzViewer: SpzViewerNode,
   worldLabsPano: WorldLabsPanoNode,
   worldLabsWorld: WorldLabsWorldNode,
+  panoCrop: PanoCropNode,
   panoViewer: PanoViewerNode,
   panoEditor: PanoEditorNode,
 };
@@ -154,8 +156,10 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image", "text"], outputs: ["image"] };
     case "worldLabsWorld":
       return { inputs: ["image"], outputs: ["image", "3d"] };
+    case "panoCrop":
+      return { inputs: [], outputs: ["image", "text"] };
     case "panoViewer":
-      return { inputs: ["image"], outputs: ["image", "text"] };
+      return { inputs: ["image"], outputs: [] };
     case "panoEditor":
       return { inputs: ["image-0", "image-1", "text"], outputs: ["image"] };
     default:
@@ -1129,6 +1133,7 @@ export function WorkflowCanvas() {
             spzViewer: { width: 300, height: 280 },
             worldLabsPano: { width: 320, height: 380 },
             worldLabsWorld: { width: 320, height: 360 },
+            panoCrop: { width: 300, height: 280 },
             panoViewer: { width: 300, height: 280 },
             panoEditor: { width: 300, height: 300 },
           };
@@ -1722,6 +1727,8 @@ export function WorkflowCanvas() {
                 return "#818cf8"; // indigo-400 (panorama generation)
               case "worldLabsWorld":
                 return "#6366f1"; // indigo-500 (3D world generation)
+              case "panoCrop":
+                return "#f9a8d4"; // pink-300 (panorama crop)
               case "panoViewer":
                 return "#f472b6"; // pink-400 (panorama viewer)
               case "panoEditor":

@@ -877,6 +877,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       switch (node.type) {
           case "imageInput":
           case "audioInput":
+          case "panoCrop":
             // Data source nodes - no execution needed
             break;
           case "glbViewer":
@@ -1190,6 +1191,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       switch (node.type) {
         case "imageInput":
         case "audioInput":
+        case "panoCrop":
           // Data source nodes - no execution needed
           break;
         case "glbViewer":

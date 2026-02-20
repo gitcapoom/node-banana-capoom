@@ -23,7 +23,7 @@ import {
   SpzViewerNodeData,
   WorldLabsPanoNodeData,
   WorldLabsWorldNodeData,
-  PanoViewerNodeData,
+  PanoCropNodeData,
   PanoEditorNodeData,
 } from "@/types";
 
@@ -103,12 +103,12 @@ function getSourceOutput(sourceNode: WorkflowNode, sourceHandleId?: string | nul
       return { type: "3d", value: bestSpz };
     }
     return { type: "image", value: wData.panoUrl || wData.thumbnailUrl || null };
-  } else if (sourceNode.type === "panoViewer") {
-    const pvData = sourceNode.data as PanoViewerNodeData;
+  } else if (sourceNode.type === "panoCrop") {
+    const pcData = sourceNode.data as PanoCropNodeData;
     if (sourceHandleId === "text") {
-      return { type: "text", value: pvData.cropMetadata || null };
+      return { type: "text", value: pcData.metadata || null };
     }
-    return { type: "image", value: pvData.capturedImage || null };
+    return { type: "image", value: pcData.image || null };
   } else if (sourceNode.type === "panoEditor") {
     return { type: "image", value: (sourceNode.data as PanoEditorNodeData).outputImage || null };
   }
