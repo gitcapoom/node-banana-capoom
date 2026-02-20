@@ -17,9 +17,10 @@ type PanoViewerNodeType = Node<PanoViewerNodeData, "panoViewer">;
  * The viewer provides a draggable rectangle overlay for capturing
  * perspective snapshots with camera metadata (yaw, pitch, FOV, etc.).
  *
+ * Each capture creates a PanoCrop node to the right of this node,
+ * holding both the perspective image and its metadata.
+ *
  * Input: image (left) — equirectangular panorama
- * Output: image (right, 35%) — perspective snapshot
- * Output: text (right, 65%) — JSON metadata (PanoCropMetadata)
  */
 export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeType>) {
   const nodeData = data;
@@ -42,33 +43,28 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
 
       const { image, metadata, width, height } = event.data;
 
-      // Store captured image and metadata in this node
-      updateNodeData(id, {
-        capturedImage: image,
-        cropMetadata: JSON.stringify(metadata),
-      });
-
-      // Also create an ImageInput node to the right with the capture
+      // Create a PanoCrop node to the right of this node
       const currentNode = nodes.find((n) => n.id === id);
       const nodeX = currentNode?.position?.x ?? 0;
       const nodeY = currentNode?.position?.y ?? 0;
       const nodeDims = defaultNodeDimensions.panoViewer;
 
       const offsetX = nodeDims.width + 40;
-      const offsetY = captureCount * (defaultNodeDimensions.imageInput.height + 20);
+      const offsetY = captureCount * (defaultNodeDimensions.panoCrop.height + 20);
 
-      addNode("imageInput", {
+      addNode("panoCrop", {
         x: nodeX + offsetX,
         y: nodeY + offsetY,
       });
 
-      // Update the new node with captured image data
+      // Update the new panoCrop node with captured data
       setTimeout(() => {
         const latestNodes = useWorkflowStore.getState().nodes;
         const newNode = latestNodes[latestNodes.length - 1];
-        if (newNode && newNode.type === "imageInput") {
+        if (newNode && newNode.type === "panoCrop") {
           updateNodeData(newNode.id, {
             image,
+            metadata: JSON.stringify(metadata),
             filename: `pano-crop-${Date.now()}.png`,
             dimensions: width && height ? { width, height } : null,
           });
@@ -139,24 +135,6 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
         className="!w-3 !h-3 !bg-violet-500 !border-violet-700"
       />
 
-      {/* Output Handle — perspective snapshot */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="image"
-        style={{ top: "35%" }}
-        className="!w-3 !h-3 !bg-violet-500 !border-violet-700"
-      />
-
-      {/* Output Handle — crop metadata JSON */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="text"
-        style={{ top: "65%" }}
-        className="!w-3 !h-3 !bg-amber-500 !border-amber-700"
-      />
-
       <div className="p-3 space-y-3">
         {/* Header */}
         <div className="flex items-center gap-2">
@@ -215,29 +193,9 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
           </div>
         )}
 
-        {/* Capture preview */}
-        {nodeData.capturedImage && (
-          <div className="bg-neutral-900 rounded-lg overflow-hidden">
-            <img
-              src={nodeData.capturedImage}
-              alt="Captured crop"
-              className="w-full h-auto object-cover"
-            />
-            <p className="text-[9px] text-neutral-500 px-2 py-1">
-              Latest capture
-            </p>
-          </div>
-        )}
-
         {/* Handle labels */}
         <div className="absolute left-5 text-[9px] text-neutral-600" style={{ top: "50%", transform: "translateY(-50%)" }}>
           pano
-        </div>
-        <div className="absolute right-5 text-[9px] text-neutral-600" style={{ top: "35%", transform: "translateY(-50%)" }}>
-          image
-        </div>
-        <div className="absolute right-5 text-[9px] text-neutral-600" style={{ top: "65%", transform: "translateY(-50%)" }}>
-          meta
         </div>
       </div>
     </BaseNode>
