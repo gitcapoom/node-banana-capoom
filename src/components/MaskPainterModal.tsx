@@ -35,6 +35,7 @@ export function MaskPainterModal() {
   const nodes = useWorkflowStore((state) => state.nodes);
 
   const stageRef = useRef<Konva.Stage>(null);
+  const overlayLayerRef = useRef<Konva.Layer>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
   const [scale, setScale] = useState(1);
@@ -70,6 +71,20 @@ export function MaskPainterModal() {
       img.src = sourceImage;
     }
   }, [sourceImage]);
+
+  // Apply real-time CSS blur to the overlay layer for instant preview
+  const currentBlurRadius = sourceNodeId
+    ? (nodes.find((n) => n.id === sourceNodeId)?.data as MaskPainterNodeData)?.blurRadius ?? 0
+    : 0;
+
+  useEffect(() => {
+    const layer = overlayLayerRef.current;
+    if (!layer) return;
+    const canvas = layer.getCanvas()._canvas;
+    if (canvas) {
+      canvas.style.filter = currentBlurRadius > 0 ? `blur(${currentBlurRadius * scale}px)` : "";
+    }
+  }, [currentBlurRadius, scale, strokes, currentElement]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -325,21 +340,23 @@ export function MaskPainterModal() {
     closeModal();
   }, [sourceNodeId, strokes, flattenMask, updateNodeData, closeModal]);
 
-  // Render a mask element as a Konva component
+  // Render a mask element as a Konva component.
+  // Brush paints black at full opacity on the overlay layer.
+  // Eraser uses destination-out to remove previous strokes from the overlay layer.
   const renderElement = (element: MaskElement) => {
+    const isBrush = element.tool === "brush";
+    const compositeOp = isBrush ? "source-over" : "destination-out";
+
     if (element.type === "stroke") {
       return (
         <Line
           key={element.id}
           points={element.points}
-          stroke={element.tool === "brush" ? "#000000" : "#ffffff"}
+          stroke="#000000"
           strokeWidth={element.strokeWidth}
           lineCap="round"
           lineJoin="round"
-          opacity={0.6}
-          globalCompositeOperation={
-            element.tool === "eraser" ? "destination-out" : "source-over"
-          }
+          globalCompositeOperation={compositeOp}
         />
       );
     } else if (element.type === "rectangle") {
@@ -350,11 +367,8 @@ export function MaskPainterModal() {
           y={element.y}
           width={element.width}
           height={element.height}
-          fill={element.tool === "brush" ? "#000000" : "#ffffff"}
-          opacity={0.6}
-          globalCompositeOperation={
-            element.tool === "eraser" ? "destination-out" : "source-over"
-          }
+          fill="#000000"
+          globalCompositeOperation={compositeOp}
         />
       );
     } else if (element.type === "circle") {
@@ -365,11 +379,8 @@ export function MaskPainterModal() {
           y={element.y}
           radiusX={element.radiusX}
           radiusY={element.radiusY}
-          fill={element.tool === "brush" ? "#000000" : "#ffffff"}
-          opacity={0.6}
-          globalCompositeOperation={
-            element.tool === "eraser" ? "destination-out" : "source-over"
-          }
+          fill="#000000"
+          globalCompositeOperation={compositeOp}
         />
       );
     }
@@ -488,8 +499,8 @@ export function MaskPainterModal() {
           onWheel={handleWheel}
           style={{ cursor: "crosshair" }}
         >
+          {/* Layer 1: Source image background */}
           <Layer>
-            {/* Source image background */}
             {image && (
               <KonvaImage
                 image={image}
@@ -497,9 +508,10 @@ export function MaskPainterModal() {
                 height={stageSize.height}
               />
             )}
-            {/* Painted elements — drawn on the image so user sees what they're masking */}
+          </Layer>
+          {/* Layer 2: Mask overlay — separate layer so eraser (destination-out) only affects strokes, not the image */}
+          <Layer ref={overlayLayerRef}>
             {strokes.map(renderElement)}
-            {/* Currently drawing element */}
             {currentElement && renderElement(currentElement)}
           </Layer>
         </Stage>
