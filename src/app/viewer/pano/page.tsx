@@ -45,6 +45,7 @@ export default function PanoViewerPage() {
   const [error, setError] = useState<string | null>(null);
   const [captureFlash, setCaptureFlash] = useState(false);
   const [rectInfo, setRectInfo] = useState({ aspectRatio: "16:9", hFov: 0, vFov: 0 });
+  const [sceneReady, setSceneReady] = useState(false);
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -130,6 +131,9 @@ export default function PanoViewerPage() {
     camera.position.set(0, 0, 0);
     cameraRef.current = camera;
 
+    // Signal that Three.js scene is ready for texture loading
+    setSceneReady(true);
+
     // Center rectangle on screen
     rectStateRef.current = {
       x: (container.clientWidth - 320) / 2,
@@ -177,45 +181,68 @@ export default function PanoViewerPage() {
 
   // ─── Load panorama texture ────────────────────────────────────
   useEffect(() => {
-    if (!panoUrl || !sceneRef.current) return;
+    if (!panoUrl || !sceneReady || !sceneRef.current) return;
 
     setLoading(true);
     setError(null);
 
-    const loader = new THREE.TextureLoader();
-    loader.load(
-      panoUrl,
-      (texture) => {
-        texture.mapping = THREE.EquirectangularReflectionMapping;
-        texture.colorSpace = THREE.SRGBColorSpace;
-        textureRef.current = texture;
+    /**
+     * Apply a loaded image as a sphere texture for the panorama viewer.
+     */
+    const applyTexture = (img: HTMLImageElement) => {
+      const texture = new THREE.Texture(img);
+      texture.needsUpdate = true;
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      textureRef.current = texture;
 
-        // Create sphere with texture mapped on inside
-        const geometry = new THREE.SphereGeometry(SPHERE_RADIUS, 60, 40);
-        geometry.scale(-1, 1, 1); // flip normals to inside
-        const material = new THREE.MeshBasicMaterial({ map: texture });
-        const mesh = new THREE.Mesh(geometry, material);
-        sceneRef.current!.add(mesh);
+      // Create sphere with texture mapped on inside
+      const geometry = new THREE.SphereGeometry(SPHERE_RADIUS, 60, 40);
+      geometry.scale(-1, 1, 1); // flip normals to inside
+      const material = new THREE.MeshBasicMaterial({ map: texture });
+      const mesh = new THREE.Mesh(geometry, material);
+      sceneRef.current!.add(mesh);
 
-        // Also draw texture to a canvas for capture
-        const img = texture.image as HTMLImageElement;
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx = canvas.getContext("2d")!;
-        ctx.drawImage(img, 0, 0);
-        equirectCanvasRef.current = canvas;
+      // Also draw texture to a canvas for capture
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      equirectCanvasRef.current = canvas;
 
-        setLoading(false);
-      },
-      undefined,
-      (err) => {
-        console.error("Failed to load panorama:", err);
+      setLoading(false);
+    };
+
+    // For data URLs (from PanoEditor), load via Image element directly
+    // to avoid TextureLoader/FileLoader issues with large base64 strings
+    if (panoUrl.startsWith("data:")) {
+      const img = new Image();
+      img.onload = () => applyTexture(img);
+      img.onerror = () => {
+        console.error("Failed to load panorama from data URL");
         setError("Failed to load panorama image");
         setLoading(false);
-      }
-    );
-  }, [panoUrl]);
+      };
+      img.src = panoUrl;
+    } else {
+      // For HTTP URLs, use TextureLoader as normal
+      const loader = new THREE.TextureLoader();
+      loader.load(
+        panoUrl,
+        (texture) => {
+          const img = texture.image as HTMLImageElement;
+          applyTexture(img);
+        },
+        undefined,
+        (err) => {
+          console.error("Failed to load panorama:", err);
+          setError("Failed to load panorama image");
+          setLoading(false);
+        }
+      );
+    }
+  }, [panoUrl, sceneReady]);
 
   // ─── Camera navigation (drag to look, scroll to zoom) ────────
   useEffect(() => {
@@ -434,8 +461,9 @@ export default function PanoViewerPage() {
     const pitchOffset = Math.atan(ndcY * Math.tan(viewportVFov / 2));
 
     // Absolute yaw/pitch of rectangle center
-    const rectYaw = yawRef.current + yawOffset;
-    const rectPitch = pitchRef.current + pitchOffset;
+    // Offset yaw by π/2 for sphere UV alignment; negate pitch for convention match
+    const rectYaw = yawRef.current + yawOffset + Math.PI / 2;
+    const rectPitch = -(pitchRef.current + pitchOffset);
 
     // Compute rectangle FOV
     const hFraction = r.width / containerW;
