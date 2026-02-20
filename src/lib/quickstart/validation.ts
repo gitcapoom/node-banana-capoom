@@ -46,6 +46,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   spzViewer: { width: 300, height: 280 },
   worldLabsPano: { width: 320, height: 380 },
   worldLabsWorld: { width: 320, height: 360 },
+  panoCrop: { width: 300, height: 280 },
   panoViewer: { width: 300, height: 280 },
   panoEditor: { width: 300, height: 300 },
 };
@@ -387,11 +388,16 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         caption: null,
         viewerWindowOpen: false,
       };
+    case "panoCrop":
+      return {
+        image: null,
+        metadata: null,
+        filename: null,
+        dimensions: null,
+      };
     case "panoViewer":
       return {
         panoUrl: null,
-        capturedImage: null,
-        cropMetadata: null,
         viewerOpen: false,
       };
     case "panoEditor":

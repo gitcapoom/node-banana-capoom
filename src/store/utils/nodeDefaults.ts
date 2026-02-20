@@ -18,6 +18,7 @@ import {
   EaseCurveNodeData,
   GLBViewerNodeData,
   SpzViewerNodeData,
+  PanoCropNodeData,
   PanoViewerNodeData,
   PanoEditorNodeData,
   WorkflowNodeData,
@@ -50,6 +51,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   spzViewer: { width: 300, height: 280 },
   worldLabsPano: { width: 320, height: 380 },
   worldLabsWorld: { width: 320, height: 360 },
+  panoCrop: { width: 300, height: 280 },
   panoViewer: { width: 300, height: 280 },
   panoEditor: { width: 300, height: 300 },
 };
@@ -293,11 +295,16 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         caption: null,
         viewerWindowOpen: false,
       } as WorldLabsWorldNodeData;
+    case "panoCrop":
+      return {
+        image: null,
+        metadata: null,
+        filename: null,
+        dimensions: null,
+      } as PanoCropNodeData;
     case "panoViewer":
       return {
         panoUrl: null,
-        capturedImage: null,
-        cropMetadata: null,
         viewerOpen: false,
       } as PanoViewerNodeData;
     case "panoEditor":

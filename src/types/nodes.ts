@@ -42,6 +42,7 @@ export type NodeType =
   | "spzViewer"
   | "worldLabsPano"
   | "worldLabsWorld"
+  | "panoCrop"
   | "panoViewer"
   | "panoEditor";
 
@@ -381,9 +382,18 @@ export interface SpzViewerNodeData extends BaseNodeData {
  */
 export interface PanoViewerNodeData extends BaseNodeData {
   panoUrl: string | null;          // Equirectangular image URL
-  capturedImage: string | null;    // Perspective snapshot (base64)
-  cropMetadata: string | null;     // JSON-serialized PanoCropMetadata
   viewerOpen: boolean;             // Whether the viewer window is currently open
+}
+
+/**
+ * Panorama Crop node - holds a perspective snapshot extracted from a panorama
+ * with its camera metadata. Created automatically by PanoViewer on capture.
+ */
+export interface PanoCropNodeData extends BaseNodeData {
+  image: string | null;            // Perspective snapshot (base64)
+  metadata: string | null;         // JSON-serialized PanoCropMetadata
+  filename: string | null;
+  dimensions: { width: number; height: number } | null;
 }
 
 /**
@@ -419,6 +429,7 @@ export type WorkflowNodeData =
   | EaseCurveNodeData
   | GLBViewerNodeData
   | SpzViewerNodeData
+  | PanoCropNodeData
   | PanoViewerNodeData
   | PanoEditorNodeData;
 
