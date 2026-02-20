@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { MaskStroke, MaskTool } from "@/types";
+import { MaskElement, MaskTool } from "@/types";
 
 interface MaskPainterStore {
   // Modal state
@@ -7,11 +7,11 @@ interface MaskPainterStore {
   sourceNodeId: string | null;
   sourceImage: string | null;
 
-  // Strokes
-  strokes: MaskStroke[];
+  // Elements (strokes + shapes)
+  strokes: MaskElement[];
 
   // History for undo/redo
-  history: MaskStroke[][];
+  history: MaskElement[][];
   historyIndex: number;
 
   // Tool state
@@ -19,11 +19,11 @@ interface MaskPainterStore {
   brushSize: number;
 
   // Modal actions
-  openModal: (nodeId: string, image: string, existingStrokes?: MaskStroke[]) => void;
+  openModal: (nodeId: string, image: string, existingStrokes?: MaskElement[]) => void;
   closeModal: () => void;
 
-  // Stroke actions
-  addStroke: (stroke: MaskStroke) => void;
+  // Element actions
+  addStroke: (stroke: MaskElement) => void;
   clear: () => void;
 
   // History actions
@@ -46,7 +46,7 @@ export const useMaskPainterStore = create<MaskPainterStore>((set, get) => ({
   currentTool: "brush",
   brushSize: 30,
 
-  openModal: (nodeId: string, image: string, existingStrokes: MaskStroke[] = []) => {
+  openModal: (nodeId: string, image: string, existingStrokes: MaskElement[] = []) => {
     set({
       isModalOpen: true,
       sourceNodeId: nodeId,
@@ -69,7 +69,7 @@ export const useMaskPainterStore = create<MaskPainterStore>((set, get) => ({
     });
   },
 
-  addStroke: (stroke: MaskStroke) => {
+  addStroke: (stroke: MaskElement) => {
     const { pushHistory } = get();
     pushHistory();
     set((state) => ({

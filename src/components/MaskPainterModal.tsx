@@ -1,18 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Stage, Layer, Image as KonvaImage, Line } from "react-konva";
+import { Stage, Layer, Image as KonvaImage, Line, Rect, Ellipse } from "react-konva";
 import { useMaskPainterStore } from "@/store/maskPainterStore";
 import { useWorkflowStore } from "@/store/workflowStore";
-import { MaskStroke, MaskPainterNodeData } from "@/types";
+import { MaskElement, MaskStroke, MaskRect, MaskCircle, MaskPainterNodeData } from "@/types";
 import Konva from "konva";
 
 /**
  * Full-screen mask painting modal.
  *
- * Users paint black brush strokes on a source image.
+ * Users paint brush strokes and draw shapes on a source image.
  * Output is a white-on-black mask (white = area to inpaint).
- * Only brush and eraser tools, no shapes, no text, no colors.
+ * Tools: brush, eraser, rectangle, circle. All shapes are filled by default.
  */
 export function MaskPainterModal() {
   const {
@@ -40,8 +40,12 @@ export function MaskPainterModal() {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDrawing, setIsDrawing] = useState(false);
-  const [currentStroke, setCurrentStroke] = useState<MaskStroke | null>(null);
+  const [currentElement, setCurrentElement] = useState<MaskElement | null>(null);
+  const [drawStart, setDrawStart] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Determine if the current tool is a freehand tool (brush/eraser) or a shape tool
+  const isFreehandTool = currentTool === "brush" || currentTool === "eraser";
 
   // Load source image
   useEffect(() => {
@@ -84,9 +88,11 @@ export function MaskPainterModal() {
           }
         }
       }
-      // B for brush, E for eraser
+      // B for brush, E for eraser, R for rectangle, C for circle
       if (e.key === "b" || e.key === "B") setTool("brush");
       if (e.key === "e" || e.key === "E") setTool("eraser");
+      if (e.key === "r" || e.key === "R") setTool("rectangle");
+      if (e.key === "c" || e.key === "C") setTool("circle");
       // [ and ] for brush size
       if (e.key === "[") setBrushSize(Math.max(10, brushSize - 10));
       if (e.key === "]") setBrushSize(Math.min(200, brushSize + 10));
@@ -111,37 +117,99 @@ export function MaskPainterModal() {
 
       const pos = getRelativePointerPosition();
       setIsDrawing(true);
+      setDrawStart(pos);
 
-      const stroke: MaskStroke = {
-        id: `stroke-${Date.now()}`,
-        points: [pos.x, pos.y],
-        strokeWidth: brushSize,
-        tool: currentTool,
-      };
-      setCurrentStroke(stroke);
+      // Determine if this is a brush or eraser action
+      const tool: "brush" | "eraser" = currentTool === "eraser" ? "eraser" : "brush";
+
+      if (isFreehandTool) {
+        // Freehand stroke
+        const stroke: MaskStroke = {
+          id: `stroke-${Date.now()}`,
+          type: "stroke",
+          points: [pos.x, pos.y],
+          strokeWidth: brushSize,
+          tool: currentTool === "eraser" ? "eraser" : "brush",
+        };
+        setCurrentElement(stroke);
+      } else if (currentTool === "rectangle") {
+        const rect: MaskRect = {
+          id: `rect-${Date.now()}`,
+          type: "rectangle",
+          x: pos.x,
+          y: pos.y,
+          width: 0,
+          height: 0,
+          tool,
+        };
+        setCurrentElement(rect);
+      } else if (currentTool === "circle") {
+        const circle: MaskCircle = {
+          id: `circle-${Date.now()}`,
+          type: "circle",
+          x: pos.x,
+          y: pos.y,
+          radiusX: 0,
+          radiusY: 0,
+          tool,
+        };
+        setCurrentElement(circle);
+      }
     },
-    [currentTool, brushSize, getRelativePointerPosition]
+    [currentTool, brushSize, isFreehandTool, getRelativePointerPosition]
   );
 
   const handleMouseMove = useCallback(() => {
-    if (!isDrawing || !currentStroke) return;
+    if (!isDrawing || !currentElement) return;
     const pos = getRelativePointerPosition();
-    setCurrentStroke({
-      ...currentStroke,
-      points: [...currentStroke.points, pos.x, pos.y],
-    });
-  }, [isDrawing, currentStroke, getRelativePointerPosition]);
+
+    if (currentElement.type === "stroke") {
+      setCurrentElement({
+        ...currentElement,
+        points: [...currentElement.points, pos.x, pos.y],
+      });
+    } else if (currentElement.type === "rectangle") {
+      const width = pos.x - drawStart.x;
+      const height = pos.y - drawStart.y;
+      setCurrentElement({
+        ...currentElement,
+        x: width < 0 ? pos.x : drawStart.x,
+        y: height < 0 ? pos.y : drawStart.y,
+        width: Math.abs(width),
+        height: Math.abs(height),
+      });
+    } else if (currentElement.type === "circle") {
+      const radiusX = Math.abs(pos.x - drawStart.x) / 2;
+      const radiusY = Math.abs(pos.y - drawStart.y) / 2;
+      setCurrentElement({
+        ...currentElement,
+        x: (drawStart.x + pos.x) / 2,
+        y: (drawStart.y + pos.y) / 2,
+        radiusX,
+        radiusY,
+      });
+    }
+  }, [isDrawing, currentElement, drawStart, getRelativePointerPosition]);
 
   const handleMouseUp = useCallback(() => {
-    if (!isDrawing || !currentStroke) return;
+    if (!isDrawing || !currentElement) return;
     setIsDrawing(false);
 
-    // Only add if stroke has some length
-    if (currentStroke.points.length >= 4) {
-      addStroke(currentStroke);
+    let shouldAdd = true;
+
+    if (currentElement.type === "stroke") {
+      shouldAdd = currentElement.points.length >= 4;
+    } else if (currentElement.type === "rectangle") {
+      shouldAdd = currentElement.width > 5 && currentElement.height > 5;
+    } else if (currentElement.type === "circle") {
+      shouldAdd = currentElement.radiusX > 5 && currentElement.radiusY > 5;
     }
-    setCurrentStroke(null);
-  }, [isDrawing, currentStroke, addStroke]);
+
+    if (shouldAdd) {
+      addStroke(currentElement);
+    }
+    setCurrentElement(null);
+  }, [isDrawing, currentElement, addStroke]);
 
   const handleWheel = useCallback(
     (e: Konva.KonvaEventObject<WheelEvent>) => {
@@ -155,11 +223,11 @@ export function MaskPainterModal() {
   );
 
   /**
-   * Flatten strokes into a white-on-black mask at source image resolution.
-   * Uses a hidden canvas to render strokes:
+   * Flatten all elements into a white-on-black mask at source image resolution.
+   * Uses a hidden canvas to render strokes and shapes:
    * 1. Fill canvas with black (= keep everything)
-   * 2. Draw strokes in white (= area to inpaint)
-   * 3. Eraser strokes drawn in black (= undo paint)
+   * 2. Draw brush strokes/shapes in white (= area to inpaint)
+   * 3. Eraser strokes/shapes drawn in black (= undo paint)
    */
   const flattenMask = useCallback((): string => {
     if (!image) return "";
@@ -180,26 +248,41 @@ export function MaskPainterModal() {
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw each stroke
-    strokes.forEach((stroke) => {
-      ctx.beginPath();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.lineWidth = stroke.strokeWidth;
+    // Draw each element
+    strokes.forEach((element) => {
+      const color = element.tool === "brush" ? "#ffffff" : "#000000";
 
-      if (stroke.tool === "brush") {
-        ctx.strokeStyle = "#ffffff"; // White = inpaint area
-      } else {
-        ctx.strokeStyle = "#000000"; // Eraser = keep area
-      }
+      if (element.type === "stroke") {
+        ctx.beginPath();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = element.strokeWidth;
+        ctx.strokeStyle = color;
 
-      if (stroke.points.length >= 2) {
-        ctx.moveTo(stroke.points[0], stroke.points[1]);
-        for (let i = 2; i < stroke.points.length; i += 2) {
-          ctx.lineTo(stroke.points[i], stroke.points[i + 1]);
+        if (element.points.length >= 2) {
+          ctx.moveTo(element.points[0], element.points[1]);
+          for (let i = 2; i < element.points.length; i += 2) {
+            ctx.lineTo(element.points[i], element.points[i + 1]);
+          }
         }
+        ctx.stroke();
+      } else if (element.type === "rectangle") {
+        ctx.fillStyle = color;
+        ctx.fillRect(element.x, element.y, element.width, element.height);
+      } else if (element.type === "circle") {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.ellipse(
+          element.x,
+          element.y,
+          element.radiusX,
+          element.radiusY,
+          0,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
       }
-      ctx.stroke();
     });
 
     // Apply blur if configured
@@ -242,23 +325,55 @@ export function MaskPainterModal() {
     closeModal();
   }, [sourceNodeId, strokes, flattenMask, updateNodeData, closeModal]);
 
-  // Render a stroke as a Konva Line
-  const renderStroke = (stroke: MaskStroke) => {
-    return (
-      <Line
-        key={stroke.id}
-        points={stroke.points}
-        stroke={stroke.tool === "brush" ? "#000000" : "#ffffff"}
-        strokeWidth={stroke.strokeWidth}
-        lineCap="round"
-        lineJoin="round"
-        opacity={0.6}
-        // For eraser, use destination-out composite to reveal background
-        globalCompositeOperation={
-          stroke.tool === "eraser" ? "destination-out" : "source-over"
-        }
-      />
-    );
+  // Render a mask element as a Konva component
+  const renderElement = (element: MaskElement) => {
+    if (element.type === "stroke") {
+      return (
+        <Line
+          key={element.id}
+          points={element.points}
+          stroke={element.tool === "brush" ? "#000000" : "#ffffff"}
+          strokeWidth={element.strokeWidth}
+          lineCap="round"
+          lineJoin="round"
+          opacity={0.6}
+          globalCompositeOperation={
+            element.tool === "eraser" ? "destination-out" : "source-over"
+          }
+        />
+      );
+    } else if (element.type === "rectangle") {
+      return (
+        <Rect
+          key={element.id}
+          x={element.x}
+          y={element.y}
+          width={element.width}
+          height={element.height}
+          fill={element.tool === "brush" ? "#000000" : "#ffffff"}
+          opacity={0.6}
+          globalCompositeOperation={
+            element.tool === "eraser" ? "destination-out" : "source-over"
+          }
+        />
+      );
+    } else if (element.type === "circle") {
+      return (
+        <Ellipse
+          key={element.id}
+          x={element.x}
+          y={element.y}
+          radiusX={element.radiusX}
+          radiusY={element.radiusY}
+          fill={element.tool === "brush" ? "#000000" : "#ffffff"}
+          opacity={0.6}
+          globalCompositeOperation={
+            element.tool === "eraser" ? "destination-out" : "source-over"
+          }
+        />
+      );
+    }
+    return null;
   };
 
   if (!isModalOpen) return null;
@@ -268,7 +383,7 @@ export function MaskPainterModal() {
       {/* Top Bar */}
       <div className="h-14 bg-neutral-900 flex items-center justify-between px-4 border-b border-neutral-800">
         <div className="flex items-center gap-1.5">
-          {/* Brush / Eraser toggle */}
+          {/* Tool buttons */}
           <button
             onClick={() => setTool("brush")}
             className={`px-3.5 py-1.5 text-xs font-medium rounded transition-colors ${
@@ -288,6 +403,26 @@ export function MaskPainterModal() {
             }`}
           >
             Eraser
+          </button>
+          <button
+            onClick={() => setTool("rectangle")}
+            className={`px-3.5 py-1.5 text-xs font-medium rounded transition-colors ${
+              currentTool === "rectangle"
+                ? "bg-white text-neutral-900"
+                : "text-neutral-400 hover:text-white"
+            }`}
+          >
+            Rect
+          </button>
+          <button
+            onClick={() => setTool("circle")}
+            className={`px-3.5 py-1.5 text-xs font-medium rounded transition-colors ${
+              currentTool === "circle"
+                ? "bg-white text-neutral-900"
+                : "text-neutral-400 hover:text-white"
+            }`}
+          >
+            Circle
           </button>
 
           <div className="w-px h-6 bg-neutral-700 mx-3" />
@@ -362,35 +497,39 @@ export function MaskPainterModal() {
                 height={stageSize.height}
               />
             )}
-            {/* Painted strokes — drawn in black on the image so user sees what they're masking */}
-            {strokes.map(renderStroke)}
-            {/* Currently drawing stroke */}
-            {currentStroke && renderStroke(currentStroke)}
+            {/* Painted elements — drawn on the image so user sees what they're masking */}
+            {strokes.map(renderElement)}
+            {/* Currently drawing element */}
+            {currentElement && renderElement(currentElement)}
           </Layer>
         </Stage>
       </div>
 
       {/* Bottom Options Bar */}
       <div className="h-14 bg-neutral-900 flex items-center justify-center gap-6 px-4 border-t border-neutral-800">
-        {/* Brush Size Slider */}
-        <div className="flex items-center gap-3">
-          <span className="text-[10px] text-neutral-500 uppercase tracking-wide">
-            Brush Size
-          </span>
-          <input
-            type="range"
-            min={10}
-            max={200}
-            value={brushSize}
-            onChange={(e) => setBrushSize(Number(e.target.value))}
-            className="w-40 accent-white"
-          />
-          <span className="text-xs text-neutral-400 w-10 text-right">
-            {brushSize}px
-          </span>
-        </div>
+        {/* Brush Size Slider (only for freehand tools) */}
+        {isFreehandTool && (
+          <>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] text-neutral-500 uppercase tracking-wide">
+                Brush Size
+              </span>
+              <input
+                type="range"
+                min={10}
+                max={200}
+                value={brushSize}
+                onChange={(e) => setBrushSize(Number(e.target.value))}
+                className="w-40 accent-white"
+              />
+              <span className="text-xs text-neutral-400 w-10 text-right">
+                {brushSize}px
+              </span>
+            </div>
 
-        <div className="w-px h-6 bg-neutral-700" />
+            <div className="w-px h-6 bg-neutral-700" />
+          </>
+        )}
 
         {/* Blur Radius Slider */}
         <div className="flex items-center gap-3">
