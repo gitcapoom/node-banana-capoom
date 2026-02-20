@@ -420,7 +420,9 @@ export default function PanoViewerPage() {
     const pitchOffset = Math.atan(ndcY * Math.tan(viewportVFov / 2));
 
     // Absolute yaw/pitch of rectangle center
-    const rectYaw = yawRef.current + yawOffset;
+    // Negate yaw because the sphere uses scale(-1,1,1) which mirrors X,
+    // so viewer yaw is inverted relative to equirect longitude.
+    const rectYaw = -(yawRef.current + yawOffset);
     const rectPitch = pitchRef.current + pitchOffset;
 
     // Compute rectangle FOV
