@@ -30,6 +30,8 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const addNode = useWorkflowStore((state) => state.addNode);
   const nodes = useWorkflowStore((state) => state.nodes);
+  const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const isRunning = useWorkflowStore((state) => state.isRunning);
 
   const viewerWindowRef = useRef<Window | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -111,6 +113,10 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   }, [nodeData.spzUrl]);
 
   // ─── Handlers ──────────────────────────────────────────────
+
+  const handleRun = useCallback(() => {
+    regenerateNode(id);
+  }, [id, regenerateNode]);
 
   const handleOpenViewer = useCallback(() => {
     if (!nodeData.spzUrl) return;
@@ -213,6 +219,8 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
       selected={selected}
       type="spzViewer"
       commentNavigation={commentNavigation}
+      onRun={handleRun}
+      isExecuting={isRunning}
     >
       {/* Input Handle — 3D data */}
       <Handle

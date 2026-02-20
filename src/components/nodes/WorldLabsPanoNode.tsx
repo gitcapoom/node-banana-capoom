@@ -104,6 +104,8 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
       selected={selected}
       type="worldLabsPano"
       commentNavigation={commentNavigation}
+      onRun={handleRegenerate}
+      isExecuting={isRunning}
     >
       {/* Input Handles */}
       <Handle
@@ -250,17 +252,6 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
             </div>
           )}
         </div>
-
-        {/* Generate / Regenerate button */}
-        {!isLoading && (
-          <button
-            onClick={handleRegenerate}
-            disabled={isRunning}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:bg-neutral-700 text-white text-xs font-medium py-1.5 px-3 rounded transition-colors"
-          >
-            {isComplete ? "Regenerate" : "Generate"}
-          </button>
-        )}
 
         {/* Handle labels */}
         <div className="absolute left-5 text-[9px] text-neutral-600" style={{ top: "35%", transform: "translateY(-50%)" }}>
