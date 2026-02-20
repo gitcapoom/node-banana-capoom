@@ -10,6 +10,7 @@ import { Generate3DNodeData, ProviderType, SelectedModel, ModelInputDef } from "
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
+import { ProviderBadge } from "./ProviderBadge";
 
 function copyToClipboard(text: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
@@ -24,33 +25,6 @@ function copyToClipboard(text: string): Promise<void> {
   document.execCommand("copy");
   document.body.removeChild(textarea);
   return Promise.resolve();
-}
-
-// Provider badge component
-function ProviderBadge({ provider }: { provider: ProviderType }) {
-  const providerName = provider === "gemini" ? "Gemini" : provider === "replicate" ? "Replicate" : provider === "kie" ? "Kie.ai" : provider === "wavespeed" ? "WaveSpeed" : "fal.ai";
-
-  return (
-    <span className="text-neutral-500 shrink-0" title={providerName}>
-      {provider === "replicate" ? (
-        <svg className="w-4 h-4" viewBox="0 0 1000 1000" fill="currentColor">
-          <polygon points="1000,427.6 1000,540.6 603.4,540.6 603.4,1000 477,1000 477,427.6" />
-          <polygon points="1000,213.8 1000,327 364.8,327 364.8,1000 238.4,1000 238.4,213.8" />
-          <polygon points="1000,0 1000,113.2 126.4,113.2 126.4,1000 0,1000 0,0" />
-        </svg>
-      ) : provider === "wavespeed" ? (
-        <svg className="w-4 h-4" viewBox="95 140 350 230" fill="currentColor">
-          <path d="M308.946 153.758C314.185 153.758 318.268 158.321 317.516 163.506C306.856 237.02 270.334 302.155 217.471 349.386C211.398 354.812 203.458 357.586 195.315 357.586H127.562C117.863 357.586 110.001 349.724 110.001 340.025V333.552C110.001 326.82 113.882 320.731 119.792 317.505C176.087 286.779 217.883 232.832 232.32 168.537C234.216 160.09 241.509 153.758 250.167 153.758H308.946Z" />
-          <path d="M183.573 153.758C188.576 153.758 192.592 157.94 192.069 162.916C187.11 210.12 160.549 250.886 122.45 275.151C116.916 278.676 110 274.489 110 267.928V171.318C110 161.62 117.862 153.758 127.56 153.758H183.573Z" />
-          <path d="M414.815 153.758C425.503 153.758 433.734 163.232 431.799 173.743C420.697 234.038 398.943 290.601 368.564 341.414C362.464 351.617 351.307 357.586 339.419 357.586H274.228C266.726 357.586 262.611 348.727 267.233 342.819C306.591 292.513 334.86 233.113 348.361 168.295C350.104 159.925 357.372 153.758 365.922 153.758H414.815Z" />
-        </svg>
-      ) : (
-        <svg className="w-4 h-4" viewBox="0 0 1855 1855" fill="currentColor">
-          <path fillRule="evenodd" clipRule="evenodd" d="M1181.65 78C1212.05 78 1236.42 101.947 1239.32 131.261C1265.25 392.744 1480.07 600.836 1750.02 625.948C1780.28 628.764 1805 652.366 1805 681.816V1174.18C1805 1203.63 1780.28 1227.24 1750.02 1230.05C1480.07 1255.16 1265.25 1463.26 1239.32 1724.74C1236.42 1754.05 1212.05 1778 1181.65 1778H673.354C642.951 1778 618.585 1754.05 615.678 1724.74C589.754 1463.26 374.927 1255.16 104.984 1230.05C74.7212 1227.24 50 1203.63 50 1174.18V681.816C50 652.366 74.7213 628.764 104.984 625.948C374.927 600.836 589.754 392.744 615.678 131.261C618.585 101.946 642.951 78 673.353 78H1181.65ZM402.377 926.561C402.377 1209.41 638.826 1438.71 930.501 1438.71C1222.18 1438.71 1458.63 1209.41 1458.63 926.561C1458.63 643.709 1222.18 414.412 930.501 414.412C638.826 414.412 402.377 643.709 402.377 926.561Z" />
-        </svg>
-      )}
-    </span>
-  );
 }
 
 // 3D generation capabilities
@@ -382,12 +356,26 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
             <span className="text-[11px] text-orange-400 font-medium">3D Model Generated</span>
             {nodeData.savedFilename ? (
               <button
-                onClick={(e) => {
+                onClick={async (e) => {
                   e.stopPropagation();
-                  if (!nodeData.savedFilePath) return;
-                  copyToClipboard(nodeData.savedFilePath).then(() => {
-                    useToast.getState().show("Path copied — paste in Explorer to open", "success");
-                  });
+                  if (!nodeData.savedFilePath) {
+                    useToast.getState().show("No file path available", "error");
+                    return;
+                  }
+                  try {
+                    const res = await fetch("/api/open-file", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ filePath: nodeData.savedFilePath }),
+                    });
+                    if (!res.ok) {
+                      const detail = await res.text().catch(() => `Status ${res.status}`);
+                      useToast.getState().show("Failed to open file", "error", true, detail);
+                    }
+                  } catch (err) {
+                    console.error("Failed to open file location:", err);
+                    useToast.getState().show("Failed to open file location", "error");
+                  }
                 }}
                 className="nodrag nopan text-[10px] text-neutral-400 hover:text-orange-300 truncate max-w-full cursor-pointer transition-colors flex items-center gap-1"
                 title={`Copy path: ${nodeData.savedFilePath}`}

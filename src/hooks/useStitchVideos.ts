@@ -16,86 +16,32 @@ import {
 } from 'mediabunny';
 import type { Rotation } from 'mediabunny';
 import { createAvcEncodingConfig, AVC_LEVEL_4_0, AVC_LEVEL_5_1 } from '@/lib/video-encoding';
-
-// Inlined constants from easy-peasy-ease
-const DEFAULT_BITRATE = 8_000_000; // 8 Mbps
-const MAX_OUTPUT_FPS = 60;
-
-const FALLBACK_WIDTH = 1920;
-const FALLBACK_HEIGHT = 1080;
-const BASELINE_PIXEL_LIMIT = 1920 * 1080;
-
-const ensureEvenDimension = (value: number): number => {
-  if (!Number.isFinite(value) || value <= 0) {
-    return 0;
-  }
-  const even = value % 2 === 0 ? value : value - 1;
-  return even > 0 ? even : 2;
-};
-
-const normalizeRotation = (value: unknown): Rotation => {
-  return value === 0 || value === 90 || value === 180 || value === 270 ? value : 0;
-};
-
-const probeVideoMetadata = async (
-  blob: Blob
-): Promise<{ width: number; height: number; rotation: Rotation; bitrate: number }> => {
-  const source = new BlobSource(blob);
-  const input = new Input({
-    source,
-    formats: ALL_FORMATS,
-  });
-  try {
-    const videoTracks = await input.getVideoTracks();
-    if (videoTracks.length === 0) {
-      throw new Error('No video tracks found while probing dimensions.');
-    }
-    const track = videoTracks[0];
-    const widthCandidate =
-      (typeof track.displayWidth === 'number' && track.displayWidth > 0
-        ? track.displayWidth
-        : track.codedWidth) ?? FALLBACK_WIDTH;
-    const heightCandidate =
-      (typeof track.displayHeight === 'number' && track.displayHeight > 0
-        ? track.displayHeight
-        : track.codedHeight) ?? FALLBACK_HEIGHT;
-
-    // Probe bitrate from packet stats
-    let bitrate = 0;
-    try {
-      const packetStats = await track.computePacketStats();
-      if (packetStats?.averageBitrate && Number.isFinite(packetStats.averageBitrate)) {
-        bitrate = packetStats.averageBitrate;
-      }
-    } catch (e) {
-      console.warn('Failed to compute packet stats for bitrate', e);
-    }
-
-    return {
-      width: ensureEvenDimension(widthCandidate),
-      height: ensureEvenDimension(heightCandidate),
-      rotation: normalizeRotation(track.rotation),
-      bitrate,
-    };
-  } finally {
-    input.dispose();
-  }
-};
+import {
+  DEFAULT_BITRATE,
+  MAX_OUTPUT_FPS,
+  FALLBACK_WIDTH,
+  FALLBACK_HEIGHT,
+  BASELINE_PIXEL_LIMIT,
+  ensureEvenDimension,
+  probeVideoMetadata,
+} from '@/lib/video-probing';
 
 const determineEncodeParameters = async (
   blobs: Blob[]
-): Promise<{ width: number; height: number; rotation: Rotation; maxSourceBitrate: number }> => {
+): Promise<{ width: number; height: number; rotation: Rotation; maxSourceBitrate: number; totalDuration: number }> => {
   let maxWidth = 0;
   let maxHeight = 0;
   let maxSourceBitrate = 0;
+  let totalDuration = 0;
   let rotation: Rotation | null = null;
 
   for (let i = 0; i < blobs.length; i++) {
     try {
-      const { width, height, rotation: trackRotation, bitrate } = await probeVideoMetadata(blobs[i]);
+      const { width, height, rotation: trackRotation, bitrate, duration } = await probeVideoMetadata(blobs[i]);
       maxWidth = Math.max(maxWidth, width);
       maxHeight = Math.max(maxHeight, height);
       maxSourceBitrate = Math.max(maxSourceBitrate, bitrate);
+      totalDuration += duration;
       if (rotation === null) {
         rotation = trackRotation;
       } else if (trackRotation !== rotation) {
@@ -114,6 +60,7 @@ const determineEncodeParameters = async (
       height: FALLBACK_HEIGHT,
       rotation: rotation ?? (0 as Rotation),
       maxSourceBitrate,
+      totalDuration,
     };
   }
 
@@ -122,6 +69,7 @@ const determineEncodeParameters = async (
     height: ensureEvenDimension(maxHeight),
     rotation: rotation ?? (0 as Rotation),
     maxSourceBitrate,
+    totalDuration,
   };
 };
 
@@ -225,6 +173,7 @@ export async function stitchVideosAsync(
       height: probedHeight,
       rotation: aggregateRotation,
       maxSourceBitrate,
+      totalDuration: probedVideoDuration,
     } = await determineEncodeParameters(videoBlobs);
 
     const safeWidth = probedWidth > 0 ? probedWidth : FALLBACK_WIDTH;
@@ -313,6 +262,18 @@ export async function stitchVideosAsync(
     outputStarted = true;
 
     try {
+    // Feed audio early so the muxer can interleave audio packets with video frames.
+    // Writing audio after all video causes broken interleaving (Discord won't play audio).
+    if (audioSource && pendingAudioBuffer) {
+      updateProgress('processing', 'Encoding audio track...', 12);
+      const trimTarget = probedVideoDuration > 0 ? probedVideoDuration : audioData!.duration;
+      const trimmedBuffer = trimAudioBuffer(pendingAudioBuffer, trimTarget);
+      await audioSource.add(trimmedBuffer);
+      await audioSource.close();
+      audioSource = null;
+      pendingAudioBuffer = null;
+    }
+
     // Track the highest timestamp we've written to ensure monotonicity
     // Start at -frameInterval so first frame can be at timestamp 0
     const frameInterval = 1 / MAX_OUTPUT_FPS;
@@ -412,17 +373,6 @@ export async function stitchVideosAsync(
       } finally {
         input.dispose();
       }
-    }
-
-    // Phase 2: Apply audio, trimmed to match the stitched video duration
-    if (audioSource && pendingAudioBuffer) {
-      updateProgress('processing', 'Encoding audio track...', 92);
-
-      const videoDuration = highestWrittenTimestamp + frameInterval;
-      const trimmedBuffer = trimAudioBuffer(pendingAudioBuffer, videoDuration);
-      await audioSource.add(trimmedBuffer);
-      await audioSource.close();
-      audioSource = null; // Already closed
     }
 
     // Flush encoder before finalizing container

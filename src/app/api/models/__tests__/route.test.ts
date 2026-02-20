@@ -712,9 +712,10 @@ describe("/api/models route", () => {
       const data = await response.json();
 
       expect(response.status).toBe(200);
-      // 1 fal text-to-image + 2 gemini models (always included)
-      expect(data.models).toHaveLength(3);
+      // 1 fal text-to-image + 1 fal text-to-speech (mapped to text-to-audio) + 2 gemini models (always included)
+      expect(data.models).toHaveLength(4);
       expect(data.models.find((m: { id: string }) => m.id === "fal-ai/flux")).toBeDefined();
+      expect(data.models.find((m: { id: string }) => m.id === "fal-ai/tts")?.capabilities).toEqual(["text-to-audio"]);
     });
   });
 

@@ -61,6 +61,14 @@ export async function executeNanoBanana(
     promptText = connectedText || promptFromDynamic || null;
   }
 
+  // Defensive: ensure promptText is actually a string at runtime
+  // (Guards against corrupted node data or race conditions in parallel execution)
+  if (promptText !== null && typeof promptText !== 'string') {
+    const raw: unknown = promptText;
+    console.warn('[nanoBanana] promptText was not a string, coercing:', typeof raw, Array.isArray(raw) ? `<redacted array length=${(raw as unknown[]).length}>` : '<redacted>');
+    promptText = Array.isArray(raw) ? (raw as string[])[0] ?? null : null;
+  }
+
   if (!promptText) {
     updateNodeData(node.id, {
       status: "error",
@@ -80,6 +88,12 @@ export async function executeNanoBanana(
   const provider = nodeData.selectedModel?.provider || "gemini";
   const headers = buildGenerateHeaders(provider, providerSettings);
 
+  // Sanitize dynamicInputs: remove prompt since it's already sent as the top-level
+  // `prompt` field in requestPayload. Keeping both can cause providers like Replicate
+  // to prefer dynamicInputs.prompt over the authoritative top-level value.
+  const sanitizedDynamicInputs = { ...dynamicInputs };
+  delete sanitizedDynamicInputs.prompt;
+
   const requestPayload = {
     images,
     prompt: promptText,
@@ -89,8 +103,17 @@ export async function executeNanoBanana(
     useGoogleSearch: nodeData.useGoogleSearch,
     selectedModel: nodeData.selectedModel,
     parameters: nodeData.parameters,
-    dynamicInputs,
+    dynamicInputs: sanitizedDynamicInputs,
   };
+
+  // Final guard: assert that prompt is a string before sending to API
+  // This catches any remaining edge cases and provides a clear error message
+  if (typeof requestPayload.prompt !== 'string') {
+    const errorMsg = `Internal error: prompt is ${typeof requestPayload.prompt}, expected string`;
+    console.error('[nanoBanana]', errorMsg);
+    updateNodeData(node.id, { status: 'error', error: errorMsg });
+    throw new Error(errorMsg);
+  }
 
   try {
     const response = await fetch("/api/generate", {

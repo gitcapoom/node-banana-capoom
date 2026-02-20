@@ -78,7 +78,7 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      expect(screen.getByText("Waiting for image or video")).toBeInTheDocument();
+      expect(screen.getByText("Waiting for image, video, or audio")).toBeInTheDocument();
     });
 
     it("should render the title 'Output'", () => {

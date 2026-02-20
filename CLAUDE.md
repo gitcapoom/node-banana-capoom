@@ -82,6 +82,8 @@ LLM models:
 | `nanoBanana` | AI image generation | image, text | image |
 | `llmGenerate` | AI text generation | text, image | text |
 | `splitGrid` | Split image into grid cells | image | reference |
+| `generateAudio` | AI audio/TTS generation | text | audio |
+| `audioInput` | Load/upload audio files | audio | audio |
 | `glbViewer` | Load/display 3D GLB models | none | image |
 | `output` | Display final result | image | none |
 
@@ -93,6 +95,7 @@ LLM models:
 |-------------|-------------|-------------|
 | `image` | Base64 data URL | Visual content |
 | `text` | String | Text content |
+| `audio` | Base64 data URL | Audio content |
 
 ### Connection Rules
 
@@ -113,6 +116,10 @@ Returns `{ images: string[], text: string | null }`.
 - `prompt` → `data.prompt`
 - `llmGenerate` → `data.outputText`
 
+**Audio data extracted from:**
+- `audioInput` → `data.audioFile`
+- `generateAudio` → `data.outputAudio`
+
 ## Keyboard Shortcuts
 
 - `Cmd/Ctrl + Enter` - Run workflow
@@ -123,6 +130,7 @@ Returns `{ images: string[], text: string | null }`.
 - `Shift + V` - Add video (generateVideo) node
 - `Shift + L` - Add LLM node
 - `Shift + A` - Add annotation node
+- `Shift + T` - Add audio (generateAudio) node
 - `H` - Stack selected nodes horizontally
 - `V` - Stack selected nodes vertically
 - `G` - Arrange selected nodes in grid

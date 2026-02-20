@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { ProviderType, ModelInputDef } from "@/types";
 import { ModelParameter } from "@/lib/providers/types";
 import { useProviderApiKeys } from "@/store/workflowStore";
@@ -267,12 +267,28 @@ interface ParameterInputProps {
 }
 
 /**
- * Individual parameter input based on type
+ * Individual parameter input based on type.
+ * Text and number inputs use local state during editing to prevent
+ * cursor-jump issues caused by React Flow re-renders on store updates.
  */
 function ParameterInput({ param, value, onChange }: ParameterInputProps) {
   const displayName = param.name
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+
+  // Local state for text/number inputs to prevent cursor jumping
+  const [localValue, setLocalValue] = useState<string>(() => {
+    if (value === undefined || value === null) return "";
+    return String(value);
+  });
+  const isFocusedRef = useRef(false);
+
+  // Sync from store when not focused (external changes)
+  useEffect(() => {
+    if (!isFocusedRef.current) {
+      setLocalValue(value === undefined || value === null ? "" : String(value));
+    }
+  }, [value]);
 
   // Determine input type and render accordingly
   if (param.enum && param.enum.length > 0) {
@@ -336,15 +352,13 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
   }
 
   if (param.type === "number" || param.type === "integer") {
-    // Number: render as number input with validation
-    const numValue = value !== undefined ? Number(value) : "";
     const hasMin = param.minimum !== undefined;
     const hasMax = param.maximum !== undefined;
 
     // Validate current value against constraints
     let validationError: string | null = null;
-    if (value !== undefined && value !== "" && !isNaN(Number(value))) {
-      const num = Number(value);
+    if (localValue !== "" && !isNaN(Number(localValue))) {
+      const num = Number(localValue);
       if (hasMin && num < param.minimum!) {
         validationError = `Min: ${param.minimum}`;
       } else if (hasMax && num > param.maximum!) {
@@ -369,16 +383,20 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
         </label>
         <input
           type="number"
-          value={numValue}
+          value={localValue}
           min={param.minimum}
           max={param.maximum}
           step={param.type === "integer" ? 1 : 0.1}
+          onFocus={() => { isFocusedRef.current = true; }}
           onChange={(e) => {
-            const val = e.target.value;
-            if (val === "") {
+            setLocalValue(e.target.value);
+          }}
+          onBlur={() => {
+            isFocusedRef.current = false;
+            if (localValue === "") {
               onChange(undefined);
             } else {
-              const num = param.type === "integer" ? parseInt(val, 10) : parseFloat(val);
+              const num = param.type === "integer" ? parseInt(localValue, 10) : parseFloat(localValue);
               onChange(isNaN(num) ? undefined : num);
             }
           }}
@@ -401,7 +419,7 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
     return null;
   }
 
-  // Default: string input
+  // Default: string input — uses local state, syncs to store on blur
   return (
     <div className="flex flex-col gap-0.5">
       <label
@@ -412,8 +430,15 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
       </label>
       <input
         type="text"
-        value={(value as string) ?? ""}
-        onChange={(e) => onChange(e.target.value || undefined)}
+        value={localValue}
+        onFocus={() => { isFocusedRef.current = true; }}
+        onChange={(e) => {
+          setLocalValue(e.target.value);
+        }}
+        onBlur={() => {
+          isFocusedRef.current = false;
+          onChange(localValue || undefined);
+        }}
         placeholder={param.default !== undefined ? `Default: ${param.default}` : undefined}
         className="nodrag nopan w-full text-[9px] py-0.5 px-1 border border-neutral-700 rounded bg-neutral-900/50 focus:outline-none focus:ring-1 focus:ring-neutral-600 text-neutral-300 placeholder:text-neutral-600"
       />

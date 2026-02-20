@@ -16,7 +16,7 @@ export interface GenerateRequest {
   resolution?: Resolution; // Only for Nano Banana Pro
   model?: ModelType;
   useGoogleSearch?: boolean; // Only for Nano Banana Pro
-  mediaType?: "image" | "video" | "3d"; // Indicates expected output type for provider routing
+  mediaType?: "image" | "video" | "3d" | "audio"; // Indicates expected output type for provider routing
 }
 
 export interface GenerateResponse {
@@ -24,8 +24,10 @@ export interface GenerateResponse {
   image?: string;
   video?: string;
   videoUrl?: string; // For large videos, return URL directly
+  audio?: string; // Base64 audio data
+  audioUrl?: string; // For large audio, return URL directly
   model3dUrl?: string; // For 3D models, return GLB URL directly
-  contentType?: "image" | "video" | "3d";
+  contentType?: "image" | "video" | "3d" | "audio";
   error?: string;
   cost?: number; // Generation cost in USD (from provider pricing)
 }

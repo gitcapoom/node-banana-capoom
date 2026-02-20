@@ -49,6 +49,10 @@ const createDefaultState = (overrides = {}) => ({
   setUseExternalImageStorage: mockSetUseExternalImageStorage,
   updateProviderApiKey: mockUpdateProviderApiKey,
   toggleProvider: mockToggleProvider,
+  maxConcurrentCalls: 3,
+  setMaxConcurrentCalls: vi.fn(),
+  canvasNavigationSettings: { panMode: "space", zoomMode: "altScroll", selectionMode: "click" },
+  updateCanvasNavigationSettings: vi.fn(),
   ...overrides,
 });
 
@@ -181,7 +185,7 @@ describe("ProjectSetupModal", () => {
       );
 
       const nameInput = screen.getByPlaceholderText("my-project") as HTMLInputElement;
-      const directoryInput = screen.getByPlaceholderText("//server/share/projects/my-project") as HTMLInputElement;
+      const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
 
       expect(nameInput.value).toBe("");
       expect(directoryInput.value).toBe("");
@@ -248,7 +252,7 @@ describe("ProjectSetupModal", () => {
       );
 
       const nameInput = screen.getByPlaceholderText("my-project") as HTMLInputElement;
-      const directoryInput = screen.getByPlaceholderText("//server/share/projects/my-project") as HTMLInputElement;
+      const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
 
       expect(nameInput.value).toBe("My Existing Project");
       expect(directoryInput.value).toBe("/path/to/project");
@@ -289,7 +293,7 @@ describe("ProjectSetupModal", () => {
       );
 
       // Fill directory but not name
-      const directoryInput = screen.getByPlaceholderText("//server/share/projects/my-project");
+      const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project");
       fireEvent.change(directoryInput, { target: { value: "/path/to/project" } });
 
       // Click Create
@@ -358,7 +362,7 @@ describe("ProjectSetupModal", () => {
       fireEvent.change(screen.getByPlaceholderText("my-project"), {
         target: { value: "My Project" },
       });
-      fireEvent.change(screen.getByPlaceholderText("//server/share/projects/my-project"), {
+      fireEvent.change(screen.getByPlaceholderText("/Users/username/projects/my-project"), {
         target: { value: "/nonexistent/path" },
       });
 
@@ -387,7 +391,7 @@ describe("ProjectSetupModal", () => {
       fireEvent.change(screen.getByPlaceholderText("my-project"), {
         target: { value: "My Project" },
       });
-      fireEvent.change(screen.getByPlaceholderText("//server/share/projects/my-project"), {
+      fireEvent.change(screen.getByPlaceholderText("/Users/username/projects/my-project"), {
         target: { value: "AT-ALGKG9VR/Users/guy/Desktop/AI Project" },
       });
 
@@ -438,7 +442,7 @@ describe("ProjectSetupModal", () => {
       fireEvent.change(screen.getByPlaceholderText("my-project"), {
         target: { value: "My Project" },
       });
-      fireEvent.change(screen.getByPlaceholderText("//server/share/projects/my-project"), {
+      fireEvent.change(screen.getByPlaceholderText("/Users/username/projects/my-project"), {
         target: { value: "/path/to/file.txt" },
       });
 
@@ -485,7 +489,7 @@ describe("ProjectSetupModal", () => {
       fireEvent.change(screen.getByPlaceholderText("my-project"), {
         target: { value: "My New Project" },
       });
-      fireEvent.change(screen.getByPlaceholderText("//server/share/projects/my-project"), {
+      fireEvent.change(screen.getByPlaceholderText("/Users/username/projects/my-project"), {
         target: { value: "/path/to/project" },
       });
 
@@ -531,7 +535,7 @@ describe("ProjectSetupModal", () => {
       fireEvent.change(screen.getByPlaceholderText("my-project"), {
         target: { value: "My Project" },
       });
-      fireEvent.change(screen.getByPlaceholderText("//server/share/projects/my-project"), {
+      fireEvent.change(screen.getByPlaceholderText("/Users/username/projects/my-project"), {
         target: { value: "/path/to/project" },
       });
 
@@ -577,7 +581,7 @@ describe("ProjectSetupModal", () => {
       fireEvent.change(screen.getByPlaceholderText("my-project"), {
         target: { value: "My Project" },
       });
-      fireEvent.change(screen.getByPlaceholderText("//server/share/projects/my-project"), {
+      fireEvent.change(screen.getByPlaceholderText("/Users/username/projects/my-project"), {
         target: { value: "/path/to/project" },
       });
 
@@ -664,7 +668,7 @@ describe("ProjectSetupModal", () => {
       fireEvent.change(screen.getByPlaceholderText("my-project"), {
         target: { value: "My Project" },
       });
-      fireEvent.change(screen.getByPlaceholderText("//server/share/projects/my-project"), {
+      fireEvent.change(screen.getByPlaceholderText("/Users/username/projects/my-project"), {
         target: { value: "/path/to/project" },
       });
 

@@ -543,6 +543,8 @@ export async function generateWithFalQueue(
         mediaUrl = result.model_urls.url;
       } else if (result.video && result.video.url) {
         mediaUrl = result.video.url;
+      } else if (result.audio && result.audio.url) {
+        mediaUrl = result.audio.url;
       } else if (result.images && Array.isArray(result.images) && result.images.length > 0) {
         mediaUrl = result.images[0].url;
       } else if (result.image && result.image.url) {
@@ -556,6 +558,25 @@ export async function generateWithFalQueue(
         return {
           success: false,
           error: "No media URL in response",
+        };
+      }
+
+      const is3DModel = input.model.capabilities.some(c => c.includes("3d"));
+      const isVideoModel = input.model.capabilities.some(c => c.includes("video"));
+      const isAudioModel = input.model.capabilities.some(c => c.includes("audio"));
+
+      // For 3D models, return URL directly (GLB files are binary — don't base64 encode)
+      if (is3DModel) {
+        console.log(`[API:${requestId}] SUCCESS - Returning 3D model URL`);
+        return {
+          success: true,
+          outputs: [
+            {
+              type: "3d",
+              data: "",
+              url: mediaUrl,
+            },
+          ],
         };
       }
 
@@ -576,25 +597,26 @@ export async function generateWithFalQueue(
         };
       }
 
-      const is3DModel = input.model.capabilities.some(c => c.includes("3d"));
-      const isVideoModel = input.model.capabilities.some(c => c.includes("video"));
+      // Detect actual media type from response content-type, falling back to model hints
+      const rawContentType = mediaResponse.headers.get("content-type") || "";
+      const isAudioResponse = rawContentType.startsWith("audio/") || (!rawContentType.startsWith("video/") && !rawContentType.startsWith("image/") && isAudioModel);
 
-      // For 3D models, return URL directly (GLB files are binary — don't base64 encode)
-      if (is3DModel) {
-        console.log(`[API:${requestId}] SUCCESS - Returning 3D model URL`);
+      if (isAudioResponse) {
+        const audioContentType = rawContentType.startsWith("audio/") ? rawContentType : "audio/mpeg";
+        const audioBuffer = await mediaResponse.arrayBuffer();
+        const audioBase64 = Buffer.from(audioBuffer).toString("base64");
+        console.log(`[API:${requestId}] SUCCESS - Returning audio`);
         return {
           success: true,
-          outputs: [
-            {
-              type: "3d",
-              data: "",
-              url: mediaUrl,
-            },
-          ],
+          outputs: [{
+            type: "audio",
+            data: `data:${audioContentType};base64,${audioBase64}`,
+            url: mediaUrl,
+          }],
         };
       }
 
-      const contentType = mediaResponse.headers.get("content-type") || (isVideoModel ? "video/mp4" : "image/png");
+      const contentType = rawContentType || (isVideoModel ? "video/mp4" : "image/png");
       const isVideo = contentType.startsWith("video/");
 
       const mediaArrayBuffer = await mediaResponse.arrayBuffer();

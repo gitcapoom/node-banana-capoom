@@ -32,6 +32,7 @@ export type NodeType =
   | "promptConstructor"
   | "nanoBanana"
   | "generateVideo"
+  | "generateAudio"
   | "llmGenerate"
   | "splitGrid"
   | "output"
@@ -39,6 +40,8 @@ export type NodeType =
   | "imageCompare"
   | "videoStitch"
   | "easeCurve"
+  | "videoTrim"
+  | "videoFrameGrab"
   | "generate3d"
   | "glbViewer"
   | "spzViewer"
@@ -252,6 +255,34 @@ export interface WorldLabsWorldNodeData extends BaseNodeData {
 }
 
 /**
+ * Carousel audio item for per-node audio history
+ */
+export interface CarouselAudioItem {
+  id: string;
+  timestamp: number;
+  prompt: string;
+  model: string; // Model ID for audio (not ModelType since external providers)
+}
+
+/**
+ * Generate Audio node - AI audio/TTS generation
+ */
+export interface GenerateAudioNodeData extends BaseNodeData {
+  inputPrompt: string | null;
+  outputAudio: string | null; // Audio data URL
+  outputAudioRef?: string; // External audio reference for storage optimization
+  selectedModel?: SelectedModel; // Required for audio generation
+  parameters?: Record<string, unknown>; // Model-specific parameters (voice, speed, etc.)
+  inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  status: NodeStatus;
+  error: string | null;
+  audioHistory: CarouselAudioItem[]; // Carousel history (IDs only)
+  selectedAudioHistoryIndex: number; // Currently selected audio in carousel
+  duration: number | null; // Duration in seconds
+  format: string | null; // MIME type (audio/mp3, audio/wav, etc.)
+}
+
+/**
  * LLM Generate node - AI text generation
  */
 export interface LLMGenerateNodeData extends BaseNodeData {
@@ -275,7 +306,8 @@ export interface OutputNodeData extends BaseNodeData {
   image: string | null;
   imageRef?: string; // External image reference for storage optimization
   video?: string | null; // Video data URL or HTTP URL
-  contentType?: "image" | "video"; // Explicit content type hint
+  audio?: string | null; // Audio data URL or HTTP URL
+  contentType?: "image" | "video" | "audio"; // Explicit content type hint
   outputFilename?: string; // Custom filename for saved outputs (without extension)
 }
 
@@ -332,6 +364,30 @@ export interface EaseCurveNodeData extends BaseNodeData {
   error: string | null;
   progress: number;
   encoderSupported: boolean | null;
+}
+
+/**
+ * Video Trim node - trims a video clip to a user-defined start/end time range
+ */
+export interface VideoTrimNodeData extends BaseNodeData {
+  startTime: number;          // Trim start in seconds (default 0)
+  endTime: number;            // Trim end in seconds (default 0 = full duration, set on video load)
+  duration: number | null;    // Source video duration (populated when video loads metadata)
+  outputVideo: string | null; // Trimmed video blob URL or data URL
+  status: NodeStatus;
+  error: string | null;
+  progress: number;           // 0-100 processing progress
+  encoderSupported: boolean | null;
+}
+
+/**
+ * Video Frame Grab node - extracts the first or last frame from a video as a full-resolution PNG image
+ */
+export interface VideoFrameGrabNodeData extends BaseNodeData {
+  framePosition: "first" | "last";   // Which frame to extract
+  outputImage: string | null;        // Extracted frame as base64 PNG data URL
+  status: NodeStatus;
+  error: string | null;
 }
 
 /**
@@ -423,6 +479,7 @@ export type WorkflowNodeData =
   | Generate3DNodeData
   | WorldLabsPanoNodeData
   | WorldLabsWorldNodeData
+  | GenerateAudioNodeData
   | LLMGenerateNodeData
   | SplitGridNodeData
   | OutputNodeData
@@ -430,6 +487,8 @@ export type WorkflowNodeData =
   | ImageCompareNodeData
   | VideoStitchNodeData
   | EaseCurveNodeData
+  | VideoTrimNodeData
+  | VideoFrameGrabNodeData
   | GLBViewerNodeData
   | SpzViewerNodeData
   | PanoCropNodeData
@@ -479,6 +538,14 @@ export interface Generate3DNodeDefaults {
   };
 }
 
+export interface GenerateAudioNodeDefaults {
+  selectedModel?: {
+    provider: ProviderType;
+    modelId: string;
+    displayName: string;
+  };
+}
+
 export interface LLMNodeDefaults {
   provider?: LLMProvider;
   model?: LLMModelType;
@@ -490,5 +557,6 @@ export interface NodeDefaultsConfig {
   generateImage?: GenerateImageNodeDefaults;
   generateVideo?: GenerateVideoNodeDefaults;
   generate3d?: Generate3DNodeDefaults;
+  generateAudio?: GenerateAudioNodeDefaults;
   llm?: LLMNodeDefaults;
 }

@@ -29,6 +29,9 @@ export type { GenerateVideoOptions } from "./generateVideoExecutor";
 export { executeGenerate3D } from "./generate3dExecutor";
 export type { Generate3DOptions } from "./generate3dExecutor";
 
+export { executeGenerateAudio } from "./generateAudioExecutor";
+export type { GenerateAudioOptions } from "./generateAudioExecutor";
+
 export { executeLlmGenerate } from "./llmGenerateExecutor";
 export type { LlmGenerateOptions } from "./llmGenerateExecutor";
 
@@ -37,6 +40,8 @@ export { executeSplitGrid } from "./splitGridExecutor";
 export {
   executeVideoStitch,
   executeEaseCurve,
+  executeVideoTrim,
+  executeVideoFrameGrab,
 } from "./videoProcessingExecutors";
 
 export { executeWorldLabsPano } from "./worldLabsPanoExecutor";

@@ -612,6 +612,42 @@ function getKieSchema(modelId: string): ExtractedSchema {
         { name: "image_urls", type: "image", required: true, label: "Image", isArray: true },
       ],
     },
+    // ============ Audio/TTS models ============
+    "elevenlabs/turbo-v2.5": {
+      parameters: [
+        { name: "voice_id", type: "string", description: "Voice ID to use for synthesis" },
+        { name: "stability", type: "number", description: "Voice stability (0-1)", default: 0.5, minimum: 0, maximum: 1 },
+        { name: "similarity_boost", type: "number", description: "Similarity boost (0-1)", default: 0.75, minimum: 0, maximum: 1 },
+        { name: "output_format", type: "string", description: "Audio output format", enum: ["mp3_44100_128", "mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"], default: "mp3_44100_128" },
+      ],
+      inputs: [{ name: "prompt", type: "text", required: true, label: "Text" }],
+    },
+    "elevenlabs/multilingual-v2": {
+      parameters: [
+        { name: "voice_id", type: "string", description: "Voice ID to use for synthesis" },
+        { name: "stability", type: "number", description: "Voice stability (0-1)", default: 0.5, minimum: 0, maximum: 1 },
+        { name: "similarity_boost", type: "number", description: "Similarity boost (0-1)", default: 0.75, minimum: 0, maximum: 1 },
+        { name: "output_format", type: "string", description: "Audio output format", enum: ["mp3_44100_128", "mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"], default: "mp3_44100_128" },
+      ],
+      inputs: [{ name: "prompt", type: "text", required: true, label: "Text" }],
+    },
+    "elevenlabs/text-to-dialogue-v3": {
+      parameters: [
+        { name: "stability", type: "number", description: "Voice stability (0-1)", default: 0.5, minimum: 0, maximum: 1 },
+        { name: "similarity_boost", type: "number", description: "Similarity boost (0-1)", default: 0.75, minimum: 0, maximum: 1 },
+        { name: "output_format", type: "string", description: "Audio output format", enum: ["mp3_44100_128", "mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"], default: "mp3_44100_128" },
+      ],
+      inputs: [{ name: "prompt", type: "text", required: true, label: "Text / Dialogue Script" }],
+    },
+    "elevenlabs/sound-effect-v2": {
+      parameters: [
+        { name: "duration_seconds", type: "number", description: "Duration in seconds (0.5-22)", minimum: 0.5, maximum: 22 },
+        { name: "loop", type: "boolean", description: "Enable smooth looping", default: false },
+        { name: "prompt_influence", type: "number", description: "How closely to follow the prompt (0-1)", default: 0.3, minimum: 0, maximum: 1 },
+        { name: "output_format", type: "string", description: "Audio output format", enum: ["mp3_44100_128", "mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"], default: "mp3_44100_128" },
+      ],
+      inputs: [{ name: "prompt", type: "text", required: true, label: "Sound Description" }],
+    },
     // ============ Video models ============
     "grok-imagine/text-to-video": {
       parameters: [

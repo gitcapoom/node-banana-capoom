@@ -284,9 +284,9 @@ describe("ModelParameters", () => {
         expect(screen.getByRole("textbox")).toBeInTheDocument();
       });
 
-      fireEvent.change(screen.getByRole("textbox"), {
-        target: { value: "new value" },
-      });
+      const textbox = screen.getByRole("textbox");
+      fireEvent.change(textbox, { target: { value: "new value" } });
+      fireEvent.blur(textbox);
 
       expect(onParametersChange).toHaveBeenCalledWith({ prompt: "new value" });
     });

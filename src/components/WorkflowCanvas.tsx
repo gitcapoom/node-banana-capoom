@@ -29,6 +29,7 @@ import {
   GenerateImageNode,
   GenerateVideoNode,
   Generate3DNode,
+  GenerateAudioNode,
   LLMGenerateNode,
   SplitGridNode,
   OutputNode,
@@ -43,6 +44,8 @@ import {
   PanoViewerNode,
   PanoEditorNode,
   MaskPainterNode,
+  VideoTrimNode,
+  VideoFrameGrabNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -72,6 +75,7 @@ const nodeTypes: NodeTypes = {
   nanoBanana: GenerateImageNode,
   generateVideo: GenerateVideoNode,
   generate3d: Generate3DNode,
+  generateAudio: GenerateAudioNode,
   llmGenerate: LLMGenerateNode,
   splitGrid: SplitGridNode,
   output: OutputNode,
@@ -79,6 +83,8 @@ const nodeTypes: NodeTypes = {
   imageCompare: ImageCompareNode,
   videoStitch: VideoStitchNode,
   easeCurve: EaseCurveNode,
+  videoTrim: VideoTrimNode,
+  videoFrameGrab: VideoFrameGrabNode,
   glbViewer: GLBViewerNode,
   spzViewer: SpzViewerNode,
   worldLabsPano: WorldLabsPanoNode,
@@ -123,7 +129,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "imageInput":
       return { inputs: ["reference"], outputs: ["image"] };
     case "audioInput":
-      return { inputs: [], outputs: ["audio"] };
+      return { inputs: ["audio"], outputs: ["audio"] };
     case "annotation":
       return { inputs: ["image"], outputs: ["image"] };
     case "prompt":
@@ -136,12 +142,14 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image", "text"], outputs: ["video"] };
     case "generate3d":
       return { inputs: ["image", "text"], outputs: ["3d"] };
+    case "generateAudio":
+      return { inputs: ["text"], outputs: ["audio"] };
     case "llmGenerate":
       return { inputs: ["text", "image"], outputs: ["text"] };
     case "splitGrid":
       return { inputs: ["image"], outputs: ["reference"] };
     case "output":
-      return { inputs: ["image", "video"], outputs: [] };
+      return { inputs: ["image", "video", "audio"], outputs: [] };
     case "outputGallery":
       return { inputs: ["image"], outputs: [] };
     case "imageCompare":
@@ -150,6 +158,10 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["video", "audio"], outputs: ["video"] };
     case "easeCurve":
       return { inputs: ["video", "easeCurve"], outputs: ["video", "easeCurve"] };
+    case "videoTrim":
+      return { inputs: ["video"], outputs: ["video"] };
+    case "videoFrameGrab":
+      return { inputs: ["video"], outputs: ["image"] };
     case "glbViewer":
       return { inputs: ["3d"], outputs: ["image"] };
     case "spzViewer":
@@ -356,7 +368,7 @@ export function WorkflowCanvas() {
         if (!targetNode) return false;
 
         const targetNodeType = targetNode.type;
-        if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "easeCurve" || targetNodeType === "output") {
+        if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "easeCurve" || targetNodeType === "videoTrim" || targetNodeType === "videoFrameGrab" || targetNodeType === "output") {
           // For output node, we allow video even though its handle is typed as "image"
           // because output node can display both images and videos
           return true;
@@ -370,8 +382,12 @@ export function WorkflowCanvas() {
         return sourceType === "3d" && targetType === "3d";
       }
 
-      // Audio connections: audio handles can only connect to audio handles
+      // Audio connections: audio handles connect to audio handles, plus output node
       if (sourceType === "audio" || targetType === "audio") {
+        if (sourceType === "audio") {
+          const targetNode = nodes.find((n) => n.id === connection.target);
+          if (targetNode?.type === "output") return true;
+        }
         return sourceType === "audio" && targetType === "audio";
       }
 
@@ -548,6 +564,11 @@ export function WorkflowCanvas() {
         // For video output connecting to output node, allow "image" input (output node accepts both)
         if (handleType === "video" && needInput && node.type === "output") {
           return "image";
+        }
+
+        // For audio output connecting to output node, use the "audio" input handle
+        if (handleType === "audio" && needInput && node.type === "output") {
+          return "audio";
         }
 
         // Then check each handle's type
@@ -836,7 +857,7 @@ export function WorkflowCanvas() {
           sourceHandleIdForNewNode = "image";
         }
       } else if (handleType === "text") {
-        if (nodeType === "nanoBanana" || nodeType === "generateVideo" || nodeType === "llmGenerate") {
+        if (nodeType === "nanoBanana" || nodeType === "generateVideo" || nodeType === "generateAudio" || nodeType === "llmGenerate") {
           targetHandleId = "text";
           // llmGenerate also has a text output
           if (nodeType === "llmGenerate") {
@@ -856,6 +877,14 @@ export function WorkflowCanvas() {
           // EaseCurve accepts video input and outputs video
           targetHandleId = "video";
           sourceHandleIdForNewNode = "video";
+        } else if (nodeType === "videoTrim") {
+          // VideoTrim accepts video input and outputs video
+          targetHandleId = "video";
+          sourceHandleIdForNewNode = "video";
+        } else if (nodeType === "videoFrameGrab") {
+          // VideoFrameGrab accepts video input and outputs image
+          targetHandleId = "video";
+          sourceHandleIdForNewNode = "image";
         } else if (nodeType === "generateVideo") {
           // GenerateVideo outputs video
           sourceHandleIdForNewNode = "video";
@@ -865,10 +894,17 @@ export function WorkflowCanvas() {
         }
       } else if (handleType === "audio") {
         if (nodeType === "audioInput") {
-          // AudioInput outputs audio
+          // Audio node: accepts audio input and outputs audio
+          targetHandleId = "audio";
+          sourceHandleIdForNewNode = "audio";
+        } else if (nodeType === "generateAudio") {
+          // GenerateAudio outputs audio (no audio input to wire to)
           sourceHandleIdForNewNode = "audio";
         } else if (nodeType === "videoStitch") {
           // VideoStitch accepts audio
+          targetHandleId = "audio";
+        } else if (nodeType === "output") {
+          // Output accepts audio on its audio handle
           targetHandleId = "audio";
         }
       } else if (handleType === "3d") {
@@ -1111,6 +1147,9 @@ export function WorkflowCanvas() {
           case "w":
             nodeType = "worldLabsPano";
             break;
+          case "t":
+            nodeType = "generateAudio";
+            break;
         }
 
         if (nodeType) {
@@ -1126,6 +1165,7 @@ export function WorkflowCanvas() {
             nanoBanana: { width: 300, height: 300 },
             generateVideo: { width: 300, height: 300 },
             generate3d: { width: 300, height: 300 },
+            generateAudio: { width: 300, height: 280 },
             llmGenerate: { width: 320, height: 360 },
             splitGrid: { width: 300, height: 320 },
             output: { width: 320, height: 320 },
@@ -1133,6 +1173,8 @@ export function WorkflowCanvas() {
             imageCompare: { width: 400, height: 360 },
             videoStitch: { width: 400, height: 280 },
             easeCurve: { width: 340, height: 480 },
+            videoTrim: { width: 360, height: 360 },
+            videoFrameGrab: { width: 320, height: 320 },
             glbViewer: { width: 360, height: 380 },
             spzViewer: { width: 300, height: 280 },
             worldLabsPano: { width: 320, height: 380 },
@@ -1710,6 +1752,8 @@ export function WorkflowCanvas() {
                 return "#9333ea";
               case "generate3d":
                 return "#fb923c";
+              case "generateAudio":
+                return "#d946ef"; // fuchsia-500 (audio/TTS)
               case "llmGenerate":
                 return "#06b6d4";
               case "splitGrid":
@@ -1724,6 +1768,10 @@ export function WorkflowCanvas() {
                 return "#f97316";
               case "easeCurve":
                 return "#bef264"; // lime-300 (easy-peasy-ease)
+              case "videoTrim":
+                return "#60a5fa"; // blue-400 (trim/cut)
+              case "videoFrameGrab":
+                return "#38bdf8"; // sky-400 (image from video)
               case "glbViewer":
                 return "#38bdf8"; // sky-400 (3D viewport)
               case "spzViewer":

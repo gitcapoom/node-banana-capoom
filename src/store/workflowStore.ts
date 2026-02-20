@@ -70,10 +70,13 @@ import {
   executeNanoBanana,
   executeGenerateVideo,
   executeGenerate3D,
+  executeGenerateAudio,
   executeLlmGenerate,
   executeSplitGrid,
   executeVideoStitch,
   executeEaseCurve,
+  executeVideoTrim,
+  executeVideoFrameGrab,
   executeGlbViewer,
   executeSpzViewer,
   executeWorldLabsPano,
@@ -574,7 +577,7 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         y: node.position.y + offset.y,
       },
       selected: true, // Select newly pasted nodes
-      data: { ...node.data }, // Deep copy data
+      data: JSON.parse(JSON.stringify(node.data)),
     }));
 
     // Create new edges with updated source/target IDs
@@ -595,6 +598,20 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
       nodes: [...updatedNodes, ...newNodes] as WorkflowNode[],
       edges: [...edges, ...newEdges],
       hasUnsavedChanges: true,
+    });
+
+    // Fix React Flow selection race condition: After paste, React Flow's internal
+    // reconciliation may fire onNodesChange with stale selection state that re-selects
+    // original nodes. Schedule an explicit selection correction after reconciliation.
+    const newNodeIdSet = new Set(newNodes.map(n => n.id));
+    requestAnimationFrame(() => {
+      const currentNodes = get().nodes;
+      const selectionChanges: NodeChange<WorkflowNode>[] = currentNodes.map(n => ({
+        type: 'select' as const,
+        id: n.id,
+        selected: newNodeIdSet.has(n.id),
+      }));
+      get().onNodesChange(selectionChanges);
     });
   },
 
@@ -876,10 +893,17 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
 
       switch (node.type) {
           case "imageInput":
-          case "audioInput":
           case "panoCrop":
             // Data source nodes - no execution needed
             break;
+          case "audioInput": {
+            // If audio is connected from upstream, use it (connection wins over upload)
+            const audioInputs = get().getConnectedInputs(node.id);
+            if (audioInputs.audio.length > 0 && audioInputs.audio[0]) {
+              get().updateNodeData(node.id, { audioFile: audioInputs.audio[0] });
+            }
+            break;
+          }
           case "glbViewer":
             await executeGlbViewer(executionCtx);
             break;
@@ -910,6 +934,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           case "generate3d":
             await executeGenerate3D(executionCtx);
             break;
+          case "generateAudio":
+            await executeGenerateAudio(executionCtx);
+            break;
           case "llmGenerate":
             await executeLlmGenerate(executionCtx);
             break;
@@ -930,6 +957,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             break;
           case "easeCurve":
             await executeEaseCurve(executionCtx);
+            break;
+          case "videoTrim":
+            await executeVideoTrim(executionCtx);
+            break;
+          case "videoFrameGrab":
+            await executeVideoFrameGrab(executionCtx);
             break;
         }
     }; // End of executeSingleNode helper
@@ -968,21 +1001,21 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
             batch.map((node) => executeSingleNode(node, abortController.signal))
           );
 
-          // Check for failures (fail-fast behavior)
-          const failed = results.find(
-            (r): r is PromiseRejectedResult =>
-              r.status === 'rejected' &&
-              !(r.reason instanceof DOMException && r.reason.name === 'AbortError')
-          );
-
-          if (failed) {
-            // Log the failure and abort remaining executions
-            logger.error('workflow.error', 'Node execution failed in parallel batch', {
-              level: levelIdx,
-              error: failed.reason instanceof Error ? failed.reason.message : String(failed.reason),
-            });
-            abortController.abort();
-            throw failed.reason;
+          // Check for failures with node context (fail-fast behavior)
+          for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            if (r.status === 'rejected' &&
+                !(r.reason instanceof DOMException && r.reason.name === 'AbortError')) {
+              const failedNode = batch[i];
+              logger.error('workflow.error', 'Node execution failed in parallel batch', {
+                level: levelIdx,
+                nodeId: failedNode.id,
+                nodeType: failedNode.type,
+                error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+              });
+              abortController.abort();
+              throw r.reason;
+            }
           }
         }
       }
@@ -1065,6 +1098,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         await executeGenerateVideo(executionCtx, regenOptions);
       } else if (node.type === "generate3d") {
         await executeGenerate3D(executionCtx, regenOptions);
+      } else if (node.type === "generateAudio") {
+        await executeGenerateAudio(executionCtx, regenOptions);
       } else if (node.type === "splitGrid") {
         await executeSplitGrid(executionCtx);
       } else if (node.type === "videoStitch") {
@@ -1085,6 +1120,16 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         await executePanoViewer(executionCtx);
       } else if (node.type === "panoEditor") {
         await executePanoEditor(executionCtx);
+      } else if (node.type === "videoTrim") {
+        await executeVideoTrim(executionCtx);
+        set({ isRunning: false, currentNodeIds: [] });
+        await logger.endSession();
+        return;
+      } else if (node.type === "videoFrameGrab") {
+        await executeVideoFrameGrab(executionCtx);
+        set({ isRunning: false, currentNodeIds: [] });
+        await logger.endSession();
+        return;
       }
 
       // After regeneration, execute directly connected downstream consumer nodes
@@ -1227,6 +1272,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         case "llmGenerate":
           await executeLlmGenerate(executionCtx, regenOptions);
           break;
+        case "generateAudio":
+          await executeGenerateAudio(executionCtx, regenOptions);
+          break;
         case "splitGrid":
           await executeSplitGrid(executionCtx);
           break;
@@ -1244,6 +1292,12 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           break;
         case "easeCurve":
           await executeEaseCurve(executionCtx);
+          break;
+        case "videoTrim":
+          await executeVideoTrim(executionCtx);
+          break;
+        case "videoFrameGrab":
+          await executeVideoFrameGrab(executionCtx);
           break;
       }
     };

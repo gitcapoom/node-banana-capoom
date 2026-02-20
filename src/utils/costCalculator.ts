@@ -258,6 +258,9 @@ export function hasNonGeminiProviders(nodes: WorkflowNode[]): boolean {
       const data = node.data as Generate3DNodeData;
       return data.selectedModel?.provider !== undefined && data.selectedModel.provider !== "gemini";
     }
+    if (node.type === "generateAudio") {
+      return true; // Audio nodes are always non-Gemini
+    }
     return false;
   });
 }

@@ -7,8 +7,9 @@ import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { usePromptAutocomplete } from "@/hooks/usePromptAutocomplete";
 import { useWorkflowStore } from "@/store/workflowStore";
-import { PromptConstructorNodeData, PromptNodeData, AvailableVariable } from "@/types";
+import { PromptConstructorNodeData, PromptNodeData, LLMGenerateNodeData, AvailableVariable } from "@/types";
 import { PromptConstructorEditorModal } from "@/components/modals/PromptConstructorEditorModal";
+import { parseVarTags } from "@/utils/parseVarTags";
 
 type PromptConstructorNodeType = Node<PromptConstructorNodeData, "promptConstructor">;
 
@@ -35,21 +36,54 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
     }
   }, [nodeData.template, isEditing]);
 
-  // Get available variables from connected prompt nodes
+  // Get available variables from connected prompt nodes (named variables + inline <var> tags)
   const availableVariables = useMemo((): AvailableVariable[] => {
-    const connectedPromptNodes = edges
+    const connectedTextNodes = edges
       .filter((e) => e.target === id && e.targetHandle === "text")
       .map((e) => nodes.find((n) => n.id === e.source))
-      .filter((n): n is typeof nodes[0] => n !== undefined && n.type === "prompt");
+      .filter((n): n is typeof nodes[0] => n !== undefined);
 
     const vars: AvailableVariable[] = [];
-    connectedPromptNodes.forEach((promptNode) => {
-      const promptData = promptNode.data as PromptNodeData;
-      if (promptData.variableName) {
-        vars.push({
-          name: promptData.variableName,
-          value: promptData.prompt || "",
-          nodeId: promptNode.id,
+    const usedNames = new Set<string>();
+
+    // First pass: named variables from Prompt nodes (these take precedence)
+    connectedTextNodes.forEach((node) => {
+      if (node.type === "prompt") {
+        const promptData = node.data as PromptNodeData;
+        if (promptData.variableName) {
+          vars.push({
+            name: promptData.variableName,
+            value: promptData.prompt || "",
+            nodeId: node.id,
+          });
+          usedNames.add(promptData.variableName);
+        }
+      }
+    });
+
+    // Second pass: parse inline <var> tags from all connected text nodes
+    connectedTextNodes.forEach((node) => {
+      let text: string | null = null;
+      if (node.type === "prompt") {
+        text = (node.data as PromptNodeData).prompt || null;
+      } else if (node.type === "llmGenerate") {
+        text = (node.data as LLMGenerateNodeData).outputText || null;
+      } else if (node.type === "promptConstructor") {
+        const pcData = node.data as PromptConstructorNodeData;
+        text = pcData.outputText ?? pcData.template ?? null;
+      }
+
+      if (text) {
+        const parsed = parseVarTags(text);
+        parsed.forEach(({ name, value }) => {
+          if (!usedNames.has(name)) {
+            vars.push({
+              name,
+              value,
+              nodeId: `${node.id}-var-${name}`,
+            });
+            usedNames.add(name);
+          }
         });
       }
     });

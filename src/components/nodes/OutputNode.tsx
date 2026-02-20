@@ -15,26 +15,36 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const [showLightbox, setShowLightbox] = useState(false);
 
+  // Determine if content is audio
+  const isAudio = useMemo(() => {
+    if (nodeData.audio) return true;
+    if (nodeData.contentType === "audio") return true;
+    if (nodeData.image?.startsWith("data:audio/")) return true;
+    return false;
+  }, [nodeData.audio, nodeData.contentType, nodeData.image]);
+
   // Determine if content is video
   const isVideo = useMemo(() => {
+    if (isAudio) return false;
     if (nodeData.video) return true;
     if (nodeData.contentType === "video") return true;
     if (nodeData.image?.startsWith("data:video/")) return true;
     if (nodeData.image?.includes(".mp4") || nodeData.image?.includes(".webm")) return true;
     return false;
-  }, [nodeData.video, nodeData.contentType, nodeData.image]);
+  }, [isAudio, nodeData.video, nodeData.contentType, nodeData.image]);
 
-  // Get the content source (video or image)
+  // Get the content source (audio, video, or image)
   const contentSrc = useMemo(() => {
+    if (nodeData.audio) return nodeData.audio;
     if (nodeData.video) return nodeData.video;
     return nodeData.image;
-  }, [nodeData.video, nodeData.image]);
+  }, [nodeData.audio, nodeData.video, nodeData.image]);
 
   const handleDownload = useCallback(async () => {
     if (!contentSrc) return;
 
     const timestamp = Date.now();
-    const extension = isVideo ? "mp4" : "png";
+    const extension = isAudio ? "mp3" : isVideo ? "mp4" : "png";
     // Use custom filename if provided, otherwise use timestamp
     const filename = nodeData.outputFilename
       ? `${nodeData.outputFilename}.${extension}`
@@ -67,7 +77,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [contentSrc, isVideo, nodeData.outputFilename]);
+  }, [contentSrc, isAudio, isVideo, nodeData.outputFilename]);
 
   return (
     <>
@@ -88,37 +98,54 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
           id="image"
           data-handletype="image"
         />
+        <Handle
+          type="target"
+          position={Position.Left}
+          id="audio"
+          data-handletype="audio"
+          style={{ top: "60%", background: "rgb(167, 139, 250)" }}
+        />
 
         {contentSrc ? (
           <div className="flex-1 flex flex-col min-h-0 gap-2">
-            <div
-              className="relative cursor-pointer group flex-1 min-h-0"
-              onClick={() => setShowLightbox(true)}
-            >
-              {isVideo ? (
-                <video
+            {isAudio ? (
+              <div className="flex-1 flex items-center min-h-0 py-2">
+                <audio
                   src={contentSrc}
                   controls
-                  loop
-                  muted
-                  autoPlay
-                  playsInline
-                  className="w-full h-full object-contain rounded"
-                  onClick={(e) => e.stopPropagation()}
+                  className="w-full rounded"
                 />
-              ) : (
-                <img
-                  src={contentSrc}
-                  alt="Output"
-                  className="w-full h-full object-contain rounded"
-                />
-              )}
-              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center rounded pointer-events-none">
-                <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-2 py-1 rounded">
-                  View full size
-                </span>
               </div>
-            </div>
+            ) : (
+              <div
+                className="relative cursor-pointer group flex-1 min-h-0"
+                onClick={() => setShowLightbox(true)}
+              >
+                {isVideo ? (
+                  <video
+                    src={contentSrc}
+                    controls
+                    loop
+                    muted
+                    autoPlay
+                    playsInline
+                    className="w-full h-full object-contain rounded"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <img
+                    src={contentSrc}
+                    alt="Output"
+                    className="w-full h-full object-contain rounded"
+                  />
+                )}
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center rounded pointer-events-none">
+                  <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-2 py-1 rounded">
+                    View full size
+                  </span>
+                </div>
+              </div>
+            )}
             <button
               onClick={handleDownload}
               className="w-full py-1.5 bg-white hover:bg-neutral-200 text-neutral-900 text-[10px] font-medium rounded transition-colors shrink-0"
@@ -128,7 +155,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
           </div>
         ) : (
           <div className="w-full flex-1 min-h-[144px] border border-dashed border-neutral-600 rounded flex items-center justify-center">
-            <span className="text-neutral-500 text-[10px]">Waiting for image or video</span>
+            <span className="text-neutral-500 text-[10px]">Waiting for image, video, or audio</span>
           </div>
         )}
 
@@ -144,8 +171,8 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         </div>
       </BaseNode>
 
-      {/* Lightbox Modal */}
-      {showLightbox && contentSrc && (
+      {/* Lightbox Modal (skip for audio) */}
+      {showLightbox && contentSrc && !isAudio && (
         <div
           className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-8"
           onClick={() => setShowLightbox(false)}

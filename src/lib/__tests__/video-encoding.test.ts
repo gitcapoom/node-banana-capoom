@@ -8,7 +8,7 @@ import {
 describe("video-encoding", () => {
   describe("constants", () => {
     it("AVC_LEVEL_4_0 is correct codec string", () => {
-      expect(AVC_LEVEL_4_0).toBe("avc1.420028");
+      expect(AVC_LEVEL_4_0).toBe("avc1.640028");
     });
 
     it("AVC_LEVEL_5_1 is correct codec string", () => {

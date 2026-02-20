@@ -505,11 +505,14 @@ export function FloatingActionBar() {
         <div className="relative flex items-center" ref={runMenuRef}>
           <button
             onClick={handleRunClick}
+            disabled={!isRunning && !valid}
             title={!valid ? errors.join("\n") : isRunning ? "Stop" : "Run"}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium transition-colors ${
               isRunning
                 ? "bg-white text-neutral-900 hover:bg-neutral-200 rounded"
-                : "bg-white text-neutral-900 hover:bg-neutral-200 rounded-l"
+                : !valid
+                  ? "bg-neutral-600 text-neutral-400 cursor-not-allowed rounded"
+                  : "bg-white text-neutral-900 hover:bg-neutral-200 rounded-l"
             }`}
           >
             {isRunning ? (
@@ -555,7 +558,7 @@ export function FloatingActionBar() {
           </button>
 
           {/* Dropdown chevron button */}
-          {!isRunning && (
+          {!isRunning && valid && (
             <button
               onClick={() => setRunMenuOpen(!runMenuOpen)}
               className="flex items-center self-stretch px-1.5 rounded-r bg-white text-neutral-900 hover:bg-neutral-200 border-l border-neutral-200 transition-colors"

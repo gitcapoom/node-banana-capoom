@@ -76,7 +76,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
       let videoData: string | null = null;
       let duration: number | null = null;
 
-      if (sourceNode.type === "generateVideo" || sourceNode.type === "easeCurve" || sourceNode.type === "videoStitch") {
+      if (sourceNode.type === "generateVideo" || sourceNode.type === "easeCurve" || sourceNode.type === "videoStitch" || sourceNode.type === "videoTrim") {
         videoData = (sourceNode.data as any).outputVideo || null;
       }
 
@@ -168,8 +168,11 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
           if (cancelled) return;
 
           const canvas = document.createElement("canvas");
-          canvas.width = 160;
-          canvas.height = 120;
+          const thumbWidth = 160;
+          const rawAspectRatio = video.videoHeight > 0 ? video.videoWidth / video.videoHeight : 0;
+          const aspectRatio = Number.isFinite(rawAspectRatio) && rawAspectRatio > 0 ? rawAspectRatio : 16 / 9;
+          canvas.width = thumbWidth;
+          canvas.height = Math.round(thumbWidth / aspectRatio);
           const ctx = canvas.getContext("2d");
           if (!ctx) continue;
 
@@ -356,7 +359,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
             Your browser doesn't support video encoding.
           </span>
           <a
-            href="https://discord.gg/placeholder"
+            href="https://discord.com/invite/89Nr6EKkTf"
             target="_blank"
             rel="noopener noreferrer"
             className="text-[10px] text-blue-400 hover:text-blue-300 underline"
@@ -462,7 +465,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
                         <img
                           src={thumbnail}
                           alt={`Clip ${clip.edgeId}`}
-                          className="w-full h-full object-cover rounded"
+                          className="w-full h-full object-contain rounded"
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">

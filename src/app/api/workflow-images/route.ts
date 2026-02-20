@@ -8,6 +8,24 @@ export const maxDuration = 300; // 5 minute timeout for large image operations
 const IMAGES_FOLDER = "inputs";
 const LEGACY_IMAGES_FOLDER = ".images"; // For backward compatibility
 
+// Helper to extract MIME type and extension from data URL
+function getMimeAndExtension(dataUrl: string): { mime: string; extension: string } {
+  const match = dataUrl.match(/^data:(image\/\w+);base64,/);
+  if (match) {
+    const mime = match[1];
+    const mimeToExt: Record<string, string> = {
+      "image/png": "png",
+      "image/jpeg": "jpg",
+      "image/jpg": "jpg",
+      "image/gif": "gif",
+      "image/webp": "webp",
+    };
+    return { mime, extension: mimeToExt[mime] || "png" };
+  }
+  // Default to PNG if no MIME type found
+  return { mime: "image/png", extension: "png" };
+}
+
 // POST: Save an image to the workflow's inputs or generations folder
 export async function POST(request: NextRequest) {
   let workflowPath: string | undefined;
@@ -80,8 +98,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Construct file path
-    const filename = `${imageId}.png`;
+    // Sanitize imageId to prevent path traversal
+    const safeImageId = path.basename(imageId);
+    if (safeImageId !== imageId || imageId.includes('..')) {
+      return NextResponse.json(
+        { success: false, error: "Invalid imageId" },
+        { status: 400 }
+      );
+    }
+
+    // Extract MIME type and determine file extension
+    const { extension } = getMimeAndExtension(imageData);
+    const filename = `${safeImageId}.${extension}`;
     const filePath = path.join(targetFolder, filename);
 
     // Extract base64 data and convert to buffer
@@ -141,6 +169,15 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Sanitize imageId to prevent path traversal
+    const safeImageId = path.basename(imageId);
+    if (safeImageId !== imageId || imageId.includes('..')) {
+      return NextResponse.json(
+        { success: false, error: "Invalid imageId" },
+        { status: 400 }
+      );
+    }
+
     // Validate workflow directory exists
     try {
       const stats = await fs.stat(workflowPath);
@@ -157,8 +194,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Construct file path - check folders in order based on hint
-    const filename = `${imageId}.png`;
+    // Construct file path - check folders and extensions in order
+    const possibleExtensions = ["png", "jpg", "jpeg", "gif", "webp"];
     const inputsFolder = path.join(workflowPath, IMAGES_FOLDER);
     const generationsFolder = path.join(workflowPath, "generations");
     const legacyFolder = path.join(workflowPath, LEGACY_IMAGES_FOLDER);
@@ -169,20 +206,26 @@ export async function GET(request: NextRequest) {
       : [inputsFolder, generationsFolder, legacyFolder];
 
     let filePath: string | null = null;
+    let foundExtension = "png"; // Track which extension was found
 
-    // Check each folder in order
+    // Check each folder and extension combination in order
     for (const searchFolder of searchOrder) {
-      const candidatePath = path.join(searchFolder, filename);
-      try {
-        await fs.access(candidatePath);
-        filePath = candidatePath;
-        if (searchFolder === legacyFolder) {
-          logger.info('file.load', 'Found image in legacy .images folder', { filePath });
+      for (const ext of possibleExtensions) {
+        const filename = `${safeImageId}.${ext}`;
+        const candidatePath = path.join(searchFolder, filename);
+        try {
+          await fs.access(candidatePath);
+          filePath = candidatePath;
+          foundExtension = ext;
+          if (searchFolder === legacyFolder) {
+            logger.info('file.load', 'Found image in legacy .images folder', { filePath });
+          }
+          break;
+        } catch {
+          // File not found with this extension, try next
         }
-        break;
-      } catch {
-        // File not found in this folder, try next
       }
+      if (filePath) break; // Stop searching if file was found
     }
 
     if (!filePath) {
@@ -202,9 +245,12 @@ export async function GET(request: NextRequest) {
     // Read the image file
     const buffer = await fs.readFile(filePath);
 
-    // Convert to base64 data URL
+    // Convert to base64 data URL with correct MIME type
     const base64 = buffer.toString("base64");
-    const dataUrl = `data:image/png;base64,${base64}`;
+    const mimeType = foundExtension === "jpg" || foundExtension === "jpeg"
+      ? "image/jpeg"
+      : `image/${foundExtension}`;
+    const dataUrl = `data:${mimeType};base64,${base64}`;
 
     logger.info('file.load', 'Workflow image loaded successfully', {
       filePath,

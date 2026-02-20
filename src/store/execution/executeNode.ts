@@ -23,9 +23,10 @@ import { executeGenerateVideo } from "./generateVideoExecutor";
 import { executeGenerate3D } from "./generate3dExecutor";
 import { executeLlmGenerate } from "./llmGenerateExecutor";
 import { executeSplitGrid } from "./splitGridExecutor";
-import { executeVideoStitch, executeEaseCurve } from "./videoProcessingExecutors";
+import { executeVideoStitch, executeEaseCurve, executeVideoTrim, executeVideoFrameGrab } from "./videoProcessingExecutors";
 import { executeWorldLabsPano } from "./worldLabsPanoExecutor";
 import { executeWorldLabsWorld } from "./worldLabsWorldExecutor";
+import { executeGenerateAudio } from "./generateAudioExecutor";
 
 export interface ExecuteNodeOptions {
   /** When true, executors that support it will fall back to stored inputs. */
@@ -45,9 +46,16 @@ export async function executeNode(
 
   switch (ctx.node.type) {
     case "imageInput":
-    case "audioInput":
-      // Data source nodes — no execution needed
+      // Data source node — no execution needed
       break;
+    case "audioInput": {
+      // If audio is connected from upstream, use it (connection wins over upload)
+      const audioInputs = ctx.getConnectedInputs(ctx.node.id);
+      if (audioInputs.audio.length > 0 && audioInputs.audio[0]) {
+        ctx.updateNodeData(ctx.node.id, { audioFile: audioInputs.audio[0] });
+      }
+      break;
+    }
     case "annotation":
       await executeAnnotation(ctx);
       break;
@@ -87,6 +95,9 @@ export async function executeNode(
     case "easeCurve":
       await executeEaseCurve(ctx);
       break;
+    case "videoTrim":
+      await executeVideoTrim(ctx);
+      break;
     case "glbViewer":
       await executeGlbViewer(ctx);
       break;
@@ -101,6 +112,12 @@ export async function executeNode(
       break;
     case "maskPainter":
       await executeMaskPainter(ctx);
+      break;
+    case "generateAudio":
+      await executeGenerateAudio(ctx, regenOpts);
+      break;
+    case "videoFrameGrab":
+      await executeVideoFrameGrab(ctx);
       break;
   }
 }

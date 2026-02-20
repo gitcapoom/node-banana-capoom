@@ -373,10 +373,11 @@ export async function generateWithWaveSpeed(
   const outputSizeMB = outputArrayBuffer.byteLength / (1024 * 1024);
 
   const rawContentType = outputResponse.headers.get("content-type");
+  const isAudioModel = input.model.capabilities.some(c => c.includes("audio"));
   const contentType =
-    (rawContentType && (rawContentType.startsWith("video/") || rawContentType.startsWith("image/")))
+    (rawContentType && (rawContentType.startsWith("video/") || rawContentType.startsWith("image/") || rawContentType.startsWith("audio/")))
       ? rawContentType
-      : (isVideoModel ? "video/mp4" : "image/png");
+      : (isVideoModel ? "video/mp4" : isAudioModel ? "audio/mpeg" : "image/png");
 
   console.log(`[API:${requestId}] Output: ${contentType}, ${outputSizeMB.toFixed(2)}MB`);
 
@@ -396,6 +397,23 @@ export async function generateWithWaveSpeed(
   }
 
   const outputBase64 = Buffer.from(outputArrayBuffer).toString("base64");
+  const isAudio = contentType.startsWith("audio/") || isAudioModel;
+
+  if (isAudio) {
+    const audioContentType = contentType.startsWith("audio/") ? contentType : "audio/mpeg";
+    console.log(`[API:${requestId}] SUCCESS - Returning audio`);
+    return {
+      success: true,
+      outputs: [
+        {
+          type: "audio",
+          data: `data:${audioContentType};base64,${outputBase64}`,
+          url: outputUrl,
+        },
+      ],
+    };
+  }
+
   console.log(`[API:${requestId}] SUCCESS - Returning ${isVideoModel ? "video" : "image"}`);
 
   return {

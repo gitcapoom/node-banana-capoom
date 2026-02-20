@@ -133,6 +133,21 @@ export function getKieModelDefaults(modelId: string): Record<string, unknown> {
         aspect_ratio: "16:9",
       };
 
+    // ElevenLabs TTS models
+    case "elevenlabs/turbo-v2.5":
+    case "elevenlabs/multilingual-v2":
+    case "elevenlabs/text-to-dialogue-v3":
+      return {
+        output_format: "mp3_44100_128",
+      };
+
+    // ElevenLabs Sound Effects
+    case "elevenlabs/sound-effect-v2":
+      return {
+        output_format: "mp3_44100_128",
+        prompt_influence: 0.3,
+      };
+
     default:
       return {};
   }
@@ -600,6 +615,14 @@ export async function generateWithKie(
     };
   }
 
+  // ElevenLabs models use "text" instead of "prompt"
+  if (modelId.startsWith("elevenlabs/")) {
+    if (inputParams.prompt) {
+      inputParams.text = inputParams.prompt;
+      delete inputParams.prompt;
+    }
+  }
+
   // All remaining Kie models use the standard createTask endpoint
   const requestBody: Record<string, unknown> = {
     model: modelId,
@@ -692,6 +715,10 @@ export async function generateWithKie(
   const data = pollResult.data;
   let mediaUrl: string | null = null;
   let isVideo = false;
+  let isAudio = false;
+
+  // Used as fallback when content-type is ambiguous
+  const isAudioModel = input.model.capabilities.some(c => c.includes("audio"));
 
   console.log(`[API:${requestId}] Kie poll result data:`, JSON.stringify(data).substring(0, 500));
 
@@ -751,8 +778,13 @@ export async function generateWithKie(
   }
 
   // Detect video from URL if not already detected
-  if (!isVideo && (mediaUrl.includes('.mp4') || mediaUrl.includes('.webm') || mediaUrl.includes('video'))) {
+  if (!isVideo && !isAudio && (mediaUrl.includes('.mp4') || mediaUrl.includes('.webm') || mediaUrl.includes('video'))) {
     isVideo = true;
+  }
+
+  // Detect audio from URL if not already detected
+  if (!isVideo && !isAudio && (mediaUrl.includes('.mp3') || mediaUrl.includes('.wav') || mediaUrl.includes('.ogg') || mediaUrl.includes('.flac'))) {
+    isAudio = true;
   }
 
   // Validate URL before fetching
@@ -778,10 +810,19 @@ export async function generateWithKie(
     return { success: false, error: `Media too large: ${(mediaContentLength / (1024 * 1024)).toFixed(0)}MB > 500MB limit` };
   }
 
-  const contentType = mediaResponse.headers.get("content-type") || (isVideo ? "video/mp4" : "image/png");
-  if (contentType.startsWith("video/")) {
+  const rawContentType = mediaResponse.headers.get("content-type") || "";
+  const isConcreteMedia = rawContentType.startsWith("audio/") || rawContentType.startsWith("video/") || rawContentType.startsWith("image/");
+  // Content-type wins over URL-based detection; reset opposite flag to avoid conflicts
+  if (rawContentType.startsWith("video/")) {
     isVideo = true;
+    isAudio = false;
+  } else if (rawContentType.startsWith("audio/")) {
+    isAudio = true;
+    isVideo = false;
+  } else if (!isConcreteMedia && !isVideo && !isAudio && isAudioModel) {
+    isAudio = true;
   }
+  const contentType = rawContentType || (isVideo ? "video/mp4" : isAudio ? "audio/mpeg" : "image/png");
 
   const mediaArrayBuffer = await mediaResponse.arrayBuffer();
   if (mediaArrayBuffer.byteLength > MAX_MEDIA_SIZE) {
@@ -791,6 +832,20 @@ export async function generateWithKie(
   const mediaSizeMB = mediaSizeBytes / (1024 * 1024);
 
   console.log(`[API:${requestId}] Output: ${contentType}, ${mediaSizeMB.toFixed(2)}MB`);
+
+  // For audio models, return base64 encoded audio
+  if (isAudio) {
+    const audioBase64 = Buffer.from(mediaArrayBuffer).toString("base64");
+    console.log(`[API:${requestId}] SUCCESS - Returning audio`);
+    return {
+      success: true,
+      outputs: [{
+        type: "audio",
+        data: `data:${contentType};base64,${audioBase64}`,
+        url: mediaUrl,
+      }],
+    };
+  }
 
   // For very large videos (>20MB), return URL only (data left empty for consumers)
   if (isVideo && mediaSizeMB > 20) {

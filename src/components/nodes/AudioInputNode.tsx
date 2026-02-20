@@ -7,6 +7,7 @@ import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { AudioInputNodeData } from "@/types";
 import { useAudioVisualization } from "@/hooks/useAudioVisualization";
+import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 
 type AudioInputNodeType = Node<AudioInputNodeData, "audioInput">;
 
@@ -15,17 +16,8 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
   const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const waveformContainerRef = useRef<HTMLDivElement>(null);
-  const animationFrameRef = useRef<number | undefined>(undefined);
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
-
-  // Use the audio visualization hook
-  const { waveformData, isLoading } = useAudioVisualization(audioBlob);
 
   // Convert base64 data URL to Blob for the hook
   useEffect(() => {
@@ -39,137 +31,21 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
     }
   }, [nodeData.audioFile]);
 
-  // Setup audio element
-  useEffect(() => {
-    if (nodeData.audioFile && !audioRef.current) {
-      const audio = new Audio(nodeData.audioFile);
-      audioRef.current = audio;
-
-      const handleEnded = () => {
-        setIsPlaying(false);
-        setCurrentTime(0);
-      };
-      const handleTimeUpdate = () => {
-        setCurrentTime(audio.currentTime);
-      };
-
-      audio.addEventListener("ended", handleEnded);
-      audio.addEventListener("timeupdate", handleTimeUpdate);
-
-      return () => {
-        audio.removeEventListener("ended", handleEnded);
-        audio.removeEventListener("timeupdate", handleTimeUpdate);
-        audio.pause();
-        audioRef.current = null;
-      };
-    }
-
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-    };
-  }, [nodeData.audioFile]);
-
-  // Helper to draw waveform bars on canvas
-  const drawWaveform = useCallback(
-    (ctx: CanvasRenderingContext2D, width: number, height: number, peaks: number[]) => {
-      ctx.clearRect(0, 0, width, height);
-
-      const barCount = Math.min(peaks.length, width);
-      const barWidth = width / barCount;
-      const barGap = 1;
-
-      ctx.fillStyle = "rgb(167, 139, 250)"; // violet-400
-
-      for (let i = 0; i < barCount; i++) {
-        const peakIndex = Math.floor((i / barCount) * peaks.length);
-        const peak = peaks[peakIndex] || 0;
-        const barHeight = peak * height;
-        const x = i * barWidth;
-        const y = (height - barHeight) / 2;
-
-        ctx.fillRect(x, y, barWidth - barGap, barHeight);
-      }
-    },
-    []
-  );
-
-  // Effect A: ResizeObserver — only recreated when waveformData changes
-  useEffect(() => {
-    if (!waveformData || !canvasRef.current || !waveformContainerRef.current) return;
-
-    const canvas = canvasRef.current;
-    const container = waveformContainerRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const width = entry.contentRect.width;
-        const height = entry.contentRect.height;
-
-        canvas.width = width;
-        canvas.height = height;
-
-        drawWaveform(ctx, width, height, waveformData.peaks);
-      }
-    });
-
-    resizeObserver.observe(container);
-
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, [waveformData, drawWaveform]);
-
-  // Effect B: Redraw waveform + playback position (lightweight, no ResizeObserver)
-  useEffect(() => {
-    if (!waveformData || !canvasRef.current) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const width = canvas.width;
-    const height = canvas.height;
-    if (width === 0 || height === 0) return;
-
-    drawWaveform(ctx, width, height, waveformData.peaks);
-
-    // Draw playback position
-    if (isPlaying && nodeData.duration) {
-      const progress = currentTime / nodeData.duration;
-      const x = progress * width;
-
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, height);
-      ctx.stroke();
-    }
-  }, [isPlaying, currentTime, nodeData.duration, waveformData, drawWaveform]);
-
-  // Animation loop for smooth playback position updates
-  useEffect(() => {
-    if (isPlaying && audioRef.current) {
-      const updatePosition = () => {
-        if (audioRef.current) {
-          setCurrentTime(audioRef.current.currentTime);
-        }
-        animationFrameRef.current = requestAnimationFrame(updatePosition);
-      };
-      animationFrameRef.current = requestAnimationFrame(updatePosition);
-    }
-
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, [isPlaying]);
+  const { waveformData, isLoading } = useAudioVisualization(audioBlob);
+  const {
+    audioRef,
+    canvasRef,
+    waveformContainerRef,
+    isPlaying,
+    currentTime,
+    handlePlayPause,
+    handleSeek,
+    formatTime,
+  } = useAudioPlayback({
+    audioSrc: nodeData.audioFile ?? null,
+    waveformData,
+    isLoadingWaveform: isLoading,
+  });
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -198,6 +74,15 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
             filename: file.name,
             format: file.type,
             duration: audio.duration,
+          });
+        };
+        audio.onerror = () => {
+          // Still load the file even if metadata extraction fails
+          updateNodeData(id, {
+            audioFile: base64,
+            filename: file.name,
+            format: file.type,
+            duration: null,
           });
         };
       };
@@ -234,8 +119,6 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
       audioRef.current.pause();
       audioRef.current = null;
     }
-    setIsPlaying(false);
-    setCurrentTime(0);
     setAudioBlob(null);
     updateNodeData(id, {
       audioFile: null,
@@ -243,42 +126,12 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
       duration: null,
       format: null,
     });
-  }, [id, updateNodeData]);
-
-  const handlePlayPause = useCallback(() => {
-    if (!audioRef.current) return;
-
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      audioRef.current.play();
-      setIsPlaying(true);
-    }
-  }, [isPlaying]);
-
-  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (!audioRef.current || !nodeData.duration || !waveformContainerRef.current) return;
-
-    const rect = waveformContainerRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const progress = x / rect.width;
-    const newTime = progress * nodeData.duration;
-
-    audioRef.current.currentTime = newTime;
-    setCurrentTime(newTime);
-  }, [nodeData.duration]);
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
+  }, [id, updateNodeData, audioRef]);
 
   return (
     <BaseNode
       id={id}
-      title="Audio Input"
+      title="Audio"
       customTitle={nodeData.customTitle}
       comment={nodeData.comment}
       onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
@@ -349,10 +202,10 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
 
             {/* Progress bar / scrubber */}
             <div className="flex-1 h-1 bg-neutral-700 rounded-full overflow-hidden relative">
-              {nodeData.duration && (
+              {audioRef.current?.duration && isFinite(audioRef.current.duration) && (
                 <div
                   className="h-full bg-violet-500 transition-all"
-                  style={{ width: `${(currentTime / nodeData.duration) * 100}%` }}
+                  style={{ width: `${(currentTime / audioRef.current.duration) * 100}%` }}
                 />
               )}
             </div>
@@ -389,6 +242,13 @@ export function AudioInputNode({ id, data, selected }: NodeProps<AudioInputNodeT
         </div>
       )}
 
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="audio"
+        data-handletype="audio"
+        style={{ background: "rgb(167, 139, 250)" }}
+      />
       <Handle
         type="source"
         position={Position.Right}

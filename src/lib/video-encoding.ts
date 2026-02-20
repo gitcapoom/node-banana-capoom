@@ -4,7 +4,7 @@ import type { VideoEncodingConfig } from 'mediabunny';
 const DEFAULT_KEYFRAME_INTERVAL = 1.0;
 const MAX_OUTPUT_FPS = 60;
 
-export const AVC_LEVEL_4_0 = 'avc1.420028';
+export const AVC_LEVEL_4_0 = 'avc1.640028';
 export const AVC_LEVEL_5_1 = 'avc1.640033';
 
 export const createAvcEncodingConfig = (
@@ -22,6 +22,7 @@ export const createAvcEncodingConfig = (
   latencyMode: 'quality',
   fullCodecString: codecString,
   hardwareAcceleration: useHardwareAcceleration ? 'prefer-hardware' : 'prefer-software',
+  sizeChangeBehavior: 'cover',
   onEncoderConfig: (config) => {
     config.avc = { ...(config.avc ?? {}), format: 'avc' };
     if (!config.latencyMode) {

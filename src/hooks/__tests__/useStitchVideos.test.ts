@@ -114,7 +114,7 @@ vi.mock("mediabunny", () => {
 
 vi.mock("@/lib/video-encoding", () => ({
   createAvcEncodingConfig: vi.fn(() => ({})),
-  AVC_LEVEL_4_0: "avc1.420028",
+  AVC_LEVEL_4_0: "avc1.640028",
   AVC_LEVEL_5_1: "avc1.640033",
 }));
 
