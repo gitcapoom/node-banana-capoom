@@ -432,10 +432,8 @@ export function FloatingActionBar() {
   const handleRunClick = () => {
     if (isRunning) {
       stopWorkflow();
-    } else if (selectedNodes.length > 0) {
-      // Default: run selected nodes when any are selected
-      executeSelectedNodes(selectedNodes.map((n) => n.id));
     } else {
+      if (!window.confirm("Are you sure you want to run the entire workflow?")) return;
       executeWorkflow();
     }
   };
@@ -548,7 +546,7 @@ export function FloatingActionBar() {
                 >
                   <path d="M8 5v14l11-7z" />
                 </svg>
-                <span>{selectedNodes.length > 0 ? `Run (${selectedNodes.length})` : "Run"}</span>
+                <span>Run</span>
                 {!valid && (
                   <span className="text-amber-500 text-[9px]" title={errors.join("\n")}>&#9888;</span>
                 )}
