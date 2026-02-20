@@ -117,13 +117,13 @@ export default function StandaloneViewerPage() {
     if (!cameraRef.current) return;
 
     if (navModeRef.current === "fly") {
-      cameraRef.current.position.set(0, 0.1, 0);
+      cameraRef.current.position.set(0, 1.5, 0);
       yawRef.current = 0;
       pitchRef.current = 0;
       cameraRef.current.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, "YXZ"));
     } else if (controlsRef.current) {
-      cameraRef.current.position.set(0, 0.1, 0.01);
-      controlsRef.current.target.set(0, 0.1, -1);
+      cameraRef.current.position.set(0, 1.5, 0.01);
+      controlsRef.current.target.set(0, 1.5, -1);
       controlsRef.current.update();
     }
   }, []);
@@ -158,7 +158,7 @@ export default function StandaloneViewerPage() {
       0.01,
       1000
     );
-    camera.position.set(0, 0.1, 0);
+    camera.position.set(0, 1.5, 0);
     cameraRef.current = camera;
 
     // OrbitControls (disabled in fly mode)
