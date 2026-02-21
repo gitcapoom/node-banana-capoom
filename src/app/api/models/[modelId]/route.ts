@@ -202,6 +202,19 @@ function isTextInput(name: string): boolean {
 }
 
 /**
+ * Check if a resolved schema is an "image URL wrapper" object.
+ * fal.ai defines image inputs as objects like ImageUrl: { type: "object", properties: { url: { type: "string" } } }
+ * These should be treated as string type for input detection purposes.
+ */
+function isImageUrlWrapperObject(schema: Record<string, unknown>): boolean {
+  if (schema.type !== "object") return false;
+  const props = schema.properties as Record<string, Record<string, unknown>> | undefined;
+  if (!props) return false;
+  // Has a "url" property that is a string — this is an image/file URL wrapper
+  return props.url !== undefined && props.url.type === "string";
+}
+
+/**
  * Resolve a $ref reference in OpenAPI schema
  * E.g., "#/components/schemas/AspectRatio" -> schema object
  */
@@ -445,8 +458,10 @@ function extractParametersFromSchema(
     if (rawProp.$ref && typeof rawProp.$ref === "string" && schemaComponents) {
       const resolved = resolveRef(rawProp.$ref as string, schemaComponents);
       if (resolved) {
-        // Merge: resolved schema provides type/format, original prop may have description overrides
-        prop = { ...resolved, ...rawProp, type: resolved.type || rawProp.type };
+        // Image URL wrapper objects (e.g. ImageUrl: {type: "object", properties: {url: ...}})
+        // should be treated as string type for input detection
+        const resolvedType = isImageUrlWrapperObject(resolved) ? "string" : resolved.type;
+        prop = { ...resolved, ...rawProp, type: resolvedType || rawProp.type };
       }
     }
     // Handle anyOf/oneOf (common in OpenAPI 3.1 for nullable types, e.g. anyOf: [{$ref: "..."}, {type: "null"}])
@@ -457,7 +472,8 @@ function extractParametersFromSchema(
         if (nonNull.$ref && typeof nonNull.$ref === "string" && schemaComponents) {
           const resolved = resolveRef(nonNull.$ref as string, schemaComponents);
           if (resolved) {
-            prop = { ...prop, ...resolved, type: resolved.type };
+            const resolvedType = isImageUrlWrapperObject(resolved) ? "string" : resolved.type;
+            prop = { ...prop, ...resolved, type: resolvedType };
           }
         } else if (nonNull.type) {
           prop = { ...prop, type: nonNull.type };

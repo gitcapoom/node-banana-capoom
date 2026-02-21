@@ -91,8 +91,9 @@ export async function getFalModelPricing(modelId: string, apiKey: string): Promi
 
 /**
  * Batch-fetch per-run pricing for multiple fal.ai models.
- * Sends all models in a single Cost Estimation API call for efficiency,
- * then falls back to individual calls if per-endpoint breakdown isn't available.
+ * Uses individual Cost Estimation API calls per model with concurrency control.
+ * (The API only returns an aggregated total_cost, not per-endpoint breakdown,
+ * so batching multiple models in one request doesn't help.)
  * Returns a Map of modelId → per-run cost in USD.
  * Models without pricing data are silently excluded from the result.
  *
@@ -118,63 +119,16 @@ export async function getFalModelPricingBatch(
 
   if (uncached.length === 0) return results;
 
-  // Build a single request with all uncached models
-  const endpoints: Record<string, { unit_quantity: number }> = {};
-  for (const id of uncached) {
-    endpoints[id] = { unit_quantity: 1 };
-  }
-
-  try {
-    const response = await fetch("https://api.fal.ai/v1/models/pricing/estimate", {
-      method: "POST",
-      headers: {
-        Authorization: `Key ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        estimate_type: "unit_price",
-        endpoints,
-      }),
-    });
-
-    if (!response.ok) {
-      console.warn(`[fal pricing] Batch estimate failed: HTTP ${response.status}`);
-      return results;
-    }
-
-    const data = await response.json();
-
-    // Check for per-endpoint breakdown first
-    if (data.endpoint_costs && typeof data.endpoint_costs === "object") {
-      for (const [id, cost] of Object.entries(data.endpoint_costs)) {
-        if (typeof cost === "number" && cost > 0) {
-          results.set(id, cost);
-          falPricingCache.set(id, { unitPrice: cost, timestamp: Date.now() });
-        }
-      }
-    } else if (typeof data.total_cost === "number" && data.total_cost > 0 && uncached.length === 1) {
-      // Single model — total_cost IS the per-model cost
-      results.set(uncached[0], data.total_cost);
-      falPricingCache.set(uncached[0], { unitPrice: data.total_cost, timestamp: Date.now() });
-    }
-
-    // Fall back to individual calls for models that didn't get pricing
-    const missing = uncached.filter(id => !results.has(id));
-    if (missing.length > 0) {
-      // Limit to first 20 to avoid timeout on the /api/models request
-      const toFetch = missing.slice(0, 20);
-      for (let i = 0; i < toFetch.length; i += 5) {
-        const batch = toFetch.slice(i, i + 5);
-        await Promise.allSettled(
-          batch.map(async (id) => {
-            const cost = await getFalModelPricing(id, apiKey);
-            if (cost !== null) results.set(id, cost);
-          })
-        );
-      }
-    }
-  } catch (err) {
-    console.warn("[fal pricing] Batch estimate error:", err);
+  // Individual calls with concurrency control
+  const concurrency = 10;
+  for (let i = 0; i < uncached.length; i += concurrency) {
+    const batch = uncached.slice(i, i + concurrency);
+    await Promise.allSettled(
+      batch.map(async (id) => {
+        const cost = await getFalModelPricing(id, apiKey);
+        if (cost !== null) results.set(id, cost);
+      })
+    );
   }
 
   return results;
