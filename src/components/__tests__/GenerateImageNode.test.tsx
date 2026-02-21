@@ -666,9 +666,10 @@ describe("GenerateImageNode", () => {
           </TestWrapper>
         );
 
-        // 1 primary image handle + 2 dynamic image handles (first_frame, last_frame) = 3
+        // 1 primary image handle + 1 dynamic image handle (last_frame) = 2
+        // first_frame is the first image input, so it maps to the primary "Image" handle
         const imageInputHandles = container.querySelectorAll('[data-handletype="image"][class*="target"]');
-        expect(imageInputHandles.length).toBe(3);
+        expect(imageInputHandles.length).toBe(2);
 
         const textHandles = container.querySelectorAll('[data-handletype="text"]');
         expect(textHandles.length).toBe(1);

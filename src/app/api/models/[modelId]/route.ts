@@ -439,16 +439,41 @@ function extractParametersFromSchema(
   const parameters: ModelParameter[] = [];
   const inputs: ModelInput[] = [];
 
-  for (const [name, prop] of Object.entries(properties)) {
+  for (const [name, rawProp] of Object.entries(properties)) {
+    // Resolve $ref if present (property-level references like { "$ref": "#/components/schemas/ImageUrl" })
+    let prop = rawProp;
+    if (rawProp.$ref && typeof rawProp.$ref === "string" && schemaComponents) {
+      const resolved = resolveRef(rawProp.$ref as string, schemaComponents);
+      if (resolved) {
+        // Merge: resolved schema provides type/format, original prop may have description overrides
+        prop = { ...resolved, ...rawProp, type: resolved.type || rawProp.type };
+      }
+    }
+    // Handle anyOf/oneOf (common in OpenAPI 3.1 for nullable types, e.g. anyOf: [{$ref: "..."}, {type: "null"}])
+    if (!prop.type && (prop.anyOf || prop.oneOf) && Array.isArray(prop.anyOf || prop.oneOf)) {
+      const variants = (prop.anyOf || prop.oneOf) as Record<string, unknown>[];
+      const nonNull = variants.find((s) => s.type !== "null");
+      if (nonNull) {
+        if (nonNull.$ref && typeof nonNull.$ref === "string" && schemaComponents) {
+          const resolved = resolveRef(nonNull.$ref as string, schemaComponents);
+          if (resolved) {
+            prop = { ...prop, ...resolved, type: resolved.type };
+          }
+        } else if (nonNull.type) {
+          prop = { ...prop, type: nonNull.type };
+        }
+      }
+    }
+
     // Check if this is a connectable input (image or text)
-    // Pass both name AND prop to check schema type, not just name
+    // Pass both name AND resolved prop to check schema type, not just name
     if (isImageInput(name, prop)) {
       inputs.push({
         name,
         type: "image",
         required: required.includes(name),
         label: toLabel(name),
-        description: prop.description as string | undefined,
+        description: (prop.description || rawProp.description) as string | undefined,
         isArray: prop.type === "array",
       });
       continue;
@@ -460,13 +485,13 @@ function extractParametersFromSchema(
         type: "text",
         required: required.includes(name),
         label: toLabel(name),
-        description: prop.description as string | undefined,
+        description: (prop.description || rawProp.description) as string | undefined,
         isArray: prop.type === "array",
       });
       continue;
     }
 
-    // Otherwise it's a parameter
+    // Otherwise it's a parameter (pass resolved prop for better type detection)
     const param = convertSchemaProperty(name, prop, required, schemaComponents);
     if (param) {
       parameters.push(param);
