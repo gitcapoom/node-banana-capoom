@@ -7,7 +7,8 @@ import { useProviderApiKeys } from "@/store/workflowStore";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 
 // localStorage cache for model schemas (persists across dev server restarts)
-const SCHEMA_CACHE_KEY = "node-banana-schema-cache-v3";
+// Bump version when schema extraction logic changes (e.g., $ref resolution)
+const SCHEMA_CACHE_KEY = "node-banana-schema-cache-v4";
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {
