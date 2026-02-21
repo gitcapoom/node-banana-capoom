@@ -396,6 +396,15 @@ export async function generateWithFalQueue(
       }
     }
     Object.assign(requestBody, filteredInputs);
+
+    // Ensure prompt is included even when using dynamic inputs.
+    // nanoBananaExecutor removes prompt from dynamicInputs to avoid duplication,
+    // but the top-level prompt must still be sent to the API when dynamic inputs
+    // are present (e.g., inpaint models with mask + prompt).
+    const promptKey = paramMap.prompt || "prompt";
+    if (input.prompt && !requestBody[promptKey]) {
+      requestBody[promptKey] = input.prompt;
+    }
   } else {
     // Fallback: use schema to map generic input names to model-specific parameter names
     if (input.prompt) {

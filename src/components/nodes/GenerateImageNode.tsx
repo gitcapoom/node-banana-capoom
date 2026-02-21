@@ -369,12 +369,15 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   const isGeminiProvider = currentProvider === "gemini";
 
   // Dynamic image inputs from schema (mask, control images, depth maps, etc.)
-  // Exclude the primary "image" input which always has its own handle
+  // Exclude the first/primary image input which maps to the dedicated "Image" handle.
+  // connectedInputs.ts maps handleToSchemaName["image"] = imageInputs[0].name,
+  // so whatever the first image input is called, it's the primary handle.
   const dynamicImageInputs = useMemo(() => {
     if (!nodeData.inputSchema) return [];
-    return nodeData.inputSchema.filter(
-      (i) => i.type === "image" && i.name !== "image_url" && i.name !== "image"
-    );
+    const imageInputs = nodeData.inputSchema.filter((i) => i.type === "image");
+    if (imageInputs.length === 0) return [];
+    const primaryImageName = imageInputs[0].name;
+    return imageInputs.filter((i) => i.name !== primaryImageName);
   }, [nodeData.inputSchema]);
   const hasDynamicImageInputs = dynamicImageInputs.length > 0;
 
