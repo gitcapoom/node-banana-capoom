@@ -90,6 +90,57 @@ export async function getFalModelPricing(modelId: string, apiKey: string): Promi
 }
 
 /**
+ * Batch-fetch per-run pricing for multiple fal.ai models.
+ * Uses the same Cost Estimation API as getFalModelPricing() but processes
+ * multiple models with concurrency control to avoid 429 rate-limit errors.
+ * Returns a Map of modelId → per-run cost in USD.
+ * Models without pricing data are silently excluded from the result.
+ *
+ * @param modelIds - Array of fal.ai endpoint IDs to price
+ * @param apiKey - fal.ai API key for authentication
+ * @param concurrency - Max simultaneous API calls (default: 5)
+ */
+export async function getFalModelPricingBatch(
+  modelIds: string[],
+  apiKey: string,
+  concurrency = 5
+): Promise<Map<string, number>> {
+  const results = new Map<string, number>();
+  const uncached: string[] = [];
+
+  // Return cached prices, collect uncached
+  for (const id of modelIds) {
+    const cached = falPricingCache.get(id);
+    if (cached && Date.now() - cached.timestamp < FAL_PRICING_CACHE_TTL) {
+      results.set(id, cached.unitPrice);
+    } else {
+      uncached.push(id);
+    }
+  }
+
+  if (uncached.length === 0) return results;
+
+  // Process uncached models with concurrency control
+  for (let i = 0; i < uncached.length; i += concurrency) {
+    const batch = uncached.slice(i, i + concurrency);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (modelId) => {
+        const cost = await getFalModelPricing(modelId, apiKey);
+        return { modelId, cost };
+      })
+    );
+
+    for (const result of batchResults) {
+      if (result.status === "fulfilled" && result.value.cost !== null) {
+        results.set(result.value.modelId, result.value.cost);
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
  * Fetch fal.ai model schema and extract input parameter mappings
  * Uses the Model Search API with OpenAPI expansion (same as /api/models/[modelId])
  * Results are cached in-memory for 30 minutes per model.
