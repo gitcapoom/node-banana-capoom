@@ -62,6 +62,7 @@ import {
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
 import {
   executeAnnotation,
+  executeMaskPainter,
   executePrompt,
   executePromptConstructor,
   executeOutput,
@@ -964,6 +965,9 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
           case "videoFrameGrab":
             await executeVideoFrameGrab(executionCtx);
             break;
+          case "maskPainter":
+            await executeMaskPainter(executionCtx);
+            break;
         }
     }; // End of executeSingleNode helper
 
@@ -1130,6 +1134,8 @@ export const useWorkflowStore = create<WorkflowStore>((set, get) => ({
         set({ isRunning: false, currentNodeIds: [] });
         await logger.endSession();
         return;
+      } else if (node.type === "maskPainter") {
+        await executeMaskPainter(executionCtx);
       }
 
       // After regeneration, execute directly connected downstream consumer nodes

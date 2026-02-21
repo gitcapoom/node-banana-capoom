@@ -10,6 +10,7 @@ export type { NodeExecutionContext, NodeExecutor } from "./types";
 
 export {
   executeAnnotation,
+  executeMaskPainter,
   executePrompt,
   executePromptConstructor,
   executeOutput,

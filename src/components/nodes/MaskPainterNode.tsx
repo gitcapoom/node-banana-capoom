@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
@@ -15,11 +15,64 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
   const commentNavigation = useCommentNavigation(id);
   const openModal = useMaskPainterStore((state) => state.openModal);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      if (!file.type.match(/^image\/(png|jpeg|webp)$/)) {
+        alert("Unsupported format. Use PNG, JPG, or WebP.");
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) {
+        alert("Image too large. Maximum size is 10MB.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        updateNodeData(id, {
+          sourceImage: base64,
+          strokes: [],
+          outputMask: null,
+        });
+      };
+      reader.readAsDataURL(file);
+    },
+    [id, updateNodeData]
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const file = e.dataTransfer.files?.[0];
+      if (!file) return;
+
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      if (fileInputRef.current) {
+        fileInputRef.current.files = dt.files;
+        fileInputRef.current.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    },
+    []
+  );
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
 
   const handleEdit = useCallback(() => {
     const imageToEdit = nodeData.sourceImage;
     if (!imageToEdit) {
-      alert("No image available. Connect an image source to the input handle.");
+      alert("No image available. Connect an image or load one manually.");
       return;
     }
     openModal(id, imageToEdit, nodeData.strokes);
@@ -47,6 +100,14 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
       selected={selected}
       commentNavigation={commentNavigation ?? undefined}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
       <Handle
         type="target"
         position={Position.Left}
@@ -88,12 +149,17 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
           </div>
         </div>
       ) : (
-        <div className="w-full flex-1 min-h-[80px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center">
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          className="w-full flex-1 min-h-[112px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center cursor-pointer hover:border-neutral-500 hover:bg-neutral-700/50 transition-colors"
+        >
           <svg className="w-5 h-5 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
           <span className="text-[10px] text-neutral-400 mt-1">
-            Connect image source
+            Drop, click, or connect
           </span>
         </div>
       )}
