@@ -34,6 +34,7 @@ interface BaseNodeProps {
   titlePrefix?: ReactNode;
   commentNavigation?: CommentNavigationProps;
   lastCost?: number | null; // Cost of last generation, displayed as a badge
+  estimatedCost?: number | null; // Pre-execution estimated cost from model pricing
 }
 
 export function BaseNode({
@@ -58,6 +59,7 @@ export function BaseNode({
   titlePrefix,
   commentNavigation,
   lastCost,
+  estimatedCost,
 }: BaseNodeProps) {
   const currentNodeIds = useWorkflowStore((state) => state.currentNodeIds);
   const groups = useWorkflowStore((state) => state.groups);
@@ -289,15 +291,22 @@ export function BaseNode({
             {headerAction}
           </div>
 
-          {/* Cost Badge */}
-          {lastCost != null && lastCost > 0 && (
+          {/* Cost Badge - actual cost (green) or estimated cost (blue) */}
+          {lastCost != null && lastCost > 0 ? (
             <span
               className="ml-2 shrink-0 text-[10px] font-medium text-emerald-400/80 bg-emerald-400/10 px-1.5 py-0.5 rounded"
               title={`Last generation cost: $${lastCost.toFixed(4)}`}
             >
               ${lastCost < 0.01 ? lastCost.toFixed(4) : lastCost.toFixed(2)}
             </span>
-          )}
+          ) : estimatedCost != null && estimatedCost > 0 ? (
+            <span
+              className="ml-2 shrink-0 text-[10px] font-medium text-blue-400/80 bg-blue-400/10 px-1.5 py-0.5 rounded"
+              title={`Estimated cost: ~$${estimatedCost.toFixed(4)} per run`}
+            >
+              Est. ~${estimatedCost < 0.01 ? estimatedCost.toFixed(4) : estimatedCost.toFixed(2)}
+            </span>
+          ) : null}
 
           {/* Lock Badge for nodes in locked groups */}
           {isInLockedGroup && (

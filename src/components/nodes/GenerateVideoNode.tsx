@@ -121,6 +121,9 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
           provider: currentProvider,
           modelId: model.id,
           displayName: model.name,
+          ...(model.pricing && {
+            pricing: { type: model.pricing.type, amount: model.pricing.amount },
+          }),
         };
         // Clear parameters when changing models (different models have different schemas)
         updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
@@ -334,6 +337,11 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     });
   }, [id, nodeData.outputVideo, setNodes]);
 
+  // Compute estimated cost from model pricing
+  const estimatedCost = useMemo(() => {
+    return nodeData.selectedModel?.pricing?.amount ?? null;
+  }, [nodeData.selectedModel?.pricing?.amount]);
+
   return (
     <>
     <BaseNode
@@ -351,6 +359,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       titlePrefix={titlePrefix}
       commentNavigation={commentNavigation ?? undefined}
       lastCost={nodeData.lastGenerationCost}
+      estimatedCost={estimatedCost}
     >
       {/* Dynamic input handles based on model schema */}
       {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (

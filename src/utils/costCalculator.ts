@@ -1,4 +1,4 @@
-import { ModelType, Resolution, NanoBananaNodeData, GenerateVideoNodeData, Generate3DNodeData, SplitGridNodeData, WorkflowNode, ProviderType } from "@/types";
+import { ModelType, Resolution, NanoBananaNodeData, GenerateVideoNodeData, Generate3DNodeData, GenerateAudioNodeData, SplitGridNodeData, WorldLabsPanoNodeData, WorldLabsWorldNodeData, WorkflowNode, ProviderType } from "@/types";
 
 // Pricing in USD per image (Gemini API)
 export const PRICING = {
@@ -132,16 +132,25 @@ export function calculatePredictedCost(
 
   /**
    * Get pricing for a model.
-   * First checks modelPricing map, then falls back to hardcoded Gemini pricing.
+   * Priority: 1) external modelPricing map, 2) selectedModel.pricing from node data, 3) hardcoded Gemini pricing.
    */
   function getPricing(
     provider: ProviderType,
     modelId: string,
-    resolution?: Resolution
+    resolution?: Resolution,
+    selectedModelPricing?: { type: 'per-run' | 'per-second'; amount: number }
   ): { unitCost: number; unit: string } | null {
     // Check external pricing map first
     if (modelPricing?.has(modelId)) {
       return modelPricing.get(modelId)!;
+    }
+
+    // Check selectedModel.pricing from node data
+    if (selectedModelPricing) {
+      return {
+        unitCost: selectedModelPricing.amount,
+        unit: selectedModelPricing.type === 'per-run' ? 'run' : 'second',
+      };
     }
 
     // Fallback to hardcoded Gemini pricing for legacy models
@@ -182,7 +191,7 @@ export function calculatePredictedCost(
       }
 
       const resolution = data.model === "nano-banana" ? "1K" : data.resolution;
-      const pricing = getPricing(provider, modelId, resolution);
+      const pricing = getPricing(provider, modelId, resolution, data.selectedModel?.pricing);
       const unitCost = pricing?.unitCost ?? null;
       const unit = pricing?.unit ?? "image";
 
@@ -199,12 +208,62 @@ export function calculatePredictedCost(
         const modelId = data.selectedModel.modelId;
         const modelName = data.selectedModel.displayName;
 
-        const pricing = getPricing(provider, modelId);
+        const pricing = getPricing(provider, modelId, undefined, data.selectedModel.pricing);
         const unitCost = pricing?.unitCost ?? null;
         const unit = pricing?.unit ?? "video";
 
         addToBreakdown(provider, modelId, modelName, unit, unitCost);
       }
+    }
+
+    // Handle generate3d nodes
+    if (node.type === "generate3d") {
+      const data = node.data as Generate3DNodeData;
+
+      if (data.selectedModel) {
+        const provider = data.selectedModel.provider;
+        const modelId = data.selectedModel.modelId;
+        const modelName = data.selectedModel.displayName;
+
+        const pricing = getPricing(provider, modelId, undefined, data.selectedModel.pricing);
+        const unitCost = pricing?.unitCost ?? null;
+        const unit = pricing?.unit ?? "3d model";
+
+        addToBreakdown(provider, modelId, modelName, unit, unitCost);
+      }
+    }
+
+    // Handle generateAudio nodes
+    if (node.type === "generateAudio") {
+      const data = node.data as GenerateAudioNodeData;
+
+      if (data.selectedModel) {
+        const provider = data.selectedModel.provider;
+        const modelId = data.selectedModel.modelId;
+        const modelName = data.selectedModel.displayName;
+
+        const pricing = getPricing(provider, modelId, undefined, data.selectedModel.pricing);
+        const unitCost = pricing?.unitCost ?? null;
+        const unit = pricing?.unit ?? "audio";
+
+        addToBreakdown(provider, modelId, modelName, unit, unitCost);
+      }
+    }
+
+    // Handle worldLabsPano nodes
+    if (node.type === "worldLabsPano") {
+      const data = node.data as WorldLabsPanoNodeData;
+      const model = data.model || "Marble 0.1-mini";
+      const unitCost = model === "Marble 0.1-mini" ? 0.12 : 1.20;
+      addToBreakdown("worldlabs", model, model, "panorama", unitCost);
+    }
+
+    // Handle worldLabsWorld nodes
+    if (node.type === "worldLabsWorld") {
+      const data = node.data as WorldLabsWorldNodeData;
+      const model = data.model || "Marble 0.1-plus";
+      const unitCost = model === "Marble 0.1-mini" ? 0.12 : 1.20;
+      addToBreakdown("worldlabs", model, model, "3d world", unitCost);
     }
 
     // SplitGrid nodes create child nanoBanana nodes - count those from settings
@@ -260,6 +319,9 @@ export function hasNonGeminiProviders(nodes: WorkflowNode[]): boolean {
     }
     if (node.type === "generateAudio") {
       return true; // Audio nodes are always non-Gemini
+    }
+    if (node.type === "worldLabsPano" || node.type === "worldLabsWorld") {
+      return true; // WorldLabs nodes are always non-Gemini
     }
     return false;
   });

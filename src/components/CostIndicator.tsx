@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useWorkflowStore } from "@/store/workflowStore";
-import { calculatePredictedCost, formatCost, hasNonGeminiProviders } from "@/utils/costCalculator";
+import { calculatePredictedCost, formatCost } from "@/utils/costCalculator";
 import { CostDialog } from "./CostDialog";
 
 export function CostIndicator() {
@@ -14,25 +14,36 @@ export function CostIndicator() {
     return calculatePredictedCost(nodes);
   }, [nodes]);
 
-  const nonGemini = useMemo(() => hasNonGeminiProviders(nodes), [nodes]);
   const hasAnyNodes = predictedCost.nodeCount > 0;
 
-  // Hide if there are no nodes and no costs incurred
+  // Hide if there are no generation nodes and no costs incurred
   if (!hasAnyNodes && incurredCost === 0) {
     return null;
   }
 
-  // For non-Gemini workflows, show incurred (actual) cost instead of predicted
+  // Always show estimated cost when generation nodes exist
+  // Show incurred cost alongside if any generations have run
   let displayCost: string;
   let costTitle: string;
 
-  if (nonGemini) {
-    if (incurredCost === 0) return null;
-    displayCost = formatCost(incurredCost);
+  if (incurredCost > 0 && predictedCost.totalCost > 0) {
+    // Both estimated and actual: show both
+    displayCost = `Est. ~${formatCost(predictedCost.totalCost)} / ${formatCost(incurredCost)} spent`;
+    costTitle = "Estimated workflow cost & session spend (click for details)";
+  } else if (incurredCost > 0) {
+    // Only actual cost (no estimated pricing available)
+    displayCost = `${formatCost(incurredCost)} spent`;
     costTitle = "Session spend (click for details)";
+  } else if (predictedCost.totalCost > 0) {
+    // Only estimated cost (no generations run yet)
+    displayCost = `Est. ~${formatCost(predictedCost.totalCost)}`;
+    costTitle = "Estimated workflow cost (click for details)";
+  } else if (hasAnyNodes && predictedCost.unknownPricingCount > 0) {
+    // Has generation nodes but no pricing data available
+    displayCost = "Cost TBD";
+    costTitle = "Some models have unknown pricing (click for details)";
   } else {
-    displayCost = formatCost(predictedCost.totalCost);
-    costTitle = "View cost details";
+    return null;
   }
 
   return (

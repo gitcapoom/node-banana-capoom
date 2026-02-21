@@ -1,12 +1,19 @@
 "use client";
 
-import React, { useCallback, useState, useEffect, useRef } from "react";
+import React, { useCallback, useState, useEffect, useRef, useMemo } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { WorldLabsWorldNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
+
+// WorldLabs Marble API pricing (USD per generation)
+// Based on credit system: $1.00 = 1,250 credits
+const WORLDLABS_PRICING = {
+  "Marble 0.1-mini": 0.12,  // 150 credits
+  "Marble 0.1-plus": 1.20,  // 1,500 credits
+} as const;
 
 type WorldLabsWorldNodeType = Node<WorldLabsWorldNodeData, "worldLabsWorld">;
 
@@ -143,6 +150,12 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
 
   const previewUrl = nodeData.panoUrl || nodeData.thumbnailUrl;
 
+  // Compute estimated cost based on selected model
+  const estimatedCost = useMemo(() => {
+    const model = nodeData.model || "Marble 0.1-plus";
+    return WORLDLABS_PRICING[model] ?? null;
+  }, [nodeData.model]);
+
   return (
     <BaseNode
       id={id}
@@ -151,6 +164,7 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
       commentNavigation={commentNavigation || undefined}
       onRun={handleRegenerate}
       isExecuting={isRunning}
+      estimatedCost={estimatedCost}
     >
       {/* Input Handle — panorama image */}
       <Handle

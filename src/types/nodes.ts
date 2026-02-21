@@ -280,6 +280,7 @@ export interface GenerateAudioNodeData extends BaseNodeData {
   selectedAudioHistoryIndex: number; // Currently selected audio in carousel
   duration: number | null; // Duration in seconds
   format: string | null; // MIME type (audio/mp3, audio/wav, etc.)
+  lastGenerationCost?: number | null; // Cost of the last generation run
 }
 
 /**
