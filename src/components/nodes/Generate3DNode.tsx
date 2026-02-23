@@ -138,11 +138,6 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
     updateNodeData(id, { output3dUrl: null, savedFilename: null, savedFilePath: null, status: "idle", error: null });
   }, [id, updateNodeData]);
 
-  // Compute estimated cost from model pricing
-  const estimatedCost = useMemo(() => {
-    return nodeData.selectedModel?.pricing?.amount ?? null;
-  }, [nodeData.selectedModel?.pricing?.amount]);
-
   return (
     <>
     <BaseNode
@@ -160,7 +155,6 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
       titlePrefix={titlePrefix}
       commentNavigation={commentNavigation ?? undefined}
       lastCost={nodeData.lastGenerationCost}
-      estimatedCost={estimatedCost}
     >
       {/* Dynamic input handles based on model schema */}
       {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (

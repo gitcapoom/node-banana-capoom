@@ -37,8 +37,6 @@ import {
   setCachedWaveSpeedSchemas,
   WaveSpeedApiSchema,
 } from "@/lib/providers/cache";
-import { getFalModelPricingBatch } from "@/app/api/generate/providers/fal";
-
 // API base URLs
 const REPLICATE_API_BASE = "https://api.replicate.com/v1";
 const FAL_API_BASE = "https://api.fal.ai/v1";
@@ -874,25 +872,6 @@ async function fetchFalModels(
     cursor = data.next_cursor;
     hasMore = data.has_more;
     pageCount++;
-  }
-
-  // Fetch per-run pricing for all models (best-effort, non-blocking)
-  if (apiKey && allModels.length > 0) {
-    try {
-      const pricingMap = await getFalModelPricingBatch(
-        allModels.map((m) => m.id),
-        apiKey
-      );
-      for (const model of allModels) {
-        const cost = pricingMap.get(model.id);
-        if (cost !== undefined) {
-          model.pricing = { type: "per-run", amount: cost, currency: "USD" };
-        }
-      }
-    } catch (err) {
-      // Pricing is best-effort — don't fail model listing if pricing fails
-      console.warn("[fal models] Failed to fetch batch pricing:", err);
-    }
   }
 
   return allModels;

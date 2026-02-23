@@ -15,7 +15,7 @@ import { GenerateRequest, GenerateResponse, ModelType, SelectedModel, ProviderTy
 import { GenerationInput, ModelCapability } from "@/lib/providers/types";
 import { generateWithGemini } from "./providers/gemini";
 import { generateWithReplicate } from "./providers/replicate";
-import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFalQueue, getFalModelPricing } from "./providers/fal";
+import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFalQueue } from "./providers/fal";
 import { generateWithKie } from "./providers/kie";
 import { generateWithWaveSpeed } from "./providers/wavespeed";
 import { calculateGenerationCost } from "@/utils/costCalculator";

@@ -25,23 +25,6 @@ const originalFetch = global.fetch;
 // Mock fetch for provider API calls
 const mockFetch = vi.fn();
 
-// Wrapper that auto-handles fal.ai pricing API calls (from getFalModelPricingBatch)
-// so tests don't need to account for pricing requests
-function createFetchWrapper() {
-  return (...args: Parameters<typeof fetch>) => {
-    const url = typeof args[0] === "string" ? args[0] : (args[0] as Request).url;
-    if (url.includes("pricing/estimate")) {
-      return Promise.resolve(
-        new Response(JSON.stringify({ total_cost: 0, currency: "USD" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-      );
-    }
-    return mockFetch(...args);
-  };
-}
-
 // Helper to create mock NextRequest for GET
 function createMockGetRequest(
   params: Record<string, string> = {},
@@ -114,8 +97,8 @@ describe("/api/models route", () => {
     // Clear API keys
     delete process.env.REPLICATE_API_KEY;
     delete process.env.FAL_API_KEY;
-    // Set up mock fetch (wrapper auto-handles pricing API calls)
-    global.fetch = createFetchWrapper() as typeof fetch;
+    // Set up mock fetch
+    global.fetch = mockFetch as typeof fetch;
     // Reset cache mock to default (miss)
     mockGetCachedModels.mockReturnValue(null);
   });

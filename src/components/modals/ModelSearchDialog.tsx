@@ -10,7 +10,7 @@ import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 
 // localStorage cache for models (persists across dev server restarts)
 // Bump version when model data shape changes (e.g., adding pricing fields)
-const MODELS_CACHE_KEY = "node-banana-models-cache-v2";
+const MODELS_CACHE_KEY = "node-banana-models-cache";
 const MODELS_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface ModelsCacheEntry {
@@ -275,7 +275,7 @@ export function ModelSearchDialog({
       // Clear localStorage model cache
       localStorage.removeItem(MODELS_CACHE_KEY);
       // Clear localStorage schema cache (keep in sync with SCHEMA_CACHE_KEY in ModelParameters.tsx)
-      localStorage.removeItem("node-banana-schema-cache-v4");
+      localStorage.removeItem("node-banana-schema-cache-v3");
       // Clear in-memory deduplicatedFetch cache
       clearFetchCache();
       // Re-fetch with cache bypass

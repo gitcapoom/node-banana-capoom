@@ -13,7 +13,6 @@ import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
 import { getImageDimensions, calculateNodeSizePreservingHeight } from "@/utils/nodeDimensions";
 import { ProviderBadge } from "./ProviderBadge";
-import { calculateGenerationCost } from "@/utils/costCalculator";
 
 // All 10 aspect ratios supported by both models
 const ASPECT_RATIOS: AspectRatio[] = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
@@ -464,16 +463,6 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     });
   }, [id, nodeData.outputImage, setNodes]);
 
-  // Compute estimated cost from model pricing
-  const estimatedCost = useMemo(() => {
-    // Gemini models: use hardcoded pricing table
-    if (currentProvider === "gemini") {
-      return calculateGenerationCost(nodeData.model, nodeData.resolution);
-    }
-    // External models: use selectedModel.pricing
-    return nodeData.selectedModel?.pricing?.amount ?? null;
-  }, [currentProvider, nodeData.model, nodeData.resolution, nodeData.selectedModel?.pricing?.amount]);
-
   return (
     <>
     <BaseNode
@@ -491,7 +480,6 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       titlePrefix={titlePrefix}
       commentNavigation={commentNavigation ?? undefined}
       lastCost={nodeData.lastGenerationCost}
-      estimatedCost={estimatedCost}
     >
       {/* Input handles - dynamically positioned based on number of image inputs */}
       {(() => {

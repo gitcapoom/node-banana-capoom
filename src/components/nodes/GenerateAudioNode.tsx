@@ -232,11 +232,6 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
     });
   }, [nodeData.inputSchema]);
 
-  // Compute estimated cost from model pricing
-  const estimatedCost = useMemo(() => {
-    return nodeData.selectedModel?.pricing?.amount ?? null;
-  }, [nodeData.selectedModel?.pricing?.amount]);
-
   return (
     <>
       <BaseNode
@@ -256,7 +251,6 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
         minWidth={300}
         minHeight={250}
         lastCost={nodeData.lastGenerationCost}
-        estimatedCost={estimatedCost}
       >
         {/* Model parameters */}
         {nodeData.selectedModel?.modelId && (
