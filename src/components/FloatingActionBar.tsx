@@ -322,7 +322,7 @@ function MiscComboButton() {
         onClick={() => setIsOpen(!isOpen)}
         className="px-2.5 py-1.5 text-[11px] font-medium text-neutral-400 hover:text-neutral-100 hover:bg-neutral-700 rounded transition-colors flex items-center gap-1"
       >
-        Misc
+        Edit
         <svg
           className={`w-3 h-3 transition-transform ${isOpen ? "rotate-180" : ""}`}
           fill="none"
@@ -337,6 +337,17 @@ function MiscComboButton() {
       {isOpen && (
         <div className="absolute bottom-full left-0 mb-2 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl overflow-hidden min-w-[140px]">
           <button
+            onClick={() => handleAddNode("annotation")}
+            draggable
+            onDragStart={(e) => handleDragStart(e, "annotation")}
+            className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+            </svg>
+            Annotate
+          </button>
+          <button
             onClick={() => handleAddNode("panoEditor")}
             draggable
             onDragStart={(e) => handleDragStart(e, "panoEditor")}
@@ -347,7 +358,7 @@ function MiscComboButton() {
               <circle cx="12" cy="12" r="3" />
               <path d="M3 12h6M15 12h6M12 3v6M12 15v6" />
             </svg>
-            Pano Editor
+            Pano Edit
           </button>
           <button
             onClick={() => handleAddNode("maskPainter")}
@@ -358,7 +369,7 @@ function MiscComboButton() {
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
             </svg>
-            Mask Painter
+            Mask Paint
           </button>
         </div>
       )}
@@ -463,7 +474,6 @@ export function FloatingActionBar() {
     <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50">
       <div className="flex items-center gap-0.5 bg-neutral-800/95 backdrop-blur-sm rounded-lg shadow-lg border border-neutral-700/80 px-1.5 py-1">
         <NodeButton type="imageInput" label="Image" />
-        <NodeButton type="annotation" label="Annotate" />
         <NodeButton type="prompt" label="Prompt" />
         <GenerateComboButton />
         <ViewerComboButton />
