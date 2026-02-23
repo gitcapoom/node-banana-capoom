@@ -271,6 +271,18 @@ function ViewerComboButton() {
             </svg>
             Pano Viewer
           </button>
+          <button
+            onClick={() => handleAddNode("spzViewer")}
+            draggable
+            onDragStart={(e) => handleDragStart(e, "spzViewer")}
+            className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c-4.97 0-9 3.134-9 7s4.03 7 9 7c.703 0 1.387-.07 2.043-.2L19 19v-3.458C20.832 14.098 21 12.578 21 10c0-3.866-4.03-7-9-7z" />
+              <circle cx="12" cy="10" r="2" />
+            </svg>
+            SPZ Viewer
+          </button>
         </div>
       )}
     </div>
