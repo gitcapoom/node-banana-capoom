@@ -5,7 +5,6 @@ import { useWorkflowStore, WorkflowFile } from "@/store/workflowStore";
 import { ProjectSetupModal } from "./ProjectSetupModal";
 import { CostIndicator } from "./CostIndicator";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
-import { useToast } from "@/components/Toast";
 
 function CommentsNavigationIcon() {
   // Subscribe to nodes so we re-render when comments change
@@ -58,22 +57,6 @@ function CommentsNavigationIcon() {
   );
 }
 
-function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text);
-  }
-  // Fallback for non-secure contexts (HTTP)
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  document.body.removeChild(textarea);
-  return Promise.resolve();
-}
-
 export function Header() {
   const {
     workflowName,
@@ -91,7 +74,6 @@ export function Header() {
     setShortcutsDialogOpen,
   } = useWorkflowStore();
 
-  const toast = useToast();
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projectModalMode, setProjectModalMode] = useState<"new" | "settings">("new");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -179,6 +161,7 @@ export function Header() {
       alert("Failed to open project folder. Please try again.");
     }
   };
+
 
   const handleRevertAIChanges = useCallback(() => {
     const confirmed = window.confirm(

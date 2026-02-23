@@ -9,7 +9,6 @@ import { loadNodeDefaults, saveNodeDefaults } from "@/store/utils/localStorage";
 import { ProviderModel } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 
-
 // LLM provider and model options (mirrored from LLMGenerateNode)
 const LLM_PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: "google", label: "Google" },
@@ -88,6 +87,40 @@ export function ProjectSetupModal({
   onSave,
   mode,
 }: ProjectSetupModalProps) {
+  const sanitizeProjectFolderName = (projectName: string): string => {
+    return projectName
+      .trim()
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+      .replace(/\.+$/g, "")
+      .trim();
+  };
+
+  const joinPathForPlatform = (basePath: string, folderName: string): string => {
+    const trimmedBase = basePath.trim();
+    const separator = /^[A-Za-z]:[\\\/]/.test(trimmedBase) || trimmedBase.startsWith("\\\\") ? "\\" : "/";
+    const endsWithSeparator = trimmedBase.endsWith("/") || trimmedBase.endsWith("\\");
+    return `${trimmedBase}${endsWithSeparator ? "" : separator}${folderName}`;
+  };
+
+  const getPathBasename = (fullPath: string): string => {
+    const withoutTrailingSeparator = fullPath.trim().replace(/[\\/]+$/, "");
+    const parts = withoutTrailingSeparator.split(/[\\/]/);
+    return parts[parts.length - 1] || "";
+  };
+
+  const ensureProjectSubfolderPath = (basePath: string, projectName: string): string => {
+    const trimmedBase = basePath.trim();
+    const sanitizedFolder = sanitizeProjectFolderName(projectName);
+    if (!sanitizedFolder) return trimmedBase;
+
+    const basename = getPathBasename(trimmedBase);
+    if (basename.toLowerCase() === sanitizedFolder.toLowerCase()) {
+      return trimmedBase;
+    }
+
+    return joinPathForPlatform(trimmedBase, sanitizedFolder);
+  };
+
   const {
     workflowName,
     saveDirectoryPath,
@@ -232,8 +265,9 @@ export function ProjectSetupModal({
       return;
     }
 
-    const trimmedPath = directoryPath.trim();
-    if (!(trimmedPath.startsWith("/") || /^[A-Za-z]:[\\\/]/.test(trimmedPath) || trimmedPath.startsWith("\\\\"))) {
+    const fullProjectPath = ensureProjectSubfolderPath(directoryPath, name);
+
+    if (!(fullProjectPath.startsWith("/") || /^[A-Za-z]:[\\\/]/.test(fullProjectPath) || fullProjectPath.startsWith("\\\\"))) {
       setError("Project directory must be an absolute path (starting with /, a drive letter, or a UNC path)");
       return;
     }
@@ -242,19 +276,13 @@ export function ProjectSetupModal({
     setError(null);
 
     try {
-      // Validate project directory exists
+      // Validate path shape when it already exists
       const response = await fetch(
-        `/api/workflow?path=${encodeURIComponent(directoryPath.trim())}`
+        `/api/workflow?path=${encodeURIComponent(fullProjectPath)}`
       );
       const result = await response.json();
 
-      if (!result.exists) {
-        setError("Project directory does not exist");
-        setIsValidating(false);
-        return;
-      }
-
-      if (!result.isDirectory) {
+      if (result.exists && !result.isDirectory) {
         setError("Project path is not a directory");
         setIsValidating(false);
         return;
@@ -263,7 +291,7 @@ export function ProjectSetupModal({
       const id = mode === "new" ? generateWorkflowId() : useWorkflowStore.getState().workflowId || generateWorkflowId();
       // Update external storage setting
       setUseExternalImageStorage(externalStorage);
-      onSave(id, name.trim(), directoryPath.trim());
+      onSave(id, name.trim(), fullProjectPath);
       setIsValidating(false);
     } catch (err) {
       setError(
@@ -318,7 +346,7 @@ export function ProjectSetupModal({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !isValidating) {
+    if (e.key === "Enter" && !isValidating && !isBrowsing) {
       handleSave();
     }
     if (e.key === "Escape") {
@@ -425,7 +453,7 @@ export function ProjectSetupModal({
                 </button>
               </div>
               <p className="text-xs text-neutral-500 mt-1">
-                Use a network path (e.g. //server/share/...) for remote access. Subfolders for inputs and generations will be auto-created.
+                Workflow files and images will be saved here. Subfolders for inputs and generations will be auto-created.
               </p>
             </div>
 
@@ -1161,7 +1189,7 @@ export function ProjectSetupModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={activeTab === "project" && isValidating}
+            disabled={activeTab === "project" && (isValidating || isBrowsing)}
             className="px-4 py-2 text-sm bg-white text-neutral-900 rounded hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {activeTab === "project"
@@ -1186,12 +1214,6 @@ export function ProjectSetupModal({
                   provider: model.provider,
                   modelId: model.id,
                   displayName: model.name,
-                  ...(model.pricing && {
-                    pricing: {
-                      type: model.pricing.type,
-                      amount: model.pricing.amount,
-                    },
-                  }),
                 }
               }
             }));
@@ -1213,12 +1235,6 @@ export function ProjectSetupModal({
                   provider: model.provider,
                   modelId: model.id,
                   displayName: model.name,
-                  ...(model.pricing && {
-                    pricing: {
-                      type: model.pricing.type,
-                      amount: model.pricing.amount,
-                    },
-                  }),
                 }
               }
             }));
