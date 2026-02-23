@@ -834,7 +834,13 @@ export function WorkflowCanvas() {
       if ((nodeType === "annotation" || nodeType === "maskPainter") && connectionType === "source" && handleType === "image" && sourceNodeId) {
         const sourceImage = getImageFromNode(sourceNodeId);
         if (sourceImage) {
-          updateNodeData(newNodeId, { sourceImage, outputImage: sourceImage });
+          if (nodeType === "maskPainter") {
+            // Mask painter: set sourceImage for the modal reference, but NOT outputMask — preview stays empty/black
+            updateNodeData(newNodeId, { sourceImage });
+          } else {
+            // Annotation: set both sourceImage and outputImage (annotation passes through the image)
+            updateNodeData(newNodeId, { sourceImage, outputImage: sourceImage });
+          }
         }
       }
 
@@ -845,10 +851,10 @@ export function WorkflowCanvas() {
       // Map handle type to the correct handle ID based on node type
       // Note: New nodes start with default handles (image, text) before a model is selected
       if (handleType === "image") {
-        if (nodeType === "annotation" || nodeType === "output" || nodeType === "splitGrid" || nodeType === "outputGallery" || nodeType === "imageCompare") {
+        if (nodeType === "annotation" || nodeType === "maskPainter" || nodeType === "output" || nodeType === "splitGrid" || nodeType === "outputGallery" || nodeType === "imageCompare") {
           targetHandleId = "image";
-          // annotation also has an image output
-          if (nodeType === "annotation") {
+          // annotation and maskPainter also have an image output
+          if (nodeType === "annotation" || nodeType === "maskPainter") {
             sourceHandleIdForNewNode = "image";
           }
         } else if (nodeType === "nanoBanana" || nodeType === "generateVideo") {
