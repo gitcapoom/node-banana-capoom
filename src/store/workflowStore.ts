@@ -85,6 +85,7 @@ import {
   executeWorldLabsWorld,
   executePanoViewer,
   executePanoEditor,
+  executeAppleSharp,
 } from "./execution";
 import type { NodeExecutionContext } from "./execution";
 export type { LevelGroup } from "./utils/executionUtils";
@@ -1029,6 +1030,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           case "maskPainter":
             await executeMaskPainter(executionCtx);
             break;
+          case "appleSharp":
+            await executeAppleSharp(executionCtx);
+            break;
         }
     }; // End of executeSingleNode helper
 
@@ -1204,6 +1208,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         return;
       } else if (node.type === "maskPainter") {
         await executeMaskPainter(executionCtx);
+      } else if (node.type === "appleSharp") {
+        await executeAppleSharp(executionCtx);
       }
 
       // After regeneration, execute directly connected downstream consumer nodes
