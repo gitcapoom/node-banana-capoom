@@ -42,7 +42,8 @@ export type NodeType =
   | "videoTrim"
   | "videoFrameGrab"
   | "generate3d"
-  | "glbViewer";
+  | "glbViewer"
+  | "appleSharp";
 
 /**
  * Node execution status
@@ -212,6 +213,23 @@ export interface Generate3DNodeData extends BaseNodeData {
   inputSchema?: ModelInputDef[];
   status: NodeStatus;
   error: string | null;
+}
+
+/**
+ * Apple SHARP node - converts a single image to a 3D Gaussian Splat (.ply)
+ * via a self-hosted SHARP server (neosun/sharp Docker image).
+ */
+export interface AppleSharpNodeData extends BaseNodeData {
+  serverUrl: string;
+  renderVideo: boolean;
+  inputImage: string | null;
+  output3dUrl: string | null;
+  outputVideoUrl: string | null;
+  savedFilename: string | null;
+  savedFilePath: string | null;
+  status: NodeStatus;
+  error: string | null;
+  progress: string | null;
 }
 
 /**
@@ -407,7 +425,8 @@ export type WorkflowNodeData =
   | EaseCurveNodeData
   | VideoTrimNodeData
   | VideoFrameGrabNodeData
-  | GLBViewerNodeData;
+  | GLBViewerNodeData
+  | AppleSharpNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)

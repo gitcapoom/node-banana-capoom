@@ -19,6 +19,7 @@ import {
   VideoTrimNodeData,
   VideoFrameGrabNodeData,
   GLBViewerNodeData,
+  AppleSharpNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -50,6 +51,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   videoTrim: { width: 360, height: 360 },
   videoFrameGrab: { width: 320, height: 320 },
   glbViewer: { width: 360, height: 380 },
+  appleSharp: { width: 300, height: 320 },
 };
 
 /**
@@ -289,5 +291,18 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         filename: null,
         capturedImage: null,
       } as GLBViewerNodeData;
+    case "appleSharp":
+      return {
+        serverUrl: "http://capoompc21:8080",
+        renderVideo: false,
+        inputImage: null,
+        output3dUrl: null,
+        outputVideoUrl: null,
+        savedFilename: null,
+        savedFilePath: null,
+        status: "idle",
+        error: null,
+        progress: null,
+      } as AppleSharpNodeData;
   }
 };

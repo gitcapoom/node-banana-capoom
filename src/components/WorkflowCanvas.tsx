@@ -1153,6 +1153,7 @@ export function WorkflowCanvas() {
             videoTrim: { width: 360, height: 360 },
             videoFrameGrab: { width: 320, height: 320 },
             glbViewer: { width: 360, height: 380 },
+            appleSharp: { width: 300, height: 320 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });
