@@ -40,6 +40,7 @@ import {
   EaseCurveNode,
   VideoTrimNode,
   VideoFrameGrabNode,
+  AppleSharpNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -81,6 +82,7 @@ const nodeTypes: NodeTypes = {
   videoTrim: VideoTrimNode,
   videoFrameGrab: VideoFrameGrabNode,
   glbViewer: GLBViewerNode,
+  appleSharp: AppleSharpNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -154,6 +156,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["video"], outputs: ["image"] };
     case "glbViewer":
       return { inputs: ["3d"], outputs: ["image"] };
+    case "appleSharp":
+      return { inputs: ["image"], outputs: ["3d"] };
     default:
       return { inputs: [], outputs: [] };
   }
@@ -1747,6 +1751,8 @@ export function WorkflowCanvas() {
                 return "#38bdf8"; // sky-400 (image from video)
               case "glbViewer":
                 return "#0ea5e9"; // sky-500 (3D viewport)
+              case "appleSharp":
+                return "#f97316"; // orange-500 (Apple SHARP 3D)
               default:
                 return "#94a3b8";
             }
