@@ -42,3 +42,5 @@ export {
   executeVideoTrim,
   executeVideoFrameGrab,
 } from "./videoProcessingExecutors";
+
+export { executeAppleSharp } from "./appleSharpExecutor";
