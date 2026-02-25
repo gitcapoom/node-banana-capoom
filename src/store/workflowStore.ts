@@ -58,6 +58,7 @@ import {
   clearNodeImageRefs,
 } from "./utils/executionUtils";
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
+import { computeDimmedNodes } from "./utils/dimmingUtils";
 import {
   executeAnnotation,
   executeArray,
@@ -336,6 +337,12 @@ interface WorkflowStore {
   // Canvas navigation settings actions
   updateCanvasNavigationSettings: (settings: CanvasNavigationSettings) => void;
 
+  // Switch dimming state
+  dimmedNodeIds: Set<string>;
+
+  // Switch dimming actions
+  recomputeDimmedNodes: () => void;
+
 }
 
 let nodeIdCounter = 0;
@@ -428,6 +435,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   // Canvas navigation settings initial state
   canvasNavigationSettings: getCanvasNavigationSettings(),
 
+  // Switch dimming initial state
+  dimmedNodeIds: new Set<string>(),
+
   setEdgeStyle: (style: EdgeStyle) => {
     set({ edgeStyle: style });
   },
@@ -480,6 +490,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => {
+    const node = get().nodes.find((n) => n.id === nodeId);
     set((state) => ({
       nodes: state.nodes.map((node) =>
         node.id === nodeId
@@ -488,6 +499,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       ) as WorkflowNode[],
       hasUnsavedChanges: true,
     }));
+    // Recompute dimming if this is a switch node and switches data changed
+    if (node?.type === "switch" && "switches" in data) {
+      get().recomputeDimmedNodes();
+    }
   },
 
   removeNode: (nodeId: string) => {
@@ -524,6 +539,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     const hasMeaningfulChange = changes.some((c) => c.type !== "select");
     // Track manual changes only for remove operations (not selection)
     const hasRemoveChange = changes.some((c) => c.type === "remove");
+    const hasAddOrRemove = changes.some((c) => c.type === "add" || c.type === "remove");
 
     set((state) => ({
       edges: applyEdgeChanges(changes, state.edges),
@@ -532,6 +548,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
     if (hasRemoveChange) {
       get().incrementManualChangeCount();
+    }
+
+    // Recompute dimming when edges are added or removed
+    if (hasAddOrRemove) {
+      get().recomputeDimmedNodes();
     }
   },
 
@@ -550,6 +571,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       };
     });
     get().incrementManualChangeCount();
+    get().recomputeDimmedNodes();
   },
 
   addEdgeWithType: (connection: Connection, edgeType: string, edgeDataOverrides?: Record<string, unknown>) => {
@@ -904,6 +926,18 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       // Check for abort before starting
       if (signal.aborted) {
         throw new DOMException('Aborted', 'AbortError');
+      }
+
+      // Check if node is dimmed (downstream of disabled Switch output)
+      const dimmedNodeIds = get().dimmedNodeIds;
+      if (dimmedNodeIds.has(node.id)) {
+        // Skip execution — node is dimmed
+        // Keep previous output visible (don't clear node data)
+        logger.info('workflow.skip', 'Node skipped (downstream of disabled Switch)', {
+          nodeId: node.id,
+          nodeType: node.type,
+        });
+        return;
       }
 
       // Check for pause edges on incoming connections (skip if resuming from this exact node)
@@ -1609,6 +1643,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     if (!options?.preserveSnapshot) {
       get().clearSnapshot();
     }
+
+    // Recompute dimming after loading workflow
+    get().recomputeDimmedNodes();
   },
 
   clearWorkflow: () => {
@@ -1631,6 +1668,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       imageRefBasePath: null,
       // Reset viewed comments when clearing workflow
       viewedCommentNodeIds: new Set<string>(),
+      // Reset dimmed nodes
+      dimmedNodeIds: new Set<string>(),
     });
     get().clearSnapshot();
   },
@@ -2129,6 +2168,18 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   updateCanvasNavigationSettings: (settings: CanvasNavigationSettings) => {
     set({ canvasNavigationSettings: settings });
     saveCanvasNavigationSettings(settings);
+  },
+
+  // Switch dimming actions
+  recomputeDimmedNodes: () => {
+    const { nodes, edges } = get();
+    const newDimmed = computeDimmedNodes(nodes, edges);
+    // Only update if set contents changed (prevent unnecessary rerenders)
+    const currentDimmed = get().dimmedNodeIds;
+    if (newDimmed.size !== currentDimmed.size ||
+        [...newDimmed].some(id => !currentDimmed.has(id))) {
+      set({ dimmedNodeIds: newDimmed });
+    }
   },
 
 });
