@@ -107,7 +107,7 @@ async function handlePredict(body: PredictAction): Promise<NextResponse> {
 async function handleHealth(body: HealthAction): Promise<NextResponse> {
   const serverUrl = normalizeServerUrl(body.serverUrl);
   try {
-    const response = await fetch(`${serverUrl}/health`, {
+    const response = await fetch(`${serverUrl}/api/gpu/status`, {
       signal: AbortSignal.timeout(5000),
     });
     return NextResponse.json({ success: response.ok });
