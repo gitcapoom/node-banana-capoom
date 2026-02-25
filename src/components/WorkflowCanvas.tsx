@@ -40,6 +40,7 @@ import {
   EaseCurveNode,
   VideoTrimNode,
   VideoFrameGrabNode,
+  RouterNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -80,6 +81,7 @@ const nodeTypes: NodeTypes = {
   easeCurve: EaseCurveNode,
   videoTrim: VideoTrimNode,
   videoFrameGrab: VideoFrameGrabNode,
+  router: RouterNode,
   glbViewer: GLBViewerNode,
 };
 
@@ -96,6 +98,8 @@ const edgeTypes: EdgeTypes = {
 // For dynamic handles, we use naming convention: image inputs contain "image", text inputs are "prompt" or "negative_prompt"
 const getHandleType = (handleId: string | null | undefined): "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | null => {
   if (!handleId) return null;
+  // Generic Router handles — return null to allow any type connection
+  if (handleId === "generic-input" || handleId === "generic-output") return null;
   // EaseCurve handles (must check before other types)
   if (handleId === "easeCurve") return "easeCurve";
   // 3D handles
@@ -152,6 +156,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["video"], outputs: ["video"] };
     case "videoFrameGrab":
       return { inputs: ["video"], outputs: ["image"] };
+    case "router":
+      return { inputs: ["image", "text", "video", "audio", "3d", "easeCurve", "generic-input"], outputs: ["image", "text", "video", "audio", "3d", "easeCurve", "generic-output"] };
     case "glbViewer":
       return { inputs: ["3d"], outputs: ["image"] };
     default:
@@ -327,10 +333,12 @@ export function WorkflowCanvas() {
       // If we can't determine types, allow the connection
       if (!sourceType || !targetType) return true;
 
-      // EaseCurve connections: only between easeCurve nodes
+      // EaseCurve connections: only between easeCurve nodes (or router)
       if (sourceType === "easeCurve" || targetType === "easeCurve") {
-        if (sourceType !== "easeCurve" || targetType !== "easeCurve") return false;
         const targetNode = nodes.find((n) => n.id === connection.target);
+        const sourceNode = nodes.find((n) => n.id === connection.source);
+        if (targetNode?.type === "router" || sourceNode?.type === "router") return true;
+        if (sourceType !== "easeCurve" || targetType !== "easeCurve") return false;
         return targetNode?.type === "easeCurve";
       }
 
@@ -344,7 +352,7 @@ export function WorkflowCanvas() {
         if (!targetNode) return false;
 
         const targetNodeType = targetNode.type;
-        if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "easeCurve" || targetNodeType === "videoTrim" || targetNodeType === "videoFrameGrab" || targetNodeType === "output") {
+        if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "easeCurve" || targetNodeType === "videoTrim" || targetNodeType === "videoFrameGrab" || targetNodeType === "output" || targetNodeType === "router") {
           // For output node, we allow video even though its handle is typed as "image"
           // because output node can display both images and videos
           return true;
@@ -353,16 +361,20 @@ export function WorkflowCanvas() {
         return false;
       }
 
-      // 3D connections: 3d handles can only connect to matching 3d handles
+      // 3D connections: 3d handles can only connect to matching 3d handles (or router)
       if (sourceType === "3d" || targetType === "3d") {
+        // Allow 3d connections to router nodes
+        const sourceNode = nodes.find((n) => n.id === connection.source);
+        const targetNode = nodes.find((n) => n.id === connection.target);
+        if (sourceNode?.type === "router" || targetNode?.type === "router") return true;
         return sourceType === "3d" && targetType === "3d";
       }
 
-      // Audio connections: audio handles connect to audio handles, plus output node
+      // Audio connections: audio handles connect to audio handles, plus output node (or router)
       if (sourceType === "audio" || targetType === "audio") {
         if (sourceType === "audio") {
           const targetNode = nodes.find((n) => n.id === connection.target);
-          if (targetNode?.type === "output") return true;
+          if (targetNode?.type === "output" || targetNode?.type === "router") return true;
         }
         return sourceType === "audio" && targetType === "audio";
       }
@@ -392,6 +404,34 @@ export function WorkflowCanvas() {
         return conn;
       };
 
+      // For Router nodes, resolve generic handles to typed handles
+      const resolveRouterHandle = (conn: Connection): Connection => {
+        const targetNode = nodes.find((n) => n.id === conn.target);
+        if (targetNode?.type !== "router") return conn;
+
+        // If targeting a generic handle, transform to typed handle
+        if (conn.targetHandle === "generic-input") {
+          const sourceType = getHandleType(conn.sourceHandle);
+          if (sourceType) {
+            return { ...conn, targetHandle: sourceType };
+          }
+        }
+        return conn;
+      };
+
+      // For Router source nodes, resolve generic output handles to typed handles
+      const resolveRouterSourceHandle = (conn: Connection): Connection => {
+        const sourceNode = nodes.find((n) => n.id === conn.source);
+        if (sourceNode?.type !== "router") return conn;
+        if (conn.sourceHandle === "generic-output") {
+          const targetType = getHandleType(conn.targetHandle);
+          if (targetType) {
+            return { ...conn, sourceHandle: targetType };
+          }
+        }
+        return conn;
+      };
+
       // Get all selected nodes
       const selectedNodes = nodes.filter((node) => node.selected);
       const sourceNode = nodes.find((node) => node.id === connection.source);
@@ -405,6 +445,8 @@ export function WorkflowCanvas() {
           // Skip if this is already the connection source
           if (node.id === connection.source) {
             let resolved = resolveImageCompareHandle(connection, batchUsed);
+            resolved = resolveRouterHandle(resolved);
+            resolved = resolveRouterSourceHandle(resolved);
             // Resolve videoStitch handles for batch connections
             const tgtNode = nodes.find((n) => n.id === resolved.target);
             if (tgtNode?.type === "videoStitch" && resolved.targetHandle?.startsWith("video-")) {
@@ -456,7 +498,9 @@ export function WorkflowCanvas() {
             }
           }
 
-          const resolved = resolveImageCompareHandle(multiConnection, batchUsed);
+          let resolved = resolveImageCompareHandle(multiConnection, batchUsed);
+          resolved = resolveRouterHandle(resolved);
+          resolved = resolveRouterSourceHandle(resolved);
           if (resolved.targetHandle) batchUsed.add(resolved.targetHandle);
           if (isValidConnection(resolved)) {
             onConnect(resolved);
@@ -464,7 +508,10 @@ export function WorkflowCanvas() {
         });
       } else {
         // Single connection
-        onConnect(resolveImageCompareHandle(connection));
+        let resolved = resolveImageCompareHandle(connection);
+        resolved = resolveRouterHandle(resolved);
+        resolved = resolveRouterSourceHandle(resolved);
+        onConnect(resolved);
       }
     },
     [onConnect, nodes, edges]
@@ -528,6 +575,15 @@ export function WorkflowCanvas() {
             if (!isOccupied) return candidateHandle;
           }
           return null;
+        }
+
+        // Router accepts any type — use typed handle if exists, otherwise generic
+        if (node.type === "router" && needInput) {
+          // Router accepts any type — use typed handle if that type is already active
+          return handleType;
+        }
+        if (node.type === "router" && !needInput) {
+          return handleType;
         }
 
         // Fall back to static handles
@@ -820,7 +876,14 @@ export function WorkflowCanvas() {
 
       // Map handle type to the correct handle ID based on node type
       // Note: New nodes start with default handles (image, text) before a model is selected
-      if (handleType === "image") {
+
+      // Router accepts and outputs all types — use the connection's handle type
+      if (nodeType === "router") {
+        if (handleType) {
+          targetHandleId = handleType;
+          sourceHandleIdForNewNode = handleType;
+        }
+      } else if (handleType === "image") {
         if (nodeType === "annotation" || nodeType === "output" || nodeType === "splitGrid" || nodeType === "outputGallery" || nodeType === "imageCompare") {
           targetHandleId = "image";
           // annotation also has an image output
@@ -1106,7 +1169,7 @@ export function WorkflowCanvas() {
             nodeType = "prompt";
             break;
           case "r":
-            nodeType = "array";
+            nodeType = "router";
             break;
           case "i":
             nodeType = "imageInput";
@@ -1152,6 +1215,7 @@ export function WorkflowCanvas() {
             easeCurve: { width: 340, height: 480 },
             videoTrim: { width: 360, height: 360 },
             videoFrameGrab: { width: 320, height: 320 },
+            router: { width: 200, height: 80 },
             glbViewer: { width: 360, height: 380 },
           };
           const dims = defaultDimensions[nodeType];
@@ -1744,6 +1808,8 @@ export function WorkflowCanvas() {
                 return "#60a5fa"; // blue-400 (trim/cut)
               case "videoFrameGrab":
                 return "#38bdf8"; // sky-400 (image from video)
+              case "router":
+                return "#6b7280"; // neutral-500 (gray/slate utility theme)
               case "glbViewer":
                 return "#0ea5e9"; // sky-500 (3D viewport)
               default:
