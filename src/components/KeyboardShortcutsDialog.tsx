@@ -36,6 +36,7 @@ const shortcutGroups: ShortcutGroup[] = [
       { keys: ["Shift", "A"], description: "Add Annotation node" },
       { keys: ["Shift", "T"], description: "Add Audio node" },
       { keys: ["Shift", "R"], description: "Add Array node" },
+      { keys: ["Shift", "W"], description: "Add Panorama node" },
     ],
   },
   {

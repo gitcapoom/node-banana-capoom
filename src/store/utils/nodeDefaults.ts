@@ -9,6 +9,8 @@ import {
   NanoBananaNodeData,
   GenerateVideoNodeData,
   Generate3DNodeData,
+  WorldLabsPanoNodeData,
+  WorldLabsWorldNodeData,
   GenerateAudioNodeData,
   LLMGenerateNodeData,
   SplitGridNodeData,
@@ -20,6 +22,11 @@ import {
   VideoFrameGrabNodeData,
   GLBViewerNodeData,
   AppleSharpNodeData,
+  SpzViewerNodeData,
+  PanoCropNodeData,
+  PanoViewerNodeData,
+  PanoEditorNodeData,
+  MaskPainterNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -52,6 +59,13 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   videoFrameGrab: { width: 320, height: 320 },
   glbViewer: { width: 360, height: 380 },
   appleSharp: { width: 300, height: 320 },
+  spzViewer: { width: 300, height: 280 },
+  worldLabsPano: { width: 320, height: 380 },
+  worldLabsWorld: { width: 320, height: 360 },
+  panoCrop: { width: 300, height: 280 },
+  panoViewer: { width: 300, height: 280 },
+  panoEditor: { width: 300, height: 300 },
+  maskPainter: { width: 260, height: 300 },
 };
 
 /**
@@ -155,6 +169,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         error: null,
         imageHistory: [],
         selectedHistoryIndex: 0,
+        lastGenerationCost: null,
       } as NanoBananaNodeData;
     }
     case "generateVideo": {
@@ -168,6 +183,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         error: null,
         videoHistory: [],
         selectedVideoHistoryIndex: 0,
+        lastGenerationCost: null,
       } as GenerateVideoNodeData;
     }
     case "generate3d": {
@@ -181,6 +197,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         selectedModel: nodeDefaults.generate3d?.selectedModel,
         status: "idle",
         error: null,
+        lastGenerationCost: null,
       } as Generate3DNodeData;
     }
     case "generateAudio": {
@@ -210,6 +227,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         maxTokens: llmDefaults?.maxTokens ?? 8192,
         status: "idle",
         error: null,
+        lastGenerationCost: null,
       } as LLMGenerateNodeData;
     }
     case "splitGrid":
@@ -304,5 +322,75 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         error: null,
         progress: null,
       } as AppleSharpNodeData;
+    case "spzViewer":
+      return {
+        spzUrl: null,
+        filename: null,
+        capturedImage: null,
+        viewerOpen: false,
+      } as SpzViewerNodeData;
+    case "worldLabsPano":
+      return {
+        worldName: "Untitled World",
+        model: "Marble 0.1-mini",
+        seed: null,
+        inputImages: [],
+        inputPrompt: null,
+        operationId: null,
+        worldId: null,
+        status: "idle",
+        error: null,
+        progress: null,
+        panoUrl: null,
+        thumbnailUrl: null,
+        caption: null,
+        imageAzimuths: {},
+      } as WorldLabsPanoNodeData;
+    case "worldLabsWorld":
+      return {
+        worldName: "Untitled World",
+        model: "Marble 0.1-plus",
+        seed: null,
+        inputImages: [],
+        inputPrompt: null,
+        operationId: null,
+        worldId: null,
+        status: "idle",
+        error: null,
+        progress: null,
+        spzUrls: null,
+        panoUrl: null,
+        thumbnailUrl: null,
+        marbleViewerUrl: null,
+        caption: null,
+        viewerWindowOpen: false,
+      } as WorldLabsWorldNodeData;
+    case "panoCrop":
+      return {
+        image: null,
+        metadata: null,
+        filename: null,
+        dimensions: null,
+      } as PanoCropNodeData;
+    case "panoViewer":
+      return {
+        panoUrl: null,
+        viewerOpen: false,
+      } as PanoViewerNodeData;
+    case "panoEditor":
+      return {
+        outputImage: null,
+        status: "idle",
+        error: null,
+      } as PanoEditorNodeData;
+    case "maskPainter":
+      return {
+        sourceImage: null,
+        strokes: [],
+        outputMask: null,
+        brushSize: 30,
+        blurRadius: 0,
+        invertMask: false,
+      } as MaskPainterNodeData;
   }
 };

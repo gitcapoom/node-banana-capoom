@@ -11,12 +11,15 @@ export type { NodeExecutionContext, NodeExecutor } from "./types";
 export {
   executeAnnotation,
   executeArray,
+  executeMaskPainter,
   executePrompt,
   executePromptConstructor,
   executeOutput,
   executeOutputGallery,
   executeImageCompare,
   executeGlbViewer,
+  executeSpzViewer,
+  executePanoViewer,
 } from "./simpleNodeExecutors";
 
 export { executeNanoBanana } from "./nanoBananaExecutor";
@@ -44,3 +47,8 @@ export {
 } from "./videoProcessingExecutors";
 
 export { executeAppleSharp } from "./appleSharpExecutor";
+
+export { executeWorldLabsPano } from "./worldLabsPanoExecutor";
+export { executeWorldLabsWorld } from "./worldLabsWorldExecutor";
+
+export { executePanoEditor } from "./panoEditorExecutor";

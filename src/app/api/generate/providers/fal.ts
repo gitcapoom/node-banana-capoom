@@ -289,11 +289,13 @@ export async function generateWithFalQueue(
     }
     Object.assign(requestBody, filteredInputs);
 
-    // Ensure prompt is included even when dynamicInputs are present
-    // (executor sends prompt as top-level field, not in dynamicInputs)
-    const promptParam = paramMap.prompt || "prompt";
-    if (input.prompt && !requestBody[promptParam]) {
-      requestBody[promptParam] = input.prompt;
+    // Ensure prompt is included even when using dynamic inputs.
+    // nanoBananaExecutor removes prompt from dynamicInputs to avoid duplication,
+    // but the top-level prompt must still be sent to the API when dynamic inputs
+    // are present (e.g., inpaint models with mask + prompt).
+    const promptKey = paramMap.prompt || "prompt";
+    if (input.prompt && !requestBody[promptKey]) {
+      requestBody[promptKey] = input.prompt;
     }
   } else {
     // Fallback: use schema to map generic input names to model-specific parameter names
@@ -471,7 +473,7 @@ export async function generateWithFalQueue(
       // Extract media URL from result
       let mediaUrl: string | null = null;
 
-      // Check for 3D model output (GLB mesh) — must check before images
+      // Check for 3D model output (GLB/OBJ mesh) — must check before images
       if (result.model_mesh?.url) {
         mediaUrl = result.model_mesh.url;
       } else if (result.mesh?.url) {
@@ -480,8 +482,17 @@ export async function generateWithFalQueue(
         mediaUrl = result.glb.url;
       } else if (result.model_glb?.url) {
         mediaUrl = result.model_glb.url;
+      } else if (result.model_obj?.url) {
+        // OBJ format fallback (e.g., Hunyuan 3D v3.1/rapid)
+        mediaUrl = result.model_obj.url;
       } else if (result.model_urls?.glb?.url) {
         mediaUrl = result.model_urls.glb.url;
+      } else if (result.model_urls?.obj?.url) {
+        // OBJ nested under model_urls
+        mediaUrl = result.model_urls.obj.url;
+      } else if (result.model_urls?.url) {
+        // Direct URL on model_urls
+        mediaUrl = result.model_urls.url;
       } else if (result.video && result.video.url) {
         mediaUrl = result.video.url;
       } else if (result.audio && result.audio.url) {
@@ -495,7 +506,7 @@ export async function generateWithFalQueue(
       }
 
       if (!mediaUrl) {
-        console.error(`[API:${requestId}] No media URL found in queue result. Result keys: ${Object.keys(result).join(", ")}`);
+        console.error(`[API:${requestId}] No media URL found in queue result. Result keys: ${Object.keys(result).join(", ")}, model_urls: ${JSON.stringify(result.model_urls)?.substring(0, 200)}`);
         return {
           success: false,
           error: "No media URL in response",
