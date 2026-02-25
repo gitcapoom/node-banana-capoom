@@ -44,7 +44,7 @@ async function handlePredict(body: PredictAction): Promise<NextResponse> {
 
   // Strip data URL prefix to get raw base64
   const base64Match = body.imageData.match(
-    /^data:image\/(\w+);base64,(.+)$/s
+    /^data:image\/(\w+);base64,(.+)$/
   );
   if (!base64Match) {
     return NextResponse.json(
