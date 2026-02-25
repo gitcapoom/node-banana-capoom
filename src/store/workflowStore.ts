@@ -77,6 +77,7 @@ import {
   executeVideoTrim,
   executeVideoFrameGrab,
   executeGlbViewer,
+  executeAppleSharp,
 } from "./execution";
 import type { NodeExecutionContext } from "./execution";
 export type { LevelGroup } from "./utils/executionUtils";
@@ -1008,6 +1009,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           case "videoFrameGrab":
             await executeVideoFrameGrab(executionCtx);
             break;
+          case "appleSharp":
+            await executeAppleSharp(executionCtx);
+            break;
         }
     }; // End of executeSingleNode helper
 
@@ -1173,6 +1177,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         set({ isRunning: false, currentNodeIds: [] });
         await logger.endSession();
         return;
+      } else if (node.type === "appleSharp") {
+        await executeAppleSharp(executionCtx);
       }
 
       // After regeneration, execute directly connected downstream consumer nodes
