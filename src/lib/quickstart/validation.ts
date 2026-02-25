@@ -32,6 +32,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "videoTrim",
   "videoFrameGrab",
   "glbViewer",
+  "appleSharp",
 ];
 
 const VALID_HANDLE_TYPES = ["image", "text", "audio", "video", "easeCurve", "3d", "reference"];
@@ -393,6 +394,19 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         glbUrl: null,
         filename: null,
         capturedImage: null,
+      };
+    case "appleSharp":
+      return {
+        serverUrl: "http://capoompc21:8080",
+        renderVideo: false,
+        inputImage: null,
+        output3dUrl: null,
+        outputVideoUrl: null,
+        savedFilename: null,
+        savedFilePath: null,
+        status: "idle",
+        error: null,
+        progress: null,
       };
   }
 }
