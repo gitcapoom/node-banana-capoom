@@ -7,7 +7,7 @@ import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, saveNanoBananaDefaults, useProviderApiKeys } from "@/store/workflowStore";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
-import { NanoBananaNodeData, AspectRatio, Resolution, ModelType, ProviderType, SelectedModel, ModelInputDef } from "@/types";
+import { NanoBananaNodeData, AspectRatio, Resolution, ModelType, MODEL_DISPLAY_NAMES, ProviderType, SelectedModel, ModelInputDef } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
@@ -17,12 +17,13 @@ import { ProviderBadge } from "./ProviderBadge";
 // All 10 aspect ratios supported by both models
 const ASPECT_RATIOS: AspectRatio[] = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
 
-// Resolutions only for Nano Banana Pro (gemini-3-pro-image-preview)
-const RESOLUTIONS: Resolution[] = ["1K", "2K", "4K"];
+// Resolutions for Nano Banana Pro and Nano Banana 2
+const RESOLUTIONS: Resolution[] = ["512", "1K", "2K", "4K"];
 
 // Hardcoded Gemini image models (always available)
 const GEMINI_IMAGE_MODELS: { value: ModelType; label: string }[] = [
   { value: "nano-banana", label: "Nano Banana" },
+  { value: "nano-banana-2", label: "Nano Banana 2" },
   { value: "nano-banana-pro", label: "Nano Banana Pro" },
 ];
 
@@ -78,7 +79,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   // Migrate legacy data: derive selectedModel from model field if missing
   useEffect(() => {
     if (nodeData.model && !nodeData.selectedModel) {
-      const displayName = nodeData.model === "nano-banana" ? "Nano Banana" : "Nano Banana Pro";
+      const displayName = MODEL_DISPLAY_NAMES[nodeData.model] || nodeData.model;
       const newSelectedModel: SelectedModel = {
         provider: "gemini",
         modelId: nodeData.model,
@@ -392,7 +393,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   }, [isGeminiOnly]);
   // Use selectedModel.modelId for Gemini models, fallback to legacy model field
   const currentModelId = isGeminiProvider ? (nodeData.selectedModel?.modelId || nodeData.model) : null;
-  const isNanoBananaPro = currentModelId === "nano-banana-pro";
+  const supportsResolution = currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2";
   const hasCarouselImages = (nodeData.imageHistory || []).length > 1;
 
   // Track previous status to detect error transitions
@@ -694,7 +695,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                 </option>
               ))}
             </select>
-            {isNanoBananaPro && (
+            {supportsResolution && (
               <select
                 value={nodeData.resolution}
                 onChange={handleResolutionChange}
@@ -710,8 +711,8 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
           </div>
         )}
 
-        {/* Google Search toggle - only for Nano Banana Pro */}
-        {currentProvider === "gemini" && isNanoBananaPro && (
+        {/* Google Search toggle - for Nano Banana Pro and Nano Banana 2 */}
+        {currentProvider === "gemini" && supportsResolution && (
           <label className="flex items-center gap-1.5 text-[10px] text-neutral-300 shrink-0 cursor-pointer">
             <input
               type="checkbox"

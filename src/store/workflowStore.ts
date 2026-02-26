@@ -23,6 +23,7 @@ import {
   ProviderSettings,
   RecentModel,
   CanvasNavigationSettings,
+  MODEL_DISPLAY_NAMES,
 } from "@/types";
 import { useToast } from "@/components/Toast";
 import { logger } from "@/utils/logger";
@@ -1491,7 +1492,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       if (node.type === "nanoBanana") {
         const data = node.data as NanoBananaNodeData;
         if (data.model && !data.selectedModel) {
-          const displayName = data.model === "nano-banana" ? "Nano Banana" : "Nano Banana Pro";
+          const displayName = MODEL_DISPLAY_NAMES[data.model] || data.model;
           return {
             ...node,
             data: {

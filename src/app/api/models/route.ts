@@ -367,6 +367,15 @@ const GEMINI_IMAGE_MODELS: ProviderModel[] = [
     pricing: { type: "per-run", amount: 0.039, currency: "USD" },
   },
   {
+    id: "nano-banana-2",
+    name: "Nano Banana 2",
+    description: "High-efficiency image generation with Gemini 3.1 Flash. Supports resolution control (512/1K/2K/4K), Google Search grounding, and up to 10 reference images.",
+    provider: "gemini",
+    capabilities: ["text-to-image", "image-to-image"],
+    coverImage: undefined,
+    pricing: { type: "per-run", amount: 0.067, currency: "USD" },
+  },
+  {
     id: "nano-banana-pro",
     name: "Nano Banana Pro",
     description: "High-quality image generation with Gemini 3 Pro. Supports text-to-image, image-to-image, resolution control (1K/2K/4K), and Google Search grounding.",

@@ -22,6 +22,7 @@ import {
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
+  MODEL_DISPLAY_NAMES,
 } from "@/types";
 import { loadGenerateImageDefaults, loadNodeDefaults } from "./localStorage";
 
@@ -127,7 +128,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
       if (nodeDefaults.generateImage?.selectedModel) {
         selectedModel = nodeDefaults.generateImage.selectedModel;
       } else {
-        const modelDisplayName = legacyDefaults.model === "nano-banana" ? "Nano Banana" : "Nano Banana Pro";
+        const modelDisplayName = MODEL_DISPLAY_NAMES[legacyDefaults.model] || legacyDefaults.model;
         selectedModel = {
           provider: "gemini",
           modelId: legacyDefaults.model,
