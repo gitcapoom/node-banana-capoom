@@ -82,13 +82,14 @@ export const ConditionalSwitchNode = memo(({ id, data, selected }: NodeProps<Wor
 
   // Calculate handle positioning
   const handleSpacing = 32;
-  const baseOffset = 38; // Clear the header bar
+  const textPreviewHeight = 20; // Height of the text preview (h-5 = 20px)
+  const baseOffset = 38 + textPreviewHeight; // Clear header bar + text preview
 
   // Dynamic height based on rule count (rules + default)
   const ruleCount = nodeData.rules.length;
   const totalOutputs = ruleCount + 1; // rules + default
   const lastHandleTop = baseOffset + totalOutputs * handleSpacing;
-  const minHeight = lastHandleTop + 40; // Extra space
+  const minHeight = lastHandleTop + 40; // Extra space for add button
 
   // Resize node and notify React Flow when rule count changes
   useEffect(() => {
@@ -205,14 +206,14 @@ export const ConditionalSwitchNode = memo(({ id, data, selected }: NodeProps<Wor
       minHeight={minHeight}
       className="bg-teal-950/50 border-teal-600"
     >
-      {/* Input handle (left) - text only */}
+      {/* Input handle (left) - text only, aligned with header */}
       <Handle
         type="target"
         position={Position.Left}
         id="text"
         data-handletype="text"
         style={{
-          top: baseOffset,
+          top: 38,
           backgroundColor: "#3b82f6", // blue for text
           width: 12,
           height: 12,
@@ -221,9 +222,9 @@ export const ConditionalSwitchNode = memo(({ id, data, selected }: NodeProps<Wor
       />
 
       {/* Body content */}
-      <div className="px-2 py-1 space-y-1">
-        {/* Text preview */}
-        <div className="text-[10px] text-neutral-400 mb-2 truncate">
+      <div className="px-2 py-1">
+        {/* Text preview — fixed height, above the handle-aligned area */}
+        <div className="text-[10px] text-neutral-400 truncate h-5 flex items-center">
           {incomingText ? (
             <>Input: &quot;{incomingText.slice(0, 50)}{incomingText.length > 50 ? "..." : ""}&quot;</>
           ) : (
@@ -231,18 +232,16 @@ export const ConditionalSwitchNode = memo(({ id, data, selected }: NodeProps<Wor
           )}
         </div>
 
-        {/* Rule rows */}
+        {/* Rule rows — each 32px tall to align with output handles */}
         {nodeData.rules.map((rule, index) => (
-          <div key={rule.id} className="flex items-center gap-1 group py-0.5">
+          <div key={rule.id} className="flex items-center gap-1 group h-8">
             {/* Match status indicator */}
             <div className="w-3 h-3 flex items-center justify-center flex-shrink-0">
               {rule.isMatched ? (
-                // Green checkmark
                 <svg className="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                 </svg>
               ) : (
-                // Gray dot
                 <div className="w-2 h-2 rounded-full bg-neutral-600" />
               )}
             </div>
@@ -333,7 +332,22 @@ export const ConditionalSwitchNode = memo(({ id, data, selected }: NodeProps<Wor
           </div>
         ))}
 
-        {/* Add rule button */}
+        {/* Default output row — 32px tall, immediately after rules to align with handle */}
+        <div className="flex items-center gap-1 h-8 border-t border-neutral-700">
+          <div className="w-3 h-3 flex items-center justify-center flex-shrink-0">
+            {defaultMatched ? (
+              <svg className="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <div className="w-2 h-2 rounded-full bg-neutral-600" />
+            )}
+          </div>
+
+          <span className="text-[10px] text-neutral-300 ml-4">Default</span>
+        </div>
+
+        {/* Add rule button — after Default so it doesn't displace handle alignment */}
         <button
           className="w-full flex items-center justify-center gap-1 text-neutral-400 hover:text-white text-[10px] py-1 mt-1 rounded hover:bg-teal-900/30 transition-colors"
           onClick={handleAddRule}
@@ -343,24 +357,6 @@ export const ConditionalSwitchNode = memo(({ id, data, selected }: NodeProps<Wor
           </svg>
           Add Rule
         </button>
-
-        {/* Default output row */}
-        <div className="flex items-center gap-1 pt-1 border-t border-neutral-700">
-          {/* Match status indicator */}
-          <div className="w-3 h-3 flex items-center justify-center flex-shrink-0">
-            {defaultMatched ? (
-              // Green checkmark
-              <svg className="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-              </svg>
-            ) : (
-              // Gray dot
-              <div className="w-2 h-2 rounded-full bg-neutral-600" />
-            )}
-          </div>
-
-          <span className="text-[10px] text-neutral-300 ml-4">Default</span>
-        </div>
       </div>
 
       {/* Output handles (right) - one per rule + default */}

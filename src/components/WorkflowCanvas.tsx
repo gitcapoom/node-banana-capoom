@@ -606,6 +606,11 @@ export function WorkflowCanvas() {
         }
       }
 
+      // ConditionalSwitch output handles have dynamic IDs (rule-xxx, default) — always text type
+      if (!fromHandleType && connectionState.fromNode.type === "conditionalSwitch") {
+        fromHandleType = "text";
+      }
+
       // Helper to find a compatible handle on a node by type
       const findCompatibleHandle = (
         node: Node,
