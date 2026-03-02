@@ -485,9 +485,10 @@ function GenerateImageControls({ node }: { node: Node }) {
 
       {isBrowseDialogOpen && (
         <ModelSearchDialog
+          isOpen={isBrowseDialogOpen}
           onClose={() => setIsBrowseDialogOpen(false)}
           onModelSelected={handleBrowseModelSelect}
-          capabilities={IMAGE_CAPABILITIES}
+          initialCapabilityFilter="image"
         />
       )}
     </>
@@ -653,9 +654,10 @@ function GenerateVideoControls({ node }: { node: Node }) {
 
       {isBrowseDialogOpen && (
         <ModelSearchDialog
+          isOpen={isBrowseDialogOpen}
           onClose={() => setIsBrowseDialogOpen(false)}
           onModelSelected={handleBrowseModelSelect}
-          capabilities={VIDEO_CAPABILITIES}
+          initialCapabilityFilter="video"
         />
       )}
     </>
@@ -811,9 +813,10 @@ function Generate3DControls({ node }: { node: Node }) {
 
       {isBrowseDialogOpen && (
         <ModelSearchDialog
+          isOpen={isBrowseDialogOpen}
           onClose={() => setIsBrowseDialogOpen(false)}
           onModelSelected={handleBrowseModelSelect}
-          capabilities={MODEL_3D_CAPABILITIES}
+          initialCapabilityFilter="3d"
         />
       )}
     </>
