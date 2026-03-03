@@ -119,7 +119,16 @@ export function ControlPanel() {
     <div className="fixed top-0 right-6 h-screen z-[50] flex items-center pointer-events-none">
       <div
         className="w-80 bg-neutral-800 border border-neutral-700 rounded-xl max-h-[80vh] overflow-y-auto pointer-events-auto transition-opacity duration-200 nowheel"
-        style={{ boxShadow: '-40px 0 80px 20px rgba(0,0,0,0.5), -10px 0 30px 5px rgba(0,0,0,0.3)' }}
+        style={{
+          boxShadow: [
+            '-1px 0 2px rgba(0,0,0,0.18)',
+            '-2px 0 4px rgba(0,0,0,0.15)',
+            '-4px 0 8px rgba(0,0,0,0.12)',
+            '-8px 0 16px rgba(0,0,0,0.10)',
+            '-16px 0 32px rgba(0,0,0,0.08)',
+            '-32px 0 64px rgba(0,0,0,0.06)',
+          ].join(', '),
+        }}
       >
         <div className="p-4">
           {/* Header */}
