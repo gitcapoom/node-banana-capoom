@@ -117,16 +117,10 @@ export function ControlPanel() {
 
   return (
     <div className="fixed top-0 right-6 h-screen z-[50] flex items-center pointer-events-none">
-      {/* Shadow overlay behind panel - wide, smooth, multi-stop gradient */}
       <div
-        className="absolute top-0 h-full pointer-events-none"
-        style={{
-          right: 0,
-          width: 'calc(100% + 20rem)',
-          background: 'linear-gradient(to right, transparent 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.03) 50%, rgba(0,0,0,0.08) 65%, rgba(0,0,0,0.18) 80%, rgba(0,0,0,0.35) 95%, rgba(0,0,0,0.45) 100%)',
-        }}
-      />
-      <div className="w-80 bg-neutral-800 border border-neutral-700 rounded-xl shadow-xl max-h-[80vh] overflow-y-auto pointer-events-auto transition-opacity duration-200 nowheel">
+        className="w-80 bg-neutral-800 border border-neutral-700 rounded-xl max-h-[80vh] overflow-y-auto pointer-events-auto transition-opacity duration-200 nowheel"
+        style={{ boxShadow: '-40px 0 80px 20px rgba(0,0,0,0.5), -10px 0 30px 5px rgba(0,0,0,0.3)' }}
+      >
         <div className="p-4">
           {/* Header */}
           <h3 className="text-sm font-medium text-neutral-200">
