@@ -1772,11 +1772,12 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
   // Auto-save actions
   setWorkflowMetadata: (id: string, name: string, path: string, generationsPath?: string | null) => {
-    // Auto-derive generationsPath: use provided value, fall back to existing, then auto-derive
-    const currentGenPath = get().generationsPath;
+    // Auto-derive generationsPath: use provided value, or derive from the new project path.
+    // Do NOT fall back to the old stored value — when the user changes the project directory,
+    // generationsPath must follow it.
     // Normalize backslashes to forward slashes for consistency (UNC paths with / work on all platforms)
     const normalizedPath = path.replace(/\\/g, "/");
-    const derivedGenerationsPath = generationsPath ?? currentGenPath ?? `${normalizedPath}/generations`;
+    const derivedGenerationsPath = generationsPath ?? `${normalizedPath}/generations`;
 
     set({
       workflowId: id,
