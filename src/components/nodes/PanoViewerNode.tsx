@@ -10,6 +10,16 @@ import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 
 type PanoViewerNodeType = Node<PanoViewerNodeData, "panoViewer">;
 
+/** Convert a base64 data URL to a Blob (avoids sessionStorage quota limits). */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(",");
+  const mime = header.match(/:(.*?);/)?.[1] || "image/png";
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
 /**
  * Panorama Viewer node.
  *
@@ -32,6 +42,7 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
   const isRunning = useWorkflowStore((state) => state.isRunning);
 
   const viewerWindowRef = useRef<Window | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
   const [captureCount, setCaptureCount] = useState(0);
 
   // ─── Viewer window postMessage listener ─────────────────────
@@ -85,12 +96,27 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
     const interval = setInterval(() => {
       if (viewerWindowRef.current?.closed) {
         viewerWindowRef.current = null;
+        // Revoke blob URL to free memory
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = null;
+        }
         updateNodeData(id, { viewerOpen: false });
       }
     }, 2000);
 
     return () => clearInterval(interval);
   }, [id, nodeData.viewerOpen, updateNodeData]);
+
+  // Revoke blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+        blobUrlRef.current = null;
+      }
+    };
+  }, []);
 
   // ─── Handlers ──────────────────────────────────────────────
 
@@ -106,12 +132,25 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
       nodeId: id,
     });
 
-    // For data URLs (large base64 from PanoEditor), use sessionStorage
-    // to avoid exceeding browser URL length limits
+    // For data URLs (large base64 from PanoEditor), convert to a Blob URL.
+    // Blob URLs are short strings referencing in-memory data with no size limit,
+    // unlike sessionStorage which has a ~5-10MB quota.
     if (nodeData.panoUrl.startsWith("data:")) {
-      const storageKey = `pano-data-${id}-${Date.now()}`;
-      sessionStorage.setItem(storageKey, nodeData.panoUrl);
-      params.set("storageKey", storageKey);
+      // Revoke previous blob URL if any
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+      }
+      const blob = dataUrlToBlob(nodeData.panoUrl);
+      const blobUrl = URL.createObjectURL(blob);
+      blobUrlRef.current = blobUrl;
+      params.set("url", blobUrl);
+
+      // Clean up legacy sessionStorage entries from before this fix
+      try {
+        Object.keys(sessionStorage)
+          .filter((k) => k.startsWith("pano-data-"))
+          .forEach((k) => sessionStorage.removeItem(k));
+      } catch { /* ignore */ }
     } else {
       params.set("url", nodeData.panoUrl);
     }

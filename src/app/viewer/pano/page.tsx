@@ -81,21 +81,12 @@ export default function PanoViewerPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const url = params.get("url");
-    const storageKey = params.get("storageKey");
     const name = params.get("name");
     const nid = params.get("nodeId");
 
-    // Load panorama from URL param (HTTP) or sessionStorage (base64 data URL)
+    // Load panorama from URL param (HTTP URL or Blob URL)
     if (url) {
       setPanoUrl(url);
-    } else if (storageKey) {
-      const stored = sessionStorage.getItem(storageKey);
-      if (stored) {
-        sessionStorage.removeItem(storageKey); // Clean up after reading
-        setPanoUrl(stored);
-      } else {
-        setError("Panorama data expired — please reopen the viewer");
-      }
     }
 
     if (name) setDisplayName(name);
@@ -226,7 +217,7 @@ export default function PanoViewerPage() {
       };
       img.src = panoUrl;
     } else {
-      // For HTTP URLs, use TextureLoader as normal
+      // For HTTP and Blob URLs, use TextureLoader
       const loader = new THREE.TextureLoader();
       loader.load(
         panoUrl,
