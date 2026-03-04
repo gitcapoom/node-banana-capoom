@@ -259,6 +259,7 @@ export interface WorldLabsWorldNodeData extends BaseNodeData {
   worldName: string;
   model: "Marble 0.1-plus" | "Marble 0.1-mini";
   seed: number | null;
+  isPano: boolean;
   inputImages: string[];
   inputPrompt: string | null;
   operationId: string | null;

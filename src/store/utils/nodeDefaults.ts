@@ -351,6 +351,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         worldName: "Untitled World",
         model: "Marble 0.1-plus",
         seed: null,
+        isPano: false,
         inputImages: [],
         inputPrompt: null,
         operationId: null,

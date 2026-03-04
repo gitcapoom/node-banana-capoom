@@ -59,6 +59,7 @@ interface GenerateAction {
   model: string;
   seed?: number | null;
   worldName?: string;
+  isPano?: boolean;
 }
 
 interface PollAction {
@@ -240,6 +241,7 @@ async function handleGenerate(
     worldPrompt.image_prompt = {
       source: "media_asset",
       media_asset_id: body.mediaAssetId,
+      ...(body.isPano ? { is_pano: true } : {}),
     };
   }
 

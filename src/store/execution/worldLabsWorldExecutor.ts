@@ -71,6 +71,7 @@ export async function executeWorldLabsWorld(
       model: apiModel,
       worldName: nodeData.worldName || "",
       mediaAssetId: uploadResult.mediaAssetId,
+      isPano: nodeData.isPano || false,
     };
 
     if (nodeData.seed != null) {

@@ -103,6 +103,10 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
     [id, updateNodeData]
   );
 
+  const handleIsPanoToggle = useCallback(() => {
+    updateNodeData(id, { isPano: !nodeData.isPano });
+  }, [id, nodeData.isPano, updateNodeData]);
+
   const handleRegenerate = useCallback(() => {
     regenerateNode(id);
   }, [id, regenerateNode]);
@@ -225,6 +229,17 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
             placeholder="Random"
           />
         </div>
+
+        {/* Is Panorama */}
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={nodeData.isPano}
+            onChange={handleIsPanoToggle}
+            className="w-3.5 h-3.5 rounded bg-neutral-800 border-neutral-600 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer"
+          />
+          <span className="text-[11px] text-neutral-400">Input is panorama</span>
+        </label>
 
         {/* Status / Preview Area */}
         <div className="bg-neutral-900 rounded-lg overflow-hidden min-h-[80px] flex items-center justify-center">
