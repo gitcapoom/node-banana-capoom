@@ -22,6 +22,8 @@ export async function executeWorldLabsWorld(
     getFreshNode,
     signal,
     providerSettings,
+    generationsPath,
+    trackSaveGeneration,
   } = ctx;
 
   const { images: connectedImages } = getConnectedInputs(node.id);
@@ -134,6 +136,69 @@ export async function executeWorldLabsWorld(
       error: null,
       progress: null,
     });
+
+    // ─── Step 6: Auto-save SPZ + panorama to generations folder ─
+    if (generationsPath) {
+      const worldLabel = (nodeData.worldName || "world")
+        .slice(0, 30)
+        .replace(/[^a-zA-Z0-9]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_|_$/g, "")
+        .toLowerCase() || "world";
+
+      // Save best available SPZ file (full_res > 500k > 100k)
+      const spzUrl =
+        assets.spzUrls?.full_res ||
+        assets.spzUrls?.["500k"] ||
+        assets.spzUrls?.["100k"];
+
+      if (spzUrl) {
+        const spzSavePromise = fetch("/api/save-generation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            directoryPath: generationsPath,
+            model3d: spzUrl,
+            customFilename: `${worldLabel}_spz`,
+          }),
+        })
+          .then((res) => res.json())
+          .then((result) => {
+            if (!result.success) {
+              console.warn("[WorldLabs] Failed to save SPZ:", result.error);
+            }
+          })
+          .catch((err) => {
+            console.error("[WorldLabs] Failed to save SPZ:", err);
+          });
+
+        trackSaveGeneration(`worldlabs-spz-${worldId}`, spzSavePromise);
+      }
+
+      // Save panorama image
+      if (assets.panoUrl) {
+        const panoSavePromise = fetch("/api/save-generation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            directoryPath: generationsPath,
+            image: assets.panoUrl,
+            customFilename: `${worldLabel}_pano`,
+          }),
+        })
+          .then((res) => res.json())
+          .then((result) => {
+            if (!result.success) {
+              console.warn("[WorldLabs] Failed to save panorama:", result.error);
+            }
+          })
+          .catch((err) => {
+            console.error("[WorldLabs] Failed to save panorama:", err);
+          });
+
+        trackSaveGeneration(`worldlabs-pano-${worldId}`, panoSavePromise);
+      }
+    }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       updateNodeData(node.id, {
