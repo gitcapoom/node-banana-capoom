@@ -241,8 +241,12 @@ async function handleGenerate(
     worldPrompt.image_prompt = {
       source: "media_asset",
       media_asset_id: body.mediaAssetId,
-      ...(body.isPano ? { is_pano: true } : {}),
     };
+  }
+
+  // is_pano is a world_prompt-level field (sibling to image_prompt, not nested inside it)
+  if (body.isPano) {
+    worldPrompt.is_pano = true;
   }
 
   // Multi-image prompt with per-image azimuth angles
@@ -370,7 +374,7 @@ async function handleGetWorld(
       headers: {
         "WLT-Api-Key": apiKey,
       },
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(30_000),
     }
   );
 
@@ -386,30 +390,33 @@ async function handleGetWorld(
   const data = await response.json();
   console.log(`[WorldLabs:${requestId}] GetWorld raw response:`, JSON.stringify(data, null, 2));
 
-  // Response is nested under data.world
+  // Response may be nested under data.world or flat
   const world = data.world || data;
 
-  console.log(`[WorldLabs:${requestId}] World data retrieved: ${world.id || world.world_id}`);
+  const resolvedWorldId = world.id || world.world_id || null;
+  console.log(`[WorldLabs:${requestId}] World data retrieved: ${resolvedWorldId}`);
 
-  // Extract SPZ URLs — nested under world.assets.splats.spz_urls
-  // Keys are full_res, 500k, 100k (NOT full/medium/low)
+  // Extract SPZ URLs — try multiple possible nesting structures
   const splats = world.assets?.splats;
   const spzUrls = {
-    full_res: splats?.spz_urls?.full_res || null,
-    "500k": splats?.spz_urls?.["500k"] || null,
-    "100k": splats?.spz_urls?.["100k"] || null,
+    full_res: splats?.spz_urls?.full_res || splats?.full_res || null,
+    "500k": splats?.spz_urls?.["500k"] || splats?.["500k"] || null,
+    "100k": splats?.spz_urls?.["100k"] || splats?.["100k"] || null,
   };
 
   // Panorama URL at world.assets.imagery.pano_url
-  const panoUrl = world.assets?.imagery?.pano_url || null;
+  const panoUrl = world.assets?.imagery?.pano_url || world.assets?.pano_url || null;
+
+  console.log(`[WorldLabs:${requestId}] Parsed SPZ URLs:`, JSON.stringify(spzUrls));
+  console.log(`[WorldLabs:${requestId}] Parsed panoUrl: ${panoUrl}`);
 
   return NextResponse.json({
     success: true,
-    worldId: world.id || world.world_id || null,
+    worldId: resolvedWorldId,
     spzUrls,
     panoUrl,
-    thumbnailUrl: world.assets?.thumbnail_url || null,
-    marbleViewerUrl: world.world_marble_url || null,
-    caption: world.assets?.caption || null,
+    thumbnailUrl: world.assets?.thumbnail_url || world.thumbnail_url || null,
+    marbleViewerUrl: world.world_marble_url || world.marble_viewer_url || null,
+    caption: world.assets?.caption || world.caption || null,
   });
 }
