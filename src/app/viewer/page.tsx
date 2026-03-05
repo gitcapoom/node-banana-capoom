@@ -59,6 +59,12 @@ export default function StandaloneViewerPage() {
   const splatMeshRef = useRef<unknown>(null);
   const initRef = useRef(false);
 
+  // Depth capture refs
+  const depthRenderTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
+  const depthMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
+  const depthSceneRef = useRef<THREE.Scene | null>(null);
+  const depthCameraRef = useRef<THREE.OrthographicCamera | null>(null);
+
   // Fly mode refs
   const keysPressedRef = useRef<Set<string>>(new Set());
   const yawRef = useRef(0);
@@ -174,6 +180,72 @@ export default function StandaloneViewerPage() {
     // Ambient light
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
+    // ─── Depth capture setup ───────────────────────────────
+    const depthTarget = new THREE.WebGLRenderTarget(
+      container.clientWidth * Math.min(window.devicePixelRatio, 2),
+      container.clientHeight * Math.min(window.devicePixelRatio, 2)
+    );
+    depthTarget.depthTexture = new THREE.DepthTexture(
+      depthTarget.width,
+      depthTarget.height
+    );
+    depthTarget.depthTexture.format = THREE.DepthFormat;
+    depthTarget.depthTexture.type = THREE.UnsignedIntType;
+    depthRenderTargetRef.current = depthTarget;
+
+    // Depth visualization shader — renders depth buffer as grayscale
+    const depthMaterial = new THREE.ShaderMaterial({
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D tDepth;
+        uniform float cameraNear;
+        uniform float cameraFar;
+        varying vec2 vUv;
+
+        float linearizeDepth(float depth) {
+          float z = depth * 2.0 - 1.0;
+          return (2.0 * cameraNear * cameraFar) / (cameraFar + cameraNear - z * (cameraFar - cameraNear));
+        }
+
+        void main() {
+          float rawDepth = texture2D(tDepth, vUv).r;
+          if (rawDepth >= 1.0) {
+            // Background (no geometry) — render as black
+            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+            return;
+          }
+          float linear = linearizeDepth(rawDepth);
+          float normalized = clamp(linear / cameraFar, 0.0, 1.0);
+          // Invert: closer = brighter (standard for ControlNet depth conditioning)
+          gl_FragColor = vec4(vec3(1.0 - normalized), 1.0);
+        }
+      `,
+      uniforms: {
+        tDepth: { value: depthTarget.depthTexture },
+        cameraNear: { value: camera.near },
+        cameraFar: { value: camera.far },
+      },
+    });
+    depthMaterialRef.current = depthMaterial;
+
+    // Fullscreen quad scene for depth visualization
+    const depthScene = new THREE.Scene();
+    const depthQuad = new THREE.Mesh(
+      new THREE.PlaneGeometry(2, 2),
+      depthMaterial
+    );
+    depthScene.add(depthQuad);
+    depthSceneRef.current = depthScene;
+
+    const depthCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    depthCameraRef.current = depthCamera;
+
     // ─── Fly mode mouse listeners ────────────────────────────
     const canvas = renderer.domElement;
 
@@ -266,6 +338,10 @@ export default function StandaloneViewerPage() {
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+
+      // Resize depth render target to match
+      const pixelRatio = Math.min(window.devicePixelRatio, 2);
+      depthTarget.setSize(w * pixelRatio, h * pixelRatio);
     };
     window.addEventListener("resize", handleResize);
 
@@ -277,6 +353,8 @@ export default function StandaloneViewerPage() {
       window.removeEventListener("mouseup", onMouseUp);
       canvas.removeEventListener("wheel", onWheel);
       controls.dispose();
+      depthTarget.dispose();
+      depthMaterial.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -404,11 +482,15 @@ export default function StandaloneViewerPage() {
   // ─── Capture screenshot ────────────────────────────────────────
 
   const handleCapture = useCallback(() => {
-    if (!rendererRef.current || !cameraRef.current || !sceneRef.current) return;
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    const scene = sceneRef.current;
+    if (!renderer || !camera || !scene) return;
 
-    rendererRef.current.render(sceneRef.current, cameraRef.current);
+    // ─── 1. Capture RGB image (existing) ─────────────────────
+    renderer.render(scene, camera);
 
-    const canvas = rendererRef.current.domElement;
+    const canvas = renderer.domElement;
     const selectedAspect = aspectRatio.ratio;
     const canvasW = canvas.width;
     const canvasH = canvas.height;
@@ -426,7 +508,7 @@ export default function StandaloneViewerPage() {
       cropX = Math.round((canvasW - cropW) / 2);
     }
 
-    // Create offscreen canvas at cropped dimensions
+    // Create offscreen canvas at cropped dimensions for RGB
     const offscreen = document.createElement("canvas");
     offscreen.width = cropW;
     offscreen.height = cropH;
@@ -440,17 +522,89 @@ export default function StandaloneViewerPage() {
     const nameSlug = worldName.replace(/[^a-zA-Z0-9]/g, "");
     const filename = `${nameSlug}_${cameraSegment}_${captureId}`;
 
-    // Flash effect
+    // ─── 2. Capture depth image ──────────────────────────────
+    let depthImage: string | null = null;
+    const depthTarget = depthRenderTargetRef.current;
+    const depthMat = depthMaterialRef.current;
+    const depthScene = depthSceneRef.current;
+    const depthCam = depthCameraRef.current;
+
+    if (depthTarget && depthMat && depthScene && depthCam) {
+      // Update depth material uniforms with current camera values
+      depthMat.uniforms.cameraNear.value = camera.near;
+      depthMat.uniforms.cameraFar.value = camera.far;
+
+      // Render scene to depth render target (captures depth buffer)
+      renderer.setRenderTarget(depthTarget);
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(null);
+
+      // Create a temporary render target for the depth visualization
+      const depthVisTarget = new THREE.WebGLRenderTarget(canvasW, canvasH);
+      renderer.setRenderTarget(depthVisTarget);
+      renderer.render(depthScene, depthCam);
+      renderer.setRenderTarget(null);
+
+      // Read pixels from depth visualization
+      const depthPixels = new Uint8Array(canvasW * canvasH * 4);
+      renderer.readRenderTargetPixels(depthVisTarget, 0, 0, canvasW, canvasH, depthPixels);
+      depthVisTarget.dispose();
+
+      // Check if depth data is meaningful (not all zeros)
+      let hasDepthData = false;
+      for (let i = 0; i < depthPixels.length; i += 4) {
+        if (depthPixels[i] > 0 || depthPixels[i + 1] > 0 || depthPixels[i + 2] > 0) {
+          hasDepthData = true;
+          break;
+        }
+      }
+
+      if (hasDepthData) {
+        // Convert depth pixels to a canvas, flip vertically (WebGL reads bottom-up)
+        const depthCanvas = document.createElement("canvas");
+        depthCanvas.width = canvasW;
+        depthCanvas.height = canvasH;
+        const depthCtx = depthCanvas.getContext("2d");
+        if (depthCtx) {
+          const imageData = depthCtx.createImageData(canvasW, canvasH);
+          // Flip vertically: WebGL pixel row 0 is the bottom
+          for (let y = 0; y < canvasH; y++) {
+            const srcRow = (canvasH - 1 - y) * canvasW * 4;
+            const dstRow = y * canvasW * 4;
+            for (let x = 0; x < canvasW * 4; x++) {
+              imageData.data[dstRow + x] = depthPixels[srcRow + x];
+            }
+          }
+          depthCtx.putImageData(imageData, 0, 0);
+
+          // Crop depth to same aspect ratio as RGB
+          const depthCropped = document.createElement("canvas");
+          depthCropped.width = cropW;
+          depthCropped.height = cropH;
+          const depthCropCtx = depthCropped.getContext("2d");
+          if (depthCropCtx) {
+            depthCropCtx.drawImage(depthCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+            depthImage = depthCropped.toDataURL("image/png");
+          }
+        }
+      }
+    }
+
+    // Re-render to screen so display isn't disrupted
+    renderer.render(scene, camera);
+
+    // ─── 3. Flash effect ──────────────────────────────────────
     setCaptureFlash(true);
     setTimeout(() => setCaptureFlash(false), 200);
 
-    // Send to parent window if opened from Node Banana
+    // ─── 4. Send results ──────────────────────────────────────
     if (window.opener && worldId) {
       window.opener.postMessage(
         {
           type: "worldlabs-capture",
           worldId,
           image,
+          depthImage,
           filename,
           width: cropW,
           height: cropH,
@@ -463,6 +617,14 @@ export default function StandaloneViewerPage() {
       link.download = `${filename}.png`;
       link.href = image;
       link.click();
+
+      // Also download depth if available
+      if (depthImage) {
+        const depthLink = document.createElement("a");
+        depthLink.download = `${filename}_depth.png`;
+        depthLink.href = depthImage;
+        setTimeout(() => depthLink.click(), 100);
+      }
     }
   }, [worldId, worldName, sensor, focalLength, aspectRatio.ratio]);
 

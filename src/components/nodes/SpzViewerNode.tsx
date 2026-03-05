@@ -45,26 +45,33 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
       // Use node ID as worldId for routing
       if (event.data.worldId !== id) return;
 
-      const { image, filename, width, height } = event.data;
+      const { image, depthImage, filename, width, height } = event.data;
 
-      // Store captured image in this node
-      updateNodeData(id, { capturedImage: image });
+      // Store captured images in this node
+      updateNodeData(id, {
+        capturedImage: image,
+        capturedDepthImage: depthImage || null,
+      });
 
-      // Also create an ImageInput node to the right with the capture
+      // Create ImageInput nodes to the right with the capture
       const currentNode = nodes.find((n) => n.id === id);
       const nodeX = currentNode?.position?.x ?? 0;
       const nodeY = currentNode?.position?.y ?? 0;
       const nodeDims = defaultNodeDimensions.spzViewer;
+      const imgNodeHeight = defaultNodeDimensions.imageInput.height;
 
       const offsetX = nodeDims.width + 40;
-      const offsetY = captureCount * (defaultNodeDimensions.imageInput.height + 20);
+      // Each capture creates 1 or 2 nodes (RGB + optional depth)
+      const nodesPerCapture = depthImage ? 2 : 1;
+      const baseOffsetY = captureCount * nodesPerCapture * (imgNodeHeight + 20);
 
+      // RGB image node
       addNode("imageInput", {
         x: nodeX + offsetX,
-        y: nodeY + offsetY,
+        y: nodeY + baseOffsetY,
       });
 
-      // Update the new node with captured image data
+      // Update the RGB node with captured image data
       setTimeout(() => {
         const latestNodes = useWorkflowStore.getState().nodes;
         const newNode = latestNodes[latestNodes.length - 1];
@@ -74,6 +81,26 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
             filename: `${filename}.png`,
             dimensions: width && height ? { width, height } : null,
           });
+        }
+
+        // Depth image node (if depth was captured)
+        if (depthImage) {
+          addNode("imageInput", {
+            x: nodeX + offsetX,
+            y: nodeY + baseOffsetY + imgNodeHeight + 20,
+          });
+
+          setTimeout(() => {
+            const depthNodes = useWorkflowStore.getState().nodes;
+            const depthNode = depthNodes[depthNodes.length - 1];
+            if (depthNode && depthNode.type === "imageInput") {
+              updateNodeData(depthNode.id, {
+                image: depthImage,
+                filename: `${filename}_depth.png`,
+                dimensions: width && height ? { width, height } : null,
+              });
+            }
+          }, 50);
         }
       }, 50);
 
@@ -154,6 +181,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
         spzUrl: url,
         filename: file.name,
         capturedImage: null,
+        capturedDepthImage: null,
       });
     },
     [id, nodeData.spzUrl, updateNodeData, isAcceptedFile]
@@ -205,6 +233,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
       spzUrl: null,
       filename: null,
       capturedImage: null,
+      capturedDepthImage: null,
       viewerOpen: false,
     });
   }, [id, nodeData.spzUrl, updateNodeData]);
@@ -343,16 +372,25 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
           </div>
         )}
 
-        {/* Capture preview */}
+        {/* Capture preview — RGB + Depth side by side */}
         {nodeData.capturedImage && (
           <div className="bg-neutral-900 rounded-lg overflow-hidden">
-            <img
-              src={nodeData.capturedImage}
-              alt="Captured view"
-              className="w-full h-auto object-cover"
-            />
+            <div className={nodeData.capturedDepthImage ? "grid grid-cols-2 gap-px bg-neutral-800" : ""}>
+              <img
+                src={nodeData.capturedImage}
+                alt="Captured view"
+                className="w-full h-auto object-cover"
+              />
+              {nodeData.capturedDepthImage && (
+                <img
+                  src={nodeData.capturedDepthImage}
+                  alt="Depth map"
+                  className="w-full h-auto object-cover"
+                />
+              )}
+            </div>
             <p className="text-[9px] text-neutral-500 px-2 py-1">
-              Latest capture
+              Latest capture{nodeData.capturedDepthImage ? " + depth" : ""}
             </p>
           </div>
         )}

@@ -431,6 +431,7 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         spzUrl: null,
         filename: null,
         capturedImage: null,
+        capturedDepthImage: null,
         viewerOpen: false,
       };
     case "worldLabsPano":

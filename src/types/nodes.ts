@@ -471,6 +471,7 @@ export interface SpzViewerNodeData extends BaseNodeData {
   spzUrl: string | null;         // SPZ/PLY file URL (HTTP or blob)
   filename: string | null;       // Display name
   capturedImage: string | null;  // Latest captured screenshot from viewer
+  capturedDepthImage: string | null; // Depth map from latest capture (grayscale)
   viewerOpen: boolean;           // Whether the viewer window is currently open
 }
 
