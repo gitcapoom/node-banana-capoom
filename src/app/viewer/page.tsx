@@ -611,16 +611,38 @@ export default function StandaloneViewerPage() {
       renderer.readRenderTargetPixels(depthVisTarget, 0, 0, canvasW, canvasH, depthPixels);
       depthVisTarget.dispose();
 
-      // Check if depth data is meaningful (not all zeros)
+      // Auto-range normalize: find min/max brightness of non-background pixels
+      // The shader outputs closer=brighter, background=black (0).
+      // cameraFar normalization often leaves everything nearly white because
+      // the scene is much shallower than cameraFar. Remap to full 0-255 range.
+      let minVal = 255;
+      let maxVal = 0;
       let hasDepthData = false;
       for (let i = 0; i < depthPixels.length; i += 4) {
-        if (depthPixels[i] > 0 || depthPixels[i + 1] > 0 || depthPixels[i + 2] > 0) {
+        const v = depthPixels[i]; // R channel (grayscale R=G=B)
+        if (v > 0) {
           hasDepthData = true;
-          break;
+          if (v < minVal) minVal = v;
+          if (v > maxVal) maxVal = v;
         }
       }
 
       if (hasDepthData) {
+        // Remap [minVal, maxVal] → [1, 255] so we use the full dynamic range
+        // Background pixels (0) stay black
+        const range = maxVal - minVal;
+        if (range > 0) {
+          for (let i = 0; i < depthPixels.length; i += 4) {
+            const v = depthPixels[i];
+            if (v > 0) {
+              const normalized = Math.round(((v - minVal) / range) * 254) + 1;
+              depthPixels[i] = normalized;
+              depthPixels[i + 1] = normalized;
+              depthPixels[i + 2] = normalized;
+            }
+          }
+        }
+
         // Convert depth pixels to a canvas, flip vertically (WebGL reads bottom-up)
         const depthCanvas = document.createElement("canvas");
         depthCanvas.width = canvasW;
