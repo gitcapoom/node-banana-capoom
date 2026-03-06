@@ -1199,18 +1199,6 @@ export default function StandaloneViewerPage() {
           triggerDownload(result.depth, `${nameSlug}_depth.${result.depth.type?.includes("webm") ? "webm" : "mp4"}`);
         }
 
-        // Signal to canvas app that a video was exported (same-origin localStorage)
-        if (savedRgb?.imageId) {
-          try {
-            localStorage.setItem("node-banana-pending-video", JSON.stringify({
-              imageId: savedRgb.imageId,
-              filename: savedRgb.filename,
-              directoryPath: "generations",
-              timestamp: Date.now(),
-            }));
-          } catch { /* localStorage may not be available */ }
-        }
-
         // Export COLMAP data if requested
         if (settings.includeColmap) {
           const colmapBlob = await exportColmap(
@@ -1220,15 +1208,21 @@ export default function StandaloneViewerPage() {
             sensor.widthMm,
             focalLength
           );
+          // Download COLMAP zip to browser
+          triggerDownload(colmapBlob, `${nameSlug}_colmap.zip`);
+          // Also save to generations folder
           const colmapFormData = new FormData();
           colmapFormData.append("file", new File([colmapBlob], `${nameSlug}_colmap.zip`, { type: "application/zip" }));
           colmapFormData.append("directoryPath", "generations");
           colmapFormData.append("customFilename", `${nameSlug}_colmap`);
           colmapFormData.append("createDirectory", "true");
-          await fetch("/api/save-generation", {
+          const colmapRes = await fetch("/api/save-generation", {
             method: "POST",
             body: colmapFormData,
           });
+          if (!colmapRes.ok) {
+            console.warn("COLMAP save to generations failed:", colmapRes.statusText);
+          }
         }
 
         setShowExportDialog(false);
