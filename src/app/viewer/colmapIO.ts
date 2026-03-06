@@ -100,14 +100,20 @@ export async function exportColmap(
 
 // ─── COLMAP Import ──────────────────────────────────────────────
 
+export interface ColmapImportResult {
+  path: CameraPath;
+  /** Camera intrinsics parsed from cameras.txt, if available */
+  cameraParams: CameraParams | null;
+}
+
 /**
  * Import a COLMAP cameras.txt + images.txt (from a ZIP or individual files)
- * and return a CameraPath with keyframes at each image pose.
+ * and return a CameraPath with keyframes at each image pose, plus camera intrinsics.
  */
 export async function importColmap(
   zipBlob: Blob,
   fps = 24
-): Promise<CameraPath> {
+): Promise<ColmapImportResult> {
   const JSZip = (await import("jszip")).default;
   const zip = await JSZip.loadAsync(zipBlob);
 
@@ -135,7 +141,7 @@ export async function importColmap(
   const poses = parseImagesTxt(imagesContent);
 
   if (poses.length === 0) {
-    return createEmptyPath(120, fps);
+    return { path: createEmptyPath(120, fps), cameraParams };
   }
 
   // Convert COLMAP poses → Three.js CameraKeyframes
@@ -148,9 +154,23 @@ export async function importColmap(
 
     // Build COLMAP rotation matrix
     const colmapRotMat = new THREE.Matrix4().makeRotationFromQuaternion(colmapQ);
-    const re = new THREE.Matrix3().setFromMatrix4(colmapRotMat).elements;
+    const colmapRe = new THREE.Matrix3().setFromMatrix4(colmapRotMat).elements;
 
+    // Recover position using the ORIGINAL COLMAP rotation BEFORE flipping
+    // Export did: pos_colmap = diag(1,-1,-1)*pos_threejs, then t = -R_colmap * pos_colmap
+    // So: pos_colmap = -R_colmap^T * t, then pos_threejs = diag(1,-1,-1)*pos_colmap
+    const colmapR3 = new THREE.Matrix3();
+    colmapR3.elements = [...colmapRe];
+    const colmapR3T = colmapR3.clone().transpose();
+    const t = new THREE.Vector3(pose.tx, pose.ty, pose.tz);
+    const posColmap = t.clone().applyMatrix3(colmapR3T).negate();
+    // Undo coordinate flip: COLMAP→Three.js
+    posColmap.y = -posColmap.y;
+    posColmap.z = -posColmap.z;
+
+    // Now flip the rotation matrix to get Three.js rotation
     // Undo Y/Z flip: negate rows 1 and 2
+    const re = [...colmapRe]; // work on a copy
     re[1] = -re[1]; re[4] = -re[4]; re[7] = -re[7];
     re[2] = -re[2]; re[5] = -re[5]; re[8] = -re[8];
 
@@ -160,16 +180,6 @@ export async function importColmap(
     threeRotMat.elements[8] = re[6]; threeRotMat.elements[9] = re[7]; threeRotMat.elements[10] = re[8];
     const threeQ = new THREE.Quaternion().setFromRotationMatrix(threeRotMat);
 
-    // COLMAP translation: t = -R * pos → pos = -R^T * t
-    const R3 = new THREE.Matrix3();
-    R3.elements = [...re];
-    const R3T = R3.clone().transpose();
-    const t = new THREE.Vector3(pose.tx, pose.ty, pose.tz);
-    const pos = t.clone().applyMatrix3(R3T).negate();
-    // Undo coordinate flip
-    pos.y = -pos.y;
-    pos.z = -pos.z;
-
     // Compute FOV from camera intrinsics
     let fov = 60; // fallback
     if (cameraParams && cameraParams.fy > 0 && cameraParams.height > 0) {
@@ -178,22 +188,25 @@ export async function importColmap(
 
     return {
       time: poses.length > 1 ? index / (poses.length - 1) : 0,
-      position: pos,
+      position: posColmap,
       quaternion: threeQ,
       fov,
     };
   });
 
   return {
-    keyframes,
-    durationFrames: poses.length,
-    fps,
+    path: {
+      keyframes,
+      durationFrames: poses.length,
+      fps,
+    },
+    cameraParams,
   };
 }
 
 // ─── Parsing helpers ────────────────────────────────────────────
 
-interface CameraParams {
+export interface CameraParams {
   width: number;
   height: number;
   fx: number;

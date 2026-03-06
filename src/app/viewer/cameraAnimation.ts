@@ -98,21 +98,11 @@ function cloneKeyframe(kf: CameraKeyframe): CameraKeyframe {
 
 // ─── Easing Functions ───────────────────────────────────────────
 
-function applyEasing(t: number, mode: InterpolationMode): number {
-  switch (mode) {
-    case "linear":
-      return t;
-    case "easeInOut":
-      // Cubic ease-in-out
-      return t < 0.5
-        ? 4 * t * t * t
-        : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    case "smooth":
-      // Smoothstep (Hermite)
-      return t * t * (3 - 2 * t);
-    default:
-      return t;
-  }
+/** Cubic ease-in-out: strong acceleration/deceleration at segment ends */
+function easeInOutCubic(t: number): number {
+  return t < 0.5
+    ? 4 * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
 // ─── Interpolation ──────────────────────────────────────────────
@@ -176,12 +166,29 @@ export function evaluateCameraPath(
   const segLen = kf1.time - kf0.time;
   const rawT = segLen > 0 ? (t - kf0.time) / segLen : 0;
 
-  // Apply easing based on the starting keyframe's interpolation mode
-  const easingMode = kf0.interpolation ?? "smooth";
-  const localT = applyEasing(rawT, easingMode);
+  const mode = kf0.interpolation ?? "smooth";
 
-  // ─── Position: Catmull-Rom spline ───────────────────────
-  const position = interpolatePositionCatmullRom(keyframes, segIndex, localT);
+  // ─── Mode-dependent interpolation ────────────────────────
+  // linear:    straight-line path, constant speed
+  // smooth:    Catmull-Rom spline, constant speed (spline provides smoothness)
+  // easeInOut: Catmull-Rom spline + cubic ease (decelerate at keyframes)
+
+  let position: THREE.Vector3;
+  let localT: number;
+
+  if (mode === "easeInOut") {
+    localT = easeInOutCubic(rawT);
+  } else {
+    localT = rawT; // both "linear" and "smooth" use raw t
+  }
+
+  if (mode === "linear") {
+    // Straight-line interpolation between kf0 and kf1
+    position = new THREE.Vector3().lerpVectors(kf0.position, kf1.position, localT);
+  } else {
+    // Catmull-Rom spline for "smooth" and "easeInOut"
+    position = interpolatePositionCatmullRom(keyframes, segIndex, localT);
+  }
 
   // ─── Rotation: SLERP between kf0 and kf1 ───────────────
   const quaternion = new THREE.Quaternion().slerpQuaternions(

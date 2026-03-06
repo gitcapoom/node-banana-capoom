@@ -31,7 +31,7 @@ export interface VideoExportResult {
 
 // ─── Constants ──────────────────────────────────────────────────
 
-const DEFAULT_BITRATE = 8_000_000;
+const DEFAULT_BITRATE = 20_000_000; // 20 Mbps for high quality H264
 
 // ─── Capability check ───────────────────────────────────────────
 
@@ -366,11 +366,14 @@ function stopRecorder(recorder: MediaRecorder, chunks: Blob[], mimeType: string)
 }
 
 function pickRecorderMime(): string {
+  // Prefer H264 MP4, then high-quality VP9 WebM
   const candidates = [
+    "video/mp4;codecs=avc1.42E01E",
+    "video/mp4;codecs=avc1",
+    "video/mp4",
     "video/webm;codecs=vp9",
     "video/webm;codecs=vp8",
     "video/webm",
-    "video/mp4",
   ];
   for (const mime of candidates) {
     if (MediaRecorder.isTypeSupported(mime)) return mime;

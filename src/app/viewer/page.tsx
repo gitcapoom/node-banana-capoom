@@ -45,6 +45,16 @@ import ExportDialog from "./ExportDialog";
 
 // ─── Helpers ────────────────────────────────────────────────────
 
+/** Convert a Blob to a data URL string */
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 interface SavedMeshState {
   mesh: THREE.Mesh;
   onBeforeRender: typeof THREE.Object3D.prototype.onBeforeRender;
@@ -1158,24 +1168,29 @@ export default function StandaloneViewerPage() {
           },
         });
 
-        // Download video(s)
+        // Save video(s) to generations folder via API
         const nameSlug = worldName.replace(/[^a-zA-Z0-9]/g, "") || "spz";
-        const videoExt = (blob: Blob) => blob.type.includes("webm") ? "webm" : "mp4";
+        const saveToGenerations = async (blob: Blob, filename: string) => {
+          const dataUrl = await blobToDataUrl(blob);
+          const res = await fetch("/api/save-generation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              directoryPath: "generations",
+              video: dataUrl,
+              customFilename: filename,
+              createDirectory: true,
+            }),
+          });
+          if (!res.ok) throw new Error(`Save failed: ${res.statusText}`);
+          return await res.json();
+        };
+
         if (result.rgb) {
-          const link = document.createElement("a");
-          link.download = `${nameSlug}_rgb.${videoExt(result.rgb)}`;
-          link.href = URL.createObjectURL(result.rgb);
-          link.click();
-          URL.revokeObjectURL(link.href);
+          await saveToGenerations(result.rgb, `${nameSlug}_rgb`);
         }
         if (result.depth) {
-          const link = document.createElement("a");
-          link.download = `${nameSlug}_depth.${videoExt(result.depth)}`;
-          link.href = URL.createObjectURL(result.depth);
-          setTimeout(() => {
-            link.click();
-            URL.revokeObjectURL(link.href);
-          }, 200);
+          await saveToGenerations(result.depth, `${nameSlug}_depth`);
         }
 
         // Export COLMAP data if requested
@@ -1187,13 +1202,17 @@ export default function StandaloneViewerPage() {
             sensor.widthMm,
             focalLength
           );
-          const colmapLink = document.createElement("a");
-          colmapLink.download = `${nameSlug}_colmap.zip`;
-          colmapLink.href = URL.createObjectURL(colmapBlob);
-          setTimeout(() => {
-            colmapLink.click();
-            URL.revokeObjectURL(colmapLink.href);
-          }, 400);
+          const colmapDataUrl = await blobToDataUrl(colmapBlob);
+          await fetch("/api/save-generation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              directoryPath: "generations",
+              video: colmapDataUrl,
+              customFilename: `${nameSlug}_colmap`,
+              createDirectory: true,
+            }),
+          });
         }
 
         setShowExportDialog(false);
@@ -1213,10 +1232,36 @@ export default function StandaloneViewerPage() {
   const handleColmapImport = useCallback(async (file: File) => {
     try {
       const blob = new Blob([await file.arrayBuffer()]);
-      const importedPath = await importColmap(blob, cameraPath.fps);
+      const { path: importedPath, cameraParams } = await importColmap(blob, cameraPath.fps);
       setCameraPath(importedPath);
       setCurrentFrame(0);
       setIsTimelineVisible(true);
+
+      // Restore camera intrinsics from COLMAP data
+      if (cameraParams) {
+        // Find the closest matching sensor preset by width
+        const bestSensor = SENSOR_PRESETS.reduce((bestIdx, preset, idx) => {
+          const diff = Math.abs(preset.widthMm - cameraParams.width * (SENSOR_PRESETS[bestIdx].widthMm / cameraParams.width));
+          return diff < Math.abs(SENSOR_PRESETS[bestIdx].widthMm - cameraParams.width * (SENSOR_PRESETS[bestIdx].widthMm / cameraParams.width)) ? idx : bestIdx;
+        }, 0);
+        setSensorIndex(bestSensor);
+
+        // Compute focal length in mm from pixel focal length: focalMm = fx * sensorWidthMm / imageWidth
+        const sensorW = SENSOR_PRESETS[bestSensor].widthMm;
+        const focalMm = cameraParams.fx * sensorW / cameraParams.width;
+        // Find closest lens preset
+        const bestLens = LENS_FOCAL_LENGTHS.reduce((bestIdx, fl, idx) =>
+          Math.abs(fl - focalMm) < Math.abs(LENS_FOCAL_LENGTHS[bestIdx] - focalMm) ? idx : bestIdx
+        , 0);
+        setLensIndex(bestLens);
+
+        // Find closest aspect ratio preset
+        const importedAspect = cameraParams.width / cameraParams.height;
+        const bestAspect = ASPECT_RATIO_PRESETS.reduce((bestIdx, preset, idx) =>
+          Math.abs(preset.ratio - importedAspect) < Math.abs(ASPECT_RATIO_PRESETS[bestIdx].ratio - importedAspect) ? idx : bestIdx
+        , 0);
+        setAspectIndex(bestAspect);
+      }
 
       // Apply first keyframe camera
       if (importedPath.keyframes.length > 0 && cameraRef.current) {
