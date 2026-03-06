@@ -90,15 +90,13 @@ function cleanDepthFloaters(data: Float32Array, w: number, h: number) {
 }
 
 /**
- * Fill small depth holes (background pixels surrounded by foreground).
- * At Gaussian splat edges, some pixels have no depth written. This iteratively
- * fills them with the nearest foreground depth, closing gaps without expanding
- * into actual open background areas.
- *
- * Only fills background pixels with 3+ foreground neighbors in their 3×3 window
- * to avoid bleeding into large background regions.
+ * Morphological dilation of depth values into adjacent background pixels.
+ * At splat silhouette edges, gaps exist where no splat wrote depth. Each
+ * iteration expands the foreground boundary by 1 pixel, filling with the
+ * minimum (closest-to-camera) neighbor depth so background doesn't bleed
+ * forward over foreground.
  */
-function fillDepthHoles(data: Float32Array, w: number, h: number, iterations = 3) {
+function dilateDepth(data: Float32Array, w: number, h: number, iterations = 2) {
   for (let iter = 0; iter < iterations; iter++) {
     const src = new Float32Array(data);
     let filled = 0;
@@ -108,29 +106,26 @@ function fillDepthHoles(data: Float32Array, w: number, h: number, iterations = 3
         const idx = (y * w + x) * 4;
         if (src[idx] >= 0) continue; // already has depth
 
-        // Gather foreground neighbors
-        let sum = 0;
-        let count = 0;
+        // Find the closest-to-camera (minimum) foreground neighbor
+        let minDepth = Infinity;
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
             if (dy === 0 && dx === 0) continue;
             const ni = ((y + dy) * w + (x + dx)) * 4;
-            if (src[ni] >= 0) {
-              sum += src[ni];
-              count++;
+            if (src[ni] >= 0 && src[ni] < minDepth) {
+              minDepth = src[ni];
             }
           }
         }
 
-        // Fill only if enough foreground neighbors (small hole, not open background)
-        if (count >= 3) {
-          data[idx] = sum / count;
+        if (minDepth < Infinity) {
+          data[idx] = minDepth;
           filled++;
         }
       }
     }
 
-    if (filled === 0) break; // no more holes to fill
+    if (filled === 0) break;
   }
 }
 
@@ -763,8 +758,8 @@ export default function StandaloneViewerPage() {
 
       // Remove isolated floating splat pixels (edge-preserving)
       cleanDepthFloaters(floatPixels, canvasW, canvasH);
-      // Fill small holes at edges where no splat wrote depth
-      fillDepthHoles(floatPixels, canvasW, canvasH);
+      // Dilate depth into edge gaps where no splat wrote depth
+      dilateDepth(floatPixels, canvasW, canvasH);
 
       // Find min/max linearized depth across all foreground pixels
       let minDepth = Infinity;
