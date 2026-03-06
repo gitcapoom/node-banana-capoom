@@ -98,24 +98,67 @@ async function findExistingFileByHash(
 }
 
 // POST: Save a generated image or video to the generations folder (or outputs folder)
+// Accepts both JSON body and multipart/form-data (for large binary uploads)
 export async function POST(request: NextRequest) {
   let directoryPath: string | undefined;
   try {
-    const body = await request.json();
-    directoryPath = body.directoryPath;
-    const image = body.image;
-    const video = body.video;
-    const model3d = body.model3d;
-    const audio = body.audio;
-    const prompt = body.prompt;
-    const imageId = body.imageId; // Optional ID for carousel support
-    const customFilename = body.customFilename; // Optional custom filename (without extension)
-    const createDirectory = body.createDirectory; // Optional flag to create directory if it doesn't exist
+    const contentType = request.headers.get("content-type") || "";
+
+    let image: string | undefined;
+    let video: string | undefined;
+    let model3d: string | undefined;
+    let audio: string | undefined;
+    let prompt: string | undefined;
+    let imageId: string | undefined;
+    let customFilename: string | undefined;
+    let createDirectory: boolean | undefined;
+    let formFileBuffer: Buffer | undefined;
+    let formFileExtension: string | undefined;
+
+    if (contentType.includes("multipart/form-data")) {
+      // Handle FormData uploads (used for large binary files like videos)
+      const formData = await request.formData();
+      directoryPath = (formData.get("directoryPath") as string) || undefined;
+      customFilename = (formData.get("customFilename") as string) || undefined;
+      createDirectory = formData.get("createDirectory") === "true";
+      prompt = (formData.get("prompt") as string) || undefined;
+
+      const file = formData.get("file") as File | null;
+      if (file) {
+        const arrayBuffer = await file.arrayBuffer();
+        formFileBuffer = Buffer.from(arrayBuffer);
+        // Detect extension from file type or name
+        if (file.type) {
+          formFileExtension = getExtensionFromMime(file.type);
+        }
+        if ((!formFileExtension || formFileExtension === "bin") && file.name) {
+          const dotIdx = file.name.lastIndexOf(".");
+          if (dotIdx > 0) formFileExtension = file.name.substring(dotIdx + 1).toLowerCase();
+        }
+        // Flag as video/audio/model based on MIME
+        if (file.type.startsWith("video/")) video = "__formdata__";
+        else if (file.type.startsWith("audio/")) audio = "__formdata__";
+        else if (file.type.startsWith("model/")) model3d = "__formdata__";
+        else image = "__formdata__";
+      }
+    } else {
+      // Handle JSON body (existing path)
+      const body = await request.json();
+      directoryPath = body.directoryPath;
+      image = body.image;
+      video = body.video;
+      model3d = body.model3d;
+      audio = body.audio;
+      prompt = body.prompt;
+      imageId = body.imageId;
+      customFilename = body.customFilename;
+      createDirectory = body.createDirectory;
+    }
 
     const isVideo = !!video;
     const isModel = !!model3d;
     const isAudio = !!audio;
-    const content = video || model3d || audio || image;
+    const content = formFileBuffer ? "__formdata__" : (video || model3d || audio || image);
 
     logger.info('file.save', 'Generation auto-save request received', {
       directoryPath,
@@ -179,7 +222,11 @@ export async function POST(request: NextRequest) {
     let buffer: Buffer;
     let extension: string;
 
-    if (isHttpUrl(content)) {
+    if (formFileBuffer) {
+      // FormData upload — buffer and extension already resolved
+      buffer = formFileBuffer;
+      extension = formFileExtension || (isAudio ? "mp3" : isVideo ? "mp4" : isModel ? "glb" : "png");
+    } else if (isHttpUrl(content)) {
       // Handle HTTP URL (common for large video files from providers)
       logger.info('file.save', 'Fetching content from URL', { url: content.substring(0, 100) });
 

@@ -45,14 +45,14 @@ import ExportDialog from "./ExportDialog";
 
 // ─── Helpers ────────────────────────────────────────────────────
 
-/** Convert a Blob to a data URL string */
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
+/** Trigger a browser download for a Blob */
+function triggerDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 interface SavedMeshState {
@@ -1168,29 +1168,47 @@ export default function StandaloneViewerPage() {
           },
         });
 
-        // Save video(s) to generations folder via API
+        // Save video(s) to generations folder via FormData upload
         const nameSlug = worldName.replace(/[^a-zA-Z0-9]/g, "") || "spz";
-        const saveToGenerations = async (blob: Blob, filename: string) => {
-          const dataUrl = await blobToDataUrl(blob);
+        const saveToGenerations = async (blob: Blob, filename: string, mimeType: string) => {
+          const formData = new FormData();
+          const ext = mimeType.includes("webm") ? "webm" : "mp4";
+          formData.append("file", new File([blob], `${filename}.${ext}`, { type: mimeType }));
+          formData.append("directoryPath", "generations");
+          formData.append("customFilename", filename);
+          formData.append("createDirectory", "true");
           const res = await fetch("/api/save-generation", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              directoryPath: "generations",
-              video: dataUrl,
-              customFilename: filename,
-              createDirectory: true,
-            }),
+            body: formData,
           });
-          if (!res.ok) throw new Error(`Save failed: ${res.statusText}`);
+          if (!res.ok) {
+            const errBody = await res.text();
+            throw new Error(`Save failed: ${res.statusText} - ${errBody}`);
+          }
           return await res.json();
         };
 
+        let savedRgb: { filePath?: string; filename?: string; imageId?: string } | null = null;
         if (result.rgb) {
-          await saveToGenerations(result.rgb, `${nameSlug}_rgb`);
+          savedRgb = await saveToGenerations(result.rgb, `${nameSlug}_rgb`, result.rgb.type || "video/mp4");
+          // Browser download fallback
+          triggerDownload(result.rgb, `${nameSlug}_rgb.${result.rgb.type?.includes("webm") ? "webm" : "mp4"}`);
         }
         if (result.depth) {
-          await saveToGenerations(result.depth, `${nameSlug}_depth`);
+          await saveToGenerations(result.depth, `${nameSlug}_depth`, result.depth.type || "video/mp4");
+          triggerDownload(result.depth, `${nameSlug}_depth.${result.depth.type?.includes("webm") ? "webm" : "mp4"}`);
+        }
+
+        // Signal to canvas app that a video was exported (same-origin localStorage)
+        if (savedRgb?.imageId) {
+          try {
+            localStorage.setItem("node-banana-pending-video", JSON.stringify({
+              imageId: savedRgb.imageId,
+              filename: savedRgb.filename,
+              directoryPath: "generations",
+              timestamp: Date.now(),
+            }));
+          } catch { /* localStorage may not be available */ }
         }
 
         // Export COLMAP data if requested
@@ -1202,16 +1220,14 @@ export default function StandaloneViewerPage() {
             sensor.widthMm,
             focalLength
           );
-          const colmapDataUrl = await blobToDataUrl(colmapBlob);
+          const colmapFormData = new FormData();
+          colmapFormData.append("file", new File([colmapBlob], `${nameSlug}_colmap.zip`, { type: "application/zip" }));
+          colmapFormData.append("directoryPath", "generations");
+          colmapFormData.append("customFilename", `${nameSlug}_colmap`);
+          colmapFormData.append("createDirectory", "true");
           await fetch("/api/save-generation", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              directoryPath: "generations",
-              video: colmapDataUrl,
-              customFilename: `${nameSlug}_colmap`,
-              createDirectory: true,
-            }),
+            body: colmapFormData,
           });
         }
 
