@@ -29,6 +29,25 @@ import {
   getCameraFilenameSegment,
 } from "@/utils/cinemaCameraPresets";
 
+// ─── Helpers ────────────────────────────────────────────────────
+
+/**
+ * Temporarily toggle depthWrite on all materials in an Object3D tree.
+ * Spark.js SplatMesh has depthWrite:false by default (alpha blending mode).
+ * We force depthWrite:true for a single depth-capture render pass, then restore.
+ */
+function setDepthWriteOnMaterials(obj: THREE.Object3D, enable: boolean) {
+  obj.traverse((child) => {
+    const mesh = child as THREE.Mesh;
+    if (mesh.material) {
+      const mat = mesh.material as THREE.Material;
+      mat.depthWrite = enable;
+      mat.transparent = !enable;
+      mat.needsUpdate = true;
+    }
+  });
+}
+
 // ─── Page Component ─────────────────────────────────────────────
 
 export default function StandaloneViewerPage() {
@@ -534,10 +553,17 @@ export default function StandaloneViewerPage() {
       depthMat.uniforms.cameraNear.value = camera.near;
       depthMat.uniforms.cameraFar.value = camera.far;
 
+      // Force depth writing on SplatMesh for this render pass
+      const splatObj = splatMeshRef.current as THREE.Object3D | null;
+      if (splatObj) setDepthWriteOnMaterials(splatObj, true);
+
       // Render scene to depth render target (captures depth buffer)
       renderer.setRenderTarget(depthTarget);
       renderer.render(scene, camera);
       renderer.setRenderTarget(null);
+
+      // Restore normal alpha-blended rendering
+      if (splatObj) setDepthWriteOnMaterials(splatObj, false);
 
       // Create a temporary render target for the depth visualization
       const depthVisTarget = new THREE.WebGLRenderTarget(canvasW, canvasH);
