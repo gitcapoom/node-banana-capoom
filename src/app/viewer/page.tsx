@@ -45,18 +45,20 @@ interface SavedMeshState {
 const DEPTH_MIN_ALPHA = 0.15;
 
 /**
- * 3×3 median filter for float depth values. Replaces isolated outlier pixels
- * (floating splat fragments) whose depth differs significantly from their
- * neighborhood median, while preserving legitimate depth edges.
+ * Edge-preserving depth cleanup. Removes truly isolated floating splat pixels
+ * without softening sharp depth edges (foreground/background boundaries).
+ *
+ * A pixel is only removed if it has NO neighbors at a similar depth — meaning
+ * it's a lone floater in empty space, not part of a surface edge. Pixels at
+ * depth discontinuities (e.g. building edges) are preserved because they have
+ * same-surface neighbors on one side.
  *
  * @param data  Float32Array of RGBA pixels (R = linearized depth, -1 = background)
  * @param w     Image width
  * @param h     Image height
  */
-function medianFilterDepth(data: Float32Array, w: number, h: number) {
-  // Work on a copy so reads aren't affected by in-place writes
+function cleanDepthFloaters(data: Float32Array, w: number, h: number) {
   const src = new Float32Array(data);
-  const neighbors: number[] = [];
 
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
@@ -64,31 +66,24 @@ function medianFilterDepth(data: Float32Array, w: number, h: number) {
       const center = src[idx];
       if (center < 0) continue; // skip background
 
-      // Gather 3×3 foreground neighbors
-      neighbors.length = 0;
+      // Count neighbors at a similar depth (same surface)
+      let similarCount = 0;
+      const depthThreshold = center * 0.08; // 8% relative depth similarity
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
+          if (dy === 0 && dx === 0) continue; // skip self
           const ni = ((y + dy) * w + (x + dx)) * 4;
-          if (src[ni] >= 0) neighbors.push(src[ni]);
+          const nd = src[ni];
+          if (nd >= 0 && Math.abs(nd - center) < depthThreshold) {
+            similarCount++;
+          }
         }
       }
 
-      // Only filter if we have enough foreground neighbors
-      if (neighbors.length < 5) {
-        // Isolated pixel — likely a floater, mark as background
+      // Only remove if NO similar-depth neighbors (true isolated floater).
+      // Edge pixels have similar-depth neighbors on the surface side → preserved.
+      if (similarCount === 0) {
         data[idx] = -1;
-        continue;
-      }
-
-      // Sort and take median
-      neighbors.sort((a, b) => a - b);
-      const median = neighbors[Math.floor(neighbors.length / 2)];
-
-      // Replace if the pixel is a significant outlier vs its neighborhood
-      const diff = Math.abs(center - median);
-      const threshold = median * 0.15; // 15% relative threshold
-      if (diff > threshold) {
-        data[idx] = median;
       }
     }
   }
@@ -679,8 +674,8 @@ export default function StandaloneViewerPage() {
       // Multi-pass stochastic rendering: each pass uses a different random seed
       // (time uniform) so different fragments survive the alpha test. The depth
       // buffer keeps the nearest value, so holes from one pass get filled by
-      // subsequent passes. 8 passes reduces hole probability to < 0.01%.
-      const NUM_DEPTH_PASSES = 8;
+      // subsequent passes. 16 passes gives near-complete coverage at edges.
+      const NUM_DEPTH_PASSES = 16;
       const prevAutoClear = renderer.autoClear;
       renderer.autoClear = false;
 
@@ -721,8 +716,8 @@ export default function StandaloneViewerPage() {
       renderer.readRenderTargetPixels(depthVisTarget, 0, 0, canvasW, canvasH, floatPixels);
       depthVisTarget.dispose();
 
-      // Remove isolated floating splat pixels via 3×3 median filter
-      medianFilterDepth(floatPixels, canvasW, canvasH);
+      // Remove isolated floating splat pixels (edge-preserving)
+      cleanDepthFloaters(floatPixels, canvasW, canvasH);
 
       // Find min/max linearized depth across all foreground pixels
       let minDepth = Infinity;
