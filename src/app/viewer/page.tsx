@@ -270,14 +270,14 @@ export default function StandaloneViewerPage() {
         void main() {
           float rawDepth = texture2D(tDepth, vUv).r;
           if (rawDepth >= 1.0) {
-            // Background (no geometry) — render as black
-            gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+            // Background (no geometry) — mark with negative value
+            gl_FragColor = vec4(-1.0, 0.0, 0.0, 1.0);
             return;
           }
+          // Output raw linearized depth as a float — no 8-bit normalization.
+          // Auto-ranging happens on CPU after reading the float render target.
           float linear = linearizeDepth(rawDepth);
-          float normalized = clamp(linear / cameraFar, 0.0, 1.0);
-          // Invert: closer = brighter (standard for ControlNet depth conditioning)
-          gl_FragColor = vec4(vec3(1.0 - normalized), 1.0);
+          gl_FragColor = vec4(linear, 0.0, 0.0, 1.0);
         }
       `,
       uniforms: {
@@ -600,62 +600,68 @@ export default function StandaloneViewerPage() {
       // Restore original material states and onBeforeRender callbacks
       restoreSceneDepthWrite(savedStates);
 
-      // Create a temporary render target for the depth visualization
-      const depthVisTarget = new THREE.WebGLRenderTarget(canvasW, canvasH);
+      // Render depth visualization to a FLOAT render target so we keep
+      // full 32-bit precision through the pipeline (no 8-bit quantization).
+      const depthVisTarget = new THREE.WebGLRenderTarget(canvasW, canvasH, {
+        type: THREE.FloatType,
+        format: THREE.RGBAFormat,
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+      });
       renderer.setRenderTarget(depthVisTarget);
       renderer.render(depthScene, depthCam);
       renderer.setRenderTarget(null);
 
-      // Read pixels from depth visualization
-      const depthPixels = new Uint8Array(canvasW * canvasH * 4);
-      renderer.readRenderTargetPixels(depthVisTarget, 0, 0, canvasW, canvasH, depthPixels);
+      // Read float pixels (R = linearized depth, background = -1)
+      const floatPixels = new Float32Array(canvasW * canvasH * 4);
+      renderer.readRenderTargetPixels(depthVisTarget, 0, 0, canvasW, canvasH, floatPixels);
       depthVisTarget.dispose();
 
-      // Auto-range normalize: find min/max brightness of non-background pixels
-      // The shader outputs closer=brighter, background=black (0).
-      // cameraFar normalization often leaves everything nearly white because
-      // the scene is much shallower than cameraFar. Remap to full 0-255 range.
-      let minVal = 255;
-      let maxVal = 0;
+      // Find min/max linearized depth across all foreground pixels
+      let minDepth = Infinity;
+      let maxDepth = -Infinity;
       let hasDepthData = false;
-      for (let i = 0; i < depthPixels.length; i += 4) {
-        const v = depthPixels[i]; // R channel (grayscale R=G=B)
-        if (v > 0) {
+      for (let i = 0; i < floatPixels.length; i += 4) {
+        const d = floatPixels[i]; // R channel = linearized depth
+        if (d >= 0) { // background is -1
           hasDepthData = true;
-          if (v < minVal) minVal = v;
-          if (v > maxVal) maxVal = v;
+          if (d < minDepth) minDepth = d;
+          if (d > maxDepth) maxDepth = d;
         }
       }
 
       if (hasDepthData) {
-        // Remap [minVal, maxVal] → [1, 255] so we use the full dynamic range
-        // Background pixels (0) stay black
-        const range = maxVal - minVal;
-        if (range > 0) {
-          for (let i = 0; i < depthPixels.length; i += 4) {
-            const v = depthPixels[i];
-            if (v > 0) {
-              const normalized = Math.round(((v - minVal) / range) * 254) + 1;
-              depthPixels[i] = normalized;
-              depthPixels[i + 1] = normalized;
-              depthPixels[i + 2] = normalized;
-            }
-          }
-        }
-
-        // Convert depth pixels to a canvas, flip vertically (WebGL reads bottom-up)
+        // Normalize float depth → 8-bit grayscale with full dynamic range.
+        // Closer = brighter (inverted), background = black.
+        const depthRange = maxDepth - minDepth;
         const depthCanvas = document.createElement("canvas");
         depthCanvas.width = canvasW;
         depthCanvas.height = canvasH;
         const depthCtx = depthCanvas.getContext("2d");
         if (depthCtx) {
           const imageData = depthCtx.createImageData(canvasW, canvasH);
-          // Flip vertically: WebGL pixel row 0 is the bottom
           for (let y = 0; y < canvasH; y++) {
+            // Flip vertically: WebGL pixel row 0 is the bottom
             const srcRow = (canvasH - 1 - y) * canvasW * 4;
             const dstRow = y * canvasW * 4;
-            for (let x = 0; x < canvasW * 4; x++) {
-              imageData.data[dstRow + x] = depthPixels[srcRow + x];
+            for (let x = 0; x < canvasW; x++) {
+              const srcIdx = srcRow + x * 4;
+              const dstIdx = dstRow + x * 4;
+              const d = floatPixels[srcIdx];
+              let brightness: number;
+              if (d < 0) {
+                brightness = 0; // background → black
+              } else if (depthRange > 0) {
+                // Normalize to [0,1] then invert: closer = brighter
+                const t = (d - minDepth) / depthRange;
+                brightness = Math.round((1 - t) * 255);
+              } else {
+                brightness = 255; // flat scene → all white
+              }
+              imageData.data[dstIdx] = brightness;
+              imageData.data[dstIdx + 1] = brightness;
+              imageData.data[dstIdx + 2] = brightness;
+              imageData.data[dstIdx + 3] = 255;
             }
           }
           depthCtx.putImageData(imageData, 0, 0);
