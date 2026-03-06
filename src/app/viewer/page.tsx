@@ -36,6 +36,7 @@ interface SavedMeshState {
   onBeforeRender: typeof THREE.Object3D.prototype.onBeforeRender;
   depthWrite: boolean;
   transparent: boolean;
+  stochastic: boolean | null; // Spark.js stochastic uniform (null if not a Spark mesh)
 }
 
 /**
@@ -47,6 +48,9 @@ interface SavedMeshState {
  *   1. Traverse the entire scene (not just splatMesh) to find SparkRenderer
  *   2. Temporarily disable onBeforeRender so it doesn't reset our override
  *   3. Force depthWrite=true & transparent=false on the material
+ *   4. Enable stochastic mode so the shader does per-fragment alpha testing
+ *      instead of writing full opaque depth for entire splat footprints
+ *      (eliminates visible blob/disc artifacts at splat edges)
  *
  * Returns saved state array to pass to restoreSceneDepthWrite().
  */
@@ -55,17 +59,25 @@ function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
   scene.traverse((child) => {
     const mesh = child as THREE.Mesh;
     if (mesh.isMesh && mesh.material) {
-      const mat = mesh.material as THREE.Material;
+      const mat = mesh.material as THREE.ShaderMaterial;
+      const hasStochastic = mat.uniforms?.stochastic !== undefined;
       saved.push({
         mesh,
         onBeforeRender: mesh.onBeforeRender,
         depthWrite: mat.depthWrite,
         transparent: mat.transparent,
+        stochastic: hasStochastic ? mat.uniforms.stochastic.value : null,
       });
       // Disable onBeforeRender to prevent SparkRenderer from resetting depthWrite
       mesh.onBeforeRender = () => {};
       mat.depthWrite = true;
       mat.transparent = false;
+      // Enable stochastic mode: fragments are randomly kept/discarded based on
+      // alpha, so low-alpha splat edges get discarded instead of writing as
+      // solid opaque discs in the depth buffer.
+      if (hasStochastic) {
+        mat.uniforms.stochastic.value = true;
+      }
       mat.needsUpdate = true;
     }
   });
@@ -74,11 +86,14 @@ function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
 
 /** Restore mesh states saved by forceSceneDepthWrite(). */
 function restoreSceneDepthWrite(saved: SavedMeshState[]) {
-  for (const { mesh, onBeforeRender, depthWrite, transparent } of saved) {
+  for (const { mesh, onBeforeRender, depthWrite, transparent, stochastic } of saved) {
     mesh.onBeforeRender = onBeforeRender;
-    const mat = mesh.material as THREE.Material;
+    const mat = mesh.material as THREE.ShaderMaterial;
     mat.depthWrite = depthWrite;
     mat.transparent = transparent;
+    if (stochastic !== null && mat.uniforms?.stochastic !== undefined) {
+      mat.uniforms.stochastic.value = stochastic;
+    }
     mat.needsUpdate = true;
   }
 }
