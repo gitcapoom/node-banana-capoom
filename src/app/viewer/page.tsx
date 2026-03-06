@@ -31,21 +31,56 @@ import {
 
 // ─── Helpers ────────────────────────────────────────────────────
 
+interface SavedMeshState {
+  mesh: THREE.Mesh;
+  onBeforeRender: typeof THREE.Object3D.prototype.onBeforeRender;
+  depthWrite: boolean;
+  transparent: boolean;
+}
+
 /**
- * Temporarily toggle depthWrite on all materials in an Object3D tree.
- * Spark.js SplatMesh has depthWrite:false by default (alpha blending mode).
- * We force depthWrite:true for a single depth-capture render pass, then restore.
+ * Force depthWrite on ALL meshes in a scene for a depth-capture render pass.
+ *
+ * Spark.js SplatMesh is an Object3D (not a Mesh) — the actual rendering is
+ * done by SparkRenderer, a dynamically-created Mesh added to the scene.
+ * SparkRenderer's onBeforeRender resets depthWrite every frame, so we must:
+ *   1. Traverse the entire scene (not just splatMesh) to find SparkRenderer
+ *   2. Temporarily disable onBeforeRender so it doesn't reset our override
+ *   3. Force depthWrite=true & transparent=false on the material
+ *
+ * Returns saved state array to pass to restoreSceneDepthWrite().
  */
-function setDepthWriteOnMaterials(obj: THREE.Object3D, enable: boolean) {
-  obj.traverse((child) => {
+function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
+  const saved: SavedMeshState[] = [];
+  scene.traverse((child) => {
     const mesh = child as THREE.Mesh;
-    if (mesh.material) {
+    if (mesh.isMesh && mesh.material) {
       const mat = mesh.material as THREE.Material;
-      mat.depthWrite = enable;
-      mat.transparent = !enable;
+      saved.push({
+        mesh,
+        onBeforeRender: mesh.onBeforeRender,
+        depthWrite: mat.depthWrite,
+        transparent: mat.transparent,
+      });
+      // Disable onBeforeRender to prevent SparkRenderer from resetting depthWrite
+      mesh.onBeforeRender = () => {};
+      mat.depthWrite = true;
+      mat.transparent = false;
       mat.needsUpdate = true;
     }
   });
+  return saved;
+}
+
+/** Restore mesh states saved by forceSceneDepthWrite(). */
+function restoreSceneDepthWrite(saved: SavedMeshState[]) {
+  for (const { mesh, onBeforeRender, depthWrite, transparent } of saved) {
+    mesh.onBeforeRender = onBeforeRender;
+    const mat = mesh.material as THREE.Material;
+    mat.depthWrite = depthWrite;
+    mat.transparent = transparent;
+    mat.needsUpdate = true;
+  }
 }
 
 // ─── Page Component ─────────────────────────────────────────────
@@ -553,17 +588,17 @@ export default function StandaloneViewerPage() {
       depthMat.uniforms.cameraNear.value = camera.near;
       depthMat.uniforms.cameraFar.value = camera.far;
 
-      // Force depth writing on SplatMesh for this render pass
-      const splatObj = splatMeshRef.current as THREE.Object3D | null;
-      if (splatObj) setDepthWriteOnMaterials(splatObj, true);
+      // Force depth writing on all scene meshes (including SparkRenderer)
+      // and suppress onBeforeRender so Spark.js doesn't reset our override
+      const savedStates = forceSceneDepthWrite(scene);
 
       // Render scene to depth render target (captures depth buffer)
       renderer.setRenderTarget(depthTarget);
       renderer.render(scene, camera);
       renderer.setRenderTarget(null);
 
-      // Restore normal alpha-blended rendering
-      if (splatObj) setDepthWriteOnMaterials(splatObj, false);
+      // Restore original material states and onBeforeRender callbacks
+      restoreSceneDepthWrite(savedStates);
 
       // Create a temporary render target for the depth visualization
       const depthVisTarget = new THREE.WebGLRenderTarget(canvasW, canvasH);
