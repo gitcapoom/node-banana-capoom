@@ -38,6 +38,60 @@ interface SavedMeshState {
   transparent: boolean;
   stochastic: boolean | null; // Spark.js stochastic uniform (null if not a Spark mesh)
   timeValue: number | null;   // Spark.js time uniform (null if not a Spark mesh)
+  minAlpha: number | null;    // Spark.js minAlpha uniform (null if not a Spark mesh)
+}
+
+/** Depth capture minAlpha — reject low-confidence splats that would appear as floaters. */
+const DEPTH_MIN_ALPHA = 0.15;
+
+/**
+ * 3×3 median filter for float depth values. Replaces isolated outlier pixels
+ * (floating splat fragments) whose depth differs significantly from their
+ * neighborhood median, while preserving legitimate depth edges.
+ *
+ * @param data  Float32Array of RGBA pixels (R = linearized depth, -1 = background)
+ * @param w     Image width
+ * @param h     Image height
+ */
+function medianFilterDepth(data: Float32Array, w: number, h: number) {
+  // Work on a copy so reads aren't affected by in-place writes
+  const src = new Float32Array(data);
+  const neighbors: number[] = [];
+
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = (y * w + x) * 4;
+      const center = src[idx];
+      if (center < 0) continue; // skip background
+
+      // Gather 3×3 foreground neighbors
+      neighbors.length = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const ni = ((y + dy) * w + (x + dx)) * 4;
+          if (src[ni] >= 0) neighbors.push(src[ni]);
+        }
+      }
+
+      // Only filter if we have enough foreground neighbors
+      if (neighbors.length < 5) {
+        // Isolated pixel — likely a floater, mark as background
+        data[idx] = -1;
+        continue;
+      }
+
+      // Sort and take median
+      neighbors.sort((a, b) => a - b);
+      const median = neighbors[Math.floor(neighbors.length / 2)];
+
+      // Replace if the pixel is a significant outlier vs its neighborhood
+      const diff = Math.abs(center - median);
+      const threshold = median * 0.15; // 15% relative threshold
+      if (diff > threshold) {
+        data[idx] = median;
+      }
+    }
+  }
 }
 
 /**
@@ -63,6 +117,7 @@ function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
       const mat = mesh.material as THREE.ShaderMaterial;
       const hasStochastic = mat.uniforms?.stochastic !== undefined;
       const hasTime = mat.uniforms?.time !== undefined;
+      const hasMinAlpha = mat.uniforms?.minAlpha !== undefined;
       saved.push({
         mesh,
         onBeforeRender: mesh.onBeforeRender,
@@ -70,6 +125,7 @@ function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
         transparent: mat.transparent,
         stochastic: hasStochastic ? mat.uniforms.stochastic.value : null,
         timeValue: hasTime ? mat.uniforms.time.value : null,
+        minAlpha: hasMinAlpha ? mat.uniforms.minAlpha.value : null,
       });
       // Disable onBeforeRender to prevent SparkRenderer from resetting depthWrite
       mesh.onBeforeRender = () => {};
@@ -81,6 +137,10 @@ function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
       if (hasStochastic) {
         mat.uniforms.stochastic.value = true;
       }
+      // Raise minAlpha to reject low-confidence floating splats
+      if (hasMinAlpha) {
+        mat.uniforms.minAlpha.value = DEPTH_MIN_ALPHA;
+      }
       mat.needsUpdate = true;
     }
   });
@@ -89,7 +149,7 @@ function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
 
 /** Restore mesh states saved by forceSceneDepthWrite(). */
 function restoreSceneDepthWrite(saved: SavedMeshState[]) {
-  for (const { mesh, onBeforeRender, depthWrite, transparent, stochastic, timeValue } of saved) {
+  for (const { mesh, onBeforeRender, depthWrite, transparent, stochastic, timeValue, minAlpha } of saved) {
     mesh.onBeforeRender = onBeforeRender;
     const mat = mesh.material as THREE.ShaderMaterial;
     mat.depthWrite = depthWrite;
@@ -99,6 +159,9 @@ function restoreSceneDepthWrite(saved: SavedMeshState[]) {
     }
     if (timeValue !== null && mat.uniforms?.time !== undefined) {
       mat.uniforms.time.value = timeValue;
+    }
+    if (minAlpha !== null && mat.uniforms?.minAlpha !== undefined) {
+      mat.uniforms.minAlpha.value = minAlpha;
     }
     mat.needsUpdate = true;
   }
@@ -657,6 +720,9 @@ export default function StandaloneViewerPage() {
       const floatPixels = new Float32Array(canvasW * canvasH * 4);
       renderer.readRenderTargetPixels(depthVisTarget, 0, 0, canvasW, canvasH, floatPixels);
       depthVisTarget.dispose();
+
+      // Remove isolated floating splat pixels via 3×3 median filter
+      medianFilterDepth(floatPixels, canvasW, canvasH);
 
       // Find min/max linearized depth across all foreground pixels
       let minDepth = Infinity;
