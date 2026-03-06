@@ -2,6 +2,8 @@ import * as THREE from "three";
 
 // ─── Types ──────────────────────────────────────────────────────
 
+export type InterpolationMode = "linear" | "easeInOut" | "smooth";
+
 export interface CameraKeyframe {
   /** Normalized time in [0, 1] along the animation path */
   time: number;
@@ -9,6 +11,8 @@ export interface CameraKeyframe {
   quaternion: THREE.Quaternion;
   /** Vertical FOV in degrees */
   fov: number;
+  /** Interpolation mode for the segment starting at this keyframe */
+  interpolation?: InterpolationMode;
 }
 
 export interface CameraPath {
@@ -50,9 +54,14 @@ export function timeToFrame(time: number, totalFrames: number): number {
 
 // ─── Keyframe CRUD ──────────────────────────────────────────────
 
-/** Add a keyframe, keeping the list sorted by time. Returns new path. */
+/** Add a keyframe, replacing any existing keyframe at the same time. Returns new path. */
 export function addKeyframe(path: CameraPath, kf: CameraKeyframe): CameraPath {
-  const keyframes = [...path.keyframes, cloneKeyframe(kf)].sort(
+  // Replace if a keyframe exists within ~1 frame tolerance
+  const tolerance = path.durationFrames > 1 ? 1 / (path.durationFrames - 1) * 0.5 : 0.01;
+  const filtered = path.keyframes.filter(
+    (existing) => Math.abs(existing.time - kf.time) > tolerance
+  );
+  const keyframes = [...filtered, cloneKeyframe(kf)].sort(
     (a, b) => a.time - b.time
   );
   return { ...path, keyframes };
@@ -83,7 +92,27 @@ function cloneKeyframe(kf: CameraKeyframe): CameraKeyframe {
     position: kf.position.clone(),
     quaternion: kf.quaternion.clone(),
     fov: kf.fov,
+    interpolation: kf.interpolation,
   };
+}
+
+// ─── Easing Functions ───────────────────────────────────────────
+
+function applyEasing(t: number, mode: InterpolationMode): number {
+  switch (mode) {
+    case "linear":
+      return t;
+    case "easeInOut":
+      // Cubic ease-in-out
+      return t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    case "smooth":
+      // Smoothstep (Hermite)
+      return t * t * (3 - 2 * t);
+    default:
+      return t;
+  }
 }
 
 // ─── Interpolation ──────────────────────────────────────────────
@@ -94,6 +123,7 @@ function cloneKeyframe(kf: CameraKeyframe): CameraKeyframe {
  * - Position: Catmull-Rom spline through keyframe positions
  * - Rotation: Sequential SLERP between neighboring keyframes
  * - FOV: Linear interpolation
+ * - Easing: Applied per-segment based on the starting keyframe's interpolation mode
  *
  * Returns null if the path has no keyframes.
  */
@@ -144,7 +174,11 @@ export function evaluateCameraPath(
   const kf0 = keyframes[segIndex];
   const kf1 = keyframes[segIndex + 1];
   const segLen = kf1.time - kf0.time;
-  const localT = segLen > 0 ? (t - kf0.time) / segLen : 0;
+  const rawT = segLen > 0 ? (t - kf0.time) / segLen : 0;
+
+  // Apply easing based on the starting keyframe's interpolation mode
+  const easingMode = kf0.interpolation ?? "smooth";
+  const localT = applyEasing(rawT, easingMode);
 
   // ─── Position: Catmull-Rom spline ───────────────────────
   const position = interpolatePositionCatmullRom(keyframes, segIndex, localT);
@@ -218,6 +252,7 @@ export interface SerializedCameraPath {
     position: [number, number, number];
     quaternion: [number, number, number, number];
     fov: number;
+    interpolation?: InterpolationMode;
   }[];
   durationFrames: number;
   fps: number;
@@ -230,6 +265,7 @@ export function serializePath(path: CameraPath): SerializedCameraPath {
       position: [kf.position.x, kf.position.y, kf.position.z],
       quaternion: [kf.quaternion.x, kf.quaternion.y, kf.quaternion.z, kf.quaternion.w],
       fov: kf.fov,
+      interpolation: kf.interpolation,
     })),
     durationFrames: path.durationFrames,
     fps: path.fps,
@@ -243,6 +279,7 @@ export function deserializePath(data: SerializedCameraPath): CameraPath {
       position: new THREE.Vector3(kf.position[0], kf.position[1], kf.position[2]),
       quaternion: new THREE.Quaternion(kf.quaternion[0], kf.quaternion[1], kf.quaternion[2], kf.quaternion[3]),
       fov: kf.fov,
+      interpolation: kf.interpolation,
     })),
     durationFrames: data.durationFrames,
     fps: data.fps,

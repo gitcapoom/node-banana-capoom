@@ -28,7 +28,7 @@ import {
   calculateCameraFOV,
   getCameraFilenameSegment,
 } from "@/utils/cinemaCameraPresets";
-import type { CameraPath, CameraKeyframe } from "./cameraAnimation";
+import type { CameraPath, CameraKeyframe, InterpolationMode } from "./cameraAnimation";
 import {
   createEmptyPath,
   addKeyframe,
@@ -373,6 +373,7 @@ export default function StandaloneViewerPage() {
   const [cameraPath, setCameraPath] = useState<CameraPath>(createEmptyPath(120, 24));
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLooping, setIsLooping] = useState(false);
   const [isTimelineVisible, setIsTimelineVisible] = useState(false);
   const [selectedKeyframe, setSelectedKeyframe] = useState<number | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
@@ -399,6 +400,7 @@ export default function StandaloneViewerPage() {
   const cameraPathRef = useRef(cameraPath);
   const currentFrameRef = useRef(0);
   const isPlayingRef = useRef(false);
+  const isLoopingRef = useRef(false);
   const lastPlayTimeRef = useRef(0);
   const colmapInputRef = useRef<HTMLInputElement>(null);
 
@@ -439,6 +441,7 @@ export default function StandaloneViewerPage() {
   useEffect(() => { cameraPathRef.current = cameraPath; }, [cameraPath]);
   useEffect(() => { currentFrameRef.current = currentFrame; }, [currentFrame]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  useEffect(() => { isLoopingRef.current = isLooping; }, [isLooping]);
 
   // Camera settings
   const sensor = SENSOR_PRESETS[sensorIndex];
@@ -669,12 +672,20 @@ export default function StandaloneViewerPage() {
             if (typeof window.__setCurrentFrame === "function") window.__setCurrentFrame(frame);
           }
 
-          // Stop at end
+          // End of animation — loop or stop
           if (frame >= path.durationFrames - 1) {
-            isPlayingRef.current = false;
-            lastPlayTimeRef.current = 0;
-            // @ts-expect-error
-            if (typeof window.__setIsPlaying === "function") window.__setIsPlaying(false);
+            if (isLoopingRef.current) {
+              // Reset to beginning and continue playing
+              currentFrameRef.current = 0;
+              lastPlayTimeRef.current = 0;
+              // @ts-expect-error — __setCurrentFrame injected below
+              if (typeof window.__setCurrentFrame === "function") window.__setCurrentFrame(0);
+            } else {
+              isPlayingRef.current = false;
+              lastPlayTimeRef.current = 0;
+              // @ts-expect-error
+              if (typeof window.__setIsPlaying === "function") window.__setIsPlaying(false);
+            }
           }
         }
       } else if (navModeRef.current === "fly") {
@@ -1049,6 +1060,27 @@ export default function StandaloneViewerPage() {
     []
   );
 
+  const handleSetInterpolation = useCallback(
+    (index: number, mode: InterpolationMode) => {
+      setCameraPath((prev) => updateKeyframe(prev, index, { interpolation: mode }));
+    },
+    []
+  );
+
+  const handleChangeDuration = useCallback(
+    (frames: number) => {
+      setCameraPath((prev) => ({ ...prev, durationFrames: frames }));
+    },
+    []
+  );
+
+  const handleChangeFps = useCallback(
+    (fps: number) => {
+      setCameraPath((prev) => ({ ...prev, fps }));
+    },
+    []
+  );
+
   // ─── Depth capture helper for video export ──────────────────────
 
   const captureDepthFrameForExport = useCallback(
@@ -1128,16 +1160,17 @@ export default function StandaloneViewerPage() {
 
         // Download video(s)
         const nameSlug = worldName.replace(/[^a-zA-Z0-9]/g, "") || "spz";
+        const videoExt = (blob: Blob) => blob.type.includes("webm") ? "webm" : "mp4";
         if (result.rgb) {
           const link = document.createElement("a");
-          link.download = `${nameSlug}_rgb.mp4`;
+          link.download = `${nameSlug}_rgb.${videoExt(result.rgb)}`;
           link.href = URL.createObjectURL(result.rgb);
           link.click();
           URL.revokeObjectURL(link.href);
         }
         if (result.depth) {
           const link = document.createElement("a");
-          link.download = `${nameSlug}_depth.mp4`;
+          link.download = `${nameSlug}_depth.${videoExt(result.depth)}`;
           link.href = URL.createObjectURL(result.depth);
           setTimeout(() => {
             link.click();
@@ -1624,13 +1657,18 @@ export default function StandaloneViewerPage() {
                 path={cameraPath}
                 currentFrame={currentFrame}
                 isPlaying={isPlaying}
+                isLooping={isLooping}
                 onScrub={handleScrub}
                 onPlay={handlePlay}
                 onStop={handleStop}
+                onToggleLoop={() => setIsLooping((v) => !v)}
                 onAddKeyframe={handleAddKeyframe}
                 onRemoveKeyframe={handleRemoveKeyframe}
                 onMoveKeyframe={handleMoveKeyframe}
                 onSelectKeyframe={setSelectedKeyframe}
+                onSetInterpolation={handleSetInterpolation}
+                onChangeDuration={handleChangeDuration}
+                onChangeFps={handleChangeFps}
                 selectedKeyframe={selectedKeyframe}
               />
             </div>
