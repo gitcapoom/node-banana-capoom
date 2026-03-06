@@ -28,6 +28,20 @@ import {
   calculateCameraFOV,
   getCameraFilenameSegment,
 } from "@/utils/cinemaCameraPresets";
+import type { CameraPath, CameraKeyframe } from "./cameraAnimation";
+import {
+  createEmptyPath,
+  addKeyframe,
+  removeKeyframe,
+  updateKeyframe,
+  evaluateCameraPath,
+  frameToTime,
+} from "./cameraAnimation";
+import { exportColmap, importColmap } from "./colmapIO";
+import { exportVideo } from "./videoExport";
+import type { ExportSettings } from "./ExportDialog";
+import Timeline from "./Timeline";
+import ExportDialog from "./ExportDialog";
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -202,6 +216,139 @@ function restoreSceneDepthWrite(saved: SavedMeshState[]) {
   }
 }
 
+/**
+ * Capture depth image from the current scene.
+ * Extracted as a standalone function so it can be reused by video export.
+ *
+ * Returns a data URL (PNG) of the depth image, or null if depth data is unavailable.
+ * The caller must provide all the pre-initialized depth rendering resources.
+ */
+export function captureDepthImage(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.PerspectiveCamera,
+  depthTarget: THREE.WebGLRenderTarget,
+  depthMat: THREE.ShaderMaterial,
+  depthScene: THREE.Scene,
+  depthCam: THREE.OrthographicCamera,
+  canvasW: number,
+  canvasH: number,
+  cropX: number,
+  cropY: number,
+  cropW: number,
+  cropH: number
+): string | null {
+  // Update depth material uniforms with current camera values
+  depthMat.uniforms.cameraNear.value = camera.near;
+  depthMat.uniforms.cameraFar.value = camera.far;
+
+  // Force depth writing on all scene meshes (including SparkRenderer)
+  const savedStates = forceSceneDepthWrite(scene);
+
+  // Multi-pass stochastic rendering: 16 passes with different random seeds
+  const NUM_DEPTH_PASSES = 16;
+  const prevAutoClear = renderer.autoClear;
+  renderer.autoClear = false;
+
+  renderer.setRenderTarget(depthTarget);
+  renderer.clear(true, true, true);
+
+  for (let pass = 0; pass < NUM_DEPTH_PASSES; pass++) {
+    for (const s of savedStates) {
+      const mat = s.mesh.material as THREE.ShaderMaterial;
+      if (mat.uniforms?.time !== undefined) {
+        mat.uniforms.time.value = pass * 0.123;
+      }
+    }
+    renderer.render(scene, camera);
+  }
+
+  renderer.setRenderTarget(null);
+  renderer.autoClear = prevAutoClear;
+
+  // Restore original material states
+  restoreSceneDepthWrite(savedStates);
+
+  // Render depth visualization to float target for full precision
+  const depthVisTarget = new THREE.WebGLRenderTarget(canvasW, canvasH, {
+    type: THREE.FloatType,
+    format: THREE.RGBAFormat,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+  renderer.setRenderTarget(depthVisTarget);
+  renderer.render(depthScene, depthCam);
+  renderer.setRenderTarget(null);
+
+  // Read float pixels (R = linearized depth, background = -1)
+  const floatPixels = new Float32Array(canvasW * canvasH * 4);
+  renderer.readRenderTargetPixels(depthVisTarget, 0, 0, canvasW, canvasH, floatPixels);
+  depthVisTarget.dispose();
+
+  // Remove isolated floating splat pixels (edge-preserving)
+  cleanDepthFloaters(floatPixels, canvasW, canvasH);
+  // Dilate depth into edge gaps
+  dilateDepth(floatPixels, canvasW, canvasH);
+
+  // Find min/max linearized depth across all foreground pixels
+  let minDepth = Infinity;
+  let maxDepth = -Infinity;
+  let hasDepthData = false;
+  for (let i = 0; i < floatPixels.length; i += 4) {
+    const d = floatPixels[i];
+    if (d >= 0) {
+      hasDepthData = true;
+      if (d < minDepth) minDepth = d;
+      if (d > maxDepth) maxDepth = d;
+    }
+  }
+
+  if (!hasDepthData) return null;
+
+  // Normalize float depth → 8-bit grayscale (closer = brighter, background = black)
+  const depthRange = maxDepth - minDepth;
+  const depthCanvas = document.createElement("canvas");
+  depthCanvas.width = canvasW;
+  depthCanvas.height = canvasH;
+  const depthCtx = depthCanvas.getContext("2d");
+  if (!depthCtx) return null;
+
+  const imageData = depthCtx.createImageData(canvasW, canvasH);
+  for (let y = 0; y < canvasH; y++) {
+    // Flip vertically: WebGL pixel row 0 is the bottom
+    const srcRow = (canvasH - 1 - y) * canvasW * 4;
+    const dstRow = y * canvasW * 4;
+    for (let x = 0; x < canvasW; x++) {
+      const srcIdx = srcRow + x * 4;
+      const dstIdx = dstRow + x * 4;
+      const d = floatPixels[srcIdx];
+      let brightness: number;
+      if (d < 0) {
+        brightness = 0;
+      } else if (depthRange > 0) {
+        const t = (d - minDepth) / depthRange;
+        brightness = Math.round((1 - t) * 255);
+      } else {
+        brightness = 255;
+      }
+      imageData.data[dstIdx] = brightness;
+      imageData.data[dstIdx + 1] = brightness;
+      imageData.data[dstIdx + 2] = brightness;
+      imageData.data[dstIdx + 3] = 255;
+    }
+  }
+  depthCtx.putImageData(imageData, 0, 0);
+
+  // Crop to requested region
+  const depthCropped = document.createElement("canvas");
+  depthCropped.width = cropW;
+  depthCropped.height = cropH;
+  const depthCropCtx = depthCropped.getContext("2d");
+  if (!depthCropCtx) return null;
+  depthCropCtx.drawImage(depthCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+  return depthCropped.toDataURL("image/png");
+}
+
 // ─── Page Component ─────────────────────────────────────────────
 
 export default function StandaloneViewerPage() {
@@ -222,6 +369,16 @@ export default function StandaloneViewerPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [navMode, setNavMode] = useState<"orbit" | "fly">("fly");
 
+  // Animation state
+  const [cameraPath, setCameraPath] = useState<CameraPath>(createEmptyPath(120, 24));
+  const [currentFrame, setCurrentFrame] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isTimelineVisible, setIsTimelineVisible] = useState(false);
+  const [selectedKeyframe, setSelectedKeyframe] = useState<number | null>(null);
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<{ frame: number; total: number } | null>(null);
+
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -237,6 +394,13 @@ export default function StandaloneViewerPage() {
   const depthMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
   const depthSceneRef = useRef<THREE.Scene | null>(null);
   const depthCameraRef = useRef<THREE.OrthographicCamera | null>(null);
+
+  // Animation refs
+  const cameraPathRef = useRef(cameraPath);
+  const currentFrameRef = useRef(0);
+  const isPlayingRef = useRef(false);
+  const lastPlayTimeRef = useRef(0);
+  const colmapInputRef = useRef<HTMLInputElement>(null);
 
   // Fly mode refs
   const keysPressedRef = useRef<Set<string>>(new Set());
@@ -270,6 +434,11 @@ export default function StandaloneViewerPage() {
       controlsRef.current.update();
     }
   }, [navMode]);
+
+  // Keep animation refs in sync with state
+  useEffect(() => { cameraPathRef.current = cameraPath; }, [cameraPath]);
+  useEffect(() => { currentFrameRef.current = currentFrame; }, [currentFrame]);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
 
   // Camera settings
   const sensor = SENSOR_PRESETS[sensorIndex];
@@ -460,10 +629,55 @@ export default function StandaloneViewerPage() {
     canvas.addEventListener("wheel", onWheel, { passive: false });
 
     // Animation loop
-    function animate() {
+    function animate(time: number) {
       animationIdRef.current = requestAnimationFrame(animate);
 
-      if (navModeRef.current === "fly") {
+      // ─── Camera path playback ───────────────────────
+      if (isPlayingRef.current) {
+        const path = cameraPathRef.current;
+        if (path.keyframes.length >= 2) {
+          if (lastPlayTimeRef.current === 0) lastPlayTimeRef.current = time;
+          const elapsed = (time - lastPlayTimeRef.current) / 1000; // seconds
+          const frameDelta = elapsed * path.fps;
+          const newFrame = Math.min(
+            currentFrameRef.current + frameDelta,
+            path.durationFrames - 1
+          );
+          lastPlayTimeRef.current = time;
+
+          const frame = Math.round(newFrame);
+          currentFrameRef.current = frame;
+
+          // Apply camera from path
+          const evaluated = evaluateCameraPath(path, frame);
+          if (evaluated) {
+            camera.position.copy(evaluated.position);
+            camera.quaternion.copy(evaluated.quaternion);
+            camera.fov = evaluated.fov;
+            camera.updateProjectionMatrix();
+
+            // Sync yaw/pitch for fly mode
+            const euler = new THREE.Euler();
+            euler.setFromQuaternion(camera.quaternion, "YXZ");
+            yawRef.current = euler.y;
+            pitchRef.current = euler.x;
+          }
+
+          // Batch state updates via postMessage to avoid excessive renders
+          if (frame % 2 === 0) {
+            // @ts-expect-error — __setCurrentFrame injected below
+            if (typeof window.__setCurrentFrame === "function") window.__setCurrentFrame(frame);
+          }
+
+          // Stop at end
+          if (frame >= path.durationFrames - 1) {
+            isPlayingRef.current = false;
+            lastPlayTimeRef.current = 0;
+            // @ts-expect-error
+            if (typeof window.__setIsPlaying === "function") window.__setIsPlaying(false);
+          }
+        }
+      } else if (navModeRef.current === "fly") {
         // Apply yaw/pitch
         const euler = new THREE.Euler(
           pitchRef.current,
@@ -502,7 +716,7 @@ export default function StandaloneViewerPage() {
 
       renderer.render(scene, camera);
     }
-    animate();
+    animate(0);
 
     // Resize handler
     const handleResize = () => {
@@ -699,128 +913,16 @@ export default function StandaloneViewerPage() {
     let depthImage: string | null = null;
     const depthTarget = depthRenderTargetRef.current;
     const depthMat = depthMaterialRef.current;
-    const depthScene = depthSceneRef.current;
+    const dScene = depthSceneRef.current;
     const depthCam = depthCameraRef.current;
 
-    if (depthTarget && depthMat && depthScene && depthCam) {
-      // Update depth material uniforms with current camera values
-      depthMat.uniforms.cameraNear.value = camera.near;
-      depthMat.uniforms.cameraFar.value = camera.far;
-
-      // Force depth writing on all scene meshes (including SparkRenderer)
-      // and suppress onBeforeRender so Spark.js doesn't reset our override
-      const savedStates = forceSceneDepthWrite(scene);
-
-      // Multi-pass stochastic rendering: each pass uses a different random seed
-      // (time uniform) so different fragments survive the alpha test. The depth
-      // buffer keeps the nearest value, so holes from one pass get filled by
-      // subsequent passes. 16 passes gives near-complete coverage at edges.
-      const NUM_DEPTH_PASSES = 16;
-      const prevAutoClear = renderer.autoClear;
-      renderer.autoClear = false;
-
-      renderer.setRenderTarget(depthTarget);
-      renderer.clear(true, true, true); // Clear once before first pass
-
-      for (let pass = 0; pass < NUM_DEPTH_PASSES; pass++) {
-        // Vary the time uniform to change the stochastic hash seed per pass
-        for (const s of savedStates) {
-          const mat = s.mesh.material as THREE.ShaderMaterial;
-          if (mat.uniforms?.time !== undefined) {
-            mat.uniforms.time.value = pass * 0.123;
-          }
-        }
-        renderer.render(scene, camera);
-      }
-
-      renderer.setRenderTarget(null);
-      renderer.autoClear = prevAutoClear;
-
-      // Restore original material states and onBeforeRender callbacks
-      restoreSceneDepthWrite(savedStates);
-
-      // Render depth visualization to a FLOAT render target so we keep
-      // full 32-bit precision through the pipeline (no 8-bit quantization).
-      const depthVisTarget = new THREE.WebGLRenderTarget(canvasW, canvasH, {
-        type: THREE.FloatType,
-        format: THREE.RGBAFormat,
-        minFilter: THREE.NearestFilter,
-        magFilter: THREE.NearestFilter,
-      });
-      renderer.setRenderTarget(depthVisTarget);
-      renderer.render(depthScene, depthCam);
-      renderer.setRenderTarget(null);
-
-      // Read float pixels (R = linearized depth, background = -1)
-      const floatPixels = new Float32Array(canvasW * canvasH * 4);
-      renderer.readRenderTargetPixels(depthVisTarget, 0, 0, canvasW, canvasH, floatPixels);
-      depthVisTarget.dispose();
-
-      // Remove isolated floating splat pixels (edge-preserving)
-      cleanDepthFloaters(floatPixels, canvasW, canvasH);
-      // Dilate depth into edge gaps where no splat wrote depth
-      dilateDepth(floatPixels, canvasW, canvasH);
-
-      // Find min/max linearized depth across all foreground pixels
-      let minDepth = Infinity;
-      let maxDepth = -Infinity;
-      let hasDepthData = false;
-      for (let i = 0; i < floatPixels.length; i += 4) {
-        const d = floatPixels[i]; // R channel = linearized depth
-        if (d >= 0) { // background is -1
-          hasDepthData = true;
-          if (d < minDepth) minDepth = d;
-          if (d > maxDepth) maxDepth = d;
-        }
-      }
-
-      if (hasDepthData) {
-        // Normalize float depth → 8-bit grayscale with full dynamic range.
-        // Closer = brighter (inverted), background = black.
-        const depthRange = maxDepth - minDepth;
-        const depthCanvas = document.createElement("canvas");
-        depthCanvas.width = canvasW;
-        depthCanvas.height = canvasH;
-        const depthCtx = depthCanvas.getContext("2d");
-        if (depthCtx) {
-          const imageData = depthCtx.createImageData(canvasW, canvasH);
-          for (let y = 0; y < canvasH; y++) {
-            // Flip vertically: WebGL pixel row 0 is the bottom
-            const srcRow = (canvasH - 1 - y) * canvasW * 4;
-            const dstRow = y * canvasW * 4;
-            for (let x = 0; x < canvasW; x++) {
-              const srcIdx = srcRow + x * 4;
-              const dstIdx = dstRow + x * 4;
-              const d = floatPixels[srcIdx];
-              let brightness: number;
-              if (d < 0) {
-                brightness = 0; // background → black
-              } else if (depthRange > 0) {
-                // Normalize to [0,1] then invert: closer = brighter
-                const t = (d - minDepth) / depthRange;
-                brightness = Math.round((1 - t) * 255);
-              } else {
-                brightness = 255; // flat scene → all white
-              }
-              imageData.data[dstIdx] = brightness;
-              imageData.data[dstIdx + 1] = brightness;
-              imageData.data[dstIdx + 2] = brightness;
-              imageData.data[dstIdx + 3] = 255;
-            }
-          }
-          depthCtx.putImageData(imageData, 0, 0);
-
-          // Crop depth to same aspect ratio as RGB
-          const depthCropped = document.createElement("canvas");
-          depthCropped.width = cropW;
-          depthCropped.height = cropH;
-          const depthCropCtx = depthCropped.getContext("2d");
-          if (depthCropCtx) {
-            depthCropCtx.drawImage(depthCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-            depthImage = depthCropped.toDataURL("image/png");
-          }
-        }
-      }
+    if (depthTarget && depthMat && dScene && depthCam) {
+      depthImage = captureDepthImage(
+        renderer, scene, camera,
+        depthTarget, depthMat, dScene, depthCam,
+        canvasW, canvasH,
+        cropX, cropY, cropW, cropH
+      );
     }
 
     // Re-render to screen so display isn't disrupted
@@ -861,6 +963,247 @@ export default function StandaloneViewerPage() {
     }
   }, [worldId, worldName, sensor, focalLength, aspectRatio.ratio]);
 
+  // ─── Animation callbacks ─────────────────────────────────────────
+
+  // Expose state setters to the rAF loop (avoids stale closures)
+  useEffect(() => {
+    // @ts-expect-error — bridge between rAF loop and React state
+    window.__setCurrentFrame = setCurrentFrame;
+    // @ts-expect-error
+    window.__setIsPlaying = setIsPlaying;
+    return () => {
+      // @ts-expect-error
+      delete window.__setCurrentFrame;
+      // @ts-expect-error
+      delete window.__setIsPlaying;
+    };
+  }, []);
+
+  const handlePlay = useCallback(() => {
+    if (cameraPath.keyframes.length < 2) return;
+    // If at end, reset to beginning
+    if (currentFrame >= cameraPath.durationFrames - 1) {
+      setCurrentFrame(0);
+      currentFrameRef.current = 0;
+    }
+    lastPlayTimeRef.current = 0;
+    setIsPlaying(true);
+  }, [cameraPath, currentFrame]);
+
+  const handleStop = useCallback(() => {
+    setIsPlaying(false);
+    lastPlayTimeRef.current = 0;
+  }, []);
+
+  const handleScrub = useCallback(
+    (frame: number) => {
+      const clamped = Math.max(0, Math.min(frame, cameraPath.durationFrames - 1));
+      setCurrentFrame(clamped);
+      currentFrameRef.current = clamped;
+      setIsPlaying(false);
+
+      // Apply camera at this frame
+      const camera = cameraRef.current;
+      if (!camera) return;
+      const evaluated = evaluateCameraPath(cameraPath, clamped);
+      if (evaluated) {
+        camera.position.copy(evaluated.position);
+        camera.quaternion.copy(evaluated.quaternion);
+        camera.fov = evaluated.fov;
+        camera.updateProjectionMatrix();
+
+        // Sync fly mode refs
+        const euler = new THREE.Euler();
+        euler.setFromQuaternion(camera.quaternion, "YXZ");
+        yawRef.current = euler.y;
+        pitchRef.current = euler.x;
+      }
+    },
+    [cameraPath]
+  );
+
+  const handleAddKeyframe = useCallback(() => {
+    const camera = cameraRef.current;
+    if (!camera) return;
+    const kf: CameraKeyframe = {
+      time: frameToTime(currentFrame, cameraPath.durationFrames),
+      position: camera.position.clone(),
+      quaternion: camera.quaternion.clone(),
+      fov: camera.fov,
+    };
+    setCameraPath((prev) => addKeyframe(prev, kf));
+  }, [currentFrame, cameraPath.durationFrames]);
+
+  const handleRemoveKeyframe = useCallback(
+    (index: number) => {
+      setCameraPath((prev) => removeKeyframe(prev, index));
+      setSelectedKeyframe(null);
+    },
+    []
+  );
+
+  const handleMoveKeyframe = useCallback(
+    (index: number, newTime: number) => {
+      setCameraPath((prev) => updateKeyframe(prev, index, { time: newTime }));
+    },
+    []
+  );
+
+  // ─── Depth capture helper for video export ──────────────────────
+
+  const captureDepthFrameForExport = useCallback(
+    (
+      renderer: THREE.WebGLRenderer,
+      scene: THREE.Scene,
+      camera: THREE.PerspectiveCamera,
+      w: number,
+      h: number
+    ): ImageData | null => {
+      const depthTarget = depthRenderTargetRef.current;
+      const depthMat = depthMaterialRef.current;
+      const dScene = depthSceneRef.current;
+      const depthCam = depthCameraRef.current;
+      if (!depthTarget || !depthMat || !dScene || !depthCam) return null;
+
+      // Resize depth target to match export resolution
+      depthTarget.setSize(w, h);
+
+      const dataUrl = captureDepthImage(
+        renderer, scene, camera,
+        depthTarget, depthMat, dScene, depthCam,
+        w, h, 0, 0, w, h
+      );
+      if (!dataUrl) return null;
+
+      // Convert data URL to ImageData
+      const img = new Image();
+      img.src = dataUrl;
+      // Since toDataURL is synchronous from canvas, we can draw immediately
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = w;
+      tempCanvas.height = h;
+      const ctx = tempCanvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(img, 0, 0);
+      return ctx.getImageData(0, 0, w, h);
+    },
+    []
+  );
+
+  // ─── Export handler ─────────────────────────────────────────────
+
+  const handleExport = useCallback(
+    async (settings: ExportSettings) => {
+      const renderer = rendererRef.current;
+      const scene = sceneRef.current;
+      const camera = cameraRef.current;
+      if (!renderer || !scene || !camera) return;
+
+      setIsExporting(true);
+      setExportProgress({ frame: 0, total: settings.durationFrames });
+
+      try {
+        // Update path with export settings
+        const exportPath: CameraPath = {
+          ...cameraPath,
+          fps: settings.fps,
+          durationFrames: settings.durationFrames,
+        };
+
+        const result = await exportVideo({
+          renderer,
+          scene,
+          camera,
+          path: exportPath,
+          mode: settings.mode,
+          resolution: settings.resolution,
+          captureDepthFrame:
+            settings.mode === "depth" || settings.mode === "both"
+              ? captureDepthFrameForExport
+              : undefined,
+          onProgress: (frame, total) => {
+            setExportProgress({ frame, total });
+          },
+        });
+
+        // Download video(s)
+        const nameSlug = worldName.replace(/[^a-zA-Z0-9]/g, "") || "spz";
+        if (result.rgb) {
+          const link = document.createElement("a");
+          link.download = `${nameSlug}_rgb.mp4`;
+          link.href = URL.createObjectURL(result.rgb);
+          link.click();
+          URL.revokeObjectURL(link.href);
+        }
+        if (result.depth) {
+          const link = document.createElement("a");
+          link.download = `${nameSlug}_depth.mp4`;
+          link.href = URL.createObjectURL(result.depth);
+          setTimeout(() => {
+            link.click();
+            URL.revokeObjectURL(link.href);
+          }, 200);
+        }
+
+        // Export COLMAP data if requested
+        if (settings.includeColmap) {
+          const colmapBlob = await exportColmap(
+            exportPath,
+            settings.resolution.width,
+            settings.resolution.height,
+            sensor.widthMm,
+            focalLength
+          );
+          const colmapLink = document.createElement("a");
+          colmapLink.download = `${nameSlug}_colmap.zip`;
+          colmapLink.href = URL.createObjectURL(colmapBlob);
+          setTimeout(() => {
+            colmapLink.click();
+            URL.revokeObjectURL(colmapLink.href);
+          }, 400);
+        }
+
+        setShowExportDialog(false);
+      } catch (err) {
+        console.error("Export failed:", err);
+        alert(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+      } finally {
+        setIsExporting(false);
+        setExportProgress(null);
+      }
+    },
+    [cameraPath, worldName, sensor.widthMm, focalLength, captureDepthFrameForExport]
+  );
+
+  // ─── COLMAP import handler ──────────────────────────────────────
+
+  const handleColmapImport = useCallback(async (file: File) => {
+    try {
+      const blob = new Blob([await file.arrayBuffer()]);
+      const importedPath = await importColmap(blob, cameraPath.fps);
+      setCameraPath(importedPath);
+      setCurrentFrame(0);
+      setIsTimelineVisible(true);
+
+      // Apply first keyframe camera
+      if (importedPath.keyframes.length > 0 && cameraRef.current) {
+        const kf = importedPath.keyframes[0];
+        cameraRef.current.position.copy(kf.position);
+        cameraRef.current.quaternion.copy(kf.quaternion);
+        cameraRef.current.fov = kf.fov;
+        cameraRef.current.updateProjectionMatrix();
+
+        const euler = new THREE.Euler();
+        euler.setFromQuaternion(cameraRef.current.quaternion, "YXZ");
+        yawRef.current = euler.y;
+        pitchRef.current = euler.x;
+      }
+    } catch (err) {
+      console.error("COLMAP import failed:", err);
+      alert(`COLMAP import failed: ${err instanceof Error ? err.message : "Unknown error"}`);
+    }
+  }, [cameraPath.fps]);
+
   // ─── Keyboard shortcuts + WASD navigation ──────────────────────
 
   useEffect(() => {
@@ -877,6 +1220,20 @@ export default function StandaloneViewerPage() {
       // Toggle nav mode
       if (e.key === "f" || e.key === "F") {
         setNavMode((m) => (m === "fly" ? "orbit" : "fly"));
+      }
+      // Toggle timeline
+      if (e.key === "t" || e.key === "T") {
+        setIsTimelineVisible((v) => !v);
+      }
+      // Add keyframe
+      if (e.key === "k" || e.key === "K") {
+        handleAddKeyframe();
+      }
+      // Delete selected keyframe
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (selectedKeyframe !== null) {
+          handleRemoveKeyframe(selectedKeyframe);
+        }
       }
       // WASD + QE navigation keys
       const navKeys = ["w", "a", "s", "d", "q", "e"];
@@ -907,7 +1264,7 @@ export default function StandaloneViewerPage() {
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("blur", handleBlur);
     };
-  }, [handleCapture]);
+  }, [handleCapture, handleAddKeyframe, handleRemoveKeyframe, selectedKeyframe]);
 
   // ─── Drag and Drop ─────────────────────────────────────────────
 
@@ -1195,25 +1552,109 @@ export default function StandaloneViewerPage() {
               </div>
             </div>
 
-            {/* Capture Button */}
-            <button
-              onClick={handleCapture}
-              disabled={!splatLoaded}
-              className="bg-red-600 hover:bg-red-500 disabled:bg-neutral-700 disabled:cursor-not-allowed text-white rounded-full w-14 h-14 flex items-center justify-center pointer-events-auto shadow-lg transition-all active:scale-95"
-              title="Capture frame (Space / Enter)"
-            >
-              <div className="w-10 h-10 border-2 border-white rounded-full flex items-center justify-center">
-                <div className="w-6 h-6 bg-white rounded-full" />
-              </div>
-            </button>
+            {/* Right side buttons */}
+            <div className="flex items-center gap-2 pointer-events-auto">
+              {/* Timeline toggle */}
+              <button
+                onClick={() => setIsTimelineVisible((v) => !v)}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
+                  isTimelineVisible
+                    ? "bg-indigo-600 text-white"
+                    : "bg-neutral-800/80 text-neutral-400 hover:text-white"
+                }`}
+                title="Toggle timeline (T)"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+                </svg>
+              </button>
+
+              {/* Export button */}
+              <button
+                onClick={() => setShowExportDialog(true)}
+                disabled={cameraPath.keyframes.length < 2}
+                className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white disabled:text-neutral-600 disabled:cursor-not-allowed transition-colors"
+                title="Export video"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+              </button>
+
+              {/* COLMAP import */}
+              <button
+                onClick={() => colmapInputRef.current?.click()}
+                className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
+                title="Import COLMAP camera path"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+              </button>
+              <input
+                ref={colmapInputRef}
+                type="file"
+                accept=".zip"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleColmapImport(file);
+                  e.target.value = "";
+                }}
+                className="hidden"
+              />
+
+              {/* Capture Button */}
+              <button
+                onClick={handleCapture}
+                disabled={!splatLoaded}
+                className="bg-red-600 hover:bg-red-500 disabled:bg-neutral-700 disabled:cursor-not-allowed text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg transition-all active:scale-95"
+                title="Capture frame (Space / Enter)"
+              >
+                <div className="w-10 h-10 border-2 border-white rounded-full flex items-center justify-center">
+                  <div className="w-6 h-6 bg-white rounded-full" />
+                </div>
+              </button>
+            </div>
           </div>
+
+          {/* Timeline */}
+          {isTimelineVisible && (
+            <div className="mt-2">
+              <Timeline
+                path={cameraPath}
+                currentFrame={currentFrame}
+                isPlaying={isPlaying}
+                onScrub={handleScrub}
+                onPlay={handlePlay}
+                onStop={handleStop}
+                onAddKeyframe={handleAddKeyframe}
+                onRemoveKeyframe={handleRemoveKeyframe}
+                onMoveKeyframe={handleMoveKeyframe}
+                onSelectKeyframe={setSelectedKeyframe}
+                selectedKeyframe={selectedKeyframe}
+              />
+            </div>
+          )}
         </div>
+      )}
+
+      {/* Export Dialog */}
+      {showExportDialog && (
+        <ExportDialog
+          path={cameraPath}
+          sensorWidthMm={sensor.widthMm}
+          focalLengthMm={focalLength}
+          onExport={handleExport}
+          onClose={() => setShowExportDialog(false)}
+          isExporting={isExporting}
+          exportProgress={exportProgress}
+        />
       )}
 
       {/* Toggle controls hint */}
       <div className="absolute top-4 right-4 pointer-events-none z-5">
         <p className="text-neutral-600 text-[9px]">
-          {navMode === "fly" ? "WASD to move · Drag to look" : "Drag to orbit"} · F toggle · H {showControls ? "hide" : "show"} · Space capture
+          {navMode === "fly" ? "WASD to move · Drag to look" : "Drag to orbit"} · F toggle · H {showControls ? "hide" : "show"} · Space capture · T timeline · K keyframe
           {!worldId && " · Drop .spz/.ply to load"}
         </p>
       </div>
