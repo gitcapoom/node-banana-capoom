@@ -37,6 +37,7 @@ interface SavedMeshState {
   depthWrite: boolean;
   transparent: boolean;
   stochastic: boolean | null; // Spark.js stochastic uniform (null if not a Spark mesh)
+  timeValue: number | null;   // Spark.js time uniform (null if not a Spark mesh)
 }
 
 /**
@@ -61,12 +62,14 @@ function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
     if (mesh.isMesh && mesh.material) {
       const mat = mesh.material as THREE.ShaderMaterial;
       const hasStochastic = mat.uniforms?.stochastic !== undefined;
+      const hasTime = mat.uniforms?.time !== undefined;
       saved.push({
         mesh,
         onBeforeRender: mesh.onBeforeRender,
         depthWrite: mat.depthWrite,
         transparent: mat.transparent,
         stochastic: hasStochastic ? mat.uniforms.stochastic.value : null,
+        timeValue: hasTime ? mat.uniforms.time.value : null,
       });
       // Disable onBeforeRender to prevent SparkRenderer from resetting depthWrite
       mesh.onBeforeRender = () => {};
@@ -86,13 +89,16 @@ function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
 
 /** Restore mesh states saved by forceSceneDepthWrite(). */
 function restoreSceneDepthWrite(saved: SavedMeshState[]) {
-  for (const { mesh, onBeforeRender, depthWrite, transparent, stochastic } of saved) {
+  for (const { mesh, onBeforeRender, depthWrite, transparent, stochastic, timeValue } of saved) {
     mesh.onBeforeRender = onBeforeRender;
     const mat = mesh.material as THREE.ShaderMaterial;
     mat.depthWrite = depthWrite;
     mat.transparent = transparent;
     if (stochastic !== null && mat.uniforms?.stochastic !== undefined) {
       mat.uniforms.stochastic.value = stochastic;
+    }
+    if (timeValue !== null && mat.uniforms?.time !== undefined) {
+      mat.uniforms.time.value = timeValue;
     }
     mat.needsUpdate = true;
   }
@@ -607,10 +613,30 @@ export default function StandaloneViewerPage() {
       // and suppress onBeforeRender so Spark.js doesn't reset our override
       const savedStates = forceSceneDepthWrite(scene);
 
-      // Render scene to depth render target (captures depth buffer)
+      // Multi-pass stochastic rendering: each pass uses a different random seed
+      // (time uniform) so different fragments survive the alpha test. The depth
+      // buffer keeps the nearest value, so holes from one pass get filled by
+      // subsequent passes. 8 passes reduces hole probability to < 0.01%.
+      const NUM_DEPTH_PASSES = 8;
+      const prevAutoClear = renderer.autoClear;
+      renderer.autoClear = false;
+
       renderer.setRenderTarget(depthTarget);
-      renderer.render(scene, camera);
+      renderer.clear(true, true, true); // Clear once before first pass
+
+      for (let pass = 0; pass < NUM_DEPTH_PASSES; pass++) {
+        // Vary the time uniform to change the stochastic hash seed per pass
+        for (const s of savedStates) {
+          const mat = s.mesh.material as THREE.ShaderMaterial;
+          if (mat.uniforms?.time !== undefined) {
+            mat.uniforms.time.value = pass * 0.123;
+          }
+        }
+        renderer.render(scene, camera);
+      }
+
       renderer.setRenderTarget(null);
+      renderer.autoClear = prevAutoClear;
 
       // Restore original material states and onBeforeRender callbacks
       restoreSceneDepthWrite(savedStates);
