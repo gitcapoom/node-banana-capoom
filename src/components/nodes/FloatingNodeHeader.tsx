@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useReactFlow } from "@xyflow/react";
 import { NodeType } from "@/types";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 
 export interface CommentNavigationProps {
   currentIndex: number;
@@ -263,9 +264,51 @@ export function FloatingNodeHeader({
     };
 
     const handlePointerUp = () => {
+      const wasDragging = isDraggingRef.current;
+
       document.removeEventListener('pointermove', handlePointerMove);
       document.removeEventListener('pointerup', handlePointerUp);
       isDraggingRef.current = false;
+
+      // Check group membership if the node was actually dragged
+      if (wasDragging) {
+        const store = useWorkflowStore.getState();
+        const allNodes = getNodes();
+        const draggedNode = allNodes.find(n => n.id === id);
+
+        if (!draggedNode) return;
+
+        // Get node dimensions (prefer measured, fallback to defaults)
+        const defaults = defaultNodeDimensions[type] || { width: 300, height: 280 };
+        const nodeWidth = draggedNode.measured?.width || (draggedNode.style?.width as number) || defaults.width;
+        const nodeHeight = draggedNode.measured?.height || (draggedNode.style?.height as number) || defaults.height;
+
+        // Calculate node center
+        const nodeCenterX = draggedNode.position.x + nodeWidth / 2;
+        const nodeCenterY = draggedNode.position.y + nodeHeight / 2;
+
+        // Check if node center is inside any group
+        let targetGroupId: string | undefined;
+
+        for (const group of Object.values(store.groups)) {
+          const inBoundsX = nodeCenterX >= group.position.x && nodeCenterX <= group.position.x + group.size.width;
+          const inBoundsY = nodeCenterY >= group.position.y && nodeCenterY <= group.position.y + group.size.height;
+
+          if (inBoundsX && inBoundsY) {
+            targetGroupId = group.id;
+            break;
+          }
+        }
+
+        // Get the node's current groupId
+        const currentNode = store.nodes.find((n) => n.id === id);
+        const currentGroupId = currentNode?.groupId;
+
+        // Update groupId if it changed
+        if (targetGroupId !== currentGroupId) {
+          store.setNodeGroupId(id, targetGroupId);
+        }
+      }
     };
 
     document.addEventListener('pointermove', handlePointerMove);
