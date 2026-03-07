@@ -263,50 +263,56 @@ export function FloatingNodeHeader({
       }
     };
 
-    const handlePointerUp = () => {
+    const handlePointerUp = (e: PointerEvent) => {
       const wasDragging = isDraggingRef.current;
 
       document.removeEventListener('pointermove', handlePointerMove);
       document.removeEventListener('pointerup', handlePointerUp);
       isDraggingRef.current = false;
 
-      // Check group membership if the node was actually dragged
+      // Check group membership for ALL moved nodes
       if (wasDragging) {
         const store = useWorkflowStore.getState();
-        const allNodes = getNodes();
-        const draggedNode = allNodes.find(n => n.id === id);
+        const { zoom } = getViewport();
+        const dx = (e.clientX - startX) / zoom;
+        const dy = (e.clientY - startY) / zoom;
 
-        if (!draggedNode) return;
+        for (const [nodeId, startPos] of startPositions) {
+          // Calculate final position deterministically from drag delta
+          const finalX = startPos.x + dx;
+          const finalY = startPos.y + dy;
 
-        // Get node dimensions (prefer measured, fallback to defaults)
-        const defaults = defaultNodeDimensions[type] || { width: 300, height: 280 };
-        const nodeWidth = draggedNode.measured?.width || (draggedNode.style?.width as number) || defaults.width;
-        const nodeHeight = draggedNode.measured?.height || (draggedNode.style?.height as number) || defaults.height;
+          // Get node dimensions from store (always fresh)
+          const storeNode = store.nodes.find(n => n.id === nodeId);
+          if (!storeNode) continue;
 
-        // Calculate node center
-        const nodeCenterX = draggedNode.position.x + nodeWidth / 2;
-        const nodeCenterY = draggedNode.position.y + nodeHeight / 2;
+          const nodeType = storeNode.type as NodeType;
+          const defaults = defaultNodeDimensions[nodeType] || { width: 300, height: 280 };
+          const nodeWidth = storeNode.measured?.width || (storeNode.style?.width as number) || defaults.width;
+          const nodeHeight = storeNode.measured?.height || (storeNode.style?.height as number) || defaults.height;
 
-        // Check if node center is inside any group
-        let targetGroupId: string | undefined;
+          // Calculate node center
+          const nodeCenterX = finalX + nodeWidth / 2;
+          const nodeCenterY = finalY + nodeHeight / 2;
 
-        for (const group of Object.values(store.groups)) {
-          const inBoundsX = nodeCenterX >= group.position.x && nodeCenterX <= group.position.x + group.size.width;
-          const inBoundsY = nodeCenterY >= group.position.y && nodeCenterY <= group.position.y + group.size.height;
+          // Check if node center is inside any group
+          let targetGroupId: string | undefined;
 
-          if (inBoundsX && inBoundsY) {
-            targetGroupId = group.id;
-            break;
+          for (const group of Object.values(store.groups)) {
+            const inBoundsX = nodeCenterX >= group.position.x && nodeCenterX <= group.position.x + group.size.width;
+            const inBoundsY = nodeCenterY >= group.position.y && nodeCenterY <= group.position.y + group.size.height;
+
+            if (inBoundsX && inBoundsY) {
+              targetGroupId = group.id;
+              break;
+            }
           }
-        }
 
-        // Get the node's current groupId
-        const currentNode = store.nodes.find((n) => n.id === id);
-        const currentGroupId = currentNode?.groupId;
-
-        // Update groupId if it changed
-        if (targetGroupId !== currentGroupId) {
-          store.setNodeGroupId(id, targetGroupId);
+          // Update groupId if it changed
+          const currentGroupId = storeNode.groupId;
+          if (targetGroupId !== currentGroupId) {
+            store.setNodeGroupId(nodeId, targetGroupId);
+          }
         }
       }
     };
