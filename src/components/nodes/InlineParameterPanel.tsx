@@ -54,7 +54,7 @@ export function InlineParameterPanel({
         }}
       >
         <div className="nodrag nopan nowheel bg-neutral-900 px-3 pb-3">
-          <div className="space-y-2">{children}</div>
+          <div className="space-y-2 max-w-[280px]">{children}</div>
         </div>
       </div>
     </div>
