@@ -251,7 +251,7 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
               onChange(val);
             }
           }}
-          className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 border border-neutral-700 rounded-md bg-neutral-800 focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
+          className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
         >
           <option value="">Default</option>
           {param.enum.map((opt) => (
@@ -278,7 +278,7 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
           type="checkbox"
           checked={effectiveValue}
           onChange={(e) => onChange(e.target.checked)}
-          className="nodrag nopan w-3 h-3 rounded border-neutral-700 bg-neutral-800 text-neutral-600 focus:ring-1 focus:ring-neutral-600 focus:ring-offset-0"
+          className="nodrag nopan w-3 h-3 rounded bg-[#1a1a1a] text-neutral-600 focus:ring-1 focus:ring-neutral-600 focus:ring-offset-0"
         />
         <span>{displayName}</span>
       </label>
@@ -336,10 +336,10 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
               }
             }}
             placeholder={param.default !== undefined ? `${param.default}` : undefined}
-            className={`nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 border rounded-md bg-neutral-800 focus:outline-none focus:ring-1 text-white placeholder:text-neutral-500 ${
+            className={`nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] focus:outline-none focus:ring-1 text-white placeholder:text-neutral-500 ${
               validationError
-                ? "border-red-500 focus:ring-red-500"
-                : "border-neutral-700 focus:ring-neutral-600"
+                ? "ring-1 ring-red-500"
+                : "focus:ring-neutral-600"
             }`}
           />
         </div>
@@ -376,7 +376,7 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
           onChange(localValue || undefined);
         }}
         placeholder={param.default !== undefined ? `${param.default}` : undefined}
-        className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 border border-neutral-700 rounded-md bg-neutral-800 focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white placeholder:text-neutral-500"
+        className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white placeholder:text-neutral-500"
       />
     </div>
   );

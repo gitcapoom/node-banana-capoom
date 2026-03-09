@@ -767,7 +767,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                 <select
                   value={currentModelId}
                   onChange={handleModelChange}
-                  className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-neutral-800 border border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
+                  className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
                 >
                   {GEMINI_IMAGE_MODELS.map((m) => (
                     <option key={m.value} value={m.value}>
@@ -783,7 +783,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                 <select
                   value={nodeData.aspectRatio || "1:1"}
                   onChange={handleAspectRatioChange}
-                  className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-neutral-800 border border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
+                  className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
                 >
                   {aspectRatios.map((ratio) => (
                     <option key={ratio} value={ratio}>
@@ -800,7 +800,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                   <select
                     value={nodeData.resolution || "2K"}
                     onChange={handleResolutionChange}
-                    className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-neutral-800 border border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
+                    className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
                   >
                     {resolutions.map((res) => (
                       <option key={res} value={res}>
@@ -818,7 +818,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                     type="checkbox"
                     checked={nodeData.useGoogleSearch || false}
                     onChange={handleGoogleSearchToggle}
-                    className="nodrag nopan w-3 h-3 rounded border-neutral-700 bg-neutral-800 text-neutral-600 focus:ring-1 focus:ring-neutral-600 focus:ring-offset-0"
+                    className="nodrag nopan w-3 h-3 rounded bg-[#1a1a1a] text-neutral-600 focus:ring-1 focus:ring-neutral-600 focus:ring-offset-0"
                   />
                   Google Search
                 </label>
@@ -831,7 +831,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                     type="checkbox"
                     checked={nodeData.useImageSearch || false}
                     onChange={handleImageSearchToggle}
-                    className="nodrag nopan w-3 h-3 rounded border-neutral-700 bg-neutral-800 text-neutral-600 focus:ring-1 focus:ring-neutral-600 focus:ring-offset-0"
+                    className="nodrag nopan w-3 h-3 rounded bg-[#1a1a1a] text-neutral-600 focus:ring-1 focus:ring-neutral-600 focus:ring-offset-0"
                   />
                   Image Search
                 </label>

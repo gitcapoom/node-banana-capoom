@@ -252,7 +252,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
               <select
                 value={provider}
                 onChange={handleProviderChange}
-                className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-neutral-800 border border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
+                className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
               >
                 {LLM_PROVIDERS.map(p => (
                   <option key={p.value} value={p.value}>{p.label}</option>
@@ -266,7 +266,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
               <select
                 value={nodeData.model || availableModels[0].value}
                 onChange={handleModelChange}
-                className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-neutral-800 border border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
+                className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
               >
                 {availableModels.map(m => (
                   <option key={m.value} value={m.value}>{m.label}</option>
