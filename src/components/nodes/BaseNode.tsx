@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useCallback, useRef, useLayoutEffect, useState } from "react";
+import { ReactNode, useCallback, useRef, useLayoutEffect } from "react";
 import { Node, NodeResizer, OnResize, useReactFlow } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getMediaDimensions, calculateAspectFitSize } from "@/utils/nodeDimensions";
@@ -75,35 +75,13 @@ export function BaseNode({
   const { getNodes, setNodes } = useReactFlow();
 
   const settingsPanelRef = useRef<HTMLDivElement>(null);
-  const [trackedSettingsHeight, setTrackedSettingsHeight] = useState(0);
+  const trackedSettingsHeightRef = useRef(0);
 
-  // Adjust node height when settings expand/collapse
+  // Adjust node height when settings collapse
   useLayoutEffect(() => {
-    if (settingsExpanded && settingsPanel) {
-      // Expanding: measure settings panel and increase node height
-      const measure = () => {
-        const panelEl = settingsPanelRef.current;
-        if (!panelEl) return;
-        const panelHeight = panelEl.scrollHeight;
-        if (panelHeight === 0) return;
-
-        setTrackedSettingsHeight(panelHeight);
-        setNodes((nodes) =>
-          nodes.map((node) => {
-            if (node.id !== id) return node;
-            const currentHeight = getNodeDimension(node, "height");
-            const newHeight = currentHeight + panelHeight;
-            return applyNodeDimensions(node, getNodeDimension(node, "width"), newHeight);
-          })
-        );
-      };
-
-      // Use rAF to ensure DOM has rendered the panel content
-      requestAnimationFrame(measure);
-    } else if (!settingsExpanded && trackedSettingsHeight > 0) {
-      // Collapsing: decrease node height by the tracked amount
-      const heightToRemove = trackedSettingsHeight;
-      setTrackedSettingsHeight(0);
+    if (!settingsExpanded && trackedSettingsHeightRef.current > 0) {
+      const heightToRemove = trackedSettingsHeightRef.current;
+      trackedSettingsHeightRef.current = 0;
       setNodes((nodes) =>
         nodes.map((node) => {
           if (node.id !== id) return node;
@@ -126,10 +104,10 @@ export function BaseNode({
       for (const entry of entries) {
         const newPanelHeight = entry.contentRect.height;
         if (newPanelHeight === 0) continue;
-        const delta = newPanelHeight - trackedSettingsHeight;
+        const delta = newPanelHeight - trackedSettingsHeightRef.current;
         if (Math.abs(delta) < 2) continue; // Ignore sub-pixel changes
 
-        setTrackedSettingsHeight(newPanelHeight);
+        trackedSettingsHeightRef.current = newPanelHeight;
         setNodes((nodes) =>
           nodes.map((node) => {
             if (node.id !== id) return node;
@@ -144,7 +122,7 @@ export function BaseNode({
     observer.observe(panelEl);
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsExpanded, settingsPanel, trackedSettingsHeight]);
+  }, [settingsExpanded, settingsPanel]);
 
   const handleResize: OnResize = useCallback(
     (_event, params) => {
@@ -174,7 +152,7 @@ export function BaseNode({
       if (!thisNode) return;
 
       const nodeHeight = getNodeDimension(thisNode, "height");
-      const contentHeight = nodeHeight - trackedSettingsHeight;
+      const contentHeight = nodeHeight - trackedSettingsHeightRef.current;
 
       const newSize = calculateAspectFitSize(
         dims.width / dims.height,
@@ -183,7 +161,7 @@ export function BaseNode({
         fullBleed
       );
 
-      const finalHeight = newSize.height + trackedSettingsHeight;
+      const finalHeight = newSize.height + trackedSettingsHeightRef.current;
 
       setNodes((nds) =>
         nds.map((n) => {
@@ -194,7 +172,7 @@ export function BaseNode({
         })
       );
     },
-    [aspectFitMedia, id, fullBleed, getNodes, setNodes, trackedSettingsHeight]
+    [aspectFitMedia, id, fullBleed, getNodes, setNodes]
   );
 
   const hasExpandedSettings = settingsExpanded && settingsPanel;
