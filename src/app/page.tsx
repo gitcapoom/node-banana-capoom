@@ -19,6 +19,16 @@ export default function Home() {
     return () => cleanupAutoSave();
   }, [initializeAutoSave, cleanupAutoSave]);
 
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (useWorkflowStore.getState().hasUnsavedChanges) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
   return (
     <ReactFlowProvider>
       <div className="h-screen flex flex-col">

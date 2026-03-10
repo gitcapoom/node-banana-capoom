@@ -3,7 +3,6 @@
 import { useCallback, useState, useEffect } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { SplitGridNodeData } from "@/types";
 import { SplitGridSettingsModal } from "../SplitGridSettingsModal";
@@ -12,7 +11,6 @@ type SplitGridNodeType = Node<SplitGridNodeData, "splitGrid">;
 
 export function SplitGridNode({ id, data, selected }: NodeProps<SplitGridNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
@@ -38,42 +36,39 @@ export function SplitGridNode({ id, data, selected }: NodeProps<SplitGridNodeTyp
   }, [id, regenerateNode]);
 
   return (
-    <BaseNode
-      id={id}
-      title="Split Grid"
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-      onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
-      selected={selected}
-      hasError={nodeData.status === "error"}
-      commentNavigation={commentNavigation ?? undefined}
-    >
-      {/* Image input handle */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="image"
-        data-handletype="image"
-      />
+    <>
+      <BaseNode
+        id={id}
+        selected={selected}
+        hasError={nodeData.status === "error"}
+        fullBleed
+      >
+        {/* Image input handle */}
+        <Handle
+          type="target"
+          position={Position.Left}
+          id="image"
+          data-handletype="image"
+          style={{ zIndex: 10 }}
+        />
 
-      {/* Reference output handle for visual links to child nodes */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="reference"
-        data-handletype="reference"
-        className="!bg-gray-500"
-      />
+        {/* Reference output handle for visual links to child nodes */}
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="reference"
+          data-handletype="reference"
+          className="!bg-gray-500"
+          style={{ zIndex: 10 }}
+        />
 
-      <div className="flex-1 flex flex-col min-h-0 gap-2">
-        {/* Preview/Status area */}
+        {/* Full-bleed preview area */}
         {nodeData.sourceImage ? (
-          <div className="relative w-full flex-1 min-h-0">
+          <div className="relative w-full h-full">
             <img
               src={nodeData.sourceImage}
               alt="Source grid"
-              className="w-full h-full object-contain rounded"
+              className="w-full h-full object-cover rounded-lg"
             />
             {/* Grid overlay visualization */}
             <div
@@ -93,7 +88,7 @@ export function SplitGridNode({ id, data, selected }: NodeProps<SplitGridNodeTyp
             </div>
             {/* Loading overlay */}
             {nodeData.status === "loading" && (
-              <div className="absolute inset-0 bg-neutral-900/70 rounded flex items-center justify-center">
+              <div className="absolute inset-0 bg-neutral-900/70 rounded-lg flex items-center justify-center">
                 <svg className="w-6 h-6 animate-spin text-white" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
@@ -102,7 +97,7 @@ export function SplitGridNode({ id, data, selected }: NodeProps<SplitGridNodeTyp
             )}
           </div>
         ) : (
-          <div className="w-full flex-1 min-h-[112px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center">
+          <div className="w-full h-full min-h-[112px] bg-neutral-900/40 flex flex-col items-center justify-center rounded-lg">
             {nodeData.status === "error" ? (
               <span className="text-[10px] text-red-400 text-center px-2">
                 {nodeData.error || "Error"}
@@ -125,40 +120,43 @@ export function SplitGridNode({ id, data, selected }: NodeProps<SplitGridNodeTyp
           </div>
         )}
 
-        {/* Config summary */}
-        <div className="flex items-center justify-between text-[10px] text-neutral-400 shrink-0">
-          <span>{nodeData.gridRows}x{nodeData.gridCols} grid ({nodeData.targetCount} images)</span>
-          <button
-            onClick={handleOpenSettings}
-            className="text-blue-400 hover:text-blue-300 transition-colors"
-          >
-            Settings
-          </button>
-        </div>
+        {/* Controls overlay pinned at bottom */}
+        <div className="absolute bottom-0 left-0 right-0 z-10 px-3 py-2 bg-neutral-900/80 backdrop-blur-sm rounded-b-lg space-y-1">
+          {/* Config summary */}
+          <div className="flex items-center justify-between text-[10px] text-neutral-400">
+            <span>{nodeData.gridRows}x{nodeData.gridCols} grid ({nodeData.targetCount} images)</span>
+            <button
+              onClick={handleOpenSettings}
+              className="nodrag nopan text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Settings
+            </button>
+          </div>
 
-        {/* Child node count / status */}
-        <div className="flex items-center justify-between shrink-0">
-          {nodeData.isConfigured ? (
-            <div className="text-[10px] text-neutral-500">
-              {nodeData.childNodeIds.length} generate sets created
-            </div>
-          ) : (
-            <div className="text-[10px] text-amber-400">
-              Not configured - click Settings
-            </div>
-          )}
+          {/* Child node count / status */}
+          <div className="flex items-center justify-between">
+            {nodeData.isConfigured ? (
+              <div className="text-[10px] text-neutral-500">
+                {nodeData.childNodeIds?.length ?? 0} generate sets created
+              </div>
+            ) : (
+              <div className="text-[10px] text-amber-400">
+                Not configured - click Settings
+              </div>
+            )}
 
-          {/* Split button */}
-          <button
-            onClick={handleSplit}
-            disabled={isRunning || !nodeData.isConfigured}
-            className="px-2 py-0.5 text-[10px] border border-white hover:bg-white hover:text-neutral-900 disabled:border-neutral-600 disabled:text-neutral-600 disabled:cursor-not-allowed text-white rounded transition-colors"
-            title={!nodeData.isConfigured ? "Configure node first" : "Split grid"}
-          >
-            Split
-          </button>
+            {/* Split button */}
+            <button
+              onClick={handleSplit}
+              disabled={isRunning || !nodeData.isConfigured}
+              className="nodrag nopan px-2 py-0.5 text-[10px] border border-white hover:bg-white hover:text-neutral-900 disabled:border-neutral-600 disabled:text-neutral-600 disabled:cursor-not-allowed text-white rounded transition-colors"
+              title={!nodeData.isConfigured ? "Configure node first" : "Split grid"}
+            >
+              Split
+            </button>
+          </div>
         </div>
-      </div>
+      </BaseNode>
 
       {/* Settings Modal */}
       {showSettings && (
@@ -168,6 +166,6 @@ export function SplitGridNode({ id, data, selected }: NodeProps<SplitGridNodeTyp
           onClose={handleCloseSettings}
         />
       )}
-    </BaseNode>
+    </>
   );
 }

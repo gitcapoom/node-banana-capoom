@@ -177,6 +177,7 @@ export interface NanoBananaNodeData extends BaseNodeData {
   useImageSearch: boolean; // Only available for Nano Banana 2
   parameters?: Record<string, unknown>; // Model-specific parameters for external providers
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
   imageHistory: CarouselImageItem[]; // Carousel history (IDs only)
@@ -195,6 +196,7 @@ export interface GenerateVideoNodeData extends BaseNodeData {
   selectedModel?: SelectedModel; // Required for video generation (no legacy fallback)
   parameters?: Record<string, unknown>; // Model-specific parameters
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
   videoHistory: CarouselVideoItem[]; // Carousel history (IDs only)
@@ -214,6 +216,7 @@ export interface Generate3DNodeData extends BaseNodeData {
   selectedModel?: SelectedModel;
   parameters?: Record<string, unknown>;
   inputSchema?: ModelInputDef[];
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
 }
@@ -238,6 +241,7 @@ export interface GenerateAudioNodeData extends BaseNodeData {
   selectedModel?: SelectedModel; // Required for audio generation
   parameters?: Record<string, unknown>; // Model-specific parameters (voice, speed, etc.)
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
   audioHistory: CarouselAudioItem[]; // Carousel history (IDs only)
@@ -258,6 +262,7 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   model: LLMModelType;
   temperature: number;
   maxTokens: number;
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
 }

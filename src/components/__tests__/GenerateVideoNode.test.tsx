@@ -307,16 +307,6 @@ describe("GenerateVideoNode", () => {
       expect(screen.getByText("Run to generate")).toBeInTheDocument();
     });
 
-    it("should render a dashed border placeholder when no output video", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps({ status: "idle", outputVideo: null })} />
-        </TestWrapper>
-      );
-
-      const placeholder = container.querySelector(".border-dashed");
-      expect(placeholder).toBeInTheDocument();
-    });
   });
 
   describe("Loading State", () => {

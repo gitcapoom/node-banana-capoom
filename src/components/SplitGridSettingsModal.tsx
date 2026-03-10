@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { SplitGridNodeData, AspectRatio, Resolution, ModelType } from "@/types";
 
@@ -183,7 +184,7 @@ export function SplitGridSettingsModal({
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
       <div
         className="bg-neutral-800 rounded-lg p-6 w-[600px] border border-neutral-700 shadow-xl"
@@ -368,6 +369,7 @@ export function SplitGridSettingsModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
