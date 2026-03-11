@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, useEffect, useMemo, useRef } from "react";
+import { useCallback, useState, useEffect, useMemo, useRef, ReactNode } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { usePromptAutocomplete } from "@/hooks/usePromptAutocomplete";
@@ -140,6 +140,40 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
     }
   }, [nodeData.template, availableVariables, id, updateNodeData, nodeData.outputText]);
 
+  const highlightRef = useRef<HTMLDivElement>(null);
+
+  // Sync highlight overlay scroll with textarea
+  const handleScroll = useCallback(() => {
+    if (textareaRef.current && highlightRef.current) {
+      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
+      highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    }
+  }, []);
+
+  // Build highlighted text with blue for resolved, red for unresolved variables
+  const highlightedContent = useMemo((): ReactNode[] => {
+    const availableNames = new Set(availableVariables.map(v => v.name));
+    const pattern = /@(\w+)/g;
+    const parts: ReactNode[] = [];
+    let lastIndex = 0;
+    const matches = localTemplate.matchAll(pattern);
+    for (const match of matches) {
+      const idx = match.index!;
+      if (idx > lastIndex) {
+        parts.push(localTemplate.slice(lastIndex, idx));
+      }
+      const isResolved = availableNames.has(match[1]);
+      parts.push(
+        <mark key={idx} className={`${isResolved ? "bg-blue-400/30" : "bg-red-400/50"} text-transparent rounded-sm px-0.5 -mx-0.5 py-0.5`}>{match[0]}</mark>
+      );
+      lastIndex = idx + match[0].length;
+    }
+    if (lastIndex < localTemplate.length) {
+      parts.push(localTemplate.slice(lastIndex));
+    }
+    return parts;
+  }, [localTemplate, availableVariables]);
+
   const handleFocus = useCallback(() => {
     setIsEditing(true);
   }, []);
@@ -169,15 +203,18 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
           style={{ zIndex: 10 }}
         />
 
-        {/* Warning badge for unresolved variables - overlay at top */}
-        {unresolvedVars.length > 0 && (
-          <div className="absolute top-2 left-2 right-2 z-20 px-2 py-1 bg-amber-900/80 backdrop-blur-sm border border-amber-700/50 rounded text-[10px] text-amber-400 pointer-events-none">
-            <span className="font-semibold">Unresolved:</span> {unresolvedVars.map(v => `@${v}`).join(', ')}
-          </div>
-        )}
-
-        {/* Template textarea with autocomplete */}
+        {/* Template textarea with highlight overlay for @variables */}
         <div className="relative w-full h-full">
+          {/* Highlight overlay - blue for resolved, red for unresolved @vars */}
+          {highlightedContent.length > 0 && (
+            <div
+              ref={highlightRef}
+              className={`absolute inset-0 p-3 text-xs leading-relaxed text-transparent bg-neutral-800 rounded-lg overflow-hidden whitespace-pre-wrap break-words pointer-events-none ${availableVariables.length > 0 || unresolvedVars.length > 0 ? "pb-7" : ""}`}
+              aria-hidden="true"
+            >
+              {highlightedContent}
+            </div>
+          )}
           <textarea
             ref={textareaRef}
             value={localTemplate}
@@ -185,8 +222,9 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
             onFocus={handleFocus}
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
+            onScroll={handleScroll}
             placeholder="Type @ to insert variables..."
-            className={`nodrag nopan nowheel w-full h-full p-3 text-xs leading-relaxed text-neutral-100 bg-neutral-800 rounded-lg resize-none focus:outline-none placeholder:text-neutral-500 ${availableVariables.length > 0 ? "pb-7" : ""}`}
+            className={`nodrag nopan nowheel relative w-full h-full p-3 text-xs leading-relaxed text-neutral-100 rounded-lg resize-none focus:outline-none placeholder:text-neutral-500 ${highlightedContent.length > 0 ? "bg-transparent" : "bg-neutral-800"} ${availableVariables.length > 0 || unresolvedVars.length > 0 ? "pb-7" : ""}`}
             title={resolvedPreview ? `Preview: ${resolvedPreview}` : undefined}
           />
 
@@ -222,10 +260,17 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
           )}
         </div>
 
-        {/* Available variables - fixed footer pinned at bottom */}
-        {availableVariables.length > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 z-10 px-3 py-1.5 bg-neutral-900/80 backdrop-blur-sm rounded-b-lg text-[10px] text-neutral-500 pointer-events-none">
-            Available: {availableVariables.map(v => `@${v.name}`).join(', ')}
+        {/* Footer - available vars + unresolved warning */}
+        {(availableVariables.length > 0 || unresolvedVars.length > 0) && (
+          <div className="absolute bottom-0 left-0 right-0 z-10 px-3 py-1.5 bg-neutral-900/80 backdrop-blur-sm rounded-b-lg text-[10px] pointer-events-none flex items-center justify-between gap-2">
+            <span className="text-neutral-500 truncate">
+              {availableVariables.length > 0 ? `Available: ${availableVariables.map(v => `@${v.name}`).join(', ')}` : ''}
+            </span>
+            {unresolvedVars.length > 0 && (
+              <span className="text-red-400 whitespace-nowrap">
+                {unresolvedVars.length} {unresolvedVars.length === 1 ? 'var' : 'vars'} missing
+              </span>
+            )}
           </div>
         )}
 

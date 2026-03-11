@@ -117,7 +117,7 @@ export function PromptNode({ id, data, selected }: NodeProps<PromptNodeType>) {
           className="nodrag nopan absolute bottom-2 left-3 z-10 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
           title="Set variable name"
         >
-          @{nodeData.variableName || "var"}
+          {nodeData.variableName ? `@${nodeData.variableName}` : "Add variable"}
         </button>
 
         {/* Text output handle */}
