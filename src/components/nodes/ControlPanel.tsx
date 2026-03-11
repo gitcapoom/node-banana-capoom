@@ -884,6 +884,7 @@ function EaseCurveControls({ node }: { node: Node }) {
   const removeEdge = useWorkflowStore((state) => state.removeEdge);
   const [showPresets, setShowPresets] = useState(false);
   const presetsButtonRef = useRef<HTMLButtonElement>(null);
+  const presetsPopupRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!showPresets) return;
@@ -893,6 +894,7 @@ function EaseCurveControls({ node }: { node: Node }) {
     };
     const handleClickOutside = (e: MouseEvent) => {
       if (presetsButtonRef.current?.contains(e.target as HTMLElement)) return;
+      if (presetsPopupRef.current?.contains(e.target as HTMLElement)) return;
       setShowPresets(false);
     };
 
@@ -1022,6 +1024,7 @@ function EaseCurveControls({ node }: { node: Node }) {
 
       {showPresets && typeof document !== 'undefined' && createPortal(
         <div
+          ref={presetsPopupRef}
           className="fixed z-[100] bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl p-2 max-h-[60vh] overflow-y-auto nowheel"
           style={{
             top: presetsButtonRef.current?.getBoundingClientRect().bottom || 0,

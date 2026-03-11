@@ -383,12 +383,13 @@ export function ProjectSetupModal({
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       onWheelCapture={(e) => e.stopPropagation()}
     >
       <div
         className="bg-neutral-800 rounded-xl w-[520px] border border-neutral-700 shadow-2xl overflow-clip flex flex-col max-h-[80vh]"
-        onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         <div className="px-8 pt-8 pb-0 shrink-0">
