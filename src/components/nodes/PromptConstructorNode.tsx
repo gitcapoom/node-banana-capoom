@@ -119,21 +119,16 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
     return unresolved;
   }, [localTemplate, availableVariables]);
 
-  // Compute resolved text client-side for preview
+  // Compute resolved text client-side for preview (single-pass to avoid prefix collisions)
   const resolvedPreview = useMemo(() => {
-    let resolved = localTemplate;
-    availableVariables.forEach((v) => {
-      resolved = resolved.replace(new RegExp(`@${v.name}`, 'g'), v.value);
-    });
-    return resolved;
+    const valueMap = new Map(availableVariables.map(v => [v.name, v.value]));
+    return localTemplate.replace(/@(\w+)/g, (match, name) => valueMap.get(name) ?? match);
   }, [localTemplate, availableVariables]);
 
   // Sync resolved text to outputText so downstream nodes can read it before execution
   useEffect(() => {
-    let resolved = nodeData.template;
-    availableVariables.forEach((v) => {
-      resolved = resolved.replace(new RegExp(`@${v.name}`, 'g'), v.value);
-    });
+    const valueMap = new Map(availableVariables.map(v => [v.name, v.value]));
+    const resolved = nodeData.template.replace(/@(\w+)/g, (match, name) => valueMap.get(name) ?? match);
     const outputValue = resolved || null;
     if (outputValue !== nodeData.outputText) {
       updateNodeData(id, { outputText: outputValue });

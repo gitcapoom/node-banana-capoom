@@ -236,9 +236,17 @@ function GenerateImageControls({ node }: { node: Node }) {
     try {
       const capabilities = IMAGE_CAPABILITIES.join(",");
       const headers: HeadersInit = {};
-      if (replicateApiKey) headers["X-Replicate-Key"] = replicateApiKey;
-      if (falApiKey) headers["X-Fal-Key"] = falApiKey;
-      if (kieApiKey) headers["X-Kie-Key"] = kieApiKey;
+      switch (currentProvider) {
+        case "replicate":
+          if (replicateApiKey) headers["X-Replicate-Key"] = replicateApiKey;
+          break;
+        case "fal":
+          if (falApiKey) headers["X-Fal-Key"] = falApiKey;
+          break;
+        case "kie":
+          if (kieApiKey) headers["X-Kie-Key"] = kieApiKey;
+          break;
+      }
 
       const response = await deduplicatedFetch(`/api/models?provider=${currentProvider}&capabilities=${capabilities}`, { headers });
       if (response.ok) {
@@ -832,14 +840,14 @@ function LLMControls({ node }: { node: Node }) {
 
       <div>
         <label className="block text-xs font-medium text-neutral-300 mb-1">
-          Temperature: {nodeData.temperature?.toFixed(2) || "0.70"}
+          Temperature: {(nodeData.temperature ?? 0.7).toFixed(2)}
         </label>
         <input
           type="range"
           min="0"
           max={provider === "anthropic" ? "1" : "2"}
           step="0.01"
-          value={nodeData.temperature || 0.7}
+          value={nodeData.temperature ?? 0.7}
           onChange={handleTemperatureChange}
           className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
         />
