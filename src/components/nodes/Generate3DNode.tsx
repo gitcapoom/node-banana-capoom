@@ -13,6 +13,7 @@ import { ProviderBadge } from "./ProviderBadge";
 import { getModelPageUrl, getProviderDisplayName } from "@/utils/providerUrls";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
+import { browseRegistry } from "@/utils/browseRegistry";
 
 // 3D generation capabilities
 const THREE_D_CAPABILITIES: ModelCapability[] = ["text-to-3d", "image-to-3d"];
@@ -27,6 +28,12 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+
+  // Register browse callback for floating header button
+  useEffect(() => {
+    browseRegistry.register(id, () => setIsBrowseDialogOpen(true));
+    return () => { browseRegistry.unregister(id); };
+  }, [id]);
 
   // Get the current selected provider (default to fal since most 3D models are there)
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "fal";

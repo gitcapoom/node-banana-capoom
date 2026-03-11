@@ -14,9 +14,9 @@ import { getVideoDimensions, calculateNodeSizePreservingHeight } from "@/utils/n
 import { ProviderBadge } from "./ProviderBadge";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
 import { useVideoAutoplay } from "@/hooks/useVideoAutoplay";
-import { getModelPageUrl, getProviderDisplayName } from "@/utils/providerUrls";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
+import { browseRegistry } from "@/utils/browseRegistry";
 
 // Video generation capabilities
 const VIDEO_CAPABILITIES: ModelCapability[] = ["text-to-video", "image-to-video"];
@@ -59,6 +59,12 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+
+  // Register browse callback for floating header button
+  useEffect(() => {
+    browseRegistry.register(id, () => setIsBrowseDialogOpen(true));
+    return () => { browseRegistry.unregister(id); };
+  }, [id]);
 
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "fal";
 
@@ -320,38 +326,6 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   const titlePrefix = useMemo(() => (
     <ProviderBadge provider={currentProvider} />
   ), [currentProvider]);
-
-  // Compute model page URL for external link
-  const modelPageUrl = useMemo(() => {
-    if (!nodeData.selectedModel?.modelId) return null;
-    return getModelPageUrl(currentProvider, nodeData.selectedModel.modelId);
-  }, [currentProvider, nodeData.selectedModel?.modelId]);
-
-  // Header action element - external link + browse button
-  const headerAction = useMemo(() => (
-    <>
-      {modelPageUrl && nodeData.selectedModel?.modelId && (
-        <a
-          href={modelPageUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="nodrag nopan text-neutral-500 hover:text-neutral-300 transition-colors"
-          title={`View on ${getProviderDisplayName(currentProvider)}`}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-          </svg>
-        </a>
-      )}
-      <button
-        onClick={() => setIsBrowseDialogOpen(true)}
-        className="nodrag nopan text-[10px] py-0.5 px-1.5 bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
-      >
-        Browse
-      </button>
-    </>
-  ), [modelPageUrl, nodeData.selectedModel?.modelId, currentProvider]);
 
   const hasCarouselVideos = (nodeData.videoHistory || []).length > 1;
 

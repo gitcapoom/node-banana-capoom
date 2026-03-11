@@ -13,6 +13,7 @@ import { useAudioVisualization } from "@/hooks/useAudioVisualization";
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
+import { browseRegistry } from "@/utils/browseRegistry";
 
 type GenerateAudioNodeType = Node<GenerateAudioNodeData, "generateAudio">;
 
@@ -25,6 +26,12 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+
+  // Register browse callback for floating header button
+  useEffect(() => {
+    browseRegistry.register(id, () => setIsBrowseDialogOpen(true));
+    return () => { browseRegistry.unregister(id); };
+  }, [id]);
 
   // Get the current selected provider (default to fal)
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "fal";

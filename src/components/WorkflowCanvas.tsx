@@ -68,6 +68,8 @@ import { EditOperation } from "@/lib/chat/editOperations";
 import { stripBinaryData } from "@/lib/chat/contextBuilder";
 import { PromptEditorModal } from "./modals/PromptEditorModal";
 import { AnnotationModal } from "./AnnotationModal";
+import { browseRegistry } from "@/utils/browseRegistry";
+import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { SplitGridSettingsModal } from "./SplitGridSettingsModal";
 import { createPortal } from "react-dom";
 import { useAnnotationStore } from "@/store/annotationStore";
@@ -411,6 +413,9 @@ export function WorkflowCanvas() {
   const handleRunNode = useCallback((nodeId: string) => {
     regenerateNode(nodeId);
   }, [regenerateNode]);
+
+  // Inline parameters mode (for showing Browse in header)
+  const { inlineParametersEnabled } = useInlineParameters();
 
   // Stable callback for expanding a node from its header
   const handleExpandNode = useCallback((nodeId: string, nodeType: string) => {
@@ -2085,6 +2090,20 @@ export function WorkflowCanvas() {
             const defaultWidth = defaultNodeDimensions[node.type as NodeType]?.width ?? 250;
             const headerWidth = node.measured?.width || (node.style?.width as number) || defaultWidth;
 
+            // Browse button for generate nodes in inline-parameters mode
+            const showBrowse = inlineParametersEnabled && (
+              node.type === "nanoBanana" || node.type === "generateVideo" ||
+              node.type === "generate3d" || node.type === "generateAudio"
+            );
+            const browseAction = showBrowse ? (
+              <button
+                onClick={() => browseRegistry.open(node.id)}
+                className="nodrag nopan text-[10px] py-0.5 px-1.5 bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
+              >
+                Browse
+              </button>
+            ) : undefined;
+
             return (
               <FloatingNodeHeader
                 key={`header-${node.id}`}
@@ -2100,6 +2119,7 @@ export function WorkflowCanvas() {
                 customTitle={node.data?.customTitle}
                 comment={node.data?.comment}
                 provider={(node.data as any)?.selectedModel?.provider}
+                headerAction={browseAction}
                 onCustomTitleChange={handleCustomTitleChange}
                 onCommentChange={handleCommentChange}
                 onRunNode={handleRunNode}

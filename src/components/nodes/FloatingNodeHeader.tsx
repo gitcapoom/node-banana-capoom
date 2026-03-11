@@ -325,7 +325,7 @@ export const FloatingNodeHeader = memo(function FloatingNodeHeader({
         onPointerDown={handleHeaderPointerDown}
       >
         {/* Title Section */}
-        <div className="flex-1 min-w-0 flex items-center gap-1.5 pl-2">
+        <div className="flex-1 min-w-0 max-w-[60%] flex items-center gap-1.5 pl-2">
           {provider && <ProviderBadge provider={provider} />}
           {isEditingTitle ? (
             <input
@@ -347,11 +347,13 @@ export const FloatingNodeHeader = memo(function FloatingNodeHeader({
               {customTitle ? `${customTitle} - ${title}` : title}
             </span>
           )}
-          {headerAction}
         </div>
 
         {/* Controls - right-aligned, fade in on hover/selected */}
         <div className={`shrink-0 flex items-center gap-1 pr-1 transition-opacity duration-200 -translate-y-1 ${showControls ? 'opacity-100' : 'opacity-0'}`}>
+          {/* Header Action (e.g. Browse button) */}
+          {headerAction}
+
           {/* Lock Badge for nodes in locked groups */}
           {isInLockedGroup && (
             <div className="shrink-0 flex items-center" title="This node is in a locked group and will be skipped during execution">

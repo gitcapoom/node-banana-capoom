@@ -12,9 +12,9 @@ import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
 import { getImageDimensions, calculateNodeSizePreservingHeight } from "@/utils/nodeDimensions";
 import { ProviderBadge } from "./ProviderBadge";
-import { getModelPageUrl, getProviderDisplayName } from "@/utils/providerUrls";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
+import { browseRegistry } from "@/utils/browseRegistry";
 
 /** Reorder items so they read column-first in a row-based CSS grid.
  *  e.g. [1,2,3,4,5,6,7,8] with 2 cols → [1,5,2,6,3,7,4,8] */
@@ -67,6 +67,12 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
 
+  // Register browse callback for floating header button
+  useEffect(() => {
+    browseRegistry.register(id, () => setIsBrowseDialogOpen(true));
+    return () => { browseRegistry.unregister(id); };
+  }, [id]);
+
   // Get the current selected provider (default to gemini)
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "gemini";
 
@@ -87,16 +93,6 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     }
     return providers;
   }, [replicateEnabled, replicateApiKey, kieEnabled, kieApiKey]);
-
-  // Check if external providers (Replicate/Fal) are enabled
-  // fal.ai is always available (works without key but rate limited)
-  const hasExternalProviders = useMemo(() => {
-    const hasReplicate = replicateEnabled && replicateApiKey;
-    // fal.ai is always available
-    return !!(hasReplicate || true);
-  }, [replicateEnabled, replicateApiKey]);
-
-  const isGeminiOnly = !hasExternalProviders;
 
   // Migrate legacy data: derive selectedModel from model field if missing
   useEffect(() => {
@@ -414,44 +410,6 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     <ProviderBadge provider={currentProvider} />
   ), [currentProvider]);
 
-  // Compute model page URL for external link
-  const modelPageUrl = useMemo(() => {
-    if (!nodeData.selectedModel?.modelId) return null;
-    return getModelPageUrl(currentProvider, nodeData.selectedModel.modelId);
-  }, [currentProvider, nodeData.selectedModel?.modelId]);
-
-  // Header action element based on provider mode
-  const headerAction = useMemo(() => {
-    const linkIcon = modelPageUrl && nodeData.selectedModel?.modelId ? (
-      <a
-        href={modelPageUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        className="nodrag nopan text-neutral-500 hover:text-neutral-300 transition-colors"
-        title={`View on ${getProviderDisplayName(currentProvider)}`}
-      >
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-        </svg>
-      </a>
-    ) : null;
-
-    if (!isGeminiOnly) {
-      return (
-        <>
-          {linkIcon}
-          <button
-            onClick={() => setIsBrowseDialogOpen(true)}
-            className="nodrag nopan text-[10px] py-0.5 px-1.5 bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
-          >
-            Browse
-          </button>
-        </>
-      );
-    }
-    return linkIcon;
-  }, [isGeminiOnly, modelPageUrl, nodeData.selectedModel?.modelId, currentProvider]);
   // Use selectedModel.modelId for Gemini models, fallback to legacy model field
   const currentModelId = isGeminiProvider ? (nodeData.selectedModel?.modelId || nodeData.model) : null;
   const supportsResolution = currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2";
