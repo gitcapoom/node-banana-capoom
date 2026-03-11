@@ -39,7 +39,7 @@ export interface ConnectedInputs {
   model3d: string | null;
   text: string | null;
   dynamicInputs: Record<string, string | string[]>;
-  easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null } | null;
+  easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null; outputDuration: number } | null;
 }
 
 /**
@@ -308,6 +308,7 @@ export function getConnectedInputsPure(
         easeCurve = {
           bezierHandles: sourceData.bezierHandles,
           easingPreset: sourceData.easingPreset,
+          outputDuration: sourceData.outputDuration,
         };
       }
     }

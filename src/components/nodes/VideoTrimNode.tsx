@@ -3,11 +3,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { VideoTrimNodeData } from "@/types";
 import { checkEncoderSupport } from "@/hooks/useStitchVideos";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
+import { useVideoAutoplay } from "@/hooks/useVideoAutoplay";
 
 type VideoTrimNodeType = Node<VideoTrimNodeData, "videoTrim">;
 
@@ -22,7 +22,6 @@ function formatTime(seconds: number): string {
 
 export function VideoTrimNode({ id, data, selected }: NodeProps<VideoTrimNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
@@ -31,6 +30,7 @@ export function VideoTrimNode({ id, data, selected }: NodeProps<VideoTrimNodeTyp
 
   // Track whether user wants to see source or output video
   const [showOutput, setShowOutput] = useState(false);
+  const videoAutoplayRef = useVideoAutoplay(id, selected);
 
   // Keep a ref to endTime so the metadata callback reads fresh state
   const endTimeRef = useRef(nodeData.endTime);
@@ -203,13 +203,8 @@ export function VideoTrimNode({ id, data, selected }: NodeProps<VideoTrimNodeTyp
     return (
       <BaseNode
         id={id}
-        title="Video Trim"
-        customTitle={nodeData.customTitle}
-        comment={nodeData.comment}
-        onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-        onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
         selected={selected}
-        commentNavigation={commentNavigation ?? undefined}
+        contentClassName="flex-1 min-h-0 overflow-clip"
         minWidth={360}
         minHeight={360}
       >
@@ -239,13 +234,7 @@ export function VideoTrimNode({ id, data, selected }: NodeProps<VideoTrimNodeTyp
     return (
       <BaseNode
         id={id}
-        title="Video Trim"
-        customTitle={nodeData.customTitle}
-        comment={nodeData.comment}
-        onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-        onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
         selected={selected}
-        commentNavigation={commentNavigation ?? undefined}
         minWidth={360}
         minHeight={360}
       >
@@ -266,18 +255,12 @@ export function VideoTrimNode({ id, data, selected }: NodeProps<VideoTrimNodeTyp
   return (
     <BaseNode
       id={id}
-      title="Video Trim"
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-      onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
-      onRun={canTrim ? handleTrim : undefined}
       selected={selected}
       isExecuting={isRunning}
       hasError={nodeData.status === "error"}
-      commentNavigation={commentNavigation ?? undefined}
       minWidth={360}
       minHeight={360}
+      aspectFitMedia={nodeData.outputVideo}
     >
       {renderHandles()}
 
@@ -286,6 +269,7 @@ export function VideoTrimNode({ id, data, selected }: NodeProps<VideoTrimNodeTyp
         <div className="flex-1 min-h-0 relative">
           {previewUrl ? (
             <video
+              ref={videoAutoplayRef}
               key={previewUrl}
               src={previewBlobUrl ?? undefined}
               controls

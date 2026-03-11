@@ -86,16 +86,6 @@ describe("SplitGridNode", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render the title 'Split Grid'", () => {
-      render(
-        <TestWrapper>
-          <SplitGridNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Split Grid")).toBeInTheDocument();
-    });
-
     it("should render input handle for image", () => {
       const { container } = render(
         <TestWrapper>
@@ -253,7 +243,7 @@ describe("SplitGridNode", () => {
     it("should call regenerateNode when Split button is clicked", () => {
       render(
         <TestWrapper>
-          <SplitGridNode {...createNodeProps({ isConfigured: true })} />
+          <SplitGridNode {...createNodeProps({ isConfigured: true, sourceImage: "data:image/png;base64,abc123" })} />
         </TestWrapper>
       );
 
@@ -370,34 +360,4 @@ describe("SplitGridNode", () => {
     });
   });
 
-  describe("Custom Title", () => {
-    it("should display custom title when provided", () => {
-      render(
-        <TestWrapper>
-          <SplitGridNode {...createNodeProps({ customTitle: "My Split" })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("My Split - Split Grid")).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData when custom title is changed", () => {
-      render(
-        <TestWrapper>
-          <SplitGridNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      // Click on title to edit
-      const title = screen.getByText("Split Grid");
-      fireEvent.click(title);
-
-      // Type new title
-      const input = screen.getByPlaceholderText("Custom title...");
-      fireEvent.change(input, { target: { value: "New Title" } });
-      fireEvent.keyDown(input, { key: "Enter" });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("split-grid-node-1", { customTitle: "New Title" });
-    });
-  });
 });

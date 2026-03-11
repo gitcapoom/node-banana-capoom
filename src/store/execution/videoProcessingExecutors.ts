@@ -235,9 +235,11 @@ export async function executeEaseCurve(ctx: NodeExecutionContext): Promise<void>
     // Propagate parent easeCurve settings if inherited
     let activeBezierHandles = nodeData.bezierHandles;
     let activeEasingPreset = nodeData.easingPreset;
+    let activeOutputDuration = nodeData.outputDuration;
     if (inputs.easeCurve) {
       activeBezierHandles = inputs.easeCurve.bezierHandles;
       activeEasingPreset = inputs.easeCurve.easingPreset;
+      activeOutputDuration = inputs.easeCurve.outputDuration;
       const edges = getEdges();
       const easeCurveSourceId =
         edges.filter(
@@ -246,6 +248,7 @@ export async function executeEaseCurve(ctx: NodeExecutionContext): Promise<void>
       updateNodeData(node.id, {
         bezierHandles: activeBezierHandles,
         easingPreset: activeEasingPreset,
+        outputDuration: activeOutputDuration,
         inheritedFrom: easeCurveSourceId,
       });
     }
@@ -295,7 +298,7 @@ export async function executeEaseCurve(ctx: NodeExecutionContext): Promise<void>
     const outputBlob = await applySpeedCurveAsync(
       videoBlob,
       videoDuration,
-      nodeData.outputDuration,
+      activeOutputDuration,
       (progress) => {
         updateNodeData(node.id, { progress: progress.progress });
       },

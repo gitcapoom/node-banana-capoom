@@ -14,10 +14,12 @@ import {
   OnConnectEnd,
   Node,
   OnSelectionChangeParams,
+  ViewportPortal,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import { useWorkflowStore, WorkflowFile } from "@/store/workflowStore";
+import { useShallow } from "zustand/shallow";
 import { useToast } from "@/components/Toast";
 import dynamic from "next/dynamic";
 import {
@@ -47,7 +49,7 @@ import {
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
 const GLBViewerNode = dynamic(() => import("./nodes/GLBViewerNode").then(mod => ({ default: mod.GLBViewerNode })), { ssr: false });
-import { EditableEdge, ReferenceEdge } from "./edges";
+import { EditableEdge, ReferenceEdge, SharedEdgeGradients } from "./edges";
 import { ConnectionDropMenu, MenuAction } from "./ConnectionDropMenu";
 import { MultiSelectToolbar } from "./MultiSelectToolbar";
 import { EdgeToolbar } from "./EdgeToolbar";
@@ -55,6 +57,8 @@ import { GlobalImageHistory } from "./GlobalImageHistory";
 import { GroupBackgroundsPortal, GroupControlsOverlay } from "./GroupsOverlay";
 import { NodeType, NanoBananaNodeData, HandleType } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
+import { FloatingNodeHeader } from "./nodes/FloatingNodeHeader";
+import { ControlPanel } from "./nodes/ControlPanel";
 import { detectAndSplitGrid } from "@/utils/gridSplitter";
 import { logger } from "@/utils/logger";
 import { WelcomeModal } from "./quickstart";
@@ -62,6 +66,13 @@ import { ProjectSetupModal } from "./ProjectSetupModal";
 import { ChatPanel } from "./ChatPanel";
 import { EditOperation } from "@/lib/chat/editOperations";
 import { stripBinaryData } from "@/lib/chat/contextBuilder";
+import { PromptEditorModal } from "./modals/PromptEditorModal";
+import { AnnotationModal } from "./AnnotationModal";
+import { browseRegistry } from "@/utils/browseRegistry";
+import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { SplitGridSettingsModal } from "./SplitGridSettingsModal";
+import { createPortal } from "react-dom";
+import { useAnnotationStore } from "@/store/annotationStore";
 
 const nodeTypes: NodeTypes = {
   imageInput: ImageInputNode,
@@ -255,9 +266,41 @@ const findScrollableAncestor = (target: HTMLElement, deltaX: number, deltaY: num
   return null;
 };
 
+/** Shared ref so child components (BaseNode) can check panning state without re-rendering */
+export const isPanningRef = { current: false };
+
 export function WorkflowCanvas() {
-  const { nodes, edges, groups, onNodesChange, onEdgesChange, onConnect, addNode, updateNodeData, loadWorkflow, getNodeById, addToGlobalHistory, setNodeGroupId, executeWorkflow, isModalOpen, showQuickstart, setShowQuickstart, navigationTarget, setNavigationTarget, captureSnapshot, applyEditOperations, setWorkflowMetadata, canvasNavigationSettings, setShortcutsDialogOpen, dimmedNodeIds } =
-    useWorkflowStore();
+  const { nodes, edges, groups, isModalOpen, showQuickstart, navigationTarget, canvasNavigationSettings, dimmedNodeIds } =
+    useWorkflowStore(useShallow((state) => ({
+      nodes: state.nodes,
+      edges: state.edges,
+      groups: state.groups,
+      isModalOpen: state.isModalOpen,
+      showQuickstart: state.showQuickstart,
+      navigationTarget: state.navigationTarget,
+      canvasNavigationSettings: state.canvasNavigationSettings,
+      dimmedNodeIds: state.dimmedNodeIds,
+    })));
+  const onNodesChange = useWorkflowStore((state) => state.onNodesChange);
+  const onEdgesChange = useWorkflowStore((state) => state.onEdgesChange);
+  const onConnect = useWorkflowStore((state) => state.onConnect);
+  const addNode = useWorkflowStore((state) => state.addNode);
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const loadWorkflow = useWorkflowStore((state) => state.loadWorkflow);
+  const getNodeById = useWorkflowStore((state) => state.getNodeById);
+  const addToGlobalHistory = useWorkflowStore((state) => state.addToGlobalHistory);
+  const setNodeGroupId = useWorkflowStore((state) => state.setNodeGroupId);
+  const executeWorkflow = useWorkflowStore((state) => state.executeWorkflow);
+  const setShowQuickstart = useWorkflowStore((state) => state.setShowQuickstart);
+  const setNavigationTarget = useWorkflowStore((state) => state.setNavigationTarget);
+  const captureSnapshot = useWorkflowStore((state) => state.captureSnapshot);
+  const applyEditOperations = useWorkflowStore((state) => state.applyEditOperations);
+  const setWorkflowMetadata = useWorkflowStore((state) => state.setWorkflowMetadata);
+  const setShortcutsDialogOpen = useWorkflowStore((state) => state.setShortcutsDialogOpen);
+  const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const clearWorkflow = useWorkflowStore((state) => state.clearWorkflow);
+  const setHoveredNodeId = useWorkflowStore((state) => state.setHoveredNodeId);
+  const openAnnotationModal = useAnnotationStore((state) => state.openModal);
   const { screenToFlowPosition, getViewport, zoomIn, zoomOut, setViewport, setCenter } = useReactFlow();
   const { show: showToast } = useToast();
   const [isDragOver, setIsDragOver] = useState(false);
@@ -267,6 +310,7 @@ export function WorkflowCanvas() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isBuildingWorkflow, setIsBuildingWorkflow] = useState(false);
   const [showNewProjectSetup, setShowNewProjectSetup] = useState(false);
+  const [expandingNode, setExpandingNode] = useState<{ id: string; type: string } | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   // Detect if canvas is empty for showing quickstart
@@ -309,6 +353,82 @@ export function WorkflowCanvas() {
       return { ...node, className: newClass };
     });
   }, [nodes, dimmedNodeIds]);
+
+  // Node title mapping for FloatingNodeHeaders
+  const NODE_TITLES: Record<string, string> = {
+    imageInput: 'Image Input',
+    audioInput: 'Audio Input',
+    annotation: 'Annotation',
+    prompt: 'Prompt',
+    array: 'Array',
+    promptConstructor: 'Prompt Constructor',
+    nanoBanana: 'Generate Image',
+    generateVideo: 'Generate Video',
+    generate3d: 'Generate 3D',
+    generateAudio: 'Generate Audio',
+    llmGenerate: 'LLM Generate',
+    splitGrid: 'Split Grid',
+    output: 'Output',
+    outputGallery: 'Output Gallery',
+    imageCompare: 'Image Compare',
+    videoStitch: 'Video Stitch',
+    easeCurve: 'Ease Curve',
+    videoTrim: 'Video Trim',
+    videoFrameGrab: 'Frame Grab',
+    router: 'Router',
+    switch: 'Switch',
+    conditionalSwitch: 'Conditional Switch',
+    glbViewer: '3D Viewer',
+  };
+
+  // Helper to get node title (used for FloatingNodeHeader)
+  const getNodeTitle = useCallback((node: Node) => {
+    // For generate nodes, check for selectedModel display name
+    if (node.type === "nanoBanana" || node.type === "generateVideo" || node.type === "generate3d" || node.type === "generateAudio") {
+      const model = (node.data as any)?.selectedModel;
+      if (model?.displayName) return model.displayName;
+    }
+
+    // For LLM nodes, check for selectedLLMModel or selectedModel
+    if (node.type === "llmGenerate") {
+      const model = (node.data as any)?.selectedLLMModel || (node.data as any)?.selectedModel;
+      if (model?.displayName) return model.displayName;
+      if (model?.name) return model.name;
+    }
+
+    return NODE_TITLES[node.type || ""] || "Node";
+  }, []);
+
+
+  // Wire comment/title change callbacks for FloatingNodeHeaders
+  const handleCustomTitleChange = useCallback((nodeId: string, title: string) => {
+    updateNodeData(nodeId, { customTitle: title || undefined });
+  }, [updateNodeData]);
+
+  const handleCommentChange = useCallback((nodeId: string, comment: string) => {
+    updateNodeData(nodeId, { comment: comment || undefined });
+  }, [updateNodeData]);
+
+  // Stable callback for running a node from its header
+  const handleRunNode = useCallback((nodeId: string) => {
+    regenerateNode(nodeId);
+  }, [regenerateNode]);
+
+  // Inline parameters mode (for showing Browse in header)
+  const { inlineParametersEnabled } = useInlineParameters();
+
+  // Stable callback for expanding a node from its header
+  const handleExpandNode = useCallback((nodeId: string, nodeType: string) => {
+    if (nodeType === 'annotation') {
+      const node = getNodeById(nodeId);
+      if (!node) return;
+      const imageToEdit = (node.data as any)?.outputImage || (node.data as any)?.image;
+      if (!imageToEdit) return;
+      openAnnotationModal(nodeId, imageToEdit, (node.data as any)?.annotations);
+    } else {
+      setExpandingNode({ id: nodeId, type: nodeType });
+    }
+  }, [getNodeById, openAnnotationModal]);
 
 
   // Check if a node was dropped into a group and add it to that group
@@ -1172,7 +1292,10 @@ export function WorkflowCanvas() {
   }, []);
 
   // Get copy/paste functions and clipboard from store
-  const { copySelectedNodes, pasteNodes, clearClipboard, clipboard } = useWorkflowStore();
+  const copySelectedNodes = useWorkflowStore((state) => state.copySelectedNodes);
+  const pasteNodes = useWorkflowStore((state) => state.pasteNodes);
+  const clearClipboard = useWorkflowStore((state) => state.clearClipboard);
+  const clipboard = useWorkflowStore((state) => state.clipboard);
 
   // Add non-passive wheel listener to handle zoom/pan and prevent browser navigation
   // This replaces the onWheel prop which is passive by default and can't preventDefault
@@ -1801,7 +1924,7 @@ export function WorkflowCanvas() {
       )}
 
       {/* Welcome Modal */}
-      {isCanvasEmpty && showQuickstart && (
+      {showQuickstart && (
         <WelcomeModal
           onWorkflowGenerated={async (workflow) => {
             await loadWorkflow(workflow);
@@ -1809,6 +1932,7 @@ export function WorkflowCanvas() {
           }}
           onClose={() => setShowQuickstart(false)}
           onNewProject={() => {
+            clearWorkflow();
             setShowQuickstart(false);
             setShowNewProjectSetup(true);
           }}
@@ -1838,6 +1962,8 @@ export function WorkflowCanvas() {
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}
         onConnectEnd={handleConnectEnd}
+        onMoveStart={() => { isPanningRef.current = true; setHoveredNodeId(null); }}
+        onMoveEnd={() => { isPanningRef.current = false; }}
         onNodeDragStop={handleNodeDragStop}
         onSelectionChange={handleSelectionChange}
         nodeTypes={nodeTypes}
@@ -1870,6 +1996,7 @@ export function WorkflowCanvas() {
         }
         selectNodesOnDrag={false}
         nodeDragThreshold={5}
+        nodeClickDistance={5}
         zoomOnScroll={false}
         zoomOnPinch={!isModalOpen}
         minZoom={0.1}
@@ -1892,6 +2019,7 @@ export function WorkflowCanvas() {
           animated: false,
         }}
       >
+        <SharedEdgeGradients />
         <GroupBackgroundsPortal />
         <GroupControlsOverlay />
         <Background color="#404040" gap={20} size={1} />
@@ -1899,6 +2027,8 @@ export function WorkflowCanvas() {
         <MiniMap
           className="bg-neutral-800 border border-neutral-700 rounded-lg shadow-lg"
           maskColor="rgba(0, 0, 0, 0.6)"
+          pannable
+          zoomable
           nodeColor={(node) => {
             switch (node.type) {
               case "imageInput":
@@ -1952,6 +2082,52 @@ export function WorkflowCanvas() {
             }
           }}
         />
+        <ViewportPortal>
+          {allNodes.map((node) => {
+            // Groups don't get floating headers
+            if (node.type === "group" as any) return null;
+
+            const defaultWidth = defaultNodeDimensions[node.type as NodeType]?.width ?? 250;
+            const headerWidth = node.measured?.width || (node.style?.width as number) || defaultWidth;
+
+            // Browse button for generate nodes in inline-parameters mode
+            const showBrowse = inlineParametersEnabled && (
+              node.type === "nanoBanana" || node.type === "generateVideo" ||
+              node.type === "generate3d" || node.type === "generateAudio"
+            );
+            const browseAction = showBrowse ? (
+              <button
+                onClick={() => browseRegistry.open(node.id)}
+                className="nodrag nopan text-[10px] py-0.5 px-1.5 bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
+              >
+                Browse
+              </button>
+            ) : undefined;
+
+            return (
+              <FloatingNodeHeader
+                key={`header-${node.id}`}
+                id={node.id}
+                type={node.type as NodeType}
+                isInLockedGroup={!!(node.data as any)?.isInLockedGroup}
+                isExecuting={!!(node.data as any)?.isExecuting}
+                focusedCommentNodeId={(node.data as any)?.focusedCommentNodeId}
+                position={node.position}
+                width={headerWidth}
+                selected={!!node.selected}
+                title={getNodeTitle(node)}
+                customTitle={node.data?.customTitle}
+                comment={node.data?.comment}
+                provider={(node.data as any)?.selectedModel?.provider}
+                headerAction={browseAction}
+                onCustomTitleChange={handleCustomTitleChange}
+                onCommentChange={handleCommentChange}
+                onRunNode={handleRunNode}
+                onExpandNode={handleExpandNode}
+              />
+            );
+          })}
+        </ViewportPortal>
       </ReactFlow>
 
       {/* Connection drop menu */}
@@ -1986,6 +2162,59 @@ export function WorkflowCanvas() {
         workflowState={chatWorkflowState}
         selectedNodeIds={selectedNodeIds}
       />
+
+      {/* Control panel - renders on right side when a configurable node is selected */}
+      <ControlPanel />
+
+      {/* Expansion modals - rendered via portal when expand button is clicked */}
+      {expandingNode && expandingNode.type === 'prompt' && (() => {
+        const node = getNodeById(expandingNode.id);
+        if (!node) return null;
+        return createPortal(
+          <PromptEditorModal
+            isOpen={true}
+            initialPrompt={(node.data as any)?.prompt || ''}
+            onSubmit={(prompt) => {
+              updateNodeData(expandingNode.id, { prompt });
+              setExpandingNode(null);
+            }}
+            onClose={() => setExpandingNode(null)}
+          />,
+          document.body
+        );
+      })()}
+
+      {expandingNode && expandingNode.type === 'promptConstructor' && (() => {
+        const node = getNodeById(expandingNode.id);
+        if (!node) return null;
+        return createPortal(
+          <PromptEditorModal
+            isOpen={true}
+            initialPrompt={(node.data as any)?.template || ''}
+            onSubmit={(template) => {
+              updateNodeData(expandingNode.id, { template });
+              setExpandingNode(null);
+            }}
+            onClose={() => setExpandingNode(null)}
+          />,
+          document.body
+        );
+      })()}
+
+      {expandingNode && expandingNode.type === 'splitGrid' && (() => {
+        const node = getNodeById(expandingNode.id);
+        if (!node) return null;
+        return (
+          <SplitGridSettingsModal
+            nodeId={expandingNode.id}
+            nodeData={node.data as any}
+            onClose={() => setExpandingNode(null)}
+          />
+        );
+      })()}
+
+      {/* AnnotationModal is globally managed by annotationStore */}
+      <AnnotationModal />
     </div>
   );
 }

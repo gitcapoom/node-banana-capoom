@@ -11,7 +11,7 @@ export function getImageDimensions(
   base64DataUrl: string
 ): Promise<{ width: number; height: number } | null> {
   return new Promise((resolve) => {
-    if (!base64DataUrl || !base64DataUrl.startsWith("data:image")) {
+    if (!base64DataUrl || (!base64DataUrl.startsWith("data:image") && !base64DataUrl.startsWith("http"))) {
       resolve(null);
       return;
     }
@@ -90,6 +90,81 @@ export function getVideoDimensions(
   });
 }
 
+/**
+ * Detect media type from URL and return dimensions using the appropriate loader.
+ * Handles data:image/*, data:video/*, blob:*, and http(s) URLs.
+ */
+export function getMediaDimensions(
+  url: string | null | undefined
+): Promise<{ width: number; height: number } | null> {
+  if (!url) return Promise.resolve(null);
+
+  if (url.startsWith("data:image")) {
+    return getImageDimensions(url);
+  }
+
+  // data:video/* → always video
+  if (url.startsWith("data:video")) {
+    return getVideoDimensions(url);
+  }
+
+  // blob:* → treat as video (most common use case)
+  if (url.startsWith("blob:")) {
+    return getVideoDimensions(url);
+  }
+
+  // http(s) URLs → check pathname for image extensions before defaulting to video
+  if (url.startsWith("http")) {
+    try {
+      const pathname = new URL(url).pathname.toLowerCase();
+      if (/\.(jpe?g|png|gif|webp|bmp|svg|avif|ico)(\?|$)/.test(pathname)) {
+        return getImageDimensions(url);
+      }
+    } catch {
+      // Invalid URL, fall through to video
+    }
+    return getVideoDimensions(url);
+  }
+
+  return Promise.resolve(null);
+}
+
+/**
+ * Calculate a node size that matches the given aspect ratio, preferring to grow.
+ * No min/max clamping — the node sizes freely to fit the content.
+ *
+ * @param aspectRatio - content width / content height
+ * @param currentWidth - the node's current width
+ * @param currentHeight - the node's current height
+ * @param fullBleed - if true, skip chrome height offset
+ * @returns {width, height} that preserves the aspect ratio at the larger-area candidate
+ */
+export function calculateAspectFitSize(
+  aspectRatio: number,
+  currentWidth: number,
+  currentHeight: number,
+  fullBleed: boolean = false
+): { width: number; height: number } {
+  if (!aspectRatio || aspectRatio <= 0 || !isFinite(aspectRatio)) {
+    return { width: currentWidth, height: currentHeight };
+  }
+
+  const chromeHeight = fullBleed ? 0 : NODE_CHROME_HEIGHT;
+
+  // Candidate A: keep current width, adjust height
+  const heightA = currentWidth / aspectRatio + chromeHeight;
+  const areaA = currentWidth * heightA;
+
+  // Candidate B: keep current height, adjust width
+  const widthB = (currentHeight - chromeHeight) * aspectRatio;
+  const areaB = widthB * currentHeight;
+
+  if (areaA >= areaB) {
+    return { width: Math.round(currentWidth), height: Math.round(heightA) };
+  }
+  return { width: Math.round(widthB), height: Math.round(currentHeight) };
+}
+
 // Node sizing constraints
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 500;
@@ -166,11 +241,13 @@ export function calculateNodeSize(
  *
  * @param aspectRatio - Width divided by height of the content
  * @param currentHeight - The node's current height (if manually set)
+ * @param skipChromeOffset - If true, skip subtracting NODE_CHROME_HEIGHT (for full-bleed nodes with floating headers)
  * @returns {width, height} dimensions that preserve height when possible
  */
 export function calculateNodeSizePreservingHeight(
   aspectRatio: number,
-  currentHeight?: number
+  currentHeight?: number,
+  skipChromeOffset: boolean = false
 ): { width: number; height: number } {
   // Handle invalid aspect ratios
   if (!aspectRatio || aspectRatio <= 0 || !isFinite(aspectRatio)) {
@@ -179,11 +256,12 @@ export function calculateNodeSizePreservingHeight(
 
   // No current height or below minimum = use default behavior
   if (!currentHeight || currentHeight < MIN_HEIGHT) {
-    return calculateNodeSize(aspectRatio);
+    return skipChromeOffset ? calculateNodeSizeForFullBleed(aspectRatio) : calculateNodeSize(aspectRatio);
   }
 
   // Preserve height, calculate width to maintain aspect ratio
-  const contentHeight = currentHeight - NODE_CHROME_HEIGHT;
+  const chromeHeight = skipChromeOffset ? 0 : NODE_CHROME_HEIGHT;
+  const contentHeight = currentHeight - chromeHeight;
   let newWidth = contentHeight * aspectRatio;
 
   // Clamp width to constraints
@@ -192,5 +270,69 @@ export function calculateNodeSizePreservingHeight(
   return {
     width: Math.round(newWidth),
     height: Math.round(currentHeight),
+  };
+}
+
+/**
+ * Calculate node dimensions for full-bleed content (no header chrome).
+ * Used by nodes with floating headers where content fills the entire node area.
+ *
+ * @param aspectRatio - Width divided by height (e.g., 16/9 for landscape, 9/16 for portrait)
+ * @param currentHeight - Optional current height to preserve (if manually resized)
+ * @returns {width, height} dimensions that fit within constraints
+ */
+export function calculateNodeSizeForFullBleed(
+  aspectRatio: number,
+  currentHeight?: number
+): { width: number; height: number } {
+  // Handle invalid aspect ratios
+  if (!aspectRatio || aspectRatio <= 0 || !isFinite(aspectRatio)) {
+    return { width: 300, height: 300 }; // Return default square
+  }
+
+  // If preserving height, calculate width
+  if (currentHeight && currentHeight >= MIN_HEIGHT) {
+    let width = currentHeight * aspectRatio;
+    width = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, width));
+    return {
+      width: Math.round(width),
+      height: Math.round(currentHeight),
+    };
+  }
+
+  // Start with base width and calculate height
+  let width = 300; // Default starting width
+  let height = width / aspectRatio;
+
+  // Check if height exceeds max - if so, scale down width to fit
+  if (height > MAX_HEIGHT) {
+    height = MAX_HEIGHT;
+    width = height * aspectRatio;
+  }
+
+  // Check if height is below min - if so, scale up width to fit
+  if (height < MIN_HEIGHT) {
+    height = MIN_HEIGHT;
+    width = height * aspectRatio;
+  }
+
+  // Clamp width to constraints
+  if (width > MAX_WIDTH) {
+    width = MAX_WIDTH;
+    height = width / aspectRatio;
+    // Re-clamp height
+    height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, height));
+  }
+
+  if (width < MIN_WIDTH) {
+    width = MIN_WIDTH;
+    height = width / aspectRatio;
+    // Re-clamp height
+    height = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, height));
+  }
+
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
   };
 }

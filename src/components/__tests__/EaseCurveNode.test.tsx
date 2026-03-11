@@ -5,7 +5,6 @@ import { EaseCurveNodeData } from "@/types";
 
 // Mock the workflow store
 const mockUpdateNodeData = vi.fn();
-const mockRegenerateNode = vi.fn();
 const mockRemoveEdge = vi.fn();
 const mockUseWorkflowStore = vi.fn();
 
@@ -19,8 +18,6 @@ vi.mock("@/store/workflowStore", () => ({
 }));
 
 // Mock @xyflow/react
-const mockSetNodes = vi.fn();
-
 vi.mock("@xyflow/react", () => {
   const React = require("react");
   const MockHandle = (props: Record<string, unknown>) =>
@@ -40,7 +37,7 @@ vi.mock("@xyflow/react", () => {
     ReactFlowProvider: ({ children }: { children: React.ReactNode }) => children,
     useReactFlow: () => ({
       getNodes: () => [],
-      setNodes: mockSetNodes,
+      setNodes: vi.fn(),
       screenToFlowPosition: (pos: unknown) => pos,
     }),
   };
@@ -50,6 +47,16 @@ vi.mock("@xyflow/react", () => {
 const mockCheckEncoderSupport = vi.fn();
 vi.mock("@/hooks/useStitchVideos", () => ({
   checkEncoderSupport: () => mockCheckEncoderSupport(),
+}));
+
+// Mock useVideoBlobUrl - return the input as-is
+vi.mock("@/hooks/useVideoBlobUrl", () => ({
+  useVideoBlobUrl: (url: string | null) => url,
+}));
+
+// Mock useVideoAutoplay - return a simple ref
+vi.mock("@/hooks/useVideoAutoplay", () => ({
+  useVideoAutoplay: () => ({ current: null }),
 }));
 
 vi.mock("@/components/Toast", () => ({
@@ -72,34 +79,17 @@ vi.mock("@/components/nodes/BaseNode", () => {
   };
 });
 
-// Mock CubicBezierEditor
-vi.mock("@/components/CubicBezierEditor", () => {
-  const React = require("react");
-  return {
-    CubicBezierEditor: (props: Record<string, unknown>) =>
-      React.createElement("div", {
-        "data-testid": "bezier-editor",
-        "data-disabled": String(props.disabled ?? false),
-      }),
-  };
-});
-
 import { EaseCurveNode } from "@/components/nodes/EaseCurveNode";
 
 /** Set up mock store state */
 function setMockStoreState(overrides: Record<string, unknown> = {}) {
   const state = {
     updateNodeData: mockUpdateNodeData,
-    regenerateNode: mockRegenerateNode,
     removeEdge: mockRemoveEdge,
     edges: [],
     nodes: [],
     isRunning: false,
-    currentNodeIds: [],
-    groups: {},
-    getNodesWithComments: vi.fn(() => []),
-    markCommentViewed: vi.fn(),
-    setNavigationTarget: vi.fn(),
+    hoveredNodeId: null,
     ...overrides,
   };
   mockUseWorkflowStore.mockImplementation(
@@ -134,10 +124,6 @@ describe("EaseCurveNode", () => {
     vi.clearAllMocks();
     mockCheckEncoderSupport.mockResolvedValue(true);
     setMockStoreState();
-    mockSetNodes.mockImplementation((fn: unknown) => {
-      // Simulate setNodes by applying function to empty array
-      if (typeof fn === "function") fn([]);
-    });
   });
 
   afterEach(() => {
@@ -179,6 +165,14 @@ describe("EaseCurveNode", () => {
       );
       expect(unsupported.querySelectorAll(".react-flow__handle").length).toBeGreaterThanOrEqual(4);
     });
+
+    it("should render handle labels for Video In, Video Out, and Settings", () => {
+      render(<EaseCurveNode {...createNodeProps()} />);
+      expect(screen.getByText("Video In")).toBeInTheDocument();
+      expect(screen.getByText("Video Out")).toBeInTheDocument();
+      // Two Settings labels (input and output)
+      expect(screen.getAllByText("Settings")).toHaveLength(2);
+    });
   });
 
   describe("Encoder Detection States", () => {
@@ -193,229 +187,69 @@ describe("EaseCurveNode", () => {
         screen.getByText(/doesn.t support video encoding/)
       ).toBeInTheDocument();
     });
+
+    it("should show Discord link when encoder is unsupported", () => {
+      render(<EaseCurveNode {...createNodeProps({ encoderSupported: false })} />);
+      const link = screen.getByText(/Message Willie on Discord/);
+      expect(link).toBeInTheDocument();
+      expect(link.closest("a")).toHaveAttribute(
+        "href",
+        "https://discord.com/invite/89Nr6EKkTf"
+      );
+    });
   });
 
-  describe("Tab Switching", () => {
-    it("should show Editor tab by default", () => {
+  describe("Video Display", () => {
+    it("should show placeholder when no output video", () => {
       render(<EaseCurveNode {...createNodeProps()} />);
-      expect(screen.getByText("Editor")).toBeInTheDocument();
-      expect(screen.getByText("Video")).toBeInTheDocument();
-      expect(screen.getByTestId("bezier-editor")).toBeInTheDocument();
-    });
-
-    it("should switch to Video tab when clicked", () => {
-      render(<EaseCurveNode {...createNodeProps()} />);
-      fireEvent.click(screen.getByText("Video"));
       expect(
         screen.getByText("Run workflow to apply ease curve")
       ).toBeInTheDocument();
     });
 
-    it("should call setNodes to resize when switching tabs", () => {
-      render(<EaseCurveNode {...createNodeProps()} />);
-      fireEvent.click(screen.getByText("Video"));
-      expect(mockSetNodes).toHaveBeenCalled();
-    });
-  });
-
-  describe("Preset Popover", () => {
-    it("should open preset popover when Presets button is clicked", () => {
-      render(<EaseCurveNode {...createNodeProps()} />);
-      fireEvent.click(screen.getByText("Presets"));
-      expect(screen.getByText("Bezier Presets")).toBeInTheDocument();
-      expect(screen.getByText("All Easing Functions")).toBeInTheDocument();
-    });
-
-    it("should close preset popover when Presets button is clicked again", () => {
-      render(<EaseCurveNode {...createNodeProps()} />);
-      // Open
-      fireEvent.click(screen.getByText("Presets"));
-      expect(screen.getByText("Bezier Presets")).toBeInTheDocument();
-      // Close
-      fireEvent.click(screen.getByText("Presets"));
-      expect(screen.queryByText("Bezier Presets")).not.toBeInTheDocument();
-    });
-
-    it("should select a preset and update bezierHandles", () => {
-      render(<EaseCurveNode {...createNodeProps()} />);
-      fireEvent.click(screen.getByText("Presets"));
-
-      // Find and click a preset button (easeInOutExpo is one of the EASING_PRESETS)
-      const presetButtons = screen.getAllByTitle(/ease/i);
-      if (presetButtons.length > 0) {
-        fireEvent.click(presetButtons[0]);
-        expect(mockUpdateNodeData).toHaveBeenCalled();
-      }
-    });
-  });
-
-  describe("Duration Input", () => {
-    it("should show duration input with current value", () => {
-      const { container } = render(
-        <EaseCurveNode {...createNodeProps({ outputDuration: 2.0 })} />
-      );
-      const input = container.querySelector('input[type="number"]');
-      expect(input).toBeInTheDocument();
-      expect(input).toHaveValue(2.0);
-    });
-
-    it("should update duration on change", () => {
-      const { container } = render(
-        <EaseCurveNode {...createNodeProps()} />
-      );
-      const input = container.querySelector('input[type="number"]')!;
-      fireEvent.change(input, { target: { value: "3.5" } });
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-ease-1", {
-        outputDuration: 3.5,
-      });
-    });
-
-    it("should clamp duration to min 0.1", () => {
-      const { container } = render(
-        <EaseCurveNode {...createNodeProps()} />
-      );
-      const input = container.querySelector('input[type="number"]')!;
-      fireEvent.change(input, { target: { value: "0.01" } });
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-ease-1", {
-        outputDuration: 0.1,
-      });
-    });
-
-    it("should clamp duration to max 30", () => {
-      const { container } = render(
-        <EaseCurveNode {...createNodeProps()} />
-      );
-      const input = container.querySelector('input[type="number"]')!;
-      fireEvent.change(input, { target: { value: "50" } });
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-ease-1", {
-        outputDuration: 30,
-      });
-    });
-
-    it("should fallback to 1.5 for NaN", () => {
-      const { container } = render(
-        <EaseCurveNode {...createNodeProps()} />
-      );
-      const input = container.querySelector('input[type="number"]')!;
-      fireEvent.change(input, { target: { value: "abc" } });
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-ease-1", {
-        outputDuration: 1.5,
-      });
-    });
-  });
-
-  describe("Apply Button", () => {
-    it("should call regenerateNode when Apply button is clicked", () => {
-      render(<EaseCurveNode {...createNodeProps()} />);
-      fireEvent.click(screen.getByText("Apply"));
-      expect(mockRegenerateNode).toHaveBeenCalledWith("test-ease-1");
-    });
-
-    it("should disable Apply when isRunning", () => {
-      setMockStoreState({ isRunning: true });
-      render(<EaseCurveNode {...createNodeProps()} />);
-      expect(screen.getByText("Apply")).toBeDisabled();
-    });
-
-    it("should disable Apply when status is loading", () => {
+    it("should show video element when outputVideo exists", () => {
       render(
-        <EaseCurveNode {...createNodeProps({ status: "loading" })} />
+        <EaseCurveNode
+          {...createNodeProps({ outputVideo: "blob:http://localhost/video" })}
+        />
       );
-      expect(screen.getByText("Apply")).toBeDisabled();
-    });
-  });
-
-  describe("Inheritance", () => {
-    it("should show inheritance overlay when easeCurve edge exists", () => {
-      setMockStoreState({
-        edges: [
-          {
-            id: "ec-edge",
-            source: "parent-ease",
-            target: "test-ease-1",
-            targetHandle: "easeCurve",
-          },
-        ],
-      });
-      render(<EaseCurveNode {...createNodeProps()} />);
-      // isInherited auto-switches to video tab; switch back to editor to see overlay
-      fireEvent.click(screen.getByText("Editor"));
-      expect(
-        screen.getByText("Settings inherited from parent node")
-      ).toBeInTheDocument();
+      const video = document.querySelector("video");
+      expect(video).toBeInTheDocument();
+      expect(video?.getAttribute("src")).toBe("blob:http://localhost/video");
     });
 
-    it("should show break button in inheritance overlay", () => {
-      setMockStoreState({
-        edges: [
-          {
-            id: "ec-edge",
-            source: "parent-ease",
-            target: "test-ease-1",
-            targetHandle: "easeCurve",
-          },
-        ],
-      });
-      render(<EaseCurveNode {...createNodeProps()} />);
-      fireEvent.click(screen.getByText("Editor"));
-      expect(screen.getByText("Control manually")).toBeInTheDocument();
+    it("should render video with correct attributes", () => {
+      render(
+        <EaseCurveNode
+          {...createNodeProps({ outputVideo: "blob:http://localhost/video" })}
+        />
+      );
+      const video = document.querySelector("video");
+      expect(video).toHaveAttribute("loop");
+      expect(video).toHaveAttribute("controls");
     });
 
-    it("should remove edge when break inheritance is clicked", () => {
-      setMockStoreState({
-        edges: [
-          {
-            id: "ec-edge",
-            source: "parent-ease",
-            target: "test-ease-1",
-            targetHandle: "easeCurve",
-          },
-        ],
-      });
-      render(<EaseCurveNode {...createNodeProps()} />);
-      fireEvent.click(screen.getByText("Editor"));
-      fireEvent.click(screen.getByText("Control manually"));
-      expect(mockRemoveEdge).toHaveBeenCalledWith("ec-edge");
+    it("should show clear button when outputVideo exists", () => {
+      render(
+        <EaseCurveNode
+          {...createNodeProps({ outputVideo: "blob:http://localhost/video" })}
+        />
+      );
+      const clearBtn = screen.getByTitle("Clear video");
+      expect(clearBtn).toBeInTheDocument();
+    });
+
+    it("should clear video when clear button is clicked", () => {
+      render(
+        <EaseCurveNode
+          {...createNodeProps({ outputVideo: "blob:http://localhost/video" })}
+        />
+      );
+      fireEvent.click(screen.getByTitle("Clear video"));
       expect(mockUpdateNodeData).toHaveBeenCalledWith("test-ease-1", {
-        inheritedFrom: null,
+        outputVideo: null,
+        status: "idle",
       });
-    });
-
-    it("should disable Apply when inherited", () => {
-      setMockStoreState({
-        edges: [
-          {
-            id: "ec-edge",
-            source: "parent-ease",
-            target: "test-ease-1",
-            targetHandle: "easeCurve",
-          },
-        ],
-      });
-      render(<EaseCurveNode {...createNodeProps()} />);
-      // isInherited auto-switches to video tab; switch back to editor
-      fireEvent.click(screen.getByText("Editor"));
-      expect(screen.getByText("Apply")).toBeDisabled();
-    });
-
-    it("should disable bezier editor when inherited", () => {
-      setMockStoreState({
-        edges: [
-          {
-            id: "ec-edge",
-            source: "parent-ease",
-            target: "test-ease-1",
-            targetHandle: "easeCurve",
-          },
-        ],
-      });
-      render(<EaseCurveNode {...createNodeProps()} />);
-      // The editor should still be in the DOM but inside a dimmed wrapper
-      // Since the editor is auto-switched to video tab when inherited,
-      // we need to switch to editor first
-      fireEvent.click(screen.getByText("Editor"));
-      const editor = screen.getByTestId("bezier-editor");
-      expect(editor.dataset.disabled).toBe("true");
     });
   });
 
@@ -425,6 +259,13 @@ describe("EaseCurveNode", () => {
         <EaseCurveNode {...createNodeProps({ status: "loading", progress: 45 })} />
       );
       expect(screen.getByText("Processing... 45%")).toBeInTheDocument();
+    });
+
+    it("should round progress percentage", () => {
+      render(
+        <EaseCurveNode {...createNodeProps({ status: "loading", progress: 33.7 })} />
+      );
+      expect(screen.getByText("Processing... 34%")).toBeInTheDocument();
     });
   });
 
@@ -440,28 +281,50 @@ describe("EaseCurveNode", () => {
       );
       expect(screen.getByText("Encoder failed")).toBeInTheDocument();
     });
-  });
 
-  describe("Video Tab", () => {
-    it("should show placeholder when no output video", () => {
-      render(<EaseCurveNode {...createNodeProps()} />);
-      fireEvent.click(screen.getByText("Video"));
-      expect(
-        screen.getByText("Run workflow to apply ease curve")
-      ).toBeInTheDocument();
-    });
-
-    it("should show video element when outputVideo exists", () => {
+    it("should not show error when status is not error", () => {
       render(
         <EaseCurveNode
-          {...createNodeProps({ outputVideo: "blob:http://localhost/video" })}
+          {...createNodeProps({
+            status: "idle",
+            error: "Stale error message",
+          })}
         />
       );
-      // outputVideo is set from initial render (no auto-switch), click Video tab
-      fireEvent.click(screen.getByText("Video"));
-      const video = document.querySelector("video");
-      expect(video).toBeInTheDocument();
-      expect(video?.getAttribute("src")).toBe("blob:http://localhost/video");
+      expect(screen.queryByText("Stale error message")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Inheritance", () => {
+    it("should detect inherited edge from store edges", () => {
+      setMockStoreState({
+        edges: [
+          {
+            id: "ec-edge",
+            source: "parent-ease",
+            target: "test-ease-1",
+            targetHandle: "easeCurve",
+          },
+        ],
+      });
+      // Rendering should not throw even when inherited
+      const { container } = render(<EaseCurveNode {...createNodeProps()} />);
+      expect(container.querySelector('[data-testid="base-node"]')).toBeInTheDocument();
+    });
+
+    it("should not detect inheritance when edge targets different node", () => {
+      setMockStoreState({
+        edges: [
+          {
+            id: "ec-edge",
+            source: "parent-ease",
+            target: "other-node",
+            targetHandle: "easeCurve",
+          },
+        ],
+      });
+      const { container } = render(<EaseCurveNode {...createNodeProps()} />);
+      expect(container.querySelector('[data-testid="base-node"]')).toBeInTheDocument();
     });
   });
 });

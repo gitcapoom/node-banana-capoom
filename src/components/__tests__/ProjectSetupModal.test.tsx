@@ -611,9 +611,9 @@ describe("ProjectSetupModal", () => {
         target: { value: "/path/to/project" },
       });
 
-      // Toggle the embed checkbox (click it to enable embed/disable external)
-      const embedCheckbox = screen.getByRole("checkbox");
-      fireEvent.click(embedCheckbox);
+      // Toggle the embed switch (click it to enable embed/disable external)
+      const embedSwitch = screen.getByRole("switch", { name: /embed images as base64/i });
+      fireEvent.click(embedSwitch);
 
       // Click Create
       fireEvent.click(screen.getByText("Create"));

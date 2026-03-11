@@ -95,7 +95,7 @@ export { CONCURRENCY_SETTINGS_KEY } from "./utils/executionUtils";
 async function evaluateAndExecuteConditionalSwitch(
   node: WorkflowNode,
   executionCtx: NodeExecutionContext,
-  getConnectedInputs: (nodeId: string) => { text: string | null; images: string[]; videos: string[]; audio: string[]; model3d: string | null; dynamicInputs: Record<string, string | string[]>; easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null } | null },
+  getConnectedInputs: (nodeId: string) => { text: string | null; images: string[]; videos: string[]; audio: string[]; model3d: string | null; dynamicInputs: Record<string, string | string[]>; easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null; outputDuration: number } | null },
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void,
 ): Promise<void> {
   const condInputs = getConnectedInputs(node.id);
@@ -243,9 +243,11 @@ interface WorkflowStore {
   openModalCount: number;
   isModalOpen: boolean;
   showQuickstart: boolean;
+  hoveredNodeId: string | null;
   incrementModalCount: () => void;
   decrementModalCount: () => void;
   setShowQuickstart: (show: boolean) => void;
+  setHoveredNodeId: (id: string | null) => void;
 
   // Execution
   isRunning: boolean;
@@ -267,7 +269,7 @@ interface WorkflowStore {
 
   // Helpers
   getNodeById: (id: string) => WorkflowNode | undefined;
-  getConnectedInputs: (nodeId: string) => { images: string[]; videos: string[]; audio: string[]; model3d: string | null; text: string | null; dynamicInputs: Record<string, string | string[]>; easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null } | null };
+  getConnectedInputs: (nodeId: string) => { images: string[]; videos: string[]; audio: string[]; model3d: string | null; text: string | null; dynamicInputs: Record<string, string | string[]>; easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null; outputDuration: number } | null };
   validateWorkflow: () => { valid: boolean; errors: string[] };
 
   // Global Image History
@@ -380,6 +382,10 @@ let nodeIdCounter = 0;
 let groupIdCounter = 0;
 let autoSaveIntervalId: ReturnType<typeof setInterval> | null = null;
 
+// RAF debounce for hover updates — coalesces rapid mouseenter/mouseleave events
+// into a single store update per animation frame
+let hoverRafId: number | null = null;
+
 // Track pending save-generation syncs to ensure IDs are resolved before workflow save
 const pendingImageSyncs = new Map<string, Promise<void>>();
 
@@ -450,6 +456,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   openModalCount: 0,
   isModalOpen: false,
   showQuickstart: true,
+  hoveredNodeId: null,
   isRunning: false,
   currentNodeIds: [],  // Changed from currentNodeId for parallel execution
   pausedAtNodeId: null,
@@ -520,6 +527,14 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
   setShowQuickstart: (show: boolean) => {
     set({ showQuickstart: show });
+  },
+
+  setHoveredNodeId: (id: string | null) => {
+    if (hoverRafId !== null) cancelAnimationFrame(hoverRafId);
+    hoverRafId = requestAnimationFrame(() => {
+      hoverRafId = null;
+      if (get().hoveredNodeId !== id) set({ hoveredNodeId: id });
+    });
   },
 
   addNode: (type: NodeType, position: XYPosition, initialData?: Partial<WorkflowNodeData>) => {
@@ -721,16 +736,25 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     });
 
     // Create new nodes with updated IDs and offset positions
-    const newNodes: WorkflowNode[] = clipboard.nodes.map((node) => ({
-      ...node,
-      id: idMapping.get(node.id)!,
-      position: {
-        x: node.position.x + offset.x,
-        y: node.position.y + offset.y,
-      },
-      selected: true, // Select newly pasted nodes
-      data: JSON.parse(JSON.stringify(node.data)),
-    }));
+    const newNodes: WorkflowNode[] = clipboard.nodes.map((node) => {
+      const defaults = defaultNodeDimensions[node.type as NodeType] || { width: 300, height: 280 };
+      return {
+        ...node,
+        id: idMapping.get(node.id)!,
+        position: {
+          x: node.position.x + offset.x,
+          y: node.position.y + offset.y,
+        },
+        selected: true, // Select newly pasted nodes
+        // Reset height to defaults so BaseNode's ResizeObserver
+        // can correctly add settings panel height from the right baseline
+        style: { width: node.style?.width ?? defaults.width, height: defaults.height },
+        width: undefined,
+        height: undefined,
+        measured: undefined,
+        data: JSON.parse(JSON.stringify(node.data)),
+      };
+    });
 
     // Create new edges with updated source/target IDs
     const newEdges: WorkflowEdge[] = clipboard.edges.map((edge) => ({
@@ -797,7 +821,6 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
     // Add padding around nodes
     const padding = 20;
-    const headerHeight = 32; // Match HEADER_HEIGHT in GroupsOverlay
 
     // Find next available color
     const usedColors = new Set(Object.values(groups).map((g) => g.color));
@@ -820,11 +843,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       color,
       position: {
         x: minX - padding,
-        y: minY - padding - headerHeight
+        y: minY - padding,
       },
       size: {
         width: maxX - minX + padding * 2,
-        height: maxY - minY + padding * 2 + headerHeight,
+        height: maxY - minY + padding * 2,
       },
     };
 
@@ -1720,6 +1743,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       useExternalImageStorage: savedConfig?.useExternalImageStorage ?? true,
       // Reset viewed comments when loading new workflow
       viewedCommentNodeIds: new Set<string>(),
+      // Dismiss welcome modal after loading a workflow
+      showQuickstart: false,
     });
 
     // Clear snapshot unless explicitly preserving (e.g., AI workflow generation)

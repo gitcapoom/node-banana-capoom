@@ -84,8 +84,9 @@ export function WelcomeModal({
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
       onWheelCapture={(e) => e.stopPropagation()}
+      onClick={onClose}
     >
-      <div className={`w-full ${dialogWidth} mx-4 bg-neutral-800 rounded-xl border border-neutral-700 shadow-2xl overflow-clip ${dialogHeight} flex flex-col`}>
+      <div className={`w-full ${dialogWidth} mx-4 bg-neutral-800 rounded-xl border border-neutral-700 shadow-2xl overflow-clip ${dialogHeight} flex flex-col`} onClick={(e) => e.stopPropagation()}>
         {currentView === "initial" && (
           <QuickstartInitialView
             onNewProject={handleNewProject}
@@ -106,16 +107,15 @@ export function WelcomeModal({
             onWorkflowGenerated={handleWorkflowSelected}
           />
         )}
+        {/* Hidden file input for loading workflows */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          accept=".json"
+          className="hidden"
+        />
       </div>
-
-      {/* Hidden file input for loading workflows */}
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleFileChange}
-        accept=".json"
-        className="hidden"
-      />
     </div>
   );
 }

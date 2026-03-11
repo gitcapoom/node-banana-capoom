@@ -151,42 +151,6 @@ describe("GenerateImageNode", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render with Gemini provider badge by default", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      // Gemini badge SVG should be present (star shape)
-      const geminiBadge = container.querySelector('svg[viewBox="0 0 65 65"]');
-      expect(geminiBadge).toBeInTheDocument();
-    });
-
-    it("should render the model name as title", () => {
-      render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps({ model: "nano-banana-pro" })} />
-        </TestWrapper>
-      );
-
-      // The title should show the display name
-      expect(screen.getByText("Nano Banana Pro")).toBeInTheDocument();
-    });
-
-    it("should render display name from selectedModel when provided", () => {
-      render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps({
-            model: "nano-banana" as const,
-            selectedModel: { provider: "fal", modelId: "flux/dev", displayName: "FLUX.1 Dev" },
-          })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("FLUX.1 Dev")).toBeInTheDocument();
-    });
-
     it("should render image and text input handles", () => {
       const { container } = render(
         <TestWrapper>
@@ -237,16 +201,6 @@ describe("GenerateImageNode", () => {
       expect(screen.getByText("Run to generate")).toBeInTheDocument();
     });
 
-    it("should render a dashed border placeholder when no output image", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps({ status: "idle", outputImage: null })} />
-        </TestWrapper>
-      );
-
-      const placeholder = container.querySelector(".border-dashed");
-      expect(placeholder).toBeInTheDocument();
-    });
   });
 
   describe("Loading State", () => {
@@ -427,166 +381,6 @@ describe("GenerateImageNode", () => {
     });
   });
 
-  describe("Run Button", () => {
-    it("should render run button", () => {
-      render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByTitle("Run this node")).toBeInTheDocument();
-    });
-
-    it("should call regenerateNode when run button is clicked", () => {
-      render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const runButton = screen.getByTitle("Run this node");
-      fireEvent.click(runButton);
-
-      expect(mockRegenerateNode).toHaveBeenCalledWith("test-node-1");
-    });
-
-    it("should disable run button when workflow is running", () => {
-      mockUseWorkflowStore.mockImplementation((selector) => {
-        const state = {
-          updateNodeData: mockUpdateNodeData,
-          regenerateNode: mockRegenerateNode,
-          addNode: mockAddNode,
-          incrementModalCount: mockIncrementModalCount,
-          decrementModalCount: mockDecrementModalCount,
-          providerSettings: defaultProviderSettings,
-          generationsPath: "/test/generations",
-          isRunning: true,
-          currentNodeIds: [],
-          groups: {},
-          nodes: [],
-          getNodesWithComments: vi.fn(() => []),
-          markCommentViewed: vi.fn(),
-          setNavigationTarget: vi.fn(),
-        };
-        return selector(state);
-      });
-
-      render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const runButton = screen.getByTitle("Run this node");
-      expect(runButton).toBeDisabled();
-    });
-  });
-
-  describe("Browse Button", () => {
-    it("should render Browse button when external providers are available", () => {
-      render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Browse")).toBeInTheDocument();
-    });
-
-    it("should open ModelSearchDialog when Browse button is clicked", async () => {
-      render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const browseButton = screen.getByText("Browse");
-      fireEvent.click(browseButton);
-
-      // ModelSearchDialog should open - look for the dialog title
-      await waitFor(() => {
-        expect(screen.getByText("Browse Models")).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe("Provider Badge Display", () => {
-    it("should show Gemini badge for Gemini provider", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps({
-            selectedModel: { provider: "gemini", modelId: "nano-banana-pro", displayName: "Nano Banana Pro" },
-          })} />
-        </TestWrapper>
-      );
-
-      // Gemini badge uses viewBox="0 0 65 65"
-      const geminiBadge = container.querySelector('svg[viewBox="0 0 65 65"]');
-      expect(geminiBadge).toBeInTheDocument();
-    });
-
-    it("should show fal.ai badge for fal provider", async () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps({
-            selectedModel: { provider: "fal", modelId: "flux/dev", displayName: "FLUX.1 Dev" },
-          })} />
-        </TestWrapper>
-      );
-
-      // Wait for effects to run
-      await waitFor(() => {
-        // fal.ai badge uses viewBox="0 0 1855 1855"
-        const falBadge = container.querySelector('svg[viewBox="0 0 1855 1855"]');
-        expect(falBadge).toBeInTheDocument();
-      });
-    });
-
-    it("should show Replicate badge for Replicate provider", async () => {
-      // Enable Replicate provider
-      mockUseWorkflowStore.mockImplementation((selector) => {
-        const state = {
-          updateNodeData: mockUpdateNodeData,
-          regenerateNode: mockRegenerateNode,
-          addNode: mockAddNode,
-          incrementModalCount: mockIncrementModalCount,
-          decrementModalCount: mockDecrementModalCount,
-          providerSettings: {
-            providers: {
-              ...defaultProviderSettings.providers,
-              replicate: { id: "replicate", name: "Replicate", enabled: true, apiKey: "test-key" },
-            },
-          },
-          generationsPath: "/test/generations",
-          isRunning: false,
-          currentNodeIds: [],
-          groups: {},
-          nodes: [],
-          getNodesWithComments: vi.fn(() => []),
-          markCommentViewed: vi.fn(),
-          setNavigationTarget: vi.fn(),
-        };
-        return selector(state);
-      });
-
-      const { container } = render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps({
-            selectedModel: { provider: "replicate", modelId: "stability-ai/sdxl", displayName: "SDXL" },
-          })} />
-        </TestWrapper>
-      );
-
-      // Wait for effects to run
-      await waitFor(() => {
-        // Replicate badge uses viewBox="0 0 1000 1000"
-        const replicateBadge = container.querySelector('svg[viewBox="0 0 1000 1000"]');
-        expect(replicateBadge).toBeInTheDocument();
-      });
-    });
-  });
-
   describe("Legacy Data Migration", () => {
     it("should migrate legacy model field to selectedModel", async () => {
       render(
@@ -733,39 +527,6 @@ describe("GenerateImageNode", () => {
         const textTop = parseFloat(textHandle.style.top);
         expect(imageTop).toBeLessThan(textTop);
       });
-    });
-  });
-
-  describe("Custom Title and Comment", () => {
-    it("should display custom title when provided", () => {
-      render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps({
-            customTitle: "My Generator",
-          })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText(/My Generator/)).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData when custom title is changed", () => {
-      render(
-        <TestWrapper>
-          <GenerateImageNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      // Click on title to edit
-      const title = screen.getByText("Nano Banana Pro");
-      fireEvent.click(title);
-
-      // Type new title
-      const input = screen.getByPlaceholderText("Custom title...");
-      fireEvent.change(input, { target: { value: "New Title" } });
-      fireEvent.keyDown(input, { key: "Enter" });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-node-1", { customTitle: "New Title" });
     });
   });
 

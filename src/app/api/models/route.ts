@@ -499,6 +499,8 @@ interface ModelsSuccessResponse {
   models: ProviderModel[];
   cached: boolean;
   providers: Record<string, ProviderResult>;
+  /** All providers that have API keys configured (env or client header) */
+  availableProviders: string[];
   errors?: string[];
 }
 
@@ -952,6 +954,13 @@ export async function GET(
   const kieKey = request.headers.get("X-Kie-Key") || process.env.KIE_API_KEY || null;
   const wavespeedKey = request.headers.get("X-WaveSpeed-Key") || process.env.WAVESPEED_API_KEY || null;
 
+  // Build list of all available providers (have keys from env or client headers)
+  const availableProviders: string[] = ["gemini"]; // Gemini always available
+  if (falKey) availableProviders.push("fal");
+  if (replicateKey) availableProviders.push("replicate");
+  if (kieKey) availableProviders.push("kie");
+  if (wavespeedKey) availableProviders.push("wavespeed");
+
   // Determine which providers to fetch from (excluding gemini/kie - handled separately as hardcoded)
   const providersToFetch: ProviderType[] = [];
   let includeGemini = false;
@@ -963,7 +972,17 @@ export async function GET(
       includeGemini = true;
     } else if (providerFilter === "kie") {
       // Only Kie requested - no external API calls needed (hardcoded models)
-      includeKie = true;
+      if (kieKey) {
+        includeKie = true;
+      } else {
+        return NextResponse.json<ModelsErrorResponse>(
+          {
+            success: false,
+            error: "Kie API key required. Add KIE_API_KEY to .env.local or configure in Settings.",
+          },
+          { status: 400 }
+        );
+      }
     } else if (providerFilter === "wavespeed") {
       if (wavespeedKey) {
         // WaveSpeed requested with key - fetch from API
@@ -1160,6 +1179,7 @@ export async function GET(
     models: filteredModels,
     cached: anyFromCache && allFromCache,
     providers: providerResults,
+    availableProviders,
   };
 
   if (errors.length > 0) {

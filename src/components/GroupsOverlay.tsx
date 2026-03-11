@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useState, useRef, useEffect } from "react";
-import { useReactFlow, ViewportPortal } from "@xyflow/react";
+import { useViewport, ViewportPortal } from "@xyflow/react";
 import { useWorkflowStore, GROUP_COLORS } from "@/store/workflowStore";
 import { GroupColor } from "@/types";
-
-const HEADER_HEIGHT = 32;
 
 const COLOR_OPTIONS: { color: GroupColor; label: string }[] = [
   { color: "neutral", label: "Gray" },
@@ -278,136 +276,161 @@ function GroupControls({ groupId, zoom }: GroupControlsProps) {
         width: group.size.width,
         height: group.size.height,
         pointerEvents: "none",
+        overflow: "visible",
       }}
     >
-      {/* Header - interactive */}
+      {/* Floating group name label - top-left, viewport-scaled */}
+      {/* Outer wrapper: zero-height anchor at the top edge of the group */}
       <div
-        className="absolute top-0 left-0 right-0 flex items-center gap-2 px-3 cursor-grab active:cursor-grabbing select-none rounded-t-xl pointer-events-auto"
-        style={{ backgroundColor: bgColor, height: HEADER_HEIGHT }}
-        onMouseDown={handleHeaderMouseDown}
+        className="absolute left-0"
+        style={{ top: 0, height: 0, overflow: "visible" }}
       >
-        {isEditing ? (
-          <input
-            ref={inputRef}
-            type="text"
-            value={editName}
-            onChange={(e) => setEditName(e.target.value)}
-            onBlur={handleNameSubmit}
-            onKeyDown={handleKeyDown}
-            className="bg-transparent border-none outline-none text-sm font-medium text-white px-0 py-0"
-            style={{ minWidth: 60, maxWidth: 200, width: `${Math.max(60, editName.length * 8)}px` }}
-          />
-        ) : (
-          <span
-            className="text-sm font-medium text-white truncate cursor-text"
-            style={{ maxWidth: 200 }}
-            onClick={() => setIsEditing(true)}
-          >
-            {group.name}
-          </span>
-        )}
-
-        {/* Spacer for drag area */}
-        <div className="flex-1" />
-
-        {/* Color Picker */}
-        <div className="relative flex items-center" ref={colorPickerRef}>
-          <button
-            onClick={() => setShowColorPicker(!showColorPicker)}
-            className="w-5 h-5 rounded border border-white/30 hover:border-white/60 transition-colors"
+        {/* Inner scaled element: bottom-anchored so it grows upward, scale keeps bottom-left fixed */}
+        <div
+          className="absolute left-0 pointer-events-auto cursor-grab active:cursor-grabbing select-none"
+          style={{
+            bottom: 0,
+            transform: `scale(${1 / zoom})`,
+            transformOrigin: "bottom left",
+            whiteSpace: "nowrap",
+          }}
+          onMouseDown={handleHeaderMouseDown}
+        >
+          <div
+            className="flex items-center rounded-md px-2 py-0.5 mb-1"
             style={{ backgroundColor: bgColor }}
-            title="Change color"
-          />
-          {showColorPicker && (
-            <>
-              {/* Invisible backdrop to catch clicks outside */}
-              <div
-                className="fixed inset-0 z-40"
-                onClick={() => setShowColorPicker(false)}
+          >
+            {isEditing ? (
+              <input
+                ref={inputRef}
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onBlur={handleNameSubmit}
+                onKeyDown={handleKeyDown}
+                className="bg-transparent border-none outline-none text-xs font-medium text-white px-0 py-0"
+                style={{ minWidth: 60, maxWidth: 200, width: `${Math.max(60, editName.length * 7)}px` }}
               />
-              <div className="absolute bottom-full left-1/2 mb-2 z-50 pointer-events-auto" style={{ transform: "translateX(-50%)" }}>
-                {COLOR_OPTIONS.map(({ color, label }, index) => {
-                  // Fan out in an arc above the button
-                  const totalItems = COLOR_OPTIONS.length;
-                  const arcSpread = 180; // degrees of arc spread (wider)
-                  const startAngle = -90 - arcSpread / 2; // start from top-left
-                  const angleStep = arcSpread / (totalItems - 1);
-                  const angle = startAngle + index * angleStep;
-                  const radius = 55; // distance from center (larger)
-                  const rad = (angle * Math.PI) / 180;
-                  const x = Math.cos(rad) * radius;
-                  const y = Math.sin(rad) * radius;
-                  const finalX = x - 12;
-                  const finalY = y - 12;
-
-                  return (
-                    <button
-                      key={color}
-                      onClick={() => handleColorChange(color)}
-                      className={`absolute w-6 h-6 rounded-full border-2 transition-[transform,border-color] duration-150 hover:scale-110 ${
-                        group.color === color
-                          ? "border-white"
-                          : "border-transparent hover:border-white/50"
-                      }`}
-                      style={{
-                        backgroundColor: PICKER_PREVIEW_COLORS[color],
-                        transform: `translate(${finalX}px, ${finalY}px)`,
-                        animation: `colorFanIn-${index} 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards`,
-                        animationDelay: `${index * 0.025}s`,
-                        opacity: 0,
-                        // Use CSS custom properties to pass the final position to the animation
-                        ["--final-x" as string]: `${finalX}px`,
-                        ["--final-y" as string]: `${finalY}px`,
-                      }}
-                      title={label}
-                    >
-                      <style>{`
-                        @keyframes colorFanIn-${index} {
-                          0% {
-                            opacity: 0;
-                            transform: translate(-12px, 0px) scale(0.3);
-                          }
-                          100% {
-                            opacity: 1;
-                            transform: translate(${finalX}px, ${finalY}px) scale(1);
-                          }
-                        }
-                      `}</style>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
+            ) : (
+              <span
+                className="text-xs font-medium text-white truncate"
+                style={{ maxWidth: 200 }}
+                onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+              >
+                {group.name}
+              </span>
+            )}
+          </div>
         </div>
+      </div>
 
-        {/* Lock/Unlock Button */}
-        <button
-          onClick={handleToggleLock}
-          className="p-0.5 rounded hover:bg-white/20 text-white/70 hover:text-white transition-colors"
-          title={group.locked ? "Unlock group" : "Lock group"}
-        >
-          {group.locked ? (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-          ) : (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
-            </svg>
-          )}
-        </button>
+      {/* Floating controls - top-right, scales naturally with canvas zoom */}
+      <div
+        className="absolute right-0 pointer-events-auto"
+        style={{
+          top: -28,
+        }}
+      >
+        <div className="flex items-center gap-1 px-1.5 py-0.5">
+          {/* Color Picker */}
+          <div className="relative flex items-center" ref={colorPickerRef}>
+            <button
+              onClick={() => setShowColorPicker(!showColorPicker)}
+              className="w-4 h-4 rounded border border-white/30 hover:border-white/60 transition-colors"
+              style={{ backgroundColor: bgColor }}
+              title="Change color"
+            />
+            {showColorPicker && (
+              <>
+                {/* Invisible backdrop to catch clicks outside */}
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowColorPicker(false)}
+                />
+                <div className="absolute bottom-full left-1/2 mb-2 z-50 pointer-events-auto" style={{ transform: "translateX(-50%)" }}>
+                  {COLOR_OPTIONS.map(({ color, label }, index) => {
+                    // Fan out in an arc above the button
+                    const totalItems = COLOR_OPTIONS.length;
+                    const arcSpread = 180; // degrees of arc spread (wider)
+                    const startAngle = -90 - arcSpread / 2; // start from top-left
+                    const angleStep = arcSpread / (totalItems - 1);
+                    const angle = startAngle + index * angleStep;
+                    const radius = 55; // distance from center (larger)
+                    const rad = (angle * Math.PI) / 180;
+                    const x = Math.cos(rad) * radius;
+                    const y = Math.sin(rad) * radius;
+                    const finalX = x - 12;
+                    const finalY = y - 12;
 
-        {/* Delete Button */}
-        <button
-          onClick={handleDelete}
-          className="p-0.5 rounded hover:bg-white/20 text-white/70 hover:text-white transition-colors"
-          title="Delete group"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+                    return (
+                      <button
+                        key={color}
+                        onClick={() => handleColorChange(color)}
+                        className={`absolute w-6 h-6 rounded-full border-2 transition-[transform,border-color] duration-150 hover:scale-110 ${
+                          group.color === color
+                            ? "border-white"
+                            : "border-transparent hover:border-white/50"
+                        }`}
+                        style={{
+                          backgroundColor: PICKER_PREVIEW_COLORS[color],
+                          transform: `translate(${finalX}px, ${finalY}px)`,
+                          animation: `colorFanIn-${index} 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards`,
+                          animationDelay: `${index * 0.025}s`,
+                          opacity: 0,
+                          // Use CSS custom properties to pass the final position to the animation
+                          ["--final-x" as string]: `${finalX}px`,
+                          ["--final-y" as string]: `${finalY}px`,
+                        }}
+                        title={label}
+                      >
+                        <style>{`
+                          @keyframes colorFanIn-${index} {
+                            0% {
+                              opacity: 0;
+                              transform: translate(-12px, 0px) scale(0.3);
+                            }
+                            100% {
+                              opacity: 1;
+                              transform: translate(${finalX}px, ${finalY}px) scale(1);
+                            }
+                          }
+                        `}</style>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Lock/Unlock Button */}
+          <button
+            onClick={handleToggleLock}
+            className="p-0.5 rounded hover:bg-white/20 text-white/70 hover:text-white transition-colors"
+            title={group.locked ? "Unlock group" : "Lock group"}
+          >
+            {group.locked ? (
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+              </svg>
+            )}
+          </button>
+
+          {/* Delete Button */}
+          <button
+            onClick={handleDelete}
+            className="p-0.5 rounded hover:bg-white/20 text-white/70 hover:text-white transition-colors"
+            title="Delete group"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Resize handles - interactive */}
@@ -469,7 +492,7 @@ export function GroupBackgroundsPortal() {
 // Renders group controls (headers, resize handles) using ViewportPortal above nodes
 export function GroupControlsOverlay() {
   const { groups } = useWorkflowStore();
-  const viewport = useReactFlow().getViewport();
+  const { zoom } = useViewport();
 
   const groupIds = Object.keys(groups);
 
@@ -479,7 +502,7 @@ export function GroupControlsOverlay() {
     <ViewportPortal>
       <div style={{ position: "absolute", top: 0, left: 0, zIndex: 1000, pointerEvents: "none" }}>
         {groupIds.map((groupId) => (
-          <GroupControls key={groupId} groupId={groupId} zoom={viewport.zoom} />
+          <GroupControls key={groupId} groupId={groupId} zoom={zoom} />
         ))}
       </div>
     </ViewportPortal>

@@ -255,6 +255,7 @@ describe("getConnectedInputsPure", () => {
       makeNode("ec", "easeCurve", {
         bezierHandles: [0.25, 0.1, 0.25, 1.0],
         easingPreset: "ease-in-out",
+        outputDuration: 8,
         outputVideo: null,
       }),
       makeNode("vs", "videoStitch"),
@@ -270,6 +271,7 @@ describe("getConnectedInputsPure", () => {
     expect(result.easeCurve).toEqual({
       bezierHandles: [0.25, 0.1, 0.25, 1.0],
       easingPreset: "ease-in-out",
+      outputDuration: 8,
     });
   });
 

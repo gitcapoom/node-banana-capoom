@@ -111,16 +111,6 @@ describe("AnnotationNode", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render with title 'Annotate'", () => {
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Annotate")).toBeInTheDocument();
-    });
-
     it("should render image input handle on left", () => {
       const { container } = render(
         <TestWrapper>
@@ -155,14 +145,14 @@ describe("AnnotationNode", () => {
       expect(screen.getByText("Drop, click, or connect")).toBeInTheDocument();
     });
 
-    it("should render drop zone with dashed border when no image", () => {
-      const { container } = render(
+    it("should render drop zone when no image", () => {
+      render(
         <TestWrapper>
           <AnnotationNode {...createNodeProps()} />
         </TestWrapper>
       );
 
-      const dropZone = container.querySelector(".border-dashed");
+      const dropZone = screen.getByText("Drop, click, or connect").parentElement!;
       expect(dropZone).toBeInTheDocument();
     });
   });
@@ -499,33 +489,4 @@ describe("AnnotationNode", () => {
     });
   });
 
-  describe("Custom Title and Comment", () => {
-    it("should display custom title when provided", () => {
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps({ customTitle: "My Annotation" })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText(/My Annotation/)).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData when custom title is changed", () => {
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      // Click on title to edit
-      const title = screen.getByText("Annotate");
-      fireEvent.click(title);
-
-      const input = screen.getByPlaceholderText("Custom title...");
-      fireEvent.change(input, { target: { value: "Custom Annotate" } });
-      fireEvent.keyDown(input, { key: "Enter" });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-annotation-1", { customTitle: "Custom Annotate" });
-    });
-  });
 });

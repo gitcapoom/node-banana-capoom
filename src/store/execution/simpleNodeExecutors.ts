@@ -323,7 +323,9 @@ export async function executeRouter(ctx: NodeExecutionContext): Promise<void> {
   // Brief status flash to show execution occurred.
   ctx.updateNodeData(ctx.node.id, { status: "loading" });
   await new Promise(resolve => setTimeout(resolve, 50));
-  ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  if (!ctx.signal?.aborted) {
+    ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  }
 }
 
 /**
@@ -334,7 +336,9 @@ export async function executeSwitch(ctx: NodeExecutionContext): Promise<void> {
   // Disabled outputs are filtered during traversal.
   ctx.updateNodeData(ctx.node.id, { status: "loading" });
   await new Promise(resolve => setTimeout(resolve, 50));
-  ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  if (!ctx.signal?.aborted) {
+    ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  }
 }
 
 /**
@@ -345,7 +349,9 @@ export async function executeConditionalSwitch(ctx: NodeExecutionContext): Promi
   // Brief status flash to show execution occurred.
   ctx.updateNodeData(ctx.node.id, { status: "loading" });
   await new Promise(resolve => setTimeout(resolve, 50));
-  ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  if (!ctx.signal?.aborted) {
+    ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  }
 }
 
 /**

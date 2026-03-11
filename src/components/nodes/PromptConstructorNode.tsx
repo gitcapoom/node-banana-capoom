@@ -1,31 +1,24 @@
 "use client";
 
-import { useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useState, useEffect, useMemo, useRef, ReactNode } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { usePromptAutocomplete } from "@/hooks/usePromptAutocomplete";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { PromptConstructorNodeData, PromptNodeData, LLMGenerateNodeData, AvailableVariable } from "@/types";
-import { PromptConstructorEditorModal } from "@/components/modals/PromptConstructorEditorModal";
 import { parseVarTags } from "@/utils/parseVarTags";
 
 type PromptConstructorNodeType = Node<PromptConstructorNodeData, "promptConstructor">;
 
 export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptConstructorNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const edges = useWorkflowStore((state) => state.edges);
   const nodes = useWorkflowStore((state) => state.nodes);
-  const incrementModalCount = useWorkflowStore((state) => state.incrementModalCount);
-  const decrementModalCount = useWorkflowStore((state) => state.decrementModalCount);
 
   // Local state for template to prevent cursor jumping
   const [localTemplate, setLocalTemplate] = useState(nodeData.template);
   const [isEditing, setIsEditing] = useState(false);
-  const [isModalOpenLocal, setIsModalOpenLocal] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -126,26 +119,55 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
     return unresolved;
   }, [localTemplate, availableVariables]);
 
-  // Compute resolved text client-side for preview
+  // Compute resolved text client-side for preview (single-pass to avoid prefix collisions)
   const resolvedPreview = useMemo(() => {
-    let resolved = localTemplate;
-    availableVariables.forEach((v) => {
-      resolved = resolved.replace(new RegExp(`@${v.name}`, 'g'), v.value);
-    });
-    return resolved;
+    const valueMap = new Map(availableVariables.map(v => [v.name, v.value]));
+    return localTemplate.replace(/@(\w+)/g, (match, name) => valueMap.get(name) ?? match);
   }, [localTemplate, availableVariables]);
 
   // Sync resolved text to outputText so downstream nodes can read it before execution
   useEffect(() => {
-    let resolved = nodeData.template;
-    availableVariables.forEach((v) => {
-      resolved = resolved.replace(new RegExp(`@${v.name}`, 'g'), v.value);
-    });
+    const valueMap = new Map(availableVariables.map(v => [v.name, v.value]));
+    const resolved = nodeData.template.replace(/@(\w+)/g, (match, name) => valueMap.get(name) ?? match);
     const outputValue = resolved || null;
     if (outputValue !== nodeData.outputText) {
       updateNodeData(id, { outputText: outputValue });
     }
   }, [nodeData.template, availableVariables, id, updateNodeData, nodeData.outputText]);
+
+  const highlightRef = useRef<HTMLDivElement>(null);
+
+  // Sync highlight overlay scroll with textarea
+  const handleScroll = useCallback(() => {
+    if (textareaRef.current && highlightRef.current) {
+      highlightRef.current.scrollTop = textareaRef.current.scrollTop;
+      highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
+    }
+  }, []);
+
+  // Build highlighted text with blue for resolved, red for unresolved variables
+  const highlightedContent = useMemo((): ReactNode[] => {
+    const availableNames = new Set(availableVariables.map(v => v.name));
+    const pattern = /@(\w+)/g;
+    const parts: ReactNode[] = [];
+    let lastIndex = 0;
+    const matches = localTemplate.matchAll(pattern);
+    for (const match of matches) {
+      const idx = match.index!;
+      if (idx > lastIndex) {
+        parts.push(localTemplate.slice(lastIndex, idx));
+      }
+      const isResolved = availableNames.has(match[1]);
+      parts.push(
+        <mark key={idx} className={`${isResolved ? "bg-blue-400/30" : "bg-red-400/50"} text-transparent rounded-sm px-0.5 -mx-0.5 py-0.5`}>{match[0]}</mark>
+      );
+      lastIndex = idx + match[0].length;
+    }
+    if (lastIndex < localTemplate.length) {
+      parts.push(localTemplate.slice(lastIndex));
+    }
+    return parts;
+  }, [localTemplate, availableVariables]);
 
   const handleFocus = useCallback(() => {
     setIsEditing(true);
@@ -160,35 +182,12 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
     setTimeout(() => closeAutocomplete(), 200);
   }, [id, localTemplate, nodeData.template, updateNodeData, closeAutocomplete]);
 
-  const handleOpenModal = useCallback(() => {
-    setIsModalOpenLocal(true);
-    incrementModalCount();
-  }, [incrementModalCount]);
-
-  const handleCloseModal = useCallback(() => {
-    setIsModalOpenLocal(false);
-    decrementModalCount();
-  }, [decrementModalCount]);
-
-  const handleSubmitModal = useCallback(
-    (template: string) => {
-      updateNodeData(id, { template });
-    },
-    [id, updateNodeData]
-  );
-
   return (
     <>
       <BaseNode
         id={id}
-        title="Prompt Constructor"
-        customTitle={nodeData.customTitle}
-        comment={nodeData.comment}
-        onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-        onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
-        onExpand={handleOpenModal}
         selected={selected}
-        commentNavigation={commentNavigation ?? undefined}
+        fullBleed
       >
         {/* Text input handle */}
         <Handle
@@ -196,69 +195,79 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
           position={Position.Left}
           id="text"
           data-handletype="text"
+          style={{ zIndex: 10 }}
         />
 
-        <div className="relative flex flex-col gap-2 flex-1">
-          {/* Warning badge for unresolved variables */}
-          {unresolvedVars.length > 0 && (
-            <div className="px-2 py-1 bg-amber-900/30 border border-amber-700/50 rounded text-[10px] text-amber-400">
-              <span className="font-semibold">Unresolved:</span> {unresolvedVars.map(v => `@${v}`).join(', ')}
+        {/* Template textarea with highlight overlay for @variables */}
+        <div className="relative w-full h-full">
+          {/* Highlight overlay - blue for resolved, red for unresolved @vars */}
+          {highlightedContent.length > 0 && (
+            <div
+              ref={highlightRef}
+              className={`absolute inset-0 p-3 text-xs leading-relaxed text-transparent bg-neutral-800 rounded-lg overflow-hidden whitespace-pre-wrap break-words pointer-events-none ${availableVariables.length > 0 || unresolvedVars.length > 0 ? "pb-7" : ""}`}
+              aria-hidden="true"
+            >
+              {highlightedContent}
             </div>
           )}
+          <textarea
+            ref={textareaRef}
+            value={localTemplate}
+            onChange={handleChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            onScroll={handleScroll}
+            placeholder="Type @ to insert variables..."
+            className={`nodrag nopan nowheel relative w-full h-full p-3 text-xs leading-relaxed text-neutral-100 rounded-lg resize-none focus:outline-none placeholder:text-neutral-500 ${highlightedContent.length > 0 ? "bg-transparent" : "bg-neutral-800"} ${availableVariables.length > 0 || unresolvedVars.length > 0 ? "pb-7" : ""}`}
+            title={resolvedPreview ? `Preview: ${resolvedPreview}` : undefined}
+          />
 
-          {/* Template textarea with autocomplete */}
-          <div className="relative flex-1 flex flex-col">
-            <textarea
-              ref={textareaRef}
-              value={localTemplate}
-              onChange={handleChange}
-              onFocus={handleFocus}
-              onBlur={handleBlur}
-              onKeyDown={handleKeyDown}
-              placeholder="Type @ to insert variables..."
-              className="nodrag nopan nowheel w-full flex-1 min-h-[70px] p-2 text-xs leading-relaxed text-neutral-100 border border-neutral-700 rounded bg-neutral-900/50 resize-none focus:outline-none focus:ring-1 focus:ring-neutral-600 focus:border-neutral-600 placeholder:text-neutral-500"
-              title={resolvedPreview ? `Preview: ${resolvedPreview}` : undefined}
-            />
-
-            {/* Autocomplete dropdown */}
-            {showAutocomplete && filteredAutocompleteVars.length > 0 && (
-              <div
-                className="absolute z-10 bg-neutral-800 border border-neutral-600 rounded shadow-xl max-h-40 overflow-y-auto"
-                style={{
-                  top: autocompletePosition.top,
-                  left: autocompletePosition.left,
-                }}
-              >
-                {filteredAutocompleteVars.map((variable, index) => (
-                  <button
-                    key={variable.nodeId}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      handleAutocompleteSelect(variable.name);
-                    }}
-                    className={`w-full px-3 py-2 text-left text-[11px] flex flex-col gap-0.5 transition-colors ${
-                      index === selectedAutocompleteIndex
-                        ? "bg-neutral-700 text-neutral-100"
-                        : "text-neutral-300 hover:bg-neutral-700"
-                    }`}
-                  >
-                    <div className="font-medium text-blue-400">@{variable.name}</div>
-                    <div className="text-neutral-500 truncate max-w-[200px]">
-                      {variable.value || "(empty)"}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Available variables info */}
-          {availableVariables.length > 0 && (
-            <div className="text-[10px] text-neutral-500 px-2">
-              Available: {availableVariables.map(v => `@${v.name}`).join(', ')}
+          {/* Autocomplete dropdown */}
+          {showAutocomplete && filteredAutocompleteVars.length > 0 && (
+            <div
+              className="absolute z-20 bg-neutral-800 border border-neutral-600 rounded shadow-xl max-h-40 overflow-y-auto"
+              style={{
+                top: autocompletePosition.top,
+                left: autocompletePosition.left,
+              }}
+            >
+              {filteredAutocompleteVars.map((variable, index) => (
+                <button
+                  key={variable.nodeId}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleAutocompleteSelect(variable.name);
+                  }}
+                  className={`w-full px-3 py-2 text-left text-[11px] flex flex-col gap-0.5 transition-colors ${
+                    index === selectedAutocompleteIndex
+                      ? "bg-neutral-700 text-neutral-100"
+                      : "text-neutral-300 hover:bg-neutral-700"
+                  }`}
+                >
+                  <div className="font-medium text-blue-400">@{variable.name}</div>
+                  <div className="text-neutral-500 truncate max-w-[200px]">
+                    {variable.value || "(empty)"}
+                  </div>
+                </button>
+              ))}
             </div>
           )}
         </div>
+
+        {/* Footer - available vars + unresolved warning */}
+        {(availableVariables.length > 0 || unresolvedVars.length > 0) && (
+          <div className="absolute bottom-0 left-0 right-0 z-10 px-3 py-1.5 bg-neutral-900/80 backdrop-blur-sm rounded-b-lg text-[10px] pointer-events-none flex items-center justify-between gap-2">
+            <span className="text-neutral-500 truncate">
+              {availableVariables.length > 0 ? `Available: ${availableVariables.map(v => `@${v.name}`).join(', ')}` : ''}
+            </span>
+            {unresolvedVars.length > 0 && (
+              <span className="text-red-400 whitespace-nowrap">
+                {unresolvedVars.length} {unresolvedVars.length === 1 ? 'var' : 'vars'} missing
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Text output handle */}
         <Handle
@@ -266,20 +275,9 @@ export function PromptConstructorNode({ id, data, selected }: NodeProps<PromptCo
           position={Position.Right}
           id="text"
           data-handletype="text"
+          style={{ zIndex: 10 }}
         />
       </BaseNode>
-
-      {/* Prompt Constructor Editor Modal - rendered via portal to escape React Flow stacking context */}
-      {isModalOpenLocal && createPortal(
-        <PromptConstructorEditorModal
-          isOpen={isModalOpenLocal}
-          initialTemplate={nodeData.template}
-          availableVariables={availableVariables}
-          onSubmit={handleSubmitModal}
-          onClose={handleCloseModal}
-        />,
-        document.body
-      )}
     </>
   );
 }
