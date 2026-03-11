@@ -17,6 +17,7 @@ const PROVIDER_HEADER_MAP: Record<ProviderType, string> = {
   kie: "X-Kie-Key",
   wavespeed: "X-WaveSpeed-Key",
   openai: "X-OpenAI-API-Key",
+  anthropic: "X-Anthropic-API-Key",
   worldlabs: "X-WorldLabs-Key",
 };
 
@@ -65,6 +66,11 @@ export function buildLlmHeaders(
     const openaiConfig = providerSettings.providers.openai;
     if (openaiConfig?.apiKey) {
       headers["X-OpenAI-API-Key"] = openaiConfig.apiKey;
+    }
+  } else if (llmProvider === "anthropic") {
+    const anthropicConfig = providerSettings.providers.anthropic;
+    if (anthropicConfig?.apiKey) {
+      headers["X-Anthropic-API-Key"] = anthropicConfig.apiKey;
     }
   }
 

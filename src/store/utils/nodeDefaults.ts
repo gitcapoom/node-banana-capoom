@@ -1,5 +1,6 @@
 import {
   NodeType,
+  ModelType,
   ImageInputNodeData,
   AudioInputNodeData,
   AnnotationNodeData,
@@ -20,6 +21,9 @@ import {
   EaseCurveNodeData,
   VideoTrimNodeData,
   VideoFrameGrabNodeData,
+  RouterNodeData,
+  SwitchNodeData,
+  ConditionalSwitchNodeData,
   GLBViewerNodeData,
   AppleSharpNodeData,
   SpzViewerNodeData,
@@ -31,6 +35,7 @@ import {
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
+  MODEL_DISPLAY_NAMES,
 } from "@/types";
 import { loadGenerateImageDefaults, loadNodeDefaults } from "./localStorage";
 
@@ -58,6 +63,9 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   easeCurve: { width: 340, height: 480 },
   videoTrim: { width: 360, height: 360 },
   videoFrameGrab: { width: 320, height: 320 },
+  router: { width: 200, height: 80 },
+  switch: { width: 220, height: 120 },
+  conditionalSwitch: { width: 260, height: 180 },
   glbViewer: { width: 360, height: 380 },
   appleSharp: { width: 300, height: 320 },
   spzViewer: { width: 300, height: 280 },
@@ -145,7 +153,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
       if (nodeDefaults.generateImage?.selectedModel) {
         selectedModel = nodeDefaults.generateImage.selectedModel;
       } else {
-        const modelDisplayName = legacyDefaults.model === "nano-banana" ? "Nano Banana" : "Nano Banana Pro";
+        const modelDisplayName = MODEL_DISPLAY_NAMES[legacyDefaults.model as ModelType] || legacyDefaults.model;
         selectedModel = {
           provider: "gemini",
           modelId: legacyDefaults.model,
@@ -157,6 +165,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
       const aspectRatio = nodeDefaults.generateImage?.aspectRatio ?? legacyDefaults.aspectRatio;
       const resolution = nodeDefaults.generateImage?.resolution ?? legacyDefaults.resolution;
       const useGoogleSearch = nodeDefaults.generateImage?.useGoogleSearch ?? legacyDefaults.useGoogleSearch;
+      const useImageSearch = nodeDefaults.generateImage?.useImageSearch ?? legacyDefaults.useImageSearch;
 
       return {
         inputImages: [],
@@ -167,6 +176,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         model: legacyDefaults.model, // Keep legacy model field for backward compat
         selectedModel,
         useGoogleSearch,
+        useImageSearch,
         status: "idle",
         error: null,
         imageHistory: [],
@@ -242,6 +252,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
           resolution: "1K",
           model: "nano-banana-pro",
           useGoogleSearch: false,
+          useImageSearch: false,
         },
         childNodeIds: [],
         gridRows: 2,
@@ -305,6 +316,28 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         status: "idle",
         error: null,
       } as VideoFrameGrabNodeData;
+    case "router":
+      return {} as RouterNodeData;
+    case "switch":
+      return {
+        inputType: null,
+        switches: [
+          { id: Math.random().toString(36).slice(2, 9), name: "Output 1", enabled: true }
+        ]
+      } as SwitchNodeData;
+    case "conditionalSwitch":
+      return {
+        incomingText: null,
+        rules: [
+          {
+            id: "rule-" + Math.random().toString(36).slice(2, 9),
+            value: "",
+            mode: "contains",
+            label: "Rule 1",
+            isMatched: false,
+          }
+        ]
+      } as ConditionalSwitchNodeData;
     case "glbViewer":
       return {
         glbUrl: null,

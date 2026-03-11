@@ -43,6 +43,9 @@ export type NodeType =
   | "easeCurve"
   | "videoTrim"
   | "videoFrameGrab"
+  | "router"
+  | "switch"
+  | "conditionalSwitch"
   | "generate3d"
   | "glbViewer"
   | "appleSharp"
@@ -191,9 +194,11 @@ export interface NanoBananaNodeData extends BaseNodeData {
   resolution: Resolution; // Only used by Nano Banana Pro
   model: ModelType;
   selectedModel?: SelectedModel; // Multi-provider model selection (optional for backward compat)
-  useGoogleSearch: boolean; // Only available for Nano Banana Pro
+  useGoogleSearch: boolean; // Only available for Nano Banana Pro and Nano Banana 2
+  useImageSearch: boolean; // Only available for Nano Banana 2
   parameters?: Record<string, unknown>; // Model-specific parameters for external providers
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
   imageHistory: CarouselImageItem[]; // Carousel history (IDs only)
@@ -213,6 +218,7 @@ export interface GenerateVideoNodeData extends BaseNodeData {
   selectedModel?: SelectedModel; // Required for video generation (no legacy fallback)
   parameters?: Record<string, unknown>; // Model-specific parameters
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
   videoHistory: CarouselVideoItem[]; // Carousel history (IDs only)
@@ -233,6 +239,7 @@ export interface Generate3DNodeData extends BaseNodeData {
   selectedModel?: SelectedModel;
   parameters?: Record<string, unknown>;
   inputSchema?: ModelInputDef[];
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
   lastGenerationCost?: number | null; // Cost of the last generation run
@@ -323,6 +330,7 @@ export interface GenerateAudioNodeData extends BaseNodeData {
   selectedModel?: SelectedModel; // Required for audio generation
   parameters?: Record<string, unknown>; // Model-specific parameters (voice, speed, etc.)
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
   audioHistory: CarouselAudioItem[]; // Carousel history (IDs only)
@@ -344,6 +352,7 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   model: LLMModelType;
   temperature: number;
   maxTokens: number;
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
   lastGenerationCost?: number | null; // Cost of the last generation run
@@ -441,6 +450,50 @@ export interface VideoFrameGrabNodeData extends BaseNodeData {
 }
 
 /**
+ * Router node - pure passthrough routing node with dynamic multi-type handles
+ */
+export interface RouterNodeData extends BaseNodeData {
+  // No internal state - all routing is derived from edge connections
+}
+
+/**
+ * Switch node - toggle-controlled routing with named outputs
+ */
+export interface SwitchNodeData extends BaseNodeData {
+  inputType: HandleType | null;  // Derived from connected input edge, null when disconnected
+  switches: Array<{
+    id: string;        // Unique identifier for handle mapping
+    name: string;      // User-editable label
+    enabled: boolean;  // Toggle state
+  }>;
+}
+
+/**
+ * Match mode for conditional switch rules
+ */
+export type MatchMode = "exact" | "contains" | "starts-with" | "ends-with";
+
+/**
+ * Conditional switch rule for text-based routing
+ */
+export interface ConditionalSwitchRule {
+  id: string;           // Unique handle ID, prefixed with "rule-" to avoid collision with reserved "default" keyword
+  value: string;        // Comma-separated match values
+  mode: MatchMode;      // Match strategy
+  label: string;        // User-editable display name
+  isMatched: boolean;   // Computed match state
+}
+
+/**
+ * Conditional Switch node - text-based routing with multi-mode matching
+ */
+export interface ConditionalSwitchNodeData extends BaseNodeData {
+  incomingText: string | null;  // Upstream text for evaluation and display
+  rules: ConditionalSwitchRule[]; // User-defined rules
+  evaluationPaused?: boolean;   // When true, skips rule evaluation and downstream dimming
+}
+
+/**
  * Split Grid node - splits image into grid cells for parallel processing
  */
 export interface SplitGridNodeData extends BaseNodeData {
@@ -453,6 +506,7 @@ export interface SplitGridNodeData extends BaseNodeData {
     resolution: Resolution;
     model: ModelType;
     useGoogleSearch: boolean;
+    useImageSearch: boolean;
   };
   childNodeIds: Array<{
     imageInput: string;
@@ -541,6 +595,9 @@ export type WorkflowNodeData =
   | EaseCurveNodeData
   | VideoTrimNodeData
   | VideoFrameGrabNodeData
+  | RouterNodeData
+  | SwitchNodeData
+  | ConditionalSwitchNodeData
   | GLBViewerNodeData
   | AppleSharpNodeData
   | SpzViewerNodeData
@@ -574,6 +631,7 @@ export interface GenerateImageNodeDefaults {
   aspectRatio?: string;
   resolution?: string;
   useGoogleSearch?: boolean;
+  useImageSearch?: boolean;
 }
 
 export interface GenerateVideoNodeDefaults {

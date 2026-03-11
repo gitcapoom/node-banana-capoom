@@ -79,9 +79,6 @@ export function AppleSharpNode({
     <BaseNode
       id={id}
       selected={selected}
-      title="Apple SHARP"
-      commentNavigation={commentNavigation || undefined}
-      onRun={handleRun}
       isExecuting={isRunning}
     >
       {/* Input Handle - Image */}

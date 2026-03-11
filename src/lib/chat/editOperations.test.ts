@@ -24,6 +24,7 @@ vi.mock("@/store/utils/nodeDefaults", () => ({
           resolution: "1K",
           model: "nano-banana",
           useGoogleSearch: false,
+          useImageSearch: false,
           status: "idle",
           error: null,
           imageHistory: [],

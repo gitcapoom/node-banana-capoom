@@ -4,7 +4,6 @@ import React, { useCallback, useState, useEffect, useMemo } from "react";
 import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { ProviderBadge } from "./ProviderBadge";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { GenerateAudioNodeData, ProviderType, SelectedModel, ModelInputDef } from "@/types";
@@ -12,16 +11,27 @@ import { ProviderModel } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useAudioVisualization } from "@/hooks/useAudioVisualization";
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
+import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { InlineParameterPanel } from "./InlineParameterPanel";
+import { browseRegistry } from "@/utils/browseRegistry";
 
 type GenerateAudioNodeType = Node<GenerateAudioNodeData, "generateAudio">;
 
 export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudioNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   const [isBrowseDialogOpen, setIsBrowseDialogOpen] = useState(false);
   const [isLoadingCarouselAudio, setIsLoadingCarouselAudio] = useState(false);
+
+  // Inline parameters infrastructure
+  const { inlineParametersEnabled } = useInlineParameters();
+
+  // Register browse callback for floating header button
+  useEffect(() => {
+    browseRegistry.register(id, () => setIsBrowseDialogOpen(true));
+    return () => { browseRegistry.unregister(id); };
+  }, [id]);
 
   // Get the current selected provider (default to fal)
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "fal";
@@ -179,9 +189,6 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
       provider: model.provider,
       modelId: model.id,
       displayName: model.name,
-      ...(model.pricing && {
-        pricing: { type: model.pricing.type, amount: model.pricing.amount },
-      }),
     };
     updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
     setIsBrowseDialogOpen(false);
@@ -194,20 +201,12 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
     return "Generate Audio";
   }, [nodeData.selectedModel?.displayName, nodeData.selectedModel?.modelId]);
 
-  // Provider badge as title prefix
-  const titlePrefix = useMemo(() => (
-    <ProviderBadge provider={currentProvider} />
-  ), [currentProvider]);
+  // Inline parameters: compute collapse state and toggle handler
+  const isParamsExpanded = nodeData.parametersExpanded ?? true; // default expanded
 
-  // Header action element - browse button
-  const headerAction = useMemo(() => (
-    <button
-      onClick={() => setIsBrowseDialogOpen(true)}
-      className="nodrag nopan text-[10px] py-0.5 px-1.5 bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
-    >
-      Browse
-    </button>
-  ), []);
+  const handleToggleParams = useCallback(() => {
+    updateNodeData(id, { parametersExpanded: !isParamsExpanded });
+  }, [id, isParamsExpanded, updateNodeData]);
 
   // Dynamic handles based on inputSchema
   const dynamicHandles = useMemo(() => {
@@ -236,24 +235,51 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
     <>
       <BaseNode
         id={id}
-        title={displayTitle}
-        titlePrefix={titlePrefix}
-        headerAction={headerAction}
-        customTitle={nodeData.customTitle}
-        comment={nodeData.comment}
-        onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-        onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
-        onRun={handleRegenerate}
         selected={selected}
+        settingsExpanded={inlineParametersEnabled && isParamsExpanded}
         isExecuting={isRunning}
         hasError={nodeData.status === "error"}
-        commentNavigation={commentNavigation ?? undefined}
         minWidth={300}
         minHeight={250}
-        lastCost={nodeData.lastGenerationCost}
+        settingsPanel={inlineParametersEnabled ? (
+          <InlineParameterPanel
+            expanded={isParamsExpanded}
+            onToggle={handleToggleParams}
+            nodeId={id}
+          >
+            {/* Model selector: Browse button + current model display */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] text-neutral-200 truncate">
+                  {displayTitle}
+                </div>
+                <div className="text-[9px] text-neutral-500">
+                  {currentProvider}
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBrowseDialogOpen(true)}
+                className="nodrag nopan shrink-0 px-2 py-1 text-[10px] bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
+              >
+                Browse
+              </button>
+            </div>
+
+            {/* External provider parameters - reuse ModelParameters component */}
+            {nodeData.selectedModel?.modelId && (
+              <ModelParameters
+                modelId={nodeData.selectedModel.modelId}
+                provider={currentProvider}
+                parameters={nodeData.parameters || {}}
+                onParametersChange={handleParametersChange}
+                onInputsLoaded={handleInputsLoaded}
+              />
+            )}
+          </InlineParameterPanel>
+        ) : undefined}
       >
-        {/* Model parameters */}
-        {nodeData.selectedModel?.modelId && (
+        {/* Model parameters (hidden when inline enabled - shown in panel below) */}
+        {!inlineParametersEnabled && nodeData.selectedModel?.modelId && (
           <ModelParameters
             provider={currentProvider}
             modelId={nodeData.selectedModel.modelId}
@@ -398,6 +424,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
           data-handletype="audio"
           style={{ background: "rgb(167, 139, 250)" }}
         />
+
       </BaseNode>
 
       {/* Browse dialog */}

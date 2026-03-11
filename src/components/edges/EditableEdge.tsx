@@ -10,6 +10,7 @@ import {
 } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { NanoBananaNodeData, WorkflowEdgeData } from "@/types";
+import { getSharedGradientId } from "./SharedEdgeGradients";
 
 interface EdgeData extends WorkflowEdgeData {
   offsetX?: number;
@@ -17,11 +18,17 @@ interface EdgeData extends WorkflowEdgeData {
 }
 
 // Colors for different connection types (dimmed for softer appearance)
-const EDGE_COLORS = {
-  image: "#0d9668", // Dimmed green for image connections
-  prompt: "#2563eb", // Dimmed blue for prompt connections
-  default: "#64748b", // Dimmed gray for unknown
-  pause: "#ea580c", // Dimmed orange for paused edges
+const EDGE_COLORS: Record<string, string> = {
+  image: "#0d9668", // Green for image connections
+  prompt: "#2563eb", // Blue for prompt connections
+  default: "#64748b", // Gray for unknown
+  pause: "#ea580c", // Orange for paused edges
+  reference: "#52525b", // Gray for reference connections
+  video: "#a855f7", // Purple for video connections
+  audio: "#f97316", // Orange for audio connections
+  text: "#2563eb", // Blue for text connections
+  "3d": "#06b6d4", // Cyan for 3D connections
+  easeCurve: "#f59e0b", // Amber for ease curve connections
 };
 
 export function EditableEdge({
@@ -43,50 +50,50 @@ export function EditableEdge({
 }: EdgeProps) {
   const { setEdges } = useReactFlow();
   const edgeStyle = useWorkflowStore((state) => state.edgeStyle);
-  // Subscribe to nodes array to get updates when node data changes
-  const nodes = useWorkflowStore((state) => state.nodes);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Check if any node is selected and if this edge is connected to it
-  const isConnectedToSelection = useMemo(() => {
-    const selectedNodes = nodes.filter((n) => n.selected);
-    if (selectedNodes.length === 0) return false; // No selection, show all dimmed
-
-    // Check if this edge connects to any selected node
+  // Narrow selector: returns boolean, only re-renders when selection relevance changes
+  const isConnectedToSelection = useWorkflowStore((state) => {
+    const selectedNodes = state.nodes.filter((n) => n.selected);
+    if (selectedNodes.length === 0) return false;
     return selectedNodes.some((n) => n.id === source || n.id === target);
-  }, [nodes, source, target]);
+  });
 
   const edgeData = data as EdgeData | undefined;
   const offsetX = edgeData?.offsetX ?? 0;
   const offsetY = edgeData?.offsetY ?? 0;
   const hasPause = edgeData?.hasPause ?? false;
 
-  // Check if target node is a Generate node that's currently loading
-  const isTargetLoading = useMemo(() => {
-    const targetNode = nodes.find((n) => n.id === target);
-    if (targetNode?.type === "nanoBanana") {
-      const nodeData = targetNode.data as NanoBananaNodeData;
-      return nodeData.status === "loading";
-    }
-    return false;
-  }, [target, nodes]);
+  // Narrow selector: only re-renders when target loading status changes
+  const isTargetLoading = useWorkflowStore((state) => {
+    const targetNode = state.nodes.find((n) => n.id === target);
+    if (targetNode?.type !== "nanoBanana") return false;
+    return (targetNode.data as NanoBananaNodeData).status === "loading";
+  });
 
   // Determine edge color based on handle type (orange if paused)
   const edgeColor = useMemo(() => {
     if (hasPause) return EDGE_COLORS.pause;
     // Use source handle to determine color (or target if source is not available)
-    const handleType = sourceHandleId || targetHandleId;
-    if (handleType === "image") return EDGE_COLORS.image;
-    if (handleType === "prompt") return EDGE_COLORS.prompt;
-    return EDGE_COLORS.default;
+    // Strip numeric suffixes (e.g., "image-0" -> "image") for lookup
+    const handleType = sourceHandleId || targetHandleId || "";
+    const normalizedType = handleType.replace(/-\d+$/, "");
+    return EDGE_COLORS[normalizedType] || EDGE_COLORS.default;
   }, [hasPause, sourceHandleId, targetHandleId]);
 
-  // Generate a unique gradient ID based on edge color and selection state
+  // Reference shared gradient by color key + selection state
   const gradientId = useMemo(() => {
-    const colorKey = hasPause ? "pause" : (sourceHandleId || targetHandleId || "default");
+    if (hasPause) {
+      const selectionKey = isConnectedToSelection ? "active" : "dimmed";
+      return getSharedGradientId("pause", selectionKey);
+    }
+    const handleType = sourceHandleId || targetHandleId || "default";
+    const normalizedType = handleType.replace(/-\d+$/, "");
+    // Use the normalized type if it exists in EDGE_COLORS, otherwise fall back to "default"
+    const colorKey = normalizedType in EDGE_COLORS ? normalizedType : "default";
     const selectionKey = isConnectedToSelection ? "active" : "dimmed";
-    return `edge-gradient-${colorKey}-${selectionKey}-${id}`;
-  }, [hasPause, sourceHandleId, targetHandleId, isConnectedToSelection, id]);
+    return getSharedGradientId(colorKey, selectionKey);
+  }, [hasPause, sourceHandleId, targetHandleId, isConnectedToSelection]);
 
   // Calculate the path based on edge style
   const [edgePath, labelX, labelY] = useMemo(() => {
@@ -181,15 +188,6 @@ export function EditableEdge({
 
   return (
     <>
-      {/* SVG gradient definition for bright-dim-bright effect */}
-      <defs>
-        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor={edgeColor} stopOpacity={isConnectedToSelection ? 1 : 0.25} />
-          <stop offset="50%" stopColor={edgeColor} stopOpacity={isConnectedToSelection ? 0.55 : 0.1} />
-          <stop offset="100%" stopColor={edgeColor} stopOpacity={isConnectedToSelection ? 1 : 0.25} />
-        </linearGradient>
-      </defs>
-
       <BaseEdge
         id={id}
         path={edgePath}
@@ -206,18 +204,25 @@ export function EditableEdge({
       {/* Animated pulse overlay when target is loading */}
       {isTargetLoading && (
         <>
-          {/* Glow effect behind the pulse */}
+          {/* Outer glow — replaces blur(6px) filter for better perf on Windows */}
           <path
             d={edgePath}
             fill="none"
             stroke={`url(#${gradientId})`}
-            strokeWidth={10}
+            strokeWidth={20}
             strokeLinecap="round"
             strokeLinejoin="round"
-            style={{
-              opacity: 0.2,
-              filter: "blur(6px)",
-            }}
+            opacity={0.06}
+          />
+          {/* Inner glow */}
+          <path
+            d={edgePath}
+            fill="none"
+            stroke={`url(#${gradientId})`}
+            strokeWidth={12}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity={0.12}
           />
           {/* Animated flowing pulse using stroke-dasharray */}
           <path

@@ -8,11 +8,13 @@ import { EnvStatusResponse } from "@/app/api/env-status/route";
 import { loadNodeDefaults, saveNodeDefaults } from "@/store/utils/localStorage";
 import { ProviderModel } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
+import { useInlineParameters } from "@/hooks/useInlineParameters";
 
 // LLM provider and model options (mirrored from LLMGenerateNode)
 const LLM_PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: "google", label: "Google" },
   { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
 ];
 
 const LLM_MODELS: Record<LLMProvider, { value: LLMModelType; label: string }[]> = {
@@ -20,10 +22,16 @@ const LLM_MODELS: Record<LLMProvider, { value: LLMModelType; label: string }[]> 
     { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
     { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
     { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro" },
+    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
   ],
   openai: [
     { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
     { value: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
+  ],
+  anthropic: [
+    { value: "claude-sonnet-4.5", label: "Claude Sonnet 4.5" },
+    { value: "claude-haiku-4.5", label: "Claude Haiku 4.5" },
+    { value: "claude-opus-4.6", label: "Claude Opus 4.6" },
   ],
 };
 
@@ -67,8 +75,6 @@ const getProviderIcon = (provider: ProviderType) => {
       return <FalIcon />;
     case "wavespeed":
       return <WaveSpeedIcon />;
-    case "worldlabs":
-      return null;
     default:
       return null;
   }
@@ -135,6 +141,9 @@ export function ProjectSetupModal({
     updateCanvasNavigationSettings,
   } = useWorkflowStore();
 
+  // Inline parameters hook
+  const { inlineParametersEnabled, setInlineParameters } = useInlineParameters();
+
   // Tab state
   const [activeTab, setActiveTab] = useState<"project" | "providers" | "nodeDefaults" | "canvas">("project");
 
@@ -151,6 +160,7 @@ export function ProjectSetupModal({
   const [showApiKey, setShowApiKey] = useState<Record<ProviderType, boolean>>({
     gemini: false,
     openai: false,
+    anthropic: false,
     replicate: false,
     fal: false,
     kie: false,
@@ -160,6 +170,7 @@ export function ProjectSetupModal({
   const [overrideActive, setOverrideActive] = useState<Record<ProviderType, boolean>>({
     gemini: false,
     openai: false,
+    anthropic: false,
     replicate: false,
     fal: false,
     kie: false,
@@ -196,11 +207,12 @@ export function ProjectSetupModal({
 
       // Sync local providers state
       setLocalProviders(providerSettings);
-      setShowApiKey({ gemini: false, openai: false, replicate: false, fal: false, kie: false, wavespeed: false, worldlabs: false });
+      setShowApiKey({ gemini: false, openai: false, anthropic: false, replicate: false, fal: false, kie: false, wavespeed: false, worldlabs: false });
       // Initialize override as active if user already has a key set
       setOverrideActive({
         gemini: !!providerSettings.providers.gemini?.apiKey,
         openai: !!providerSettings.providers.openai?.apiKey,
+        anthropic: !!providerSettings.providers.anthropic?.apiKey,
         replicate: !!providerSettings.providers.replicate?.apiKey,
         fal: !!providerSettings.providers.fal?.apiKey,
         kie: !!providerSettings.providers.kie?.apiKey,
@@ -303,7 +315,7 @@ export function ProjectSetupModal({
 
   const handleSaveProviders = () => {
     // Save each provider's settings
-    const providerIds: ProviderType[] = ["gemini", "openai", "replicate", "fal", "kie", "wavespeed", "worldlabs"];
+    const providerIds: ProviderType[] = ["gemini", "openai", "anthropic", "replicate", "fal", "kie", "wavespeed"];
     for (const providerId of providerIds) {
       const local = localProviders.providers[providerId];
       const current = providerSettings.providers[providerId];
@@ -372,39 +384,48 @@ export function ProjectSetupModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      onWheelCapture={(e) => e.stopPropagation()}
+    >
       <div
-        className="bg-neutral-800 rounded-lg w-[480px] border border-neutral-700 shadow-xl flex flex-col max-h-[80vh]"
+        className="bg-neutral-800 rounded-xl w-[520px] border border-neutral-700 shadow-2xl overflow-clip flex flex-col max-h-[80vh]"
         onKeyDown={handleKeyDown}
       >
-        <div className="px-6 pt-6 pb-0 shrink-0">
-          <h2 className="text-lg font-semibold text-neutral-100 mb-4">
-            {mode === "new" ? "New Project" : "Project Settings"}
-          </h2>
+        <div className="px-8 pt-8 pb-0 shrink-0">
+          <div className="flex items-center gap-2 mb-5">
+            <img src="/banana_icon.png" alt="" className="w-6 h-6" />
+            <h2 className="text-xl font-medium text-neutral-100">
+              {mode === "new" ? "New Project" : "Project Settings"}
+            </h2>
+          </div>
 
           {/* Tab Bar */}
-          <div className="flex gap-4 border-b border-neutral-700">
+          <div className="flex gap-1.5 p-1 bg-neutral-900/50 rounded-lg">
           <button
             onClick={() => setActiveTab("project")}
-            className={`pb-2 text-sm ${activeTab === "project" ? "text-neutral-100 border-b-2 border-white" : "text-neutral-400"}`}
+            className={`px-3 py-1.5 text-sm rounded-md transition-all duration-150 ${activeTab === "project" ? "bg-neutral-700 text-neutral-100 font-medium" : "text-neutral-400 hover:text-neutral-300 hover:bg-neutral-800/50"}`}
           >
             Project
           </button>
           <button
             onClick={() => setActiveTab("providers")}
-            className={`pb-2 text-sm ${activeTab === "providers" ? "text-neutral-100 border-b-2 border-white" : "text-neutral-400"}`}
+            className={`px-3 py-1.5 text-sm rounded-md transition-all duration-150 ${activeTab === "providers" ? "bg-neutral-700 text-neutral-100 font-medium" : "text-neutral-400 hover:text-neutral-300 hover:bg-neutral-800/50"}`}
           >
             Providers
           </button>
           <button
             onClick={() => setActiveTab("nodeDefaults")}
-            className={`pb-2 text-sm ${activeTab === "nodeDefaults" ? "text-neutral-100 border-b-2 border-white" : "text-neutral-400"}`}
+            className={`px-3 py-1.5 text-sm rounded-md transition-all duration-150 ${activeTab === "nodeDefaults" ? "bg-neutral-700 text-neutral-100 font-medium" : "text-neutral-400 hover:text-neutral-300 hover:bg-neutral-800/50"}`}
           >
             Node Defaults
           </button>
           <button
             onClick={() => setActiveTab("canvas")}
-            className={`pb-2 text-sm ${activeTab === "canvas" ? "text-neutral-100 border-b-2 border-white" : "text-neutral-400"}`}
+            className={`px-3 py-1.5 text-sm rounded-md transition-all duration-150 ${activeTab === "canvas" ? "bg-neutral-700 text-neutral-100 font-medium" : "text-neutral-400 hover:text-neutral-300 hover:bg-neutral-800/50"}`}
           >
             Canvas
           </button>
@@ -412,7 +433,7 @@ export function ProjectSetupModal({
         </div>
 
         {/* Scrollable tab content area */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-8 py-5">
 
         {/* Project Tab Content */}
         {activeTab === "project" && (
@@ -427,7 +448,7 @@ export function ProjectSetupModal({
                 onChange={(e) => setName(e.target.value)}
                 placeholder="my-project"
                 autoFocus
-                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
+                className="w-full px-3 py-2 bg-neutral-900 border border-neutral-600 rounded-lg text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
               />
             </div>
 
@@ -441,36 +462,59 @@ export function ProjectSetupModal({
                   value={directoryPath}
                   onChange={(e) => setDirectoryPath(e.target.value)}
                   placeholder="/Users/username/projects/my-project"
-                  className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
+                  className="flex-1 px-3 py-2 bg-neutral-900 border border-neutral-600 rounded-lg text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
                 />
                 <button
                   type="button"
                   onClick={handleBrowse}
                   disabled={isBrowsing}
-                  className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-700 disabled:opacity-50 text-neutral-200 text-sm rounded transition-colors"
+                  className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-700 disabled:opacity-50 text-neutral-200 text-sm rounded-lg transition-colors"
                 >
                   {isBrowsing ? "..." : "Browse"}
                 </button>
               </div>
-              <p className="text-xs text-neutral-500 mt-1">
+              <p className="text-xs text-neutral-400 mt-1">
                 Workflow files and images will be saved here. Subfolders for inputs and generations will be auto-created.
               </p>
             </div>
 
             <div className="pt-2 border-t border-neutral-700">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={!externalStorage}
-                  onChange={(e) => setExternalStorage(!e.target.checked)}
-                  className="w-4 h-4 rounded border-neutral-600 bg-neutral-900 text-blue-500 focus:ring-blue-500 focus:ring-offset-neutral-800"
-                />
+              <label className="flex items-center justify-between gap-3 cursor-pointer">
                 <div>
                   <span className="text-sm text-neutral-200">Embed images as base64</span>
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-xs text-neutral-400">
                     Embeds all images in workflow, larger workflow files. Can hit memory limits on very large workflows.
                   </p>
                 </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!externalStorage}
+                  onClick={() => setExternalStorage(externalStorage ? false : true)}
+                  className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${!externalStorage ? "bg-blue-500" : "bg-neutral-600"}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${!externalStorage ? "translate-x-[18px]" : "translate-x-[3px]"}`} />
+                </button>
+              </label>
+            </div>
+
+            <div className="pt-2 border-t border-neutral-700">
+              <label className="flex items-center justify-between gap-3 cursor-pointer">
+                <div>
+                  <span className="text-sm text-neutral-200">Show model settings on nodes</span>
+                  <p className="text-xs text-neutral-400">
+                    Show model parameters inside generation nodes instead of the side panel
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={inlineParametersEnabled}
+                  onClick={() => setInlineParameters(!inlineParametersEnabled)}
+                  className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${inlineParametersEnabled ? "bg-blue-500" : "bg-neutral-600"}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${inlineParametersEnabled ? "translate-x-[18px]" : "translate-x-[3px]"}`} />
+                </button>
               </label>
             </div>
 
@@ -503,7 +547,7 @@ export function ProjectSetupModal({
                       value={localProviders.providers.gemini?.apiKey || ""}
                       onChange={(e) => updateLocalProvider("gemini", { apiKey: e.target.value || null })}
                       placeholder="AIza..."
-                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
+                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
                     />
                     <button
                       type="button"
@@ -551,7 +595,7 @@ export function ProjectSetupModal({
                       value={localProviders.providers.openai?.apiKey || ""}
                       onChange={(e) => updateLocalProvider("openai", { apiKey: e.target.value || null })}
                       placeholder="sk-..."
-                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
+                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
                     />
                     <button
                       type="button"
@@ -566,6 +610,54 @@ export function ProjectSetupModal({
                         onClick={() => {
                           setOverrideActive((prev) => ({ ...prev, openai: false }));
                           updateLocalProvider("openai", { apiKey: null });
+                        }}
+                        className="text-xs text-neutral-500 hover:text-neutral-300"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Anthropic Provider */}
+            <div className="p-3 bg-neutral-900 rounded-lg border border-neutral-700">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-neutral-100">Anthropic</span>
+                {envStatus?.anthropic && !overrideActive.anthropic ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-green-400">Configured via .env</span>
+                    <button
+                      type="button"
+                      onClick={() => setOverrideActive((prev) => ({ ...prev, anthropic: true }))}
+                      className="px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200 transition-colors"
+                    >
+                      Override
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type={showApiKey.anthropic ? "text" : "password"}
+                      value={localProviders.providers.anthropic?.apiKey || ""}
+                      onChange={(e) => updateLocalProvider("anthropic", { apiKey: e.target.value || null })}
+                      placeholder="sk-ant-..."
+                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey((prev) => ({ ...prev, anthropic: !prev.anthropic }))}
+                      className="text-xs text-neutral-400 hover:text-neutral-200"
+                    >
+                      {showApiKey.anthropic ? "Hide" : "Show"}
+                    </button>
+                    {envStatus?.anthropic && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOverrideActive((prev) => ({ ...prev, anthropic: false }));
+                          updateLocalProvider("anthropic", { apiKey: null });
                         }}
                         className="text-xs text-neutral-500 hover:text-neutral-300"
                       >
@@ -599,7 +691,7 @@ export function ProjectSetupModal({
                       value={localProviders.providers.replicate?.apiKey || ""}
                       onChange={(e) => updateLocalProvider("replicate", { apiKey: e.target.value || null })}
                       placeholder="r8_..."
-                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
+                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
                     />
                     <button
                       type="button"
@@ -647,7 +739,7 @@ export function ProjectSetupModal({
                       value={localProviders.providers.fal?.apiKey || ""}
                       onChange={(e) => updateLocalProvider("fal", { apiKey: e.target.value || null })}
                       placeholder="..."
-                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
+                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
                     />
                     <button
                       type="button"
@@ -676,16 +768,10 @@ export function ProjectSetupModal({
             {/* Kie.ai Provider */}
             <div className="p-3 bg-neutral-900 rounded-lg border border-neutral-700">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <svg className="w-4 h-4 text-orange-400" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-                  </svg>
-                  <span className="text-sm font-medium text-neutral-100">Kie.ai</span>
-                  <span className="text-xs text-neutral-500">(Sora, Veo, Kling, etc.)</span>
-                </div>
+                <span className="text-sm font-medium text-neutral-100">Kie.ai</span>
                 {envStatus?.kie && !overrideActive.kie ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-green-400">✓ From .env</span>
+                    <span className="text-xs text-green-400">Configured via .env</span>
                     <button
                       type="button"
                       onClick={() => setOverrideActive((prev) => ({ ...prev, kie: true }))}
@@ -701,7 +787,7 @@ export function ProjectSetupModal({
                       value={localProviders.providers.kie?.apiKey || ""}
                       onChange={(e) => updateLocalProvider("kie", { apiKey: e.target.value || null })}
                       placeholder="..."
-                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
+                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
                     />
                     <button
                       type="button"
@@ -749,7 +835,7 @@ export function ProjectSetupModal({
                       value={localProviders.providers.wavespeed?.apiKey || ""}
                       onChange={(e) => updateLocalProvider("wavespeed", { apiKey: e.target.value || null })}
                       placeholder="..."
-                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
+                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded-lg text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
                     />
                     <button
                       type="button"
@@ -775,55 +861,7 @@ export function ProjectSetupModal({
               </div>
             </div>
 
-            {/* World Labs */}
-            <div className="p-3 bg-neutral-900 rounded-lg border border-neutral-700">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-neutral-100">World Labs</span>
-                {envStatus?.worldlabs && !overrideActive.worldlabs ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-green-400">Configured via .env</span>
-                    <button
-                      type="button"
-                      onClick={() => setOverrideActive((prev) => ({ ...prev, worldlabs: true }))}
-                      className="px-2 py-1 text-xs text-neutral-400 hover:text-neutral-200 transition-colors"
-                    >
-                      Override
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type={showApiKey.worldlabs ? "text" : "password"}
-                      value={localProviders.providers.worldlabs?.apiKey || ""}
-                      onChange={(e) => updateLocalProvider("worldlabs", { apiKey: e.target.value || null })}
-                      placeholder="..."
-                      className="w-48 px-2 py-1 bg-neutral-800 border border-neutral-600 rounded text-neutral-100 text-xs focus:outline-none focus:border-neutral-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowApiKey((prev) => ({ ...prev, worldlabs: !prev.worldlabs }))}
-                      className="text-xs text-neutral-400 hover:text-neutral-200"
-                    >
-                      {showApiKey.worldlabs ? "Hide" : "Show"}
-                    </button>
-                    {envStatus?.worldlabs && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOverrideActive((prev) => ({ ...prev, worldlabs: false }));
-                          updateLocalProvider("worldlabs", { apiKey: null });
-                        }}
-                        className="text-xs text-neutral-500 hover:text-neutral-300"
-                      >
-                        Cancel
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <p className="text-xs text-neutral-500 mt-2">
+            <p className="text-xs text-neutral-400 mt-2">
               Add API keys via <code className="px-1 py-0.5 bg-neutral-800 rounded">.env.local</code> for better security. Keys added here override .env and are stored in your browser.
             </p>
           </div>
@@ -865,7 +903,7 @@ export function ProjectSetupModal({
                     </>
                   ) : (
                     <>
-                      <span className="text-xs text-neutral-500">System default (Gemini nano-banana-pro)</span>
+                      <span className="text-xs text-neutral-400">System default (Gemini nano-banana-pro)</span>
                       <button
                         type="button"
                         onClick={() => setShowImageModelDialog(true)}
@@ -912,7 +950,7 @@ export function ProjectSetupModal({
                     </>
                   ) : (
                     <>
-                      <span className="text-xs text-neutral-500">None set (select on first use)</span>
+                      <span className="text-xs text-neutral-400">None set (select on first use)</span>
                       <button
                         type="button"
                         onClick={() => setShowVideoModelDialog(true)}
@@ -946,7 +984,7 @@ export function ProjectSetupModal({
                 </div>
 
                 {!localNodeDefaults.llm ? (
-                  <p className="text-xs text-neutral-500">Using system defaults (Google Gemini 3 Flash)</p>
+                  <p className="text-xs text-neutral-400">Using system defaults (Google Gemini 3 Flash)</p>
                 ) : null}
 
                 {/* Provider dropdown */}
@@ -957,12 +995,15 @@ export function ProjectSetupModal({
                     onChange={(e) => {
                       const newProvider = e.target.value as LLMProvider;
                       const firstModelForProvider = LLM_MODELS[newProvider][0].value;
+                      const currentTemp = localNodeDefaults.llm?.temperature ?? 0.7;
                       setLocalNodeDefaults(prev => ({
                         ...prev,
                         llm: {
                           ...prev.llm,
                           provider: newProvider,
                           model: firstModelForProvider,
+                          // Clamp temperature for Anthropic (max 1.0)
+                          ...(newProvider === "anthropic" && currentTemp > 1 ? { temperature: 1 } : {}),
                         }
                       }));
                     }}
@@ -1001,7 +1042,7 @@ export function ProjectSetupModal({
                   <input
                     type="range"
                     min="0"
-                    max="2"
+                    max={(localNodeDefaults.llm?.provider || "google") === "anthropic" ? "1" : "2"}
                     step="0.1"
                     value={localNodeDefaults.llm?.temperature ?? 0.7}
                     onChange={(e) => {
@@ -1057,14 +1098,14 @@ export function ProjectSetupModal({
                     className="flex-1 h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-neutral-400"
                   />
                 </div>
-                <p className="text-xs text-neutral-500">
+                <p className="text-xs text-neutral-400">
                   Maximum number of nodes to execute in parallel during workflow execution.
                   Higher values may improve speed but increase API rate limit risk.
                 </p>
               </div>
             </div>
 
-            <p className="text-xs text-neutral-500 mt-2">
+            <p className="text-xs text-neutral-400 mt-2">
               These defaults are applied when creating nodes via keyboard shortcuts (Shift+G, Shift+L, etc).
             </p>
           </div>
@@ -1072,106 +1113,107 @@ export function ProjectSetupModal({
 
         {/* Canvas Tab Content */}
         {activeTab === "canvas" && (
-          <div className="space-y-5">
+          <div className="space-y-3">
+            <p className="text-xs text-neutral-400">Configure how you navigate and interact with the canvas.</p>
             {/* Pan Mode */}
-            <div>
-              <h3 className="text-sm font-medium text-neutral-200 mb-2">Pan Mode</h3>
-              <div className="space-y-1.5">
-                {([
-                  { value: "space" as PanMode, label: "Space + Drag", description: "Hold Space and drag to pan (default)" },
-                  { value: "middleMouse" as PanMode, label: "Middle Mouse", description: "Click and drag with middle mouse button" },
-                  { value: "always" as PanMode, label: "Always On", description: "Pan without holding any keys" },
-                ] as const).map((option) => (
-                  <label
-                    key={option.value}
-                    className={`flex items-start p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                      localCanvasSettings.panMode === option.value
-                        ? "border-blue-500 bg-blue-500/10"
-                        : "border-neutral-700 hover:border-neutral-600 bg-neutral-900/50"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="panMode"
-                      value={option.value}
-                      checked={localCanvasSettings.panMode === option.value}
-                      onChange={(e) => setLocalCanvasSettings({ ...localCanvasSettings, panMode: e.target.value as PanMode })}
-                      className="mt-0.5 mr-3"
-                    />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-neutral-200">{option.label}</div>
-                      <div className="text-xs text-neutral-400 mt-0.5">{option.description}</div>
-                    </div>
-                  </label>
-                ))}
+            <div className="p-3 bg-neutral-900 rounded-lg border border-neutral-700">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-neutral-100">Pan Mode</span>
+                  <p className="text-xs text-neutral-400">
+                    {localCanvasSettings.panMode === "space" && "Hold Space and drag to pan"}
+                    {localCanvasSettings.panMode === "middleMouse" && "Click and drag with middle mouse button"}
+                    {localCanvasSettings.panMode === "always" && "Pan without holding any keys"}
+                  </p>
+                </div>
+                <div className="flex gap-1 p-0.5 bg-neutral-800 rounded-md">
+                  {([
+                    { value: "space" as PanMode, label: "Space + Drag" },
+                    { value: "middleMouse" as PanMode, label: "Middle Mouse" },
+                    { value: "always" as PanMode, label: "Always On" },
+                  ] as const).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setLocalCanvasSettings({ ...localCanvasSettings, panMode: option.value })}
+                      className={`flex-1 px-2 py-1.5 text-xs rounded transition-all duration-150 ${
+                        localCanvasSettings.panMode === option.value
+                          ? "bg-neutral-700 text-neutral-100 font-medium"
+                          : "text-neutral-400 hover:text-neutral-300"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
             {/* Zoom Mode */}
-            <div>
-              <h3 className="text-sm font-medium text-neutral-200 mb-2">Zoom Mode</h3>
-              <div className="space-y-1.5">
-                {([
-                  { value: "altScroll" as ZoomMode, label: "Alt + Scroll", description: "Hold Alt and scroll to zoom (default)" },
-                  { value: "ctrlScroll" as ZoomMode, label: "Ctrl + Scroll", description: "Hold Ctrl/Cmd and scroll to zoom" },
-                  { value: "scroll" as ZoomMode, label: "Scroll", description: "Scroll to zoom without holding any keys" },
-                ] as const).map((option) => (
-                  <label
-                    key={option.value}
-                    className={`flex items-start p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                      localCanvasSettings.zoomMode === option.value
-                        ? "border-blue-500 bg-blue-500/10"
-                        : "border-neutral-700 hover:border-neutral-600 bg-neutral-900/50"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="zoomMode"
-                      value={option.value}
-                      checked={localCanvasSettings.zoomMode === option.value}
-                      onChange={(e) => setLocalCanvasSettings({ ...localCanvasSettings, zoomMode: e.target.value as ZoomMode })}
-                      className="mt-0.5 mr-3"
-                    />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-neutral-200">{option.label}</div>
-                      <div className="text-xs text-neutral-400 mt-0.5">{option.description}</div>
-                    </div>
-                  </label>
-                ))}
+            <div className="p-3 bg-neutral-900 rounded-lg border border-neutral-700">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-neutral-100">Zoom Mode</span>
+                  <p className="text-xs text-neutral-400">
+                    {localCanvasSettings.zoomMode === "altScroll" && "Hold Alt and scroll to zoom"}
+                    {localCanvasSettings.zoomMode === "ctrlScroll" && "Hold Ctrl/Cmd and scroll to zoom"}
+                    {localCanvasSettings.zoomMode === "scroll" && "Scroll to zoom without modifier keys"}
+                  </p>
+                </div>
+                <div className="flex gap-1 p-0.5 bg-neutral-800 rounded-md">
+                  {([
+                    { value: "altScroll" as ZoomMode, label: "Alt + Scroll" },
+                    { value: "ctrlScroll" as ZoomMode, label: "Ctrl + Scroll" },
+                    { value: "scroll" as ZoomMode, label: "Scroll" },
+                  ] as const).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setLocalCanvasSettings({ ...localCanvasSettings, zoomMode: option.value })}
+                      className={`flex-1 px-2 py-1.5 text-xs rounded transition-all duration-150 ${
+                        localCanvasSettings.zoomMode === option.value
+                          ? "bg-neutral-700 text-neutral-100 font-medium"
+                          : "text-neutral-400 hover:text-neutral-300"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
             {/* Selection Mode */}
-            <div>
-              <h3 className="text-sm font-medium text-neutral-200 mb-2">Selection Mode</h3>
-              <div className="space-y-1.5">
-                {([
-                  { value: "click" as SelectionMode, label: "Click", description: "Click to select nodes (default)" },
-                  { value: "altDrag" as SelectionMode, label: "Alt + Drag", description: "Hold Alt and drag to select multiple nodes" },
-                  { value: "shiftDrag" as SelectionMode, label: "Shift + Drag", description: "Hold Shift and drag to select multiple nodes" },
-                ] as const).map((option) => (
-                  <label
-                    key={option.value}
-                    className={`flex items-start p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                      localCanvasSettings.selectionMode === option.value
-                        ? "border-blue-500 bg-blue-500/10"
-                        : "border-neutral-700 hover:border-neutral-600 bg-neutral-900/50"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="selectionMode"
-                      value={option.value}
-                      checked={localCanvasSettings.selectionMode === option.value}
-                      onChange={(e) => setLocalCanvasSettings({ ...localCanvasSettings, selectionMode: e.target.value as SelectionMode })}
-                      className="mt-0.5 mr-3"
-                    />
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-neutral-200">{option.label}</div>
-                      <div className="text-xs text-neutral-400 mt-0.5">{option.description}</div>
-                    </div>
-                  </label>
-                ))}
+            <div className="p-3 bg-neutral-900 rounded-lg border border-neutral-700">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-neutral-100">Selection Mode</span>
+                  <p className="text-xs text-neutral-400">
+                    {localCanvasSettings.selectionMode === "click" && "Click to select nodes"}
+                    {localCanvasSettings.selectionMode === "altDrag" && "Hold Alt and drag to select"}
+                    {localCanvasSettings.selectionMode === "shiftDrag" && "Hold Shift and drag to select"}
+                  </p>
+                </div>
+                <div className="flex gap-1 p-0.5 bg-neutral-800 rounded-md">
+                  {([
+                    { value: "click" as SelectionMode, label: "Click" },
+                    { value: "altDrag" as SelectionMode, label: "Alt + Drag" },
+                    { value: "shiftDrag" as SelectionMode, label: "Shift + Drag" },
+                  ] as const).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setLocalCanvasSettings({ ...localCanvasSettings, selectionMode: option.value })}
+                      className={`flex-1 px-2 py-1.5 text-xs rounded transition-all duration-150 ${
+                        localCanvasSettings.selectionMode === option.value
+                          ? "bg-neutral-700 text-neutral-100 font-medium"
+                          : "text-neutral-400 hover:text-neutral-300"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -1180,7 +1222,7 @@ export function ProjectSetupModal({
         </div>
 
         {/* Fixed footer */}
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-neutral-700 shrink-0">
+        <div className="flex justify-end gap-2 px-8 py-5 border-t border-neutral-700/50 shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm text-neutral-400 hover:text-neutral-100 transition-colors"
@@ -1190,7 +1232,7 @@ export function ProjectSetupModal({
           <button
             onClick={handleSave}
             disabled={activeTab === "project" && (isValidating || isBrowsing)}
-            className="px-4 py-2 text-sm bg-white text-neutral-900 rounded hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-4 py-2 text-sm bg-white text-neutral-900 rounded-lg hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {activeTab === "project"
               ? (isValidating ? "Validating..." : mode === "new" ? "Create" : "Save")

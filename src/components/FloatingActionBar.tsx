@@ -1,10 +1,76 @@
 "use client";
 
-import { useRef, useState, useEffect, useMemo } from "react";
+import { useRef, useState, useEffect, useMemo, useCallback } from "react";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useShallow } from "zustand/shallow";
 import { NodeType } from "@/types";
 import { useReactFlow } from "@xyflow/react";
 import { ModelSearchDialog } from "./modals/ModelSearchDialog";
+
+// All nodes menu categories
+const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: string }[] }[] = [
+  {
+    label: "Input",
+    nodes: [
+      { type: "imageInput", label: "Image Input" },
+      { type: "videoInput", label: "Video Input" },
+      { type: "audioInput", label: "Audio Input" },
+      { type: "glbViewer", label: "3D Viewer" },
+      { type: "spzViewer", label: "SPZ Viewer" },
+      { type: "panoViewer", label: "Pano Viewer" },
+    ],
+  },
+  {
+    label: "Text",
+    nodes: [
+      { type: "prompt", label: "Prompt" },
+      { type: "promptConstructor", label: "Prompt Constructor" },
+      { type: "array", label: "Array" },
+    ],
+  },
+  {
+    label: "Generate",
+    nodes: [
+      { type: "nanoBanana", label: "Generate Image" },
+      { type: "generateVideo", label: "Generate Video" },
+      { type: "generate3d", label: "Generate 3D" },
+      { type: "generateAudio", label: "Generate Audio" },
+      { type: "llmGenerate", label: "LLM Generate" },
+      { type: "worldLabsPano", label: "Generate Panorama" },
+      { type: "worldLabsWorld", label: "Generate World" },
+      { type: "appleSharp", label: "SHARP (3D)" },
+    ],
+  },
+  {
+    label: "Process",
+    nodes: [
+      { type: "annotation", label: "Annotate" },
+      { type: "panoEditor", label: "Pano Edit" },
+      { type: "maskPainter", label: "Mask Paint" },
+      { type: "splitGrid", label: "Split Grid" },
+      { type: "videoStitch", label: "Video Stitch" },
+      { type: "videoTrim", label: "Video Trim" },
+      { type: "easeCurve", label: "Ease Curve" },
+      { type: "videoFrameGrab", label: "Frame Grab" },
+      { type: "imageCompare", label: "Image Compare" },
+    ],
+  },
+  {
+    label: "Route",
+    nodes: [
+      { type: "router", label: "Router" },
+      { type: "switch", label: "Switch" },
+      { type: "conditionalSwitch", label: "Conditional Switch" },
+    ],
+  },
+  {
+    label: "Output",
+    nodes: [
+      { type: "output", label: "Output" },
+      { type: "outputGallery", label: "Output Gallery" },
+    ],
+  },
+];
 
 // Get the center of the React Flow pane in screen coordinates
 function getPaneCenter() {
@@ -298,7 +364,7 @@ function GenerateComboButton() {
 }
 
 
-function ViewerComboButton() {
+function AllNodesMenu() {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const addNode = useWorkflowStore((state) => state.addNode);
@@ -320,7 +386,7 @@ function ViewerComboButton() {
     };
   }, [isOpen]);
 
-  const handleAddNode = (type: NodeType) => {
+  const handleAddNode = useCallback((type: NodeType) => {
     const center = getPaneCenter();
     const position = screenToFlowPosition({
       x: center.x + Math.random() * 100 - 50,
@@ -329,13 +395,13 @@ function ViewerComboButton() {
 
     addNode(type, position);
     setIsOpen(false);
-  };
+  }, [addNode, screenToFlowPosition]);
 
-  const handleDragStart = (event: React.DragEvent, type: NodeType) => {
+  const handleDragStart = useCallback((event: React.DragEvent, type: NodeType) => {
     event.dataTransfer.setData("application/node-type", type);
     event.dataTransfer.effectAllowed = "copy";
     setIsOpen(false);
-  };
+  }, []);
 
   return (
     <div className="relative" ref={menuRef}>
@@ -343,7 +409,7 @@ function ViewerComboButton() {
         onClick={() => setIsOpen(!isOpen)}
         className="px-2.5 py-1.5 text-[11px] font-medium text-neutral-400 hover:text-neutral-100 hover:bg-neutral-700 rounded transition-colors flex items-center gap-1"
       >
-        Viewer
+        All nodes
         <svg
           className={`w-3 h-3 transition-transform ${isOpen ? "rotate-180" : ""}`}
           fill="none"
@@ -356,142 +422,26 @@ function ViewerComboButton() {
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full left-0 mb-2 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl overflow-hidden min-w-[140px]">
-          <button
-            onClick={() => handleAddNode("glbViewer")}
-            draggable
-            onDragStart={(e) => handleDragStart(e, "glbViewer")}
-            className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
-            </svg>
-            GLB Viewer
-          </button>
-          <button
-            onClick={() => handleAddNode("panoViewer")}
-            draggable
-            onDragStart={(e) => handleDragStart(e, "panoViewer")}
-            className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-              <circle cx="12" cy="12" r="10" />
-              <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-            </svg>
-            Pano Viewer
-          </button>
-          <button
-            onClick={() => handleAddNode("spzViewer")}
-            draggable
-            onDragStart={(e) => handleDragStart(e, "spzViewer")}
-            className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c-4.97 0-9 3.134-9 7s4.03 7 9 7c.703 0 1.387-.07 2.043-.2L19 19v-3.458C20.832 14.098 21 12.578 21 10c0-3.866-4.03-7-9-7z" />
-              <circle cx="12" cy="10" r="2" />
-            </svg>
-            SPZ Viewer
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
+        <div className="absolute bottom-full left-0 mb-2 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl overflow-hidden min-w-[180px] max-h-[400px] overflow-y-auto">
+          {ALL_NODES_CATEGORIES.map((category, catIndex) => (
+            <div key={category.label}>
+              <div className={`px-3 py-1 text-[10px] text-neutral-500 uppercase tracking-wide${catIndex > 0 ? " border-t border-neutral-700" : ""}`}>
+                {category.label}
+              </div>
+              {category.nodes.map((node) => (
+                <button
+                  key={node.type}
+                  onClick={() => handleAddNode(node.type)}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, node.type)}
+                  className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
+                >
+                  {node.label}
+                </button>
+              ))}
+            </div>
+          ))}
 
-function MiscComboButton() {
-  const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const addNode = useWorkflowStore((state) => state.addNode);
-  const { screenToFlowPosition } = useReactFlow();
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-
-    if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
-  }, [isOpen]);
-
-  const handleAddNode = (type: NodeType) => {
-    const center = getPaneCenter();
-    const position = screenToFlowPosition({
-      x: center.x + Math.random() * 100 - 50,
-      y: center.y + Math.random() * 100 - 50,
-    });
-
-    addNode(type, position);
-    setIsOpen(false);
-  };
-
-  const handleDragStart = (event: React.DragEvent, type: NodeType) => {
-    event.dataTransfer.setData("application/node-type", type);
-    event.dataTransfer.effectAllowed = "copy";
-    setIsOpen(false);
-  };
-
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="px-2.5 py-1.5 text-[11px] font-medium text-neutral-400 hover:text-neutral-100 hover:bg-neutral-700 rounded transition-colors flex items-center gap-1"
-      >
-        Edit
-        <svg
-          className={`w-3 h-3 transition-transform ${isOpen ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
-        </svg>
-      </button>
-
-      {isOpen && (
-        <div className="absolute bottom-full left-0 mb-2 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl overflow-hidden min-w-[140px]">
-          <button
-            onClick={() => handleAddNode("annotation")}
-            draggable
-            onDragStart={(e) => handleDragStart(e, "annotation")}
-            className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-            </svg>
-            Annotate
-          </button>
-          <button
-            onClick={() => handleAddNode("panoEditor")}
-            draggable
-            onDragStart={(e) => handleDragStart(e, "panoEditor")}
-            className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="12" cy="12" r="3" />
-              <path d="M3 12h6M15 12h6M12 3v6M12 15v6" />
-            </svg>
-            Pano Edit
-          </button>
-          <button
-            onClick={() => handleAddNode("maskPainter")}
-            draggable
-            onDragStart={(e) => handleDragStart(e, "maskPainter")}
-            className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
-            </svg>
-            Mask Paint
-          </button>
         </div>
       )}
     </div>
@@ -513,7 +463,21 @@ export function FloatingActionBar() {
     setModelSearchOpen,
     modelSearchOpen,
     modelSearchProvider,
-  } = useWorkflowStore();
+  } = useWorkflowStore(useShallow((state) => ({
+    nodes: state.nodes,
+    isRunning: state.isRunning,
+    currentNodeIds: state.currentNodeIds,
+    executeWorkflow: state.executeWorkflow,
+    regenerateNode: state.regenerateNode,
+    executeSelectedNodes: state.executeSelectedNodes,
+    stopWorkflow: state.stopWorkflow,
+    validateWorkflow: state.validateWorkflow,
+    edgeStyle: state.edgeStyle,
+    setEdgeStyle: state.setEdgeStyle,
+    setModelSearchOpen: state.setModelSearchOpen,
+    modelSearchOpen: state.modelSearchOpen,
+    modelSearchProvider: state.modelSearchProvider,
+  })));
 
   // Get display text for running nodes
   const runningNodeCount = currentNodeIds.length;
@@ -594,23 +558,20 @@ export function FloatingActionBar() {
   return (
     <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50">
       <div className="flex items-center gap-0.5 bg-neutral-800/95 backdrop-blur-sm rounded-lg shadow-lg border border-neutral-700/80 px-1.5 py-1">
-        <InputComboButton />
+        <NodeButton type="imageInput" label="Image" />
         <NodeButton type="prompt" label="Prompt" />
         <GenerateComboButton />
-        <ViewerComboButton />
-        <MiscComboButton />
         <NodeButton type="output" label="Output" />
+        <AllNodesMenu />
 
-        {/* Browse models button */}
+        {/* All models button */}
         <div className="w-px h-5 bg-neutral-600 mx-1.5" />
         <button
           onClick={() => setModelSearchOpen(true)}
           title="Browse models"
-          className="p-1.5 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-700 rounded transition-colors"
+          className="px-2.5 py-1.5 text-[11px] font-medium text-neutral-400 hover:text-neutral-100 hover:bg-neutral-700 rounded transition-colors"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          All models
         </button>
 
         <div className="w-px h-5 bg-neutral-600 mx-1.5" />

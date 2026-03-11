@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { SplitGridNodeData, AspectRatio, Resolution, ModelType } from "@/types";
 
@@ -20,10 +21,13 @@ const LAYOUT_OPTIONS = [
   { rows: 2, cols: 5 },
 ] as const;
 
-const ASPECT_RATIOS: AspectRatio[] = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
-const RESOLUTIONS: Resolution[] = ["1K", "2K", "4K"];
+const BASE_ASPECT_RATIOS: AspectRatio[] = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+const EXTENDED_ASPECT_RATIOS: AspectRatio[] = ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"];
+const RESOLUTIONS_PRO: Resolution[] = ["1K", "2K", "4K"];
+const RESOLUTIONS_NB2: Resolution[] = ["512", "1K", "2K", "4K"];
 const MODELS: { value: ModelType; label: string }[] = [
   { value: "nano-banana", label: "Nano Banana" },
+  { value: "nano-banana-2", label: "Nano Banana 2" },
   { value: "nano-banana-pro", label: "Nano Banana Pro" },
 ];
 
@@ -47,10 +51,13 @@ export function SplitGridSettingsModal({
   const [resolution, setResolution] = useState(nodeData.generateSettings.resolution);
   const [model, setModel] = useState(nodeData.generateSettings.model);
   const [useGoogleSearch, setUseGoogleSearch] = useState(nodeData.generateSettings.useGoogleSearch);
+  const [useImageSearch, setUseImageSearch] = useState(nodeData.generateSettings.useImageSearch);
 
   const { rows, cols } = LAYOUT_OPTIONS[selectedLayoutIndex];
   const targetCount = rows * cols;
-  const isNanoBananaPro = model === "nano-banana-pro";
+  const isNanoBananaPro = model === "nano-banana-pro" || model === "nano-banana-2";
+  const aspectRatios = model === "nano-banana-2" ? EXTENDED_ASPECT_RATIOS : BASE_ASPECT_RATIOS;
+  const resolutions = model === "nano-banana-2" ? RESOLUTIONS_NB2 : RESOLUTIONS_PRO;
 
   const handleCreate = useCallback(() => {
     const splitNode = getNodeById(nodeId);
@@ -105,6 +112,7 @@ export function SplitGridSettingsModal({
         resolution,
         model,
         useGoogleSearch,
+        useImageSearch,
       });
 
       // Create prompt node (below imageInput)
@@ -155,6 +163,7 @@ export function SplitGridSettingsModal({
         resolution,
         model,
         useGoogleSearch,
+        useImageSearch,
       },
       childNodeIds,
       gridRows: rows,
@@ -165,7 +174,7 @@ export function SplitGridSettingsModal({
     onClose();
   }, [
     nodeId, targetCount, defaultPrompt, aspectRatio, resolution,
-    model, useGoogleSearch, rows, cols, selectedLayoutIndex, getNodeById,
+    model, useGoogleSearch, useImageSearch, rows, cols, selectedLayoutIndex, getNodeById,
     addNode, updateNodeData, onConnect, addEdgeWithType, onClose
   ]);
 
@@ -175,7 +184,7 @@ export function SplitGridSettingsModal({
     }
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50">
       <div
         className="bg-neutral-800 rounded-lg p-6 w-[600px] border border-neutral-700 shadow-xl"
@@ -261,7 +270,20 @@ export function SplitGridSettingsModal({
                 </label>
                 <select
                   value={model}
-                  onChange={(e) => setModel(e.target.value as ModelType)}
+                  onChange={(e) => {
+                    const newModel = e.target.value as ModelType;
+                    setModel(newModel);
+                    // Normalize aspect ratio for the new model's allowed set
+                    const newAspectRatios = newModel === "nano-banana-2" ? EXTENDED_ASPECT_RATIOS : BASE_ASPECT_RATIOS;
+                    if (!newAspectRatios.includes(aspectRatio)) {
+                      setAspectRatio(newAspectRatios[0]);
+                    }
+                    // Normalize resolution for the new model's allowed set
+                    const newResolutions = newModel === "nano-banana-2" ? RESOLUTIONS_NB2 : RESOLUTIONS_PRO;
+                    if (!newResolutions.includes(resolution)) {
+                      setResolution(newResolutions[0]);
+                    }
+                  }}
                   className="w-full px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
                 >
                   {MODELS.map((m) => (
@@ -279,7 +301,7 @@ export function SplitGridSettingsModal({
                   onChange={(e) => setAspectRatio(e.target.value as AspectRatio)}
                   className="w-full px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
                 >
-                  {ASPECT_RATIOS.map((ar) => (
+                  {aspectRatios.map((ar) => (
                     <option key={ar} value={ar}>{ar}</option>
                   ))}
                 </select>
@@ -296,7 +318,7 @@ export function SplitGridSettingsModal({
                       onChange={(e) => setResolution(e.target.value as Resolution)}
                       className="w-full px-3 py-2 bg-neutral-900 border border-neutral-600 rounded text-neutral-100 text-sm focus:outline-none focus:border-neutral-500"
                     >
-                      {RESOLUTIONS.map((res) => (
+                      {resolutions.map((res) => (
                         <option key={res} value={res}>{res}</option>
                       ))}
                     </select>
@@ -313,6 +335,19 @@ export function SplitGridSettingsModal({
                       Google Search
                     </label>
                   </div>
+                  {model === "nano-banana-2" && (
+                    <div className="flex items-end pb-2">
+                      <label className="flex items-center gap-2 text-sm text-neutral-300 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useImageSearch}
+                          onChange={(e) => setUseImageSearch(e.target.checked)}
+                          className="w-4 h-4 rounded border-neutral-600 bg-neutral-900"
+                        />
+                        Image Search
+                      </label>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -334,6 +369,7 @@ export function SplitGridSettingsModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

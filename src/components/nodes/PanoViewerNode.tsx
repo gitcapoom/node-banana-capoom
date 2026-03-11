@@ -169,9 +169,6 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
     <BaseNode
       id={id}
       selected={selected}
-      title="Pano Viewer"
-      commentNavigation={commentNavigation || undefined}
-      onRun={handleRun}
       isExecuting={isRunning}
     >
       {/* Input Handle — equirectangular panorama */}

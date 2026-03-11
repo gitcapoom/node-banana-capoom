@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { GenerateAudioNode } from "@/components/nodes/GenerateAudioNode";
 import { ReactFlowProvider } from "@xyflow/react";
 import { GenerateAudioNodeData, ProviderSettings } from "@/types";
@@ -152,28 +152,6 @@ describe("GenerateAudioNode", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render with default title when no model selected", () => {
-      render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Generate Audio")).toBeInTheDocument();
-    });
-
-    it("should render model name as title when selectedModel is set", () => {
-      render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps({
-            selectedModel: { provider: "kie", modelId: "elevenlabs-turbo-v2.5", displayName: "ElevenLabs Turbo v2.5" },
-          })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("ElevenLabs Turbo v2.5")).toBeInTheDocument();
-    });
-
     it("should render text input handle", () => {
       const { container } = render(
         <TestWrapper>
@@ -194,33 +172,6 @@ describe("GenerateAudioNode", () => {
 
       const outputHandle = container.querySelector('[data-handletype="audio"]');
       expect(outputHandle).toBeInTheDocument();
-    });
-  });
-
-  describe("Provider Badge", () => {
-    it("should show provider badge for default provider (fal)", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      // Provider badge should be rendered with fal.ai title
-      const badge = container.querySelector('[title="fal.ai"]');
-      expect(badge).toBeInTheDocument();
-    });
-
-    it("should show provider badge matching selected model provider", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps({
-            selectedModel: { provider: "kie", modelId: "elevenlabs-turbo-v2.5", displayName: "ElevenLabs" },
-          })} />
-        </TestWrapper>
-      );
-
-      const badge = container.querySelector('[title="Kie.ai"]');
-      expect(badge).toBeInTheDocument();
     });
   });
 
@@ -305,61 +256,6 @@ describe("GenerateAudioNode", () => {
     });
   });
 
-  describe("Run Button", () => {
-    it("should show run button in header", () => {
-      render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByTitle("Run this node")).toBeInTheDocument();
-    });
-
-    it("should call regenerateNode when run button is clicked", () => {
-      render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const runButton = screen.getByTitle("Run this node");
-      fireEvent.click(runButton);
-
-      expect(mockRegenerateNode).toHaveBeenCalledWith("test-audio-1");
-    });
-
-    it("should disable run button when workflow is running", () => {
-      mockUseWorkflowStore.mockImplementation((selector) => {
-        const state = {
-          updateNodeData: mockUpdateNodeData,
-          regenerateNode: mockRegenerateNode,
-          incrementModalCount: mockIncrementModalCount,
-          decrementModalCount: mockDecrementModalCount,
-          providerSettings: defaultProviderSettings,
-          generationsPath: "/test/generations",
-          isRunning: true,
-          currentNodeIds: [],
-          groups: {},
-          nodes: [],
-          getNodesWithComments: vi.fn(() => []),
-          markCommentViewed: vi.fn(),
-          setNavigationTarget: vi.fn(),
-        };
-        return selector(state);
-      });
-
-      render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const runButton = screen.getByTitle("Run this node");
-      expect(runButton).toBeDisabled();
-    });
-  });
-
   describe("Audio History Carousel", () => {
     it("should not show carousel controls when history has only one item", () => {
       render(
@@ -410,54 +306,6 @@ describe("GenerateAudioNode", () => {
       );
 
       expect(screen.getByText("2/3")).toBeInTheDocument();
-    });
-  });
-
-  describe("Browse Button", () => {
-    it("should render Browse button", () => {
-      render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Browse")).toBeInTheDocument();
-    });
-
-    it("should open ModelSearchDialog when Browse button is clicked", async () => {
-      render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const browseButton = screen.getByText("Browse");
-      fireEvent.click(browseButton);
-
-      await waitFor(() => {
-        expect(screen.getByText("Browse Models")).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe("ModelParameters Component", () => {
-    it("should render ModelParameters when model is selected", () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ parameters: [], inputs: [] }),
-      });
-
-      const { container } = render(
-        <TestWrapper>
-          <GenerateAudioNode {...createNodeProps({
-            selectedModel: { provider: "kie", modelId: "elevenlabs-turbo-v2.5", displayName: "ElevenLabs Turbo v2.5" },
-          })} />
-        </TestWrapper>
-      );
-
-      // ModelParameters component should be rendered (it contains the parameters section)
-      // The node should show the model name as its title
-      expect(screen.getByText("ElevenLabs Turbo v2.5")).toBeInTheDocument();
     });
   });
 

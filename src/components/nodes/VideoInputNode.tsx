@@ -163,13 +163,7 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
   return (
     <BaseNode
       id={id}
-      title="Video"
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-      onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
       selected={selected}
-      commentNavigation={commentNavigation ?? undefined}
       minWidth={280}
       minHeight={200}
     >

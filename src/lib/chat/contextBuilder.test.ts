@@ -239,6 +239,7 @@ describe("stripBinaryData", () => {
           resolution: "1K",
           model: "nano-banana",
           useGoogleSearch: false,
+          useImageSearch: false,
         },
         childNodeIds: [],
         gridRows: 2,
@@ -258,6 +259,7 @@ describe("stripBinaryData", () => {
         resolution: "1K",
         model: "nano-banana",
         useGoogleSearch: false,
+        useImageSearch: false,
       });
       expect(stripped.data.sourceImage).toMatch(/\[image:.*KB\]/);
     });
@@ -373,7 +375,7 @@ describe("stripBinaryData", () => {
           sourceImage: FAKE_BASE64_PNG,
           targetCount: 4,
           defaultPrompt: "test",
-          generateSettings: { aspectRatio: "1:1", resolution: "1K", model: "nano-banana", useGoogleSearch: false },
+          generateSettings: { aspectRatio: "1:1", resolution: "1K", model: "nano-banana", useGoogleSearch: false, useImageSearch: false },
           childNodeIds: [],
           gridRows: 2,
           gridCols: 2,

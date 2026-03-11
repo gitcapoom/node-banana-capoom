@@ -48,9 +48,6 @@ export function PanoEditorNode({ id, data, selected }: NodeProps<PanoEditorNodeT
     <BaseNode
       id={id}
       selected={selected}
-      title="Pano Editor"
-      commentNavigation={commentNavigation || undefined}
-      onRun={handleRun}
       isExecuting={isRunning}
     >
       {/* Input Handle — original panorama */}

@@ -102,9 +102,6 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
     <BaseNode
       id={id}
       selected={selected}
-      title="Panorama Generator"
-      commentNavigation={commentNavigation || undefined}
-      onRun={handleRegenerate}
       isExecuting={isRunning}
     >
       {/* Input Handles */}

@@ -24,6 +24,9 @@ import {
   PromptConstructorNodeData,
   LLMGenerateNodeData,
   GLBViewerNodeData,
+  SwitchNodeData,
+  ConditionalSwitchNodeData,
+  MatchMode,
   AppleSharpNodeData,
   SpzViewerNodeData,
   WorldLabsPanoNodeData,
@@ -44,7 +47,7 @@ export interface ConnectedInputs {
   model3d: string | null;
   text: string | null;
   dynamicInputs: Record<string, string | string[]>;
-  easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null } | null;
+  easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null; outputDuration: number } | null;
 }
 
 /**
@@ -163,14 +166,20 @@ function getSourceOutput(
 export function getConnectedInputsPure(
   nodeId: string,
   nodes: WorkflowNode[],
-  edges: WorkflowEdge[]
+  edges: WorkflowEdge[],
+  visited?: Set<string>,
+  dimmedNodeIds?: Set<string>
 ): ConnectedInputs {
+  const _visited = visited || new Set<string>();
+  if (_visited.has(nodeId)) return { images: [], videos: [], audio: [], model3d: null, text: null, dynamicInputs: {}, easeCurve: null };
+  _visited.add(nodeId);
   const images: string[] = [];
   const videos: string[] = [];
   const audio: string[] = [];
   let model3d: string | null = null;
   let text: string | null = null;
   const dynamicInputs: Record<string, string | string[]> = {};
+  let easeCurve: ConnectedInputs["easeCurve"] = null;
 
   // Get the target node to check for inputSchema
   const targetNode = nodes.find((n) => n.id === nodeId);
@@ -218,6 +227,92 @@ export function getConnectedInputsPure(
       const sourceNode = nodes.find((n) => n.id === edge.source);
       if (!sourceNode) return;
 
+      // Skip dimmed source nodes — their data should not flow downstream
+      if (dimmedNodeIds && dimmedNodeIds.has(sourceNode.id)) return;
+
+      // Router passthrough — traverse upstream to find actual data source
+      if (sourceNode.type === "router") {
+        const routerInputs = getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);
+        // Determine which type this edge carries based on the source handle
+        const edgeType = edge.sourceHandle; // Will be "image", "text", "video", "audio", "3d", or "easeCurve"
+
+        if (edgeType === "image" || (!edgeType && isImageHandle(edge.sourceHandle))) {
+          images.push(...routerInputs.images);
+        } else if (edgeType === "text" || (!edgeType && isTextHandle(edge.sourceHandle))) {
+          if (routerInputs.text) text = routerInputs.text;
+        } else if (edgeType === "video") {
+          videos.push(...routerInputs.videos);
+        } else if (edgeType === "audio") {
+          audio.push(...routerInputs.audio);
+        } else if (edgeType === "3d") {
+          if (routerInputs.model3d) model3d = routerInputs.model3d;
+        } else if (edgeType === "easeCurve") {
+          // EaseCurve passthrough
+          if (routerInputs.easeCurve) easeCurve = routerInputs.easeCurve;
+        }
+        return; // Skip normal getSourceOutput processing for this edge
+      }
+
+      // Switch passthrough — traverse upstream if output is enabled
+      if (sourceNode.type === "switch") {
+        const switchData = sourceNode.data as SwitchNodeData;
+        const switchId = edge.sourceHandle; // Handle ID matches switch entry id
+        const switchEntry = switchData.switches?.find(s => s.id === switchId);
+
+        // Skip disabled outputs — data does not flow through disabled switches
+        if (!switchEntry || !switchEntry.enabled) {
+          return; // Block this path
+        }
+
+        // Enabled switch: recursively get upstream data (same pattern as router)
+        const switchInputs = getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);
+        const edgeType = switchData.inputType;
+
+        if (edgeType === "image") {
+          images.push(...switchInputs.images);
+        } else if (edgeType === "text") {
+          if (switchInputs.text) text = switchInputs.text;
+        } else if (edgeType === "video") {
+          videos.push(...switchInputs.videos);
+        } else if (edgeType === "audio") {
+          audio.push(...switchInputs.audio);
+        } else if (edgeType === "3d") {
+          if (switchInputs.model3d) model3d = switchInputs.model3d;
+        } else if (edgeType === "easeCurve") {
+          if (switchInputs.easeCurve) easeCurve = switchInputs.easeCurve;
+        }
+        return; // Skip normal getSourceOutput processing
+      }
+
+      // Conditional Switch passthrough — traverse upstream if output is active (matched or default)
+      if (sourceNode.type === "conditionalSwitch") {
+        const condData = sourceNode.data as ConditionalSwitchNodeData;
+
+        // When evaluation is paused, all outputs are active (gate is open)
+        if (!condData.evaluationPaused) {
+          const sourceHandle = edge.sourceHandle;
+
+          // Find matching rule or check if default
+          const rule = condData.rules.find(r => r.id === sourceHandle);
+          const isDefaultHandle = sourceHandle === "default";
+
+          // Determine if this output is active
+          let isActive = false;
+          if (rule) {
+            isActive = rule.isMatched;
+          } else if (isDefaultHandle) {
+            // Default is active when NO rules match
+            isActive = !condData.rules.some(r => r.isMatched);
+          }
+
+          // Block non-active outputs (data does not flow through non-matching rules)
+          if (!isActive) return;
+        }
+
+        // Active output (or paused): ConditionalSwitch is a gate — trigger downstream but don't pass data through
+        return;
+      }
+
       const handleId = edge.targetHandle;
       const { type, value } = getSourceOutput(
         sourceNode,
@@ -256,19 +351,21 @@ export function getConnectedInputsPure(
       }
     });
 
-  // Extract easeCurve data from parent EaseCurve node
-  let easeCurve: ConnectedInputs["easeCurve"] = null;
-  const easeCurveEdge = edges.find(
-    (e) => e.target === nodeId && e.targetHandle === "easeCurve"
-  );
-  if (easeCurveEdge) {
-    const sourceNode = nodes.find((n) => n.id === easeCurveEdge.source);
-    if (sourceNode?.type === "easeCurve") {
-      const sourceData = sourceNode.data as EaseCurveNodeData;
-      easeCurve = {
-        bezierHandles: sourceData.bezierHandles,
-        easingPreset: sourceData.easingPreset,
-      };
+  // Extract easeCurve data from parent EaseCurve node (if not already set by router passthrough)
+  if (!easeCurve) {
+    const easeCurveEdge = edges.find(
+      (e) => e.target === nodeId && e.targetHandle === "easeCurve"
+    );
+    if (easeCurveEdge) {
+      const sourceNode = nodes.find((n) => n.id === easeCurveEdge.source);
+      if (sourceNode?.type === "easeCurve") {
+        const sourceData = sourceNode.data as EaseCurveNodeData;
+        easeCurve = {
+          bezierHandles: sourceData.bezierHandles,
+          easingPreset: sourceData.easingPreset,
+          outputDuration: sourceData.outputDuration,
+        };
+      }
     }
   }
 

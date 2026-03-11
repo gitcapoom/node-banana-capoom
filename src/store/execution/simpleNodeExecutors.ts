@@ -377,6 +377,45 @@ export async function executePanoViewer(ctx: NodeExecutionContext): Promise<void
 }
 
 /**
+ * Router node: pure passthrough with brief status flash.
+ */
+export async function executeRouter(ctx: NodeExecutionContext): Promise<void> {
+  // Router is pure passthrough — data flows via edge traversal in getConnectedInputs.
+  // Brief status flash to show execution occurred.
+  ctx.updateNodeData(ctx.node.id, { status: "loading" });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  if (!ctx.signal?.aborted) {
+    ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  }
+}
+
+/**
+ * Switch node: pure passthrough with toggle-controlled routing.
+ */
+export async function executeSwitch(ctx: NodeExecutionContext): Promise<void> {
+  // Switch is pure passthrough — data flows via edge traversal in getConnectedInputs.
+  // Disabled outputs are filtered during traversal.
+  ctx.updateNodeData(ctx.node.id, { status: "loading" });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  if (!ctx.signal?.aborted) {
+    ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  }
+}
+
+/**
+ * ConditionalSwitch node: pure passthrough with text-based rule matching.
+ */
+export async function executeConditionalSwitch(ctx: NodeExecutionContext): Promise<void> {
+  // ConditionalSwitch is pure passthrough — actual text matching happens during connectedInputs traversal.
+  // Brief status flash to show execution occurred.
+  ctx.updateNodeData(ctx.node.id, { status: "loading" });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  if (!ctx.signal?.aborted) {
+    ctx.updateNodeData(ctx.node.id, { status: "complete" });
+  }
+}
+
+/**
  * GLB Viewer node: receives 3D model URL from upstream, fetches via server proxy and loads it.
  */
 export async function executeGlbViewer(ctx: NodeExecutionContext): Promise<void> {

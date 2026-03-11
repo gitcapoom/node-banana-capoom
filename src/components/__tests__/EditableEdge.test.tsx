@@ -133,9 +133,10 @@ describe("EditableEdge", () => {
         </TestWrapper>
       );
 
-      // Check that gradient is defined
-      const gradient = container.querySelector("linearGradient");
-      expect(gradient).toBeInTheDocument();
+      // Edges now reference shared gradient IDs instead of per-edge defs
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("edge-grad-image-");
     });
 
     it("should use blue color for prompt handle type", () => {
@@ -145,8 +146,9 @@ describe("EditableEdge", () => {
         </TestWrapper>
       );
 
-      const gradient = container.querySelector("linearGradient");
-      expect(gradient).toBeInTheDocument();
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("edge-grad-prompt-");
     });
 
     it("should use orange color when edge is paused", () => {
@@ -160,8 +162,9 @@ describe("EditableEdge", () => {
         </TestWrapper>
       );
 
-      const gradient = container.querySelector("linearGradient");
-      expect(gradient).toBeInTheDocument();
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("edge-grad-pause-");
     });
   });
 
@@ -278,13 +281,10 @@ describe("EditableEdge", () => {
         </TestWrapper>
       );
 
-      // Gradient should exist with active opacity values
-      const gradient = container.querySelector("linearGradient");
-      expect(gradient).toBeInTheDocument();
-
-      // Check first stop has opacity 1 (active state)
-      const stops = gradient?.querySelectorAll("stop");
-      expect(stops?.[0]?.getAttribute("stop-opacity")).toBe("1");
+      // Should reference the "active" shared gradient
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("-active");
     });
 
     it("should have dimmed opacity when not connected to selected node", () => {
@@ -300,13 +300,10 @@ describe("EditableEdge", () => {
         </TestWrapper>
       );
 
-      // Gradient should exist with dimmed opacity values
-      const gradient = container.querySelector("linearGradient");
-      expect(gradient).toBeInTheDocument();
-
-      // Check first stop has lower opacity (dimmed state)
-      const stops = gradient?.querySelectorAll("stop");
-      expect(stops?.[0]?.getAttribute("stop-opacity")).toBe("0.25");
+      // Should reference the "dimmed" shared gradient
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("-dimmed");
     });
   });
 

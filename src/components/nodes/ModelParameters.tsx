@@ -1,14 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { ProviderType, ModelInputDef } from "@/types";
 import { ModelParameter } from "@/lib/providers/types";
 import { useProviderApiKeys } from "@/store/workflowStore";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 
 // localStorage cache for model schemas (persists across dev server restarts)
-// Bump version when schema extraction logic changes (e.g., $ref resolution)
-const SCHEMA_CACHE_KEY = "node-banana-schema-cache-v3";
+const SCHEMA_CACHE_KEY = "node-banana-schema-cache";
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {
@@ -41,6 +40,20 @@ function setCachedSchema(modelId: string, provider: string, parameters: ModelPar
   }
 }
 
+/** Reorder items so they read column-first in a row-based CSS grid.
+ *  e.g. [1,2,3,4,5,6,7,8] with 2 cols → [1,5,2,6,3,7,4,8] */
+function reorderColumnFirst<T>(items: T[], cols: number): T[] {
+  const rows = Math.ceil(items.length / cols);
+  const result: T[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = c * rows + r;
+      if (idx < items.length) result.push(items[idx]);
+    }
+  }
+  return result;
+}
+
 interface ModelParametersProps {
   modelId: string;
   provider: ProviderType;
@@ -48,8 +61,6 @@ interface ModelParametersProps {
   onParametersChange: (parameters: Record<string, unknown>) => void;
   onExpandChange?: (expanded: boolean, parameterCount: number) => void;
   onInputsLoaded?: (inputs: ModelInputDef[]) => void;
-  /** Names of inputs already handled as connection handles — these are filtered out from the parameter list */
-  inputNames?: string[];
 }
 
 /**
@@ -57,20 +68,17 @@ interface ModelParametersProps {
  * Fetches schema from /api/models/{modelId}?provider={provider}
  * and renders appropriate inputs based on parameter types.
  */
-export function ModelParameters({
+function ModelParametersInner({
   modelId,
   provider,
   parameters,
   onParametersChange,
   onExpandChange,
   onInputsLoaded,
-  inputNames,
 }: ModelParametersProps) {
   const [schema, setSchema] = useState<ModelParameter[]>([]);
-  const [fetchedInputs, setFetchedInputs] = useState<ModelInputDef[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isExpanded, setIsExpanded] = useState(true);
   // Use stable selector for API keys to prevent unnecessary re-fetches
   const { replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey } = useProviderApiKeys();
 
@@ -78,7 +86,6 @@ export function ModelParameters({
   useEffect(() => {
     if (!modelId || provider === "gemini") {
       setSchema([]);
-      setFetchedInputs([]);
       onInputsLoaded?.([]);
       return;
     }
@@ -88,7 +95,6 @@ export function ModelParameters({
       const cached = getCachedSchema(modelId, provider);
       if (cached) {
         setSchema(cached.parameters);
-        setFetchedInputs(cached.inputs);
         onInputsLoaded?.(cached.inputs);
         return;
       }
@@ -126,7 +132,6 @@ export function ModelParameters({
         const params = data.parameters || [];
         const inputs = data.inputs || [];
         setSchema(params);
-        setFetchedInputs(inputs);
 
         // Cache the successful result
         setCachedSchema(modelId, provider, params, inputs);
@@ -147,12 +152,12 @@ export function ModelParameters({
     fetchSchema();
   }, [modelId, provider, replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, onInputsLoaded]);
 
-  // Notify parent to resize node when schema loads and panel is expanded
+  // Notify parent to resize node when schema loads
   useEffect(() => {
-    if (isExpanded && schema.length > 0 && onExpandChange) {
+    if (schema.length > 0 && onExpandChange) {
       onExpandChange(true, schema.length);
     }
-  }, [schema, isExpanded, onExpandChange]);
+  }, [schema, onExpandChange]);
 
   const handleParameterChange = useCallback(
     (name: string, value: unknown) => {
@@ -171,15 +176,46 @@ export function ModelParameters({
     [parameters, onParametersChange]
   );
 
-  // Filter out parameters that are already handled as connection handles (e.g. image inputs like mask)
-  // Merges locally-fetched inputs (same render cycle, no race condition) with parent-provided inputNames (fallback)
-  const allInputNames = new Set([
-    ...fetchedInputs.map((i) => i.name),
-    ...(inputNames ?? []),
-  ]);
-  const filteredSchema = allInputNames.size > 0
-    ? schema.filter((param) => !allInputNames.has(param.name))
-    : schema;
+  const sortedSchema = useMemo(() => {
+    return [...schema].sort((a, b) => {
+      // Sort order: dropdowns first, then numbers, then strings, then checkboxes last
+      const typeOrder = (p: ModelParameter) => {
+        if (p.enum && p.enum.length > 0) return 0; // dropdowns first
+        if (p.type === "number" || p.type === "integer") return 1;
+        if (p.type === "boolean") return 3; // checkboxes last
+        return 2; // string and other
+      };
+      return typeOrder(a) - typeOrder(b);
+    });
+  }, [schema]);
+
+  const useGrid = sortedSchema.length > 4;
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [colCount, setColCount] = useState(1);
+
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el || !useGrid) { setColCount(1); return; }
+    let rafId: number;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const cols = getComputedStyle(el).gridTemplateColumns.split(" ").length;
+        setColCount(prev => prev === cols ? prev : cols);
+      });
+    });
+    observer.observe(el);
+    return () => {
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
+  }, [useGrid]);
+
+  const displaySchema = useMemo(() => {
+    return useGrid && colCount > 1
+      ? reorderColumnFirst(sortedSchema, colCount)
+      : sortedSchema;
+  }, [sortedSchema, useGrid, colCount]);
 
   // Don't render anything for Gemini or if no model selected
   if (provider === "gemini" || !modelId) {
@@ -187,74 +223,35 @@ export function ModelParameters({
   }
 
   // Don't render if no schema available and not loading
-  if (!isLoading && filteredSchema.length === 0 && !error) {
+  if (!isLoading && schema.length === 0 && !error) {
     return null;
   }
 
   return (
     <div className="shrink-0">
-      {/* Collapsible header */}
-      <button
-        onClick={() => {
-          const newExpanded = !isExpanded;
-          setIsExpanded(newExpanded);
-          onExpandChange?.(newExpanded, schema.length);
-        }}
-        className="w-full flex items-center justify-between text-[10px] text-neutral-400 hover:text-neutral-300 transition-colors py-0.5"
-      >
-        <span className="flex items-center gap-1">
-          <svg
-            className={`w-2.5 h-2.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-          Parameters
-          {Object.keys(parameters).length > 0 && (
-            <span className="text-neutral-500">({Object.keys(parameters).length})</span>
-          )}
-        </span>
-        {isLoading && (
-          <svg className="w-2.5 h-2.5 animate-spin" fill="none" viewBox="0 0 24 24">
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="3"
+      {error ? (
+        <span className="text-[9px] text-red-400">{error}</span>
+      ) : isLoading ? (
+        <span className="text-[9px] text-neutral-500">Loading parameters...</span>
+      ) : schema.length === 0 ? (
+        <span className="text-[9px] text-neutral-500">No parameters available</span>
+      ) : (
+        <div
+          ref={gridRef}
+          className={useGrid
+            ? "grid grid-cols-[repeat(auto-fill,minmax(min(180px,100%),1fr))] max-w-[420px] gap-x-6 gap-y-1.5"
+            : "space-y-1.5 max-w-[280px]"
+          }
+        >
+          {displaySchema.map((param) => (
+            <ParameterInput
+              key={param.name}
+              param={param}
+              name={param.name}
+              value={parameters[param.name]}
+              onChange={handleParameterChange}
             />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            />
-          </svg>
-        )}
-      </button>
-
-      {/* Parameter inputs (when expanded) */}
-      {isExpanded && (
-        <div className="mt-1 space-y-1.5">
-          {error ? (
-            <span className="text-[9px] text-red-400">{error}</span>
-          ) : isLoading ? (
-            <span className="text-[9px] text-neutral-500">Loading parameters...</span>
-          ) : filteredSchema.length === 0 ? (
-            <span className="text-[9px] text-neutral-500">No parameters available</span>
-          ) : (
-            filteredSchema.map((param) => (
-              <ParameterInput
-                key={param.name}
-                param={param}
-                value={parameters[param.name]}
-                onChange={(value) => handleParameterChange(param.name, value)}
-              />
-            ))
-          )}
+          ))}
         </div>
       )}
     </div>
@@ -263,8 +260,9 @@ export function ModelParameters({
 
 interface ParameterInputProps {
   param: ModelParameter;
+  name: string;
   value: unknown;
-  onChange: (value: unknown) => void;
+  onChange: (name: string, value: unknown) => void;
 }
 
 /**
@@ -272,7 +270,11 @@ interface ParameterInputProps {
  * Text and number inputs use local state during editing to prevent
  * cursor-jump issues caused by React Flow re-renders on store updates.
  */
-function ParameterInput({ param, value, onChange }: ParameterInputProps) {
+function ParameterInputInner({ param, name, value, onChange }: ParameterInputProps) {
+  // Stable callback that passes name along with value
+  const handleChange = useCallback((value: unknown) => {
+    onChange(name, value);
+  }, [name, onChange]);
   const displayName = param.name
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
@@ -295,9 +297,9 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
   if (param.enum && param.enum.length > 0) {
     // Enum: render as select
     return (
-      <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-2">
         <label
-          className="text-[9px] text-neutral-400"
+          className="text-[11px] text-neutral-400 shrink-0"
           title={param.description || undefined}
         >
           {displayName}
@@ -307,18 +309,18 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
           onChange={(e) => {
             const val = e.target.value;
             if (val === "") {
-              onChange(undefined);
+              handleChange(undefined);
             } else if (param.type === "integer") {
-              onChange(parseInt(val, 10));
+              handleChange(parseInt(val, 10));
             } else if (param.type === "number") {
-              onChange(parseFloat(val));
+              handleChange(parseFloat(val));
             } else if (param.type === "boolean") {
-              onChange(val === "true");
+              handleChange(val === "true");
             } else {
-              onChange(val);
+              handleChange(val);
             }
           }}
-          className="nodrag nopan w-full text-[9px] py-0.5 px-1 border border-neutral-700 rounded bg-neutral-900/50 focus:outline-none focus:ring-1 focus:ring-neutral-600 text-neutral-300"
+          className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
         >
           <option value="">Default</option>
           {param.enum.map((opt) => (
@@ -338,14 +340,14 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
     // Boolean: render as checkbox
     return (
       <label
-        className="flex items-center gap-1.5 text-[9px] text-neutral-400 cursor-pointer"
+        className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer"
         title={param.description || undefined}
       >
         <input
           type="checkbox"
           checked={effectiveValue}
-          onChange={(e) => onChange(e.target.checked)}
-          className="nodrag nopan w-2.5 h-2.5 rounded border-neutral-700 bg-neutral-900/50 text-neutral-600 focus:ring-1 focus:ring-neutral-600 focus:ring-offset-0"
+          onChange={(e) => handleChange(e.target.checked)}
+          className="nodrag nopan w-3 h-3 rounded bg-[#1a1a1a] text-neutral-600 focus:ring-1 focus:ring-neutral-600 focus:ring-offset-0"
         />
         <span>{displayName}</span>
       </label>
@@ -371,45 +373,47 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
 
     return (
       <div className="flex flex-col gap-0.5">
-        <label
-          className="text-[9px] text-neutral-400 flex items-center gap-1"
-          title={param.description || undefined}
-        >
-          {displayName}
-          {hasMin && hasMax && (
-            <span className="text-neutral-500">
-              ({param.minimum}-{param.maximum})
-            </span>
-          )}
-        </label>
-        <input
-          type="number"
-          value={localValue}
-          min={param.minimum}
-          max={param.maximum}
-          step={param.type === "integer" ? 1 : 0.1}
-          onFocus={() => { isFocusedRef.current = true; }}
-          onChange={(e) => {
-            setLocalValue(e.target.value);
-          }}
-          onBlur={() => {
-            isFocusedRef.current = false;
-            if (localValue === "") {
-              onChange(undefined);
-            } else {
-              const num = param.type === "integer" ? parseInt(localValue, 10) : parseFloat(localValue);
-              onChange(isNaN(num) ? undefined : num);
-            }
-          }}
-          placeholder={param.default !== undefined ? `Default: ${param.default}` : undefined}
-          className={`nodrag nopan w-full text-[9px] py-0.5 px-1 border rounded bg-neutral-900/50 focus:outline-none focus:ring-1 text-neutral-300 placeholder:text-neutral-600 ${
-            validationError
-              ? "border-red-500 focus:ring-red-500"
-              : "border-neutral-700 focus:ring-neutral-600"
-          }`}
-        />
+        <div className="flex items-center gap-2">
+          <label
+            className="text-[11px] text-neutral-400 shrink-0 flex items-center gap-1"
+            title={param.description || undefined}
+          >
+            {displayName}
+            {hasMin && hasMax && (
+              <span className="text-neutral-500 text-[9px]">
+                ({param.minimum}-{param.maximum})
+              </span>
+            )}
+          </label>
+          <input
+            type="number"
+            value={localValue}
+            min={param.minimum}
+            max={param.maximum}
+            step={param.type === "integer" ? 1 : 0.1}
+            onFocus={() => { isFocusedRef.current = true; }}
+            onChange={(e) => {
+              setLocalValue(e.target.value);
+            }}
+            onBlur={() => {
+              isFocusedRef.current = false;
+              if (localValue === "") {
+                handleChange(undefined);
+              } else {
+                const num = param.type === "integer" ? parseInt(localValue, 10) : parseFloat(localValue);
+                handleChange(isNaN(num) ? undefined : num);
+              }
+            }}
+            placeholder={param.default !== undefined ? `${param.default}` : undefined}
+            className={`nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] focus:outline-none focus:ring-1 text-white placeholder:text-neutral-500 ${
+              validationError
+                ? "ring-1 ring-red-500"
+                : "focus:ring-neutral-600"
+            }`}
+          />
+        </div>
         {validationError && (
-          <span className="text-[8px] text-red-400">{validationError}</span>
+          <span className="text-[9px] text-red-400">{validationError}</span>
         )}
       </div>
     );
@@ -422,9 +426,9 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
 
   // Default: string input — uses local state, syncs to store on blur
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex items-center gap-2">
       <label
-        className="text-[9px] text-neutral-400"
+        className="text-[11px] text-neutral-400 shrink-0"
         title={param.description || undefined}
       >
         {displayName}
@@ -438,11 +442,15 @@ function ParameterInput({ param, value, onChange }: ParameterInputProps) {
         }}
         onBlur={() => {
           isFocusedRef.current = false;
-          onChange(localValue || undefined);
+          handleChange(localValue || undefined);
         }}
-        placeholder={param.default !== undefined ? `Default: ${param.default}` : undefined}
-        className="nodrag nopan w-full text-[9px] py-0.5 px-1 border border-neutral-700 rounded bg-neutral-900/50 focus:outline-none focus:ring-1 focus:ring-neutral-600 text-neutral-300 placeholder:text-neutral-600"
+        placeholder={param.default !== undefined ? `${param.default}` : undefined}
+        className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white placeholder:text-neutral-500"
       />
     </div>
   );
 }
+
+// Memoized exports to prevent unnecessary re-renders
+export const ModelParameters = React.memo(ModelParametersInner);
+const ParameterInput = React.memo(ParameterInputInner);

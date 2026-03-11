@@ -219,6 +219,7 @@ describe("executeEaseCurve", () => {
         easeCurve: {
           bezierHandles: [0.42, 0, 0.58, 1],
           easingPreset: "ease-in-out",
+          outputDuration: 10,
         },
       }),
       getEdges: vi.fn().mockReturnValue([
@@ -232,6 +233,7 @@ describe("executeEaseCurve", () => {
     expect(ctx.updateNodeData).toHaveBeenCalledWith("ec-1", expect.objectContaining({
       bezierHandles: [0.42, 0, 0.58, 1],
       easingPreset: "ease-in-out",
+      outputDuration: 10,
       inheritedFrom: "parent-ec",
     }));
   });

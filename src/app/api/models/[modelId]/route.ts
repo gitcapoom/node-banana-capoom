@@ -936,6 +936,51 @@ function getKieSchema(modelId: string): ExtractedSchema {
 }
 
 /**
+ * Get schema for Gemini video models (native Veo via Gemini API)
+ * Returns null if the model is not a Gemini video model.
+ */
+function getGeminiVideoSchema(modelId: string): ExtractedSchema | null {
+  const commonParams: ModelParameter[] = [
+    { name: "aspectRatio", type: "string", description: "Output aspect ratio", enum: ["16:9", "9:16"], default: "16:9" },
+    { name: "durationSeconds", type: "string", description: "Video duration in seconds", enum: ["4", "6", "8"], default: "8" },
+    { name: "resolution", type: "string", description: "Output resolution", enum: ["720p", "1080p", "4k"], default: "720p" },
+    { name: "seed", type: "integer", description: "Random seed for reproducibility", minimum: 0 },
+  ];
+
+  const textInputs: ModelInput[] = [
+    { name: "prompt", type: "text", required: true, label: "Prompt" },
+    { name: "negative_prompt", type: "text", required: false, label: "Neg. Prompt" },
+  ];
+
+  const schemas: Record<string, ExtractedSchema> = {
+    "veo-3.1/text-to-video": {
+      parameters: commonParams,
+      inputs: textInputs,
+    },
+    "veo-3.1/image-to-video": {
+      parameters: commonParams,
+      inputs: [
+        ...textInputs,
+        { name: "image", type: "image", required: true, label: "Image" },
+      ],
+    },
+    "veo-3.1-fast/text-to-video": {
+      parameters: commonParams,
+      inputs: textInputs,
+    },
+    "veo-3.1-fast/image-to-video": {
+      parameters: commonParams,
+      inputs: [
+        ...textInputs,
+        { name: "image", type: "image", required: true, label: "Image" },
+      ],
+    },
+  };
+
+  return schemas[modelId] ?? null;
+}
+
+/**
  * Get static schema for WaveSpeed models (fallback when dynamic schema not available)
  */
 function getStaticWaveSpeedSchema(modelId: string): ExtractedSchema {
@@ -1169,11 +1214,11 @@ export async function GET(
   const decodedModelId = decodeURIComponent(modelId);
   const provider = request.nextUrl.searchParams.get("provider") as ProviderType | null;
 
-  if (!provider || (provider !== "replicate" && provider !== "fal" && provider !== "kie" && provider !== "wavespeed")) {
+  if (!provider || (provider !== "replicate" && provider !== "fal" && provider !== "kie" && provider !== "wavespeed" && provider !== "gemini")) {
     return NextResponse.json<SchemaErrorResponse>(
       {
         success: false,
-        error: "Invalid or missing provider. Use ?provider=replicate, ?provider=fal, ?provider=kie, or ?provider=wavespeed",
+        error: "Invalid or missing provider. Use ?provider=replicate, ?provider=fal, ?provider=kie, ?provider=wavespeed, or ?provider=gemini",
       },
       { status: 400 }
     );
@@ -1194,7 +1239,16 @@ export async function GET(
   try {
     let result: ExtractedSchema;
 
-    if (provider === "replicate") {
+    if (provider === "gemini") {
+      // Gemini video models use hardcoded schemas
+      const geminiVideoSchema = getGeminiVideoSchema(decodedModelId);
+      if (geminiVideoSchema) {
+        result = geminiVideoSchema;
+      } else {
+        // Gemini image models don't use schema endpoint (params are built-in)
+        result = { parameters: [], inputs: [] };
+      }
+    } else if (provider === "replicate") {
       // User-provided key takes precedence over env variable
       const apiKey = request.headers.get("X-Replicate-Key") || process.env.REPLICATE_API_KEY;
       if (!apiKey) {

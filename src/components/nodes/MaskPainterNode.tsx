@@ -102,13 +102,7 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
   return (
     <BaseNode
       id={id}
-      title="Mask Painter"
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-      onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
       selected={selected}
-      commentNavigation={commentNavigation ?? undefined}
     >
       <input
         ref={fileInputRef}

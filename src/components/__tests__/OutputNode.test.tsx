@@ -23,6 +23,16 @@ vi.mock("@xyflow/react", async () => {
   };
 });
 
+// Mock useVideoBlobUrl to pass through the URL directly
+vi.mock("@/hooks/useVideoBlobUrl", () => ({
+  useVideoBlobUrl: (url: string | null) => url,
+}));
+
+// Mock useVideoAutoplay to return a simple ref
+vi.mock("@/hooks/useVideoAutoplay", () => ({
+  useVideoAutoplay: () => ({ current: null }),
+}));
+
 // Mock URL.createObjectURL and URL.revokeObjectURL
 const mockCreateObjectURL = vi.fn(() => "blob:test-url");
 const mockRevokeObjectURL = vi.fn();
@@ -45,6 +55,7 @@ describe("OutputNode", () => {
         currentNodeIds: [],
         groups: {},
         nodes: [],
+        hoveredNodeId: null,
         getNodesWithComments: vi.fn(() => []),
         markCommentViewed: vi.fn(),
         setNavigationTarget: vi.fn(),
@@ -81,17 +92,7 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      expect(screen.getByText("Waiting for image, video, or audio")).toBeInTheDocument();
-    });
-
-    it("should render the title 'Output'", () => {
-      render(
-        <TestWrapper>
-          <OutputNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Output")).toBeInTheDocument();
+      expect(screen.getByText("Connect input")).toBeInTheDocument();
     });
 
     it("should not render download button when no content", () => {
@@ -101,7 +102,7 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      expect(screen.queryByText("Download")).not.toBeInTheDocument();
+      expect(screen.queryByTitle("Download")).not.toBeInTheDocument();
     });
 
     it("should render input handle for image", () => {
@@ -146,7 +147,7 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      expect(screen.getByText("Download")).toBeInTheDocument();
+      expect(screen.getByTitle("Download")).toBeInTheDocument();
     });
   });
 
@@ -271,17 +272,6 @@ describe("OutputNode", () => {
 
       const video = document.querySelector("video");
       expect(video?.muted).toBe(true);
-    });
-
-    it("should render video with autoPlay attribute", () => {
-      render(
-        <TestWrapper>
-          <OutputNode {...createNodeProps({ video: "data:video/mp4;base64,xyz" })} />
-        </TestWrapper>
-      );
-
-      const video = document.querySelector("video");
-      expect(video?.autoplay).toBe(true);
     });
 
     it("should render video with playsInline attribute", () => {
@@ -437,7 +427,7 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const downloadButton = screen.getByText("Download");
+      const downloadButton = screen.getByTitle("Download");
       fireEvent.click(downloadButton);
 
       await waitFor(() => {
@@ -459,7 +449,7 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const downloadButton = screen.getByText("Download");
+      const downloadButton = screen.getByTitle("Download");
       fireEvent.click(downloadButton);
 
       await waitFor(() => {
@@ -483,7 +473,7 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const downloadButton = screen.getByText("Download");
+      const downloadButton = screen.getByTitle("Download");
       fireEvent.click(downloadButton);
 
       await waitFor(() => {
@@ -499,7 +489,7 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const downloadButton = screen.getByText("Download");
+      const downloadButton = screen.getByTitle("Download");
       fireEvent.click(downloadButton);
 
       await waitFor(() => {
@@ -520,7 +510,7 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const downloadButton = screen.getByText("Download");
+      const downloadButton = screen.getByTitle("Download");
       fireEvent.click(downloadButton);
 
       await waitFor(() => {
@@ -529,34 +519,4 @@ describe("OutputNode", () => {
     });
   });
 
-  describe("Custom Title and Comment", () => {
-    it("should display custom title when provided", () => {
-      render(
-        <TestWrapper>
-          <OutputNode {...createNodeProps({ customTitle: "My Output", image: null })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("My Output - Output")).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData when custom title is changed", () => {
-      render(
-        <TestWrapper>
-          <OutputNode {...createNodeProps({ image: null })} />
-        </TestWrapper>
-      );
-
-      // Click on title to edit
-      const title = screen.getByText("Output");
-      fireEvent.click(title);
-
-      // Type new title
-      const input = screen.getByPlaceholderText("Custom title...");
-      fireEvent.change(input, { target: { value: "New Title" } });
-      fireEvent.keyDown(input, { key: "Enter" });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("output-node-1", { customTitle: "New Title" });
-    });
-  });
 });

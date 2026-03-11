@@ -32,6 +32,9 @@ const VALID_NODE_TYPES: NodeType[] = [
   "easeCurve",
   "videoTrim",
   "videoFrameGrab",
+  "router",
+  "switch",
+  "conditionalSwitch",
   "glbViewer",
   "appleSharp",
   "spzViewer",
@@ -67,6 +70,9 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   easeCurve: { width: 340, height: 480 },
   videoTrim: { width: 360, height: 360 },
   videoFrameGrab: { width: 320, height: 320 },
+  router: { width: 200, height: 80 },
+  switch: { width: 220, height: 120 },
+  conditionalSwitch: { width: 260, height: 180 },
   glbViewer: { width: 360, height: 380 },
   appleSharp: { width: 300, height: 320 },
   spzViewer: { width: 300, height: 280 },
@@ -289,6 +295,7 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         resolution: "1K",
         model: "nano-banana-pro",
         useGoogleSearch: false,
+        useImageSearch: false,
         status: "idle",
         error: null,
         imageHistory: [],
@@ -354,6 +361,7 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
           resolution: "1K",
           model: "nano-banana-pro",
           useGoogleSearch: false,
+          useImageSearch: false,
         },
         childNodeIds: [],
         gridRows: 2,
@@ -415,6 +423,23 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         outputImage: null,
         status: "idle",
         error: null,
+      };
+    case "router":
+      return {};
+    case "switch":
+      return { inputType: null, switches: [{ id: "sw-1", name: "Output 1", enabled: true }] };
+    case "conditionalSwitch":
+      return {
+        incomingText: null,
+        rules: [
+          {
+            id: "rule-" + Math.random().toString(36).slice(2, 9),
+            value: "",
+            mode: "contains",
+            label: "Rule 1",
+            isMatched: false,
+          }
+        ]
       };
     case "glbViewer":
       return {
