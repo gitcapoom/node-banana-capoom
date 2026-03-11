@@ -48,6 +48,7 @@ import {
   VideoTrimNode,
   VideoFrameGrabNode,
   AppleSharpNode,
+  VideoInputNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -97,6 +98,7 @@ const nodeTypes: NodeTypes = {
   panoViewer: PanoViewerNode,
   panoEditor: PanoEditorNode,
   maskPainter: MaskPainterNode,
+  videoInput: VideoInputNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -186,6 +188,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image-0", "image-1", "text"], outputs: ["image"] };
     case "maskPainter":
       return { inputs: ["image"], outputs: ["image"] };
+    case "videoInput":
+      return { inputs: ["video"], outputs: ["video"] };
     default:
       return { inputs: [], outputs: [] };
   }
@@ -1167,6 +1171,9 @@ export function WorkflowCanvas() {
           case "t":
             nodeType = "generateAudio";
             break;
+          case "d":
+            nodeType = "videoInput";
+            break;
         }
 
         if (nodeType) {
@@ -1202,6 +1209,7 @@ export function WorkflowCanvas() {
             panoViewer: { width: 300, height: 280 },
             panoEditor: { width: 300, height: 300 },
             maskPainter: { width: 260, height: 300 },
+            videoInput: { width: 320, height: 300 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });
@@ -1465,10 +1473,16 @@ export function WorkflowCanvas() {
     const hasAudioFile = items.some(
       (item) => item.kind === "file" && item.type.startsWith("audio/")
     );
+    const hasVideoFile = items.some(
+      (item) => item.kind === "file" && item.type.startsWith("video/")
+    );
 
     if (hasJsonFile) {
       setIsDragOver(true);
       setDropType("workflow");
+    } else if (hasVideoFile) {
+      setIsDragOver(true);
+      setDropType("node");
     } else if (hasAudioFile) {
       setIsDragOver(true);
       setDropType("audio");
@@ -1550,6 +1564,46 @@ export function WorkflowCanvas() {
           }
         };
         reader.readAsText(file);
+        return;
+      }
+
+      // Handle video files (check MIME type and file extension as fallback)
+      const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|avi|mkv)$/i;
+      const videoFiles = allFiles.filter((file) => file.type.startsWith("video/") || VIDEO_EXTENSIONS.test(file.name));
+      if (videoFiles.length > 0) {
+        const position = screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+        videoFiles.forEach((file, index) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const dataUrl = e.target?.result as string;
+            const nodeId = addNode("videoInput", {
+              x: position.x + index * 340,
+              y: position.y,
+            });
+            const tempVideo = document.createElement("video");
+            tempVideo.preload = "metadata";
+            tempVideo.onloadedmetadata = () => {
+              updateNodeData(nodeId, {
+                videoFile: dataUrl,
+                filename: file.name,
+                format: file.type,
+                duration: tempVideo.duration,
+              });
+            };
+            tempVideo.onerror = () => {
+              updateNodeData(nodeId, {
+                videoFile: dataUrl,
+                filename: file.name,
+                format: file.type,
+              });
+            };
+            tempVideo.src = dataUrl;
+          };
+          reader.readAsDataURL(file);
+        });
         return;
       }
 
@@ -1811,6 +1865,8 @@ export function WorkflowCanvas() {
                 return "#fb923c"; // orange-400 (panorama editor)
               case "maskPainter":
                 return "#a3a3a3"; // neutral-400 (mask painting)
+              case "videoInput":
+                return "#8b5cf6"; // violet-600 (video input)
               default:
                 return "#94a3b8";
             }

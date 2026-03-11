@@ -52,7 +52,8 @@ export type NodeType =
   | "panoCrop"
   | "panoViewer"
   | "panoEditor"
-  | "maskPainter";
+  | "maskPainter"
+  | "videoInput";
 
 /**
  * Node execution status
@@ -77,6 +78,16 @@ export interface AudioInputNodeData extends BaseNodeData {
   filename: string | null;       // Original filename for display
   duration: number | null;       // Duration in seconds
   format: string | null;         // MIME type (audio/mp3, audio/wav, etc.)
+}
+
+/**
+ * Video input node - loads/uploads video files into the workflow
+ */
+export interface VideoInputNodeData extends BaseNodeData {
+  videoFile: string | null;      // Base64 data URL of the video file
+  filename: string | null;       // Original filename for display
+  duration: number | null;       // Duration in seconds
+  format: string | null;         // MIME type (video/mp4, video/webm, etc.)
 }
 
 /**
@@ -536,7 +547,8 @@ export type WorkflowNodeData =
   | PanoCropNodeData
   | PanoViewerNodeData
   | PanoEditorNodeData
-  | MaskPainterNodeData;
+  | MaskPainterNodeData
+  | VideoInputNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)

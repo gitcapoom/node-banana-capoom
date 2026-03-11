@@ -65,9 +65,25 @@ export function Toast() {
   const handleCopy = async () => {
     const textToCopy = details ? `${message}\n\n${details}` : message;
     if (textToCopy) {
-      await navigator.clipboard.writeText(textToCopy);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(textToCopy);
+        } else {
+          // Fallback for non-secure contexts (HTTP)
+          const textarea = document.createElement("textarea");
+          textarea.value = textToCopy;
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        }
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        console.warn("Failed to copy to clipboard");
+      }
     }
   };
 

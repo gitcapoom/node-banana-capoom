@@ -58,6 +58,14 @@ export async function executeNode(
       }
       break;
     }
+    case "videoInput": {
+      // If video is connected from upstream, use it (connection wins over upload)
+      const videoInputs = ctx.getConnectedInputs(ctx.node.id);
+      if (videoInputs.videos.length > 0 && videoInputs.videos[0]) {
+        ctx.updateNodeData(ctx.node.id, { videoFile: videoInputs.videos[0] });
+      }
+      break;
+    }
     case "annotation":
       await executeAnnotation(ctx);
       break;

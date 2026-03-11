@@ -92,16 +92,20 @@ export type { LevelGroup } from "./utils/executionUtils";
 export { CONCURRENCY_SETTINGS_KEY } from "./utils/executionUtils";
 
 function saveLogSession(): void {
-  const session = logger.getCurrentSession();
-  if (session) {
-    session.endTime = new Date().toISOString();
-    fetch('/api/logs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session }),
-    }).catch((err) => {
-      console.error('Failed to save log session:', err);
-    });
+  try {
+    const session = logger.getCurrentSession();
+    if (session) {
+      session.endTime = new Date().toISOString();
+      fetch('/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session }),
+      }).catch((err) => {
+        console.error('Failed to save log session:', err);
+      });
+    }
+  } catch (err) {
+    console.error('Failed to serialize log session:', err);
   }
 }
 
@@ -964,6 +968,14 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
             }
             break;
           }
+          case "videoInput": {
+            // If video is connected from upstream, use it (connection wins over upload)
+            const videoInputs = get().getConnectedInputs(node.id);
+            if (videoInputs.videos.length > 0 && videoInputs.videos[0]) {
+              get().updateNodeData(node.id, { videoFile: videoInputs.videos[0] });
+            }
+            break;
+          }
           case "glbViewer":
             await executeGlbViewer(executionCtx);
             break;
@@ -1251,6 +1263,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       saveLogSession();
       await logger.endSession();
     } catch (error) {
+      // Log full stack trace to browser console for debugging
+      console.error('[regenerateNode] failed:', error);
       logger.error('node.error', 'Node regeneration failed', {
         nodeId,
       }, error instanceof Error ? error : undefined);
@@ -1316,6 +1330,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       switch (node.type) {
         case "imageInput":
         case "audioInput":
+        case "videoInput":
         case "panoCrop":
           // Data source nodes - no execution needed
           break;
@@ -1605,6 +1620,46 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       workflow.edges = Array.from(edgeById.values());
     }
 
+    // Sanitize edges: remove edges referencing non-existent nodes or stale dynamic handles.
+    // Dynamic handles (e.g. "image-mask_url") are derived from a node's inputSchema.
+    // When the model changes, the schema changes too, but old edges persist — causing
+    // React Flow to fire warnings on every render and potentially overflowing the call stack.
+    {
+      const nodeMap = new Map(workflow.nodes.map((n) => [n.id, n]));
+      const beforeCount = workflow.edges.length;
+      workflow.edges = workflow.edges.filter((edge) => {
+        // Remove edges targeting/sourcing nodes that no longer exist
+        const sourceNode = nodeMap.get(edge.source);
+        const targetNode = nodeMap.get(edge.target);
+        if (!sourceNode || !targetNode) return false;
+
+        // Validate compound dynamic handles (e.g. "image-mask_url") against inputSchema
+        const th = edge.targetHandle;
+        if (th) {
+          const dashIdx = th.indexOf("-");
+          if (dashIdx > 0) {
+            const suffix = th.slice(dashIdx + 1);
+            // Skip indexed handles like "image-0", "image-1" (panoEditor etc.)
+            if (!/^\d+$/.test(suffix)) {
+              const targetData = targetNode.data as Record<string, unknown>;
+              const schema = targetData.inputSchema as Array<{ name: string; type: string }> | undefined;
+              if (schema) {
+                const exists = schema.some((s) => s.name === suffix);
+                if (!exists) {
+                  console.warn(`[loadWorkflow] Removing stale edge ${edge.id}: handle "${th}" not in inputSchema`);
+                  return false;
+                }
+              }
+            }
+          }
+        }
+        return true;
+      });
+      if (workflow.edges.length < beforeCount) {
+        console.log(`[loadWorkflow] Sanitized ${beforeCount - workflow.edges.length} invalid edge(s)`);
+      }
+    }
+
     // Look up saved config from localStorage (only if workflow has an ID)
     const configs = loadSaveConfigs();
     const savedConfig = workflow.id ? configs[workflow.id] : null;
@@ -1762,7 +1817,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     };
 
     set((state) => ({
-      globalImageHistory: [newItem, ...state.globalImageHistory],
+      globalImageHistory: [newItem, ...state.globalImageHistory].slice(0, 200),
     }));
   },
 

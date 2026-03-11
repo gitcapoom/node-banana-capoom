@@ -155,6 +155,46 @@ async function getFalInputMapping(modelId: string, apiKey: string | null): Promi
 
 export const MAX_UPLOAD_SIZE = 20 * 1024 * 1024; // 20 MB
 
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
+const MAX_UPLOAD_ATTEMPTS = 3;
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  label: string,
+  maxAttempts = MAX_UPLOAD_ATTEMPTS,
+): Promise<Response> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await fetch(url, options);
+
+      if (response.ok) return response;
+
+      if (!RETRYABLE_STATUS_CODES.has(response.status) || attempt === maxAttempts) {
+        throw new Error(`${label}: ${response.status}`);
+      }
+
+      console.warn(`[fal] ${label} returned ${response.status}, retrying (${attempt}/${maxAttempts})...`);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Don't retry non-retryable errors (our own thrown errors with status info)
+      if (lastError.message.startsWith(label)) throw lastError;
+
+      if (attempt === maxAttempts) throw lastError;
+
+      console.warn(`[fal] ${label} failed: ${lastError.message}, retrying (${attempt}/${maxAttempts})...`);
+    }
+
+    // Exponential backoff: 1s, 2s
+    await new Promise((resolve) => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+  }
+
+  throw lastError || new Error(`${label} failed after ${maxAttempts} attempts`);
+}
+
 /**
  * Upload a base64 data URL image to fal.ai CDN storage.
  * Returns the CDN URL to use in API requests instead of inline base64.
@@ -180,7 +220,7 @@ export async function uploadImageToFal(base64DataUrl: string, apiKey: string | n
 
   // Step 1: Initiate upload to get a signed PUT URL
   const ext = contentType.split("/")[1] || "png";
-  const initiateResponse = await fetch(
+  const initiateResponse = await fetchWithRetry(
     "https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3",
     {
       method: "POST",
@@ -192,12 +232,9 @@ export async function uploadImageToFal(base64DataUrl: string, apiKey: string | n
         content_type: contentType,
         file_name: `${Date.now()}.${ext}`,
       }),
-    }
+    },
+    "Failed to initiate fal CDN upload",
   );
-
-  if (!initiateResponse.ok) {
-    throw new Error(`Failed to initiate fal CDN upload: ${initiateResponse.status}`);
-  }
 
   const { upload_url: uploadUrl, file_url: fileUrl } = await initiateResponse.json();
 
@@ -217,15 +254,15 @@ export async function uploadImageToFal(base64DataUrl: string, apiKey: string | n
   }
 
   // Step 2: PUT the binary data to the validated signed URL
-  const putResponse = await fetch(uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": contentType },
-    body: binaryData,
-  });
-
-  if (!putResponse.ok) {
-    throw new Error(`Failed to upload to fal CDN: ${putResponse.status}`);
-  }
+  await fetchWithRetry(
+    uploadUrl,
+    {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: binaryData,
+    },
+    "Failed to upload to fal CDN",
+  );
 
   return fileUrl;
 }

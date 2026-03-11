@@ -31,6 +31,7 @@ import {
   PanoCropNodeData,
   PanoEditorNodeData,
   MaskPainterNodeData,
+  VideoInputNodeData,
 } from "@/types";
 
 /**
@@ -149,6 +150,8 @@ function getSourceOutput(
     return { type: "image", value: (sourceNode.data as PanoEditorNodeData).outputImage || null };
   } else if (sourceNode.type === "maskPainter") {
     return { type: "image", value: (sourceNode.data as MaskPainterNodeData).outputMask || null };
+  } else if (sourceNode.type === "videoInput") {
+    return { type: "video", value: (sourceNode.data as VideoInputNodeData).videoFile };
   }
   return { type: "image", value: null };
 }

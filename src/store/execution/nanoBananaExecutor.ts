@@ -116,10 +116,20 @@ export async function executeNanoBanana(
   }
 
   try {
+    let body: string;
+    try {
+      body = JSON.stringify(requestPayload);
+    } catch (serializeError) {
+      const msg = `Failed to serialize request (${images.length} images): ${serializeError instanceof Error ? serializeError.message : String(serializeError)}`;
+      console.error('[nanoBanana] Serialization failed:', serializeError);
+      updateNodeData(node.id, { status: "error", error: msg });
+      throw new Error(msg);
+    }
+
     const response = await fetch("/api/generate", {
       method: "POST",
       headers,
-      body: JSON.stringify(requestPayload),
+      body,
       ...(signal ? { signal } : {}),
     });
 

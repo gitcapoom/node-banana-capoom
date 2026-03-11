@@ -14,6 +14,7 @@ interface ValidationResult {
 const VALID_NODE_TYPES: NodeType[] = [
   "imageInput",
   "audioInput",
+  "videoInput",
   "annotation",
   "prompt",
   "array",
@@ -48,6 +49,7 @@ const VALID_HANDLE_TYPES = ["image", "text", "audio", "video", "easeCurve", "3d"
 const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = {
   imageInput: { width: 300, height: 280 },
   audioInput: { width: 300, height: 200 },
+  videoInput: { width: 320, height: 300 },
   annotation: { width: 300, height: 280 },
   prompt: { width: 320, height: 220 },
   array: { width: 360, height: 360 },
@@ -238,6 +240,13 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
     case "audioInput":
       return {
         audioFile: null,
+        filename: null,
+        duration: null,
+        format: null,
+      };
+    case "videoInput":
+      return {
+        videoFile: null,
         filename: null,
         duration: null,
         format: null,
