@@ -246,9 +246,6 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     <BaseNode
       id={id}
       selected={selected}
-      title="SPZ Viewer"
-      commentNavigation={commentNavigation || undefined}
-      onRun={handleRun}
       isExecuting={isRunning}
     >
       {/* Input Handle — 3D data */}

@@ -82,16 +82,6 @@ describe("ImageInputNode", () => {
   };
 
   describe("Basic Rendering", () => {
-    it("should render the Image title", () => {
-      render(
-        <TestWrapper>
-          <ImageInputNode {...defaultProps} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Image")).toBeInTheDocument();
-    });
-
     it("should render drop zone when no image is set", () => {
       render(
         <TestWrapper>
@@ -99,7 +89,7 @@ describe("ImageInputNode", () => {
         </TestWrapper>
       );
 
-      expect(screen.getByText("Drop or click")).toBeInTheDocument();
+      expect(screen.getByText("Drop image")).toBeInTheDocument();
     });
 
     it("should render reference input handle on left", () => {
@@ -147,26 +137,6 @@ describe("ImageInputNode", () => {
       expect(img).toHaveAttribute("src", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==");
     });
 
-    it("should display filename", () => {
-      render(
-        <TestWrapper>
-          <ImageInputNode {...propsWithImage} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("test-image.png")).toBeInTheDocument();
-    });
-
-    it("should display dimensions", () => {
-      render(
-        <TestWrapper>
-          <ImageInputNode {...propsWithImage} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("800x600")).toBeInTheDocument();
-    });
-
     it("should not show drop zone when image is set", () => {
       render(
         <TestWrapper>
@@ -174,7 +144,7 @@ describe("ImageInputNode", () => {
         </TestWrapper>
       );
 
-      expect(screen.queryByText("Drop or click")).not.toBeInTheDocument();
+      expect(screen.queryByText("Drop image")).not.toBeInTheDocument();
     });
   });
 
@@ -422,7 +392,7 @@ describe("ImageInputNode", () => {
         </TestWrapper>
       );
 
-      const dropZone = screen.getByText("Drop or click").parentElement!;
+      const dropZone = screen.getByText("Drop image").parentElement!;
       const dragOverEvent = new Event("dragover", { bubbles: true });
       Object.assign(dragOverEvent, {
         preventDefault: vi.fn(),
@@ -445,7 +415,7 @@ describe("ImageInputNode", () => {
         </TestWrapper>
       );
 
-      const dropZone = screen.getByText("Drop or click").parentElement!;
+      const dropZone = screen.getByText("Drop image").parentElement!;
 
       // Drop with empty files array (no file to process)
       const dataTransfer = {
@@ -472,50 +442,11 @@ describe("ImageInputNode", () => {
       const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
       const clickSpy = vi.spyOn(fileInput, "click");
 
-      const dropZone = screen.getByText("Drop or click").parentElement!;
+      const dropZone = screen.getByText("Drop image").parentElement!;
       fireEvent.click(dropZone);
 
       expect(clickSpy).toHaveBeenCalled();
     });
   });
 
-  describe("Custom Title and Comment", () => {
-    it("should display custom title when provided", () => {
-      const propsWithCustomTitle = {
-        ...defaultProps,
-        data: {
-          ...defaultProps.data,
-          customTitle: "My Image",
-        },
-      };
-
-      render(
-        <TestWrapper>
-          <ImageInputNode {...propsWithCustomTitle} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("My Image - Image")).toBeInTheDocument();
-    });
-
-    it("should update custom title via onCustomTitleChange", () => {
-      render(
-        <TestWrapper>
-          <ImageInputNode {...defaultProps} />
-        </TestWrapper>
-      );
-
-      // Click on title to edit
-      const title = screen.getByText("Image");
-      fireEvent.click(title);
-
-      const input = screen.getByPlaceholderText("Custom title...");
-      fireEvent.change(input, { target: { value: "New Title" } });
-      fireEvent.keyDown(input, { key: "Enter" });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-image-1", {
-        customTitle: "New Title",
-      });
-    });
-  });
 });

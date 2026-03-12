@@ -366,6 +366,15 @@ const GEMINI_IMAGE_MODELS: ProviderModel[] = [
     pricing: { type: "per-run", amount: 0.039, currency: "USD" },
   },
   {
+    id: "nano-banana-2",
+    name: "Nano Banana 2",
+    description: "High-efficiency image generation with Gemini 3.1 Flash. Supports resolution control (512/1K/2K/4K), Google Search grounding, and up to 10 reference images.",
+    provider: "gemini",
+    capabilities: ["text-to-image", "image-to-image"],
+    coverImage: undefined,
+    pricing: { type: "per-run", amount: 0.067, currency: "USD" },
+  },
+  {
     id: "nano-banana-pro",
     name: "Nano Banana Pro",
     description: "High-quality image generation with Gemini 3 Pro. Supports text-to-image, image-to-image, resolution control (1K/2K/4K), and Google Search grounding.",
@@ -373,6 +382,46 @@ const GEMINI_IMAGE_MODELS: ProviderModel[] = [
     capabilities: ["text-to-image", "image-to-image"],
     coverImage: undefined,
     pricing: { type: "per-run", amount: 0.134, currency: "USD" },
+  },
+];
+
+// Gemini video models (native Veo via Gemini API)
+const GEMINI_VIDEO_MODELS: ProviderModel[] = [
+  {
+    id: "veo-3.1/text-to-video",
+    name: "Veo 3.1",
+    description: "Highest quality video generation with Veo 3.1. Supports 720p/1080p/4k, 4-8 second clips, and native audio via Gemini API.",
+    provider: "gemini",
+    capabilities: ["text-to-video"],
+    coverImage: undefined,
+    pricing: { type: "per-second", amount: 0.40, currency: "USD" },
+  },
+  {
+    id: "veo-3.1/image-to-video",
+    name: "Veo 3.1 I2V",
+    description: "Image-to-video generation with Veo 3.1. Supports 720p/1080p/4k, 4-8 second clips, and native audio via Gemini API.",
+    provider: "gemini",
+    capabilities: ["image-to-video"],
+    coverImage: undefined,
+    pricing: { type: "per-second", amount: 0.40, currency: "USD" },
+  },
+  {
+    id: "veo-3.1-fast/text-to-video",
+    name: "Veo 3.1 Fast",
+    description: "Fast, cost-effective video generation with Veo 3.1 Fast. Supports 720p/1080p/4k, 4-8 second clips via Gemini API.",
+    provider: "gemini",
+    capabilities: ["text-to-video"],
+    coverImage: undefined,
+    pricing: { type: "per-second", amount: 0.15, currency: "USD" },
+  },
+  {
+    id: "veo-3.1-fast/image-to-video",
+    name: "Veo 3.1 Fast I2V",
+    description: "Fast image-to-video generation with Veo 3.1 Fast. Supports 720p/1080p/4k, 4-8 second clips via Gemini API.",
+    provider: "gemini",
+    capabilities: ["image-to-video"],
+    coverImage: undefined,
+    pricing: { type: "per-second", amount: 0.15, currency: "USD" },
   },
 ];
 
@@ -449,6 +498,8 @@ interface ModelsSuccessResponse {
   models: ProviderModel[];
   cached: boolean;
   providers: Record<string, ProviderResult>;
+  /** All providers that have API keys configured (env or client header) */
+  availableProviders: string[];
   errors?: string[];
 }
 
@@ -899,6 +950,13 @@ export async function GET(
   const kieKey = request.headers.get("X-Kie-Key") || process.env.KIE_API_KEY || null;
   const wavespeedKey = request.headers.get("X-WaveSpeed-Key") || process.env.WAVESPEED_API_KEY || null;
 
+  // Build list of all available providers (have keys from env or client headers)
+  const availableProviders: string[] = ["gemini"]; // Gemini always available
+  if (falKey) availableProviders.push("fal");
+  if (replicateKey) availableProviders.push("replicate");
+  if (kieKey) availableProviders.push("kie");
+  if (wavespeedKey) availableProviders.push("wavespeed");
+
   // Determine which providers to fetch from (excluding gemini/kie - handled separately as hardcoded)
   const providersToFetch: ProviderType[] = [];
   let includeGemini = false;
@@ -910,7 +968,17 @@ export async function GET(
       includeGemini = true;
     } else if (providerFilter === "kie") {
       // Only Kie requested - no external API calls needed (hardcoded models)
-      includeKie = true;
+      if (kieKey) {
+        includeKie = true;
+      } else {
+        return NextResponse.json<ModelsErrorResponse>(
+          {
+            success: false,
+            error: "Kie API key required. Add KIE_API_KEY to .env.local or configure in Settings.",
+          },
+          { status: 400 }
+        );
+      }
     } else if (providerFilter === "wavespeed") {
       if (wavespeedKey) {
         // WaveSpeed requested with key - fetch from API
@@ -967,7 +1035,7 @@ export async function GET(
   // Add Gemini models first if included (they appear at the top)
   if (includeGemini) {
     // Filter by search query if provided
-    let geminiModels = GEMINI_IMAGE_MODELS;
+    let geminiModels = [...GEMINI_IMAGE_MODELS, ...GEMINI_VIDEO_MODELS];
     if (searchQuery) {
       geminiModels = filterModelsBySearch(geminiModels, searchQuery);
     }
@@ -1107,6 +1175,7 @@ export async function GET(
     models: filteredModels,
     cached: anyFromCache && allFromCache,
     providers: providerResults,
+    availableProviders,
   };
 
   if (errors.length > 0) {

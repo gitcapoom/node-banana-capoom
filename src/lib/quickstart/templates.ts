@@ -82,6 +82,7 @@ const createNanoBananaData = () => ({
   resolution: "1K" as const,
   model: "nano-banana-pro" as const,
   useGoogleSearch: false,
+  useImageSearch: false,
   status: "idle" as const,
   error: null,
   imageHistory: [],

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useMaskPainterStore } from "@/store/maskPainterStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { MaskPainterNodeData } from "@/types";
@@ -12,7 +11,6 @@ type MaskPainterNodeType = Node<MaskPainterNodeData, "maskPainter">;
 
 export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const openModal = useMaskPainterStore((state) => state.openModal);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
@@ -102,13 +100,7 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
   return (
     <BaseNode
       id={id}
-      title="Mask Painter"
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-      onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
       selected={selected}
-      commentNavigation={commentNavigation ?? undefined}
     >
       <input
         ref={fileInputRef}

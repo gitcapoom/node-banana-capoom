@@ -3,8 +3,9 @@
 import React, { useCallback, useState, useEffect, useRef } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { InlineParameterPanel } from "./InlineParameterPanel";
 import { WorldLabsWorldNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 
@@ -22,7 +23,6 @@ type WorldLabsWorldNodeType = Node<WorldLabsWorldNodeData, "worldLabsWorld">;
  */
 export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWorldNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const addNode = useWorkflowStore((state) => state.addNode);
   const nodes = useWorkflowStore((state) => state.nodes);
@@ -30,6 +30,14 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
   const isRunning = useWorkflowStore((state) => state.isRunning);
   const viewerWindowRef = useRef<Window | null>(null);
   const [captureCount, setCaptureCount] = useState(0);
+
+  // Inline parameters infrastructure
+  const { inlineParametersEnabled } = useInlineParameters();
+  const isParamsExpanded = nodeData.parametersExpanded ?? true;
+
+  const handleToggleParams = useCallback(() => {
+    updateNodeData(id, { parametersExpanded: !isParamsExpanded });
+  }, [id, isParamsExpanded, updateNodeData]);
 
   // ─── Viewer window postMessage listener ─────────────────────
   useEffect(() => {
@@ -147,14 +155,76 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
 
   const previewUrl = nodeData.panoUrl || nodeData.thumbnailUrl;
 
+  // ─── Settings Controls (shared between inline and panel modes) ───
+
+  const settingsControls = (
+    <div className="space-y-3">
+      {/* World Name */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">World Name</label>
+        <input
+          type="text"
+          value={nodeData.worldName}
+          onChange={handleWorldNameChange}
+          className="nodrag nopan w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+          placeholder="My World"
+        />
+      </div>
+
+      {/* Model Selection */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">Model</label>
+        <select
+          value={nodeData.model}
+          onChange={handleModelChange}
+          className="nodrag nopan w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
+        >
+          <option value="Marble 0.1-plus">Marble 0.1 Plus</option>
+          <option value="Marble 0.1-mini">Marble 0.1 Mini</option>
+        </select>
+      </div>
+
+      {/* Seed (Optional) */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">Seed (optional)</label>
+        <input
+          type="number"
+          value={nodeData.seed ?? ""}
+          onChange={handleSeedChange}
+          className="nodrag nopan w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+          placeholder="Random"
+        />
+      </div>
+
+      {/* Is Panorama */}
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={nodeData.isPano}
+          onChange={handleIsPanoToggle}
+          className="nodrag nopan w-3.5 h-3.5 rounded bg-neutral-800 border-neutral-600 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer"
+        />
+        <span className="text-[11px] text-neutral-400">Input is panorama</span>
+      </label>
+    </div>
+  );
+
   return (
     <BaseNode
       id={id}
       selected={selected}
-      title="World Generator"
-      commentNavigation={commentNavigation || undefined}
-      onRun={handleRegenerate}
       isExecuting={isRunning}
+      hasError={nodeData.status === "error"}
+      settingsExpanded={inlineParametersEnabled && isParamsExpanded}
+      settingsPanel={inlineParametersEnabled ? (
+        <InlineParameterPanel
+          expanded={isParamsExpanded}
+          onToggle={handleToggleParams}
+          nodeId={id}
+        >
+          {settingsControls}
+        </InlineParameterPanel>
+      ) : undefined}
     >
       {/* Input Handle — panorama image */}
       <Handle
@@ -184,63 +254,6 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
       />
 
       <div className="p-3 space-y-3">
-        {/* Header */}
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-indigo-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <circle cx="12" cy="12" r="10" />
-            <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-          </svg>
-          <span className="text-xs font-medium text-neutral-300">World Generator</span>
-        </div>
-
-        {/* World Name */}
-        <div>
-          <label className="text-[10px] text-neutral-500 block mb-1">World Name</label>
-          <input
-            type="text"
-            value={nodeData.worldName}
-            onChange={handleWorldNameChange}
-            className="w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
-            placeholder="My World"
-          />
-        </div>
-
-        {/* Model Selection */}
-        <div>
-          <label className="text-[10px] text-neutral-500 block mb-1">Model</label>
-          <select
-            value={nodeData.model}
-            onChange={handleModelChange}
-            className="w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
-          >
-            <option value="Marble 0.1-plus">Marble 0.1 Plus</option>
-            <option value="Marble 0.1-mini">Marble 0.1 Mini</option>
-          </select>
-        </div>
-
-        {/* Seed (Optional) */}
-        <div>
-          <label className="text-[10px] text-neutral-500 block mb-1">Seed (optional)</label>
-          <input
-            type="number"
-            value={nodeData.seed ?? ""}
-            onChange={handleSeedChange}
-            className="w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
-            placeholder="Random"
-          />
-        </div>
-
-        {/* Is Panorama */}
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={nodeData.isPano}
-            onChange={handleIsPanoToggle}
-            className="w-3.5 h-3.5 rounded bg-neutral-800 border-neutral-600 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer"
-          />
-          <span className="text-[11px] text-neutral-400">Input is panorama</span>
-        </label>
-
         {/* Status / Preview Area */}
         <div className="bg-neutral-900 rounded-lg overflow-hidden min-h-[80px] flex items-center justify-center">
           {nodeData.status === "idle" && (
@@ -291,7 +304,7 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
         {isComplete && nodeData.spzUrls && (
           <button
             onClick={handleOpenViewer}
-            className="w-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium py-1.5 px-3 rounded transition-colors flex items-center justify-center gap-1"
+            className="nodrag nopan w-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium py-1.5 px-3 rounded transition-colors flex items-center justify-center gap-1"
           >
             <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -305,7 +318,7 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
         {isComplete && nodeData.marbleViewerUrl && (
           <button
             onClick={handleOpenMarbleViewer}
-            className="w-full text-[10px] text-neutral-500 hover:text-indigo-400 transition-colors flex items-center justify-center gap-1"
+            className="nodrag nopan w-full text-[10px] text-neutral-500 hover:text-indigo-400 transition-colors flex items-center justify-center gap-1"
           >
             Open in Marble Viewer
             <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

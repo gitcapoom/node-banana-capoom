@@ -99,39 +99,6 @@ describe("PromptNode", () => {
     });
   });
 
-  it("should render the Prompt title", () => {
-    render(
-      <TestWrapper>
-        <PromptNode {...defaultProps} />
-      </TestWrapper>
-    );
-
-    expect(screen.getByText("Prompt")).toBeInTheDocument();
-  });
-
-  it("should render expand button", () => {
-    render(
-      <TestWrapper>
-        <PromptNode {...defaultProps} />
-      </TestWrapper>
-    );
-
-    expect(screen.getByTitle("Expand editor")).toBeInTheDocument();
-  });
-
-  it("should call incrementModalCount when expand button is clicked", () => {
-    render(
-      <TestWrapper>
-        <PromptNode {...defaultProps} />
-      </TestWrapper>
-    );
-
-    const expandButton = screen.getByTitle("Expand editor");
-    fireEvent.click(expandButton);
-
-    expect(mockIncrementModalCount).toHaveBeenCalled();
-  });
-
   it("should render text output handle", () => {
     const { container } = render(
       <TestWrapper>

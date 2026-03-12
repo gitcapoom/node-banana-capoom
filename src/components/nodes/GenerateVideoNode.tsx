@@ -3,7 +3,6 @@
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
@@ -14,18 +13,41 @@ import { useToast } from "@/components/Toast";
 import { getVideoDimensions, calculateNodeSizePreservingHeight } from "@/utils/nodeDimensions";
 import { ProviderBadge } from "./ProviderBadge";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
+import { useVideoAutoplay } from "@/hooks/useVideoAutoplay";
+import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { InlineParameterPanel } from "./InlineParameterPanel";
+import { browseRegistry } from "@/utils/browseRegistry";
 
 // Video generation capabilities
 const VIDEO_CAPABILITIES: ModelCapability[] = ["text-to-video", "image-to-video"];
+
+/** Returns true for Gemini-native Veo video models */
+function isVeoModel(modelId: string | undefined): boolean {
+  if (!modelId) return false;
+  return modelId.startsWith("veo-");
+}
+
+/** Build the hardcoded inputSchema for a Veo model, or undefined for non-Veo */
+function buildVeoInputSchema(modelId: string): ModelInputDef[] | undefined {
+  if (!isVeoModel(modelId)) return undefined;
+  const isI2V = modelId.includes("image-to-video");
+  const inputs: ModelInputDef[] = [
+    { name: "prompt", type: "text", required: true, label: "Prompt" },
+    { name: "negative_prompt", type: "text", required: false, label: "Neg. Prompt" },
+  ];
+  if (isI2V) {
+    inputs.unshift({ name: "image", type: "image", required: true, label: "Image" });
+  }
+  return inputs;
+}
 
 type GenerateVideoNodeType = Node<GenerateVideoNodeData, "generateVideo">;
 
 export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVideoNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
+  const { geminiApiKey, replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -33,13 +55,26 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   const [isBrowseDialogOpen, setIsBrowseDialogOpen] = useState(false);
   const [isLoadingCarouselVideo, setIsLoadingCarouselVideo] = useState(false);
   const videoBlobUrl = useVideoBlobUrl(nodeData.outputVideo ?? null);
+  const videoAutoplayRef = useVideoAutoplay(id, selected);
 
-  // Get the current selected provider (default to fal since Gemini doesn't do video)
+  // Inline parameters infrastructure
+  const { inlineParametersEnabled } = useInlineParameters();
+
+  // Register browse callback for floating header button
+  useEffect(() => {
+    browseRegistry.register(id, () => setIsBrowseDialogOpen(true));
+    return () => { browseRegistry.unregister(id); };
+  }, [id]);
+
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "fal";
 
-  // Get enabled providers (exclude Gemini since it doesn't do video)
+  // Get enabled providers
   const enabledProviders = useMemo(() => {
     const providers: { id: ProviderType; name: string }[] = [];
+    // Gemini available when API key is configured (settings or env var)
+    if (geminiApiKey) {
+      providers.push({ id: "gemini", name: "Gemini" });
+    }
     // fal.ai is always available (works without key but rate limited)
     providers.push({ id: "fal", name: "fal.ai" });
     // Add Replicate if configured
@@ -51,7 +86,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       providers.push({ id: "kie", name: "Kie.ai" });
     }
     return providers;
-  }, [replicateEnabled, replicateApiKey, kieEnabled, kieApiKey]);
+  }, [geminiApiKey, replicateEnabled, replicateApiKey, kieEnabled, kieApiKey]);
 
   // Fetch models from external providers when provider changes
   const fetchModels = useCallback(async () => {
@@ -60,6 +95,9 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     try {
       const capabilities = VIDEO_CAPABILITIES.join(",");
       const headers: HeadersInit = {};
+      if (geminiApiKey) {
+        headers["X-Gemini-API-Key"] = geminiApiKey;
+      }
       if (replicateApiKey) {
         headers["X-Replicate-Key"] = replicateApiKey;
       }
@@ -91,11 +129,18 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     } finally {
       setIsLoadingModels(false);
     }
-  }, [currentProvider, replicateApiKey, falApiKey, kieApiKey]);
+  }, [currentProvider, geminiApiKey, replicateApiKey, falApiKey, kieApiKey]);
 
   useEffect(() => {
     fetchModels();
   }, [fetchModels]);
+
+  // Inline parameters: compute collapse state and toggle handler
+  const isParamsExpanded = nodeData.parametersExpanded ?? true; // default expanded
+
+  const handleToggleParams = useCallback(() => {
+    updateNodeData(id, { parametersExpanded: !isParamsExpanded });
+  }, [id, isParamsExpanded, updateNodeData]);
 
   // Handle provider change
   const handleProviderChange = useCallback(
@@ -107,8 +152,8 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
         modelId: "",
         displayName: "Select model...",
       };
-      // Clear parameters when switching providers (different providers have different schemas)
-      updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
+      // Clear parameters and schema when switching providers
+      updateNodeData(id, { selectedModel: newSelectedModel, parameters: {}, inputSchema: undefined });
     },
     [id, updateNodeData]
   );
@@ -123,12 +168,14 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
           provider: currentProvider,
           modelId: model.id,
           displayName: model.name,
-          ...(model.pricing && {
-            pricing: { type: model.pricing.type, amount: model.pricing.amount },
-          }),
         };
         // Clear parameters when changing models (different models have different schemas)
-        updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
+        // Set inputSchema immediately for Veo models so handles render in the same update
+        updateNodeData(id, {
+          selectedModel: newSelectedModel,
+          parameters: {},
+          inputSchema: buildVeoInputSchema(model.id),
+        });
       }
     },
     [id, currentProvider, externalModels, updateNodeData]
@@ -257,14 +304,13 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       provider: model.provider,
       modelId: model.id,
       displayName: model.name,
-      ...(model.pricing && {
-        pricing: {
-          type: model.pricing.type,
-          amount: model.pricing.amount,
-        },
-      }),
     };
-    updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
+    // Set inputSchema immediately for Veo models so handles render in the same update
+    updateNodeData(id, {
+      selectedModel: newSelectedModel,
+      parameters: {},
+      inputSchema: buildVeoInputSchema(model.id),
+    });
     setIsBrowseDialogOpen(false);
   }, [id, updateNodeData]);
 
@@ -280,16 +326,6 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   const titlePrefix = useMemo(() => (
     <ProviderBadge provider={currentProvider} />
   ), [currentProvider]);
-
-  // Header action element - browse button
-  const headerAction = useMemo(() => (
-    <button
-      onClick={() => setIsBrowseDialogOpen(true)}
-      className="nodrag nopan text-[10px] py-0.5 px-1.5 bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
-    >
-      Browse
-    </button>
-  ), []);
 
   const hasCarouselVideos = (nodeData.videoHistory || []).length > 1;
 
@@ -343,19 +379,30 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     <>
     <BaseNode
       id={id}
-      title={displayTitle}
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-      onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
-      onRun={handleRegenerate}
       selected={selected}
       isExecuting={isRunning}
       hasError={nodeData.status === "error"}
-      headerAction={headerAction}
-      titlePrefix={titlePrefix}
-      commentNavigation={commentNavigation ?? undefined}
-      lastCost={nodeData.lastGenerationCost}
+      fullBleed
+      settingsExpanded={inlineParametersEnabled && isParamsExpanded}
+      aspectFitMedia={nodeData.outputVideo}
+      settingsPanel={inlineParametersEnabled ? (
+        <InlineParameterPanel
+          expanded={isParamsExpanded}
+          onToggle={handleToggleParams}
+          nodeId={id}
+        >
+          {/* External provider parameters - reuse ModelParameters component */}
+          {nodeData.selectedModel?.modelId && !isVeoModel(nodeData.selectedModel.modelId) && (
+            <ModelParameters
+              modelId={nodeData.selectedModel.modelId}
+              provider={currentProvider}
+              parameters={nodeData.parameters || {}}
+              onParametersChange={handleParametersChange}
+              onInputsLoaded={handleInputsLoaded}
+            />
+          )}
+        </InlineParameterPanel>
+      ) : undefined}
     >
       {/* Dynamic input handles based on model schema */}
       {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
@@ -383,10 +430,10 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
           // Add image handles from schema, or a placeholder if none exist
           if (hasImageInput) {
-            imageInputs.forEach((input) => {
+            imageInputs.forEach((input, index) => {
               handles.push({
-                // Use schema name in handle ID for direct mapping in connectedInputs
-                id: `image-${input.name}`,
+                // Always use indexed IDs for schema inputs for consistency
+                id: `image-${index}`,
                 type: "image",
                 label: input.label,
                 schemaName: input.name,
@@ -408,10 +455,10 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
           // Add text handles from schema, or a placeholder if none exist
           if (hasTextInput) {
-            textInputs.forEach((input) => {
+            textInputs.forEach((input, index) => {
               handles.push({
-                // Use schema name in handle ID for direct mapping in connectedInputs
-                id: `text-${input.name}`,
+                // Always use indexed IDs for schema inputs for consistency
+                id: `text-${index}`,
                 type: "text",
                 label: input.label,
                 schemaName: input.name,
@@ -454,6 +501,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                   style={{
                     top: `${topPercent}%`,
                     opacity: handle.isPlaceholder ? 0.3 : 1,
+                    zIndex: 10,
                   }}
                   data-handletype={handle.type}
                   data-schema-name={handle.schemaName || undefined}
@@ -468,6 +516,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                     top: `calc(${topPercent}% - 18px)`,
                     color: isImage ? "var(--handle-color-image)" : "var(--handle-color-text)",
                     opacity: handle.isPlaceholder ? 0.3 : 1,
+                    zIndex: 10,
                   }}
                 >
                   {handle.label}
@@ -510,7 +559,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             type="target"
             position={Position.Left}
             id="image"
-            style={{ top: "35%" }}
+            style={{ top: "35%", zIndex: 10 }}
             data-handletype="image"
             isConnectable={true}
           />
@@ -521,6 +570,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
               right: `calc(100% + 8px)`,
               top: "calc(35% - 18px)",
               color: "var(--handle-color-image)",
+              zIndex: 10,
             }}
           >
             Image
@@ -529,7 +579,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             type="target"
             position={Position.Left}
             id="text"
-            style={{ top: "65%" }}
+            style={{ top: "65%", zIndex: 10 }}
             data-handletype="text"
           />
           {/* Default text label */}
@@ -539,6 +589,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
               right: `calc(100% + 8px)`,
               top: "calc(65% - 18px)",
               color: "var(--handle-color-text)",
+              zIndex: 10,
             }}
           >
             Prompt
@@ -551,6 +602,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
         position={Position.Right}
         id="video"
         data-handletype="video"
+        style={{ zIndex: 10 }}
       />
       {/* Output label */}
       <div
@@ -559,29 +611,29 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
           left: `calc(100% + 8px)`,
           top: "calc(50% - 18px)",
           color: "var(--handle-color-image)",
+          zIndex: 10,
         }}
       >
         Video
       </div>
 
-      <div className="flex-1 flex flex-col min-h-0 gap-2">
+      <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
         {/* Preview area */}
         {nodeData.outputVideo ? (
           <>
-          <div className="relative w-full flex-1 min-h-0">
             <video
+              ref={videoAutoplayRef}
               key={nodeData.videoHistory?.[nodeData.selectedVideoHistoryIndex || 0]?.id}
               src={videoBlobUrl ?? undefined}
               controls
-              autoPlay
               loop
               muted
-              className="w-full h-full object-contain rounded"
+              className="w-full h-full object-cover"
               playsInline
             />
             {/* Loading overlay for generation */}
             {nodeData.status === "loading" && (
-              <div className="absolute inset-0 bg-neutral-900/70 rounded flex items-center justify-center">
+              <div className="absolute inset-0 bg-neutral-900/70 flex items-center justify-center">
                 <svg
                   className="w-6 h-6 animate-spin text-white"
                   fill="none"
@@ -605,7 +657,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             )}
             {/* Error overlay when generation failed */}
             {nodeData.status === "error" && (
-              <div className="absolute inset-0 bg-red-900/40 rounded flex flex-col items-center justify-center gap-1">
+              <div className="absolute inset-0 bg-red-900/40 flex flex-col items-center justify-center gap-1">
                 <svg
                   className="w-6 h-6 text-white"
                   fill="none"
@@ -621,7 +673,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             )}
             {/* Loading overlay for carousel navigation */}
             {isLoadingCarouselVideo && (
-              <div className="absolute inset-0 bg-neutral-900/50 rounded flex items-center justify-center">
+              <div className="absolute inset-0 bg-neutral-900/50 flex items-center justify-center">
                 <svg
                   className="w-4 h-4 animate-spin text-white"
                   fill="none"
@@ -643,6 +695,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                 </svg>
               </div>
             )}
+            {/* Clear button */}
             <div className="absolute top-1 right-1">
               <button
                 onClick={handleClearVideo}
@@ -654,39 +707,38 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                 </svg>
               </button>
             </div>
-          </div>
 
-          {/* Carousel controls - only show if there are multiple videos */}
-          {hasCarouselVideos && (
-            <div className="flex items-center justify-center gap-2 shrink-0">
-              <button
-                onClick={handleCarouselPrevious}
-                disabled={isLoadingCarouselVideo}
-                className="w-5 h-5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
-                title="Previous video"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <span className="text-[10px] text-neutral-400 min-w-[32px] text-center">
-                {(nodeData.selectedVideoHistoryIndex || 0) + 1} / {(nodeData.videoHistory || []).length}
-              </span>
-              <button
-                onClick={handleCarouselNext}
-                disabled={isLoadingCarouselVideo}
-                className="w-5 h-5 rounded bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
-                title="Next video"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
-            </div>
-          )}
-        </>
+            {/* Carousel controls - overlaid on video bottom */}
+            {hasCarouselVideos && (
+              <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-2 py-1.5 bg-neutral-900/60 backdrop-blur-sm">
+                <button
+                  onClick={handleCarouselPrevious}
+                  disabled={isLoadingCarouselVideo}
+                  className="w-5 h-5 rounded hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-white/70 hover:text-white transition-colors"
+                  title="Previous video"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <span className="text-[10px] text-white/70 min-w-[32px] text-center">
+                  {(nodeData.selectedVideoHistoryIndex || 0) + 1} / {(nodeData.videoHistory || []).length}
+                </span>
+                <button
+                  onClick={handleCarouselNext}
+                  disabled={isLoadingCarouselVideo}
+                  className="w-5 h-5 rounded hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center text-white/70 hover:text-white transition-colors"
+                  title="Next video"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </>
         ) : (
-          <div className="w-full flex-1 min-h-[112px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center">
+          <div className="w-full h-full min-h-[112px] bg-neutral-900/40 flex flex-col items-center justify-center">
             {nodeData.status === "loading" ? (
               <svg
                 className="w-4 h-4 animate-spin text-neutral-400"
@@ -718,21 +770,23 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             )}
           </div>
         )}
-
-        {/* Model-specific parameters */}
-        {nodeData.selectedModel?.modelId && (
-          <ModelParameters
-            modelId={nodeData.selectedModel.modelId}
-            provider={currentProvider}
-            parameters={nodeData.parameters || {}}
-            onParametersChange={handleParametersChange}
-            onExpandChange={handleParametersExpandChange}
-            onInputsLoaded={handleInputsLoaded}
-            inputNames={nodeData.inputSchema?.map(i => i.name)}
-          />
-        )}
       </div>
+
     </BaseNode>
+
+    {/* Hidden ModelParameters — only for schema-loading side effect (dynamic handles) when inline disabled */}
+    {!inlineParametersEnabled && nodeData.selectedModel?.modelId && !isVeoModel(nodeData.selectedModel.modelId) && (
+      <div className="hidden">
+        <ModelParameters
+          modelId={nodeData.selectedModel.modelId}
+          provider={currentProvider}
+          parameters={nodeData.parameters || {}}
+          onParametersChange={handleParametersChange}
+          onExpandChange={handleParametersExpandChange}
+          onInputsLoaded={handleInputsLoaded}
+        />
+      </div>
+    )}
 
     {/* Model browser dialog */}
     {isBrowseDialogOpen && (

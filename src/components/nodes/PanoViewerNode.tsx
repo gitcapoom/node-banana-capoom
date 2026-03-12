@@ -1,9 +1,8 @@
 "use client";
 
-import React, { useCallback, useState, useEffect, useRef } from "react";
+import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { PanoViewerNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
@@ -34,16 +33,32 @@ function dataUrlToBlob(dataUrl: string): Blob {
  */
 export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const addNode = useWorkflowStore((state) => state.addNode);
   const nodes = useWorkflowStore((state) => state.nodes);
-  const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const edges = useWorkflowStore((state) => state.edges);
   const isRunning = useWorkflowStore((state) => state.isRunning);
 
   const viewerWindowRef = useRef<Window | null>(null);
   const blobUrlRef = useRef<string | null>(null);
   const [captureCount, setCaptureCount] = useState(0);
+
+  // ─── Reactive incoming image from connected upstream node ──
+  const incomingImage = useMemo(() => {
+    const imageEdge = edges.find(
+      (e) => e.target === id && e.targetHandle === "image"
+    );
+    if (!imageEdge) return null;
+    const sourceNode = nodes.find((n) => n.id === imageEdge.source);
+    if (!sourceNode) return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d = sourceNode.data as any;
+    // Cover the common image-output fields across node types
+    return d.panoUrl || d.outputImage || d.image || d.thumbnailUrl || d.capturedImage || null;
+  }, [edges, nodes, id]);
+
+  // The image to display: prefer stored panoUrl (set after execution), fall back to live upstream
+  const displayImage: string | null = nodeData.panoUrl || incomingImage;
 
   // ─── Viewer window postMessage listener ─────────────────────
   useEffect(() => {
@@ -120,12 +135,16 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
 
   // ─── Handlers ──────────────────────────────────────────────
 
-  const handleRun = useCallback(() => {
-    regenerateNode(id);
-  }, [id, regenerateNode]);
+  const handleFocusViewer = useCallback(() => {
+    // If the viewer window is already open, just focus it
+    if (viewerWindowRef.current && !viewerWindowRef.current.closed) {
+      viewerWindowRef.current.focus();
+      return;
+    }
 
-  const handleOpenViewer = useCallback(() => {
-    if (!nodeData.panoUrl) return;
+    // Use stored panoUrl first, fall back to live upstream image
+    const imageUrl = nodeData.panoUrl || incomingImage;
+    if (!imageUrl) return;
 
     const params = new URLSearchParams({
       name: "Panorama Viewer",
@@ -135,12 +154,12 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
     // For data URLs (large base64 from PanoEditor), convert to a Blob URL.
     // Blob URLs are short strings referencing in-memory data with no size limit,
     // unlike sessionStorage which has a ~5-10MB quota.
-    if (nodeData.panoUrl.startsWith("data:")) {
+    if (imageUrl.startsWith("data:")) {
       // Revoke previous blob URL if any
       if (blobUrlRef.current) {
         URL.revokeObjectURL(blobUrlRef.current);
       }
-      const blob = dataUrlToBlob(nodeData.panoUrl);
+      const blob = dataUrlToBlob(imageUrl);
       const blobUrl = URL.createObjectURL(blob);
       blobUrlRef.current = blobUrl;
       params.set("url", blobUrl);
@@ -152,26 +171,23 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
           .forEach((k) => sessionStorage.removeItem(k));
       } catch { /* ignore */ }
     } else {
-      params.set("url", nodeData.panoUrl);
+      params.set("url", imageUrl);
     }
 
     const viewerUrl = `/viewer/pano?${params.toString()}`;
     const w = window.open(viewerUrl, `pano-viewer-${id}`, "width=1280,height=720");
     viewerWindowRef.current = w;
     updateNodeData(id, { viewerOpen: true });
-  }, [id, nodeData.panoUrl, updateNodeData]);
+  }, [id, nodeData.panoUrl, incomingImage, updateNodeData]);
 
   // ─── Render ─────────────────────────────────────────────────
 
-  const hasPano = !!nodeData.panoUrl;
+  const hasImage = !!displayImage;
 
   return (
     <BaseNode
       id={id}
       selected={selected}
-      title="Pano Viewer"
-      commentNavigation={commentNavigation || undefined}
-      onRun={handleRun}
       isExecuting={isRunning}
     >
       {/* Input Handle — equirectangular panorama */}
@@ -184,23 +200,8 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
       />
 
       <div className="p-3 space-y-3">
-        {/* Header */}
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-pink-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <circle cx="12" cy="12" r="10" />
-            <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-          </svg>
-          <span className="text-xs font-medium text-neutral-300">Pano Viewer</span>
-          {nodeData.viewerOpen && (
-            <span className="text-[9px] text-pink-400 ml-auto flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
-              Viewer open
-            </span>
-          )}
-        </div>
-
         {/* Content area */}
-        {!hasPano ? (
+        {!hasImage ? (
           <div className="rounded-lg border-2 border-dashed border-neutral-700 bg-neutral-900 min-h-[80px] flex flex-col items-center justify-center">
             <svg
               className="w-8 h-8 text-neutral-600 mb-1"
@@ -218,19 +219,19 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
           </div>
         ) : (
           <div className="space-y-2">
-            {/* Panorama thumbnail */}
+            {/* Panorama thumbnail — shows incoming image reactively */}
             <div className="bg-neutral-900 rounded-lg overflow-hidden">
               <img
-                src={nodeData.panoUrl!}
+                src={displayImage}
                 alt="Panorama"
                 className="w-full h-auto object-cover max-h-[80px]"
               />
             </div>
 
-            {/* Open Viewer button */}
+            {/* Open / Focus Viewer button */}
             <button
-              onClick={handleOpenViewer}
-              className="w-full bg-pink-600 hover:bg-pink-500 text-white text-xs font-medium py-1.5 px-3 rounded transition-colors flex items-center justify-center gap-1.5"
+              onClick={handleFocusViewer}
+              className="nodrag nopan w-full bg-pink-600 hover:bg-pink-500 text-white text-xs font-medium py-1.5 px-3 rounded transition-colors flex items-center justify-center gap-1.5"
             >
               <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -238,6 +239,14 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
               </svg>
               {nodeData.viewerOpen ? "Focus Viewer" : "Open Viewer"}
             </button>
+
+            {/* Viewer status indicator */}
+            {nodeData.viewerOpen && (
+              <div className="flex items-center justify-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
+                <span className="text-[9px] text-pink-400">Viewer open</span>
+              </div>
+            )}
           </div>
         )}
 

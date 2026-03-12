@@ -123,42 +123,6 @@ describe("Generate3DNode", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render with default title when no model selected", () => {
-      render(
-        <TestWrapper>
-          <Generate3DNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Select 3D model...")).toBeInTheDocument();
-    });
-
-    it("should render model name when selected", () => {
-      render(
-        <TestWrapper>
-          <Generate3DNode {...createNodeProps({
-            selectedModel: {
-              provider: "fal",
-              modelId: "fal-ai/triposr",
-              displayName: "TripoSR",
-            },
-          })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("TripoSR")).toBeInTheDocument();
-    });
-
-    it("should render Browse button", () => {
-      render(
-        <TestWrapper>
-          <Generate3DNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Browse")).toBeInTheDocument();
-    });
-
     it("should render 'Run to generate' when idle", () => {
       render(
         <TestWrapper>

@@ -15,11 +15,18 @@ const GOOGLE_MODEL_MAP: Record<string, string> = {
   "gemini-2.5-flash": "gemini-2.5-flash",
   "gemini-3-flash-preview": "gemini-3-flash-preview",
   "gemini-3-pro-preview": "gemini-3-pro-preview",
+  "gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
 };
 
 const OPENAI_MODEL_MAP: Record<string, string> = {
   "gpt-4.1-mini": "gpt-4.1-mini",
   "gpt-4.1-nano": "gpt-4.1-nano",
+};
+
+const ANTHROPIC_MODEL_MAP: Record<string, string> = {
+  "claude-sonnet-4.5": "claude-sonnet-4-5-20250929",
+  "claude-haiku-4.5": "claude-haiku-4-5-20251001",
+  "claude-opus-4.6": "claude-opus-4-6",
 };
 
 async function generateWithGoogle(
@@ -190,6 +197,98 @@ async function generateWithOpenAI(
   return text;
 }
 
+async function generateWithAnthropic(
+  prompt: string,
+  model: LLMModelType,
+  temperature: number,
+  maxTokens: number,
+  images?: string[],
+  requestId?: string,
+  userApiKey?: string | null
+): Promise<string> {
+  const apiKey = userApiKey || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    logger.error('api.error', 'ANTHROPIC_API_KEY not configured', { requestId });
+    throw new Error("ANTHROPIC_API_KEY not configured. Add it to .env.local or configure in Settings.");
+  }
+
+  const modelId = ANTHROPIC_MODEL_MAP[model];
+
+  logger.info('api.llm', 'Calling Anthropic API', {
+    requestId,
+    model: modelId,
+    temperature,
+    maxTokens,
+    imageCount: images?.length || 0,
+    promptLength: prompt.length,
+  });
+
+  // Build content blocks
+  const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
+
+  if (images && images.length > 0) {
+    for (const img of images) {
+      const matches = img.match(/^data:(.+?);base64,(.+)$/);
+      if (matches) {
+        content.push({
+          type: "image",
+          source: { type: "base64", media_type: matches[1], data: matches[2] },
+        });
+      } else {
+        content.push({
+          type: "image",
+          source: { type: "base64", media_type: "image/png", data: img },
+        });
+      }
+    }
+  }
+
+  content.push({ type: "text", text: prompt });
+
+  const startTime = Date.now();
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages: [{ role: "user", content }],
+      temperature,
+      max_tokens: maxTokens,
+    }),
+  });
+  const duration = Date.now() - startTime;
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    logger.error('api.error', 'Anthropic API request failed', {
+      requestId,
+      status: response.status,
+      error: error.error?.message,
+    });
+    throw new Error(error.error?.message || `Anthropic API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const text = data.content?.[0]?.text;
+
+  if (!text) {
+    logger.error('api.error', 'No text in Anthropic response', { requestId });
+    throw new Error("No text in Anthropic response");
+  }
+
+  logger.info('api.llm', 'Anthropic API response received', {
+    requestId,
+    duration,
+    responseLength: text.length,
+  });
+
+  return text;
+}
+
 export async function POST(request: NextRequest) {
   const requestId = generateRequestId();
 
@@ -197,6 +296,7 @@ export async function POST(request: NextRequest) {
     // Get user-provided API keys from headers (override env variables)
     const geminiApiKey = request.headers.get("X-Gemini-API-Key");
     const openaiApiKey = request.headers.get("X-OpenAI-API-Key");
+    const anthropicApiKey = request.headers.get("X-Anthropic-API-Key");
 
     const body: LLMGenerateRequest = await request.json();
     const {
@@ -233,6 +333,8 @@ export async function POST(request: NextRequest) {
       text = await generateWithGoogle(prompt, model, temperature, maxTokens, images, requestId, geminiApiKey);
     } else if (provider === "openai") {
       text = await generateWithOpenAI(prompt, model, temperature, maxTokens, images, requestId, openaiApiKey);
+    } else if (provider === "anthropic") {
+      text = await generateWithAnthropic(prompt, model, temperature, maxTokens, images, requestId, anthropicApiKey);
     } else {
       logger.warn('api.llm', 'Unknown provider requested', { requestId, provider });
       return NextResponse.json<LLMGenerateResponse>(

@@ -25,6 +25,8 @@ import {
   ProviderSettings,
   RecentModel,
   CanvasNavigationSettings,
+  MatchMode,
+  MODEL_DISPLAY_NAMES,
 } from "@/types";
 import { useToast } from "@/components/Toast";
 import { logger } from "@/utils/logger";
@@ -60,6 +62,8 @@ import {
   clearNodeImageRefs,
 } from "./utils/executionUtils";
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
+import { evaluateRule } from "./utils/ruleEvaluation";
+import { computeDimmedNodes } from "./utils/dimmingUtils";
 import {
   executeAnnotation,
   executeArray,
@@ -85,10 +89,40 @@ import {
   executeWorldLabsWorld,
   executePanoViewer,
   executePanoEditor,
+  executeRouter,
+  executeSwitch,
+  executeConditionalSwitch,
 } from "./execution";
 import type { NodeExecutionContext } from "./execution";
 export type { LevelGroup } from "./utils/executionUtils";
 export { CONCURRENCY_SETTINGS_KEY } from "./utils/executionUtils";
+
+/**
+ * Evaluate conditional switch rules against incoming text, update node data, then execute.
+ */
+async function evaluateAndExecuteConditionalSwitch(
+  node: WorkflowNode,
+  executionCtx: NodeExecutionContext,
+  getConnectedInputs: (nodeId: string) => { text: string | null; images: string[]; videos: string[]; audio: string[]; model3d: string | null; dynamicInputs: Record<string, string | string[]>; easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null; outputDuration: number } | null },
+  updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void,
+): Promise<void> {
+  const condInputs = getConnectedInputs(node.id);
+  const incomingText = condInputs.text;
+  const nodeData = node.data as { rules: Array<{ id: string; value: string; mode: string; label: string; isMatched: boolean }> };
+
+  const updatedRules = nodeData.rules.map(rule => {
+    const isMatched = evaluateRule(incomingText, rule.value, rule.mode as MatchMode);
+    return { ...rule, isMatched };
+  });
+
+  updateNodeData(node.id, {
+    incomingText,
+    rules: updatedRules,
+    evaluationPaused: false,
+  });
+
+  await executeConditionalSwitch(executionCtx);
+}
 
 function saveLogSession(): void {
   try {
@@ -221,9 +255,11 @@ interface WorkflowStore {
   openModalCount: number;
   isModalOpen: boolean;
   showQuickstart: boolean;
+  hoveredNodeId: string | null;
   incrementModalCount: () => void;
   decrementModalCount: () => void;
   setShowQuickstart: (show: boolean) => void;
+  setHoveredNodeId: (id: string | null) => void;
 
   // Execution
   isRunning: boolean;
@@ -245,7 +281,7 @@ interface WorkflowStore {
 
   // Helpers
   getNodeById: (id: string) => WorkflowNode | undefined;
-  getConnectedInputs: (nodeId: string) => { images: string[]; videos: string[]; audio: string[]; model3d: string | null; text: string | null; dynamicInputs: Record<string, string | string[]>; easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null } | null };
+  getConnectedInputs: (nodeId: string) => { images: string[]; videos: string[]; audio: string[]; model3d: string | null; text: string | null; dynamicInputs: Record<string, string | string[]>; easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null; outputDuration: number } | null };
   validateWorkflow: () => { valid: boolean; errors: string[] };
 
   // Global Image History
@@ -346,11 +382,21 @@ interface WorkflowStore {
   // Canvas navigation settings actions
   updateCanvasNavigationSettings: (settings: CanvasNavigationSettings) => void;
 
+  // Switch dimming state
+  dimmedNodeIds: Set<string>;
+
+  // Switch dimming actions
+  recomputeDimmedNodes: () => void;
+
 }
 
 let nodeIdCounter = 0;
 let groupIdCounter = 0;
 let autoSaveIntervalId: ReturnType<typeof setInterval> | null = null;
+
+// RAF debounce for hover updates — coalesces rapid mouseenter/mouseleave events
+// into a single store update per animation frame
+let hoverRafId: number | null = null;
 
 // Track pending save-generation syncs to ensure IDs are resolved before workflow save
 const pendingImageSyncs = new Map<string, Promise<void>>();
@@ -382,6 +428,37 @@ async function waitForPendingImageSyncs(timeout: number = 60000): Promise<void> 
 export { generateWorkflowId, saveGenerateImageDefaults, saveNanoBananaDefaults } from "./utils/localStorage";
 export { GROUP_COLORS } from "./utils/nodeDefaults";
 
+/** Node types whose output carries image data */
+const IMAGE_SOURCE_NODE_TYPES = new Set<string>([
+  "imageInput", "annotation", "nanoBanana", "glbViewer", "videoFrameGrab",
+]);
+
+/**
+ * After edges are removed, clear inputImages on any target node that no longer
+ * has an image-source edge. Prevents stale images from being sent to the API
+ * when useStoredFallback picks up old node data.
+ */
+function clearStaleInputImages(
+  removedEdges: WorkflowEdge[],
+  get: () => WorkflowStore
+): void {
+  if (removedEdges.length === 0) return;
+  const { edges, nodes, updateNodeData } = get();
+  const targetIds = new Set(removedEdges.map((e) => e.target));
+  for (const targetId of targetIds) {
+    const node = nodes.find((n) => n.id === targetId);
+    if (!node || !("inputImages" in (node.data as Record<string, unknown>))) continue;
+    const hasRemainingImageSource = edges.some((e) => {
+      if (e.target !== targetId) return false;
+      const src = nodes.find((n) => n.id === e.source);
+      return src ? IMAGE_SOURCE_NODE_TYPES.has(src.type ?? "") : false;
+    });
+    if (!hasRemainingImageSource) {
+      updateNodeData(targetId, { inputImages: [] });
+    }
+  }
+}
+
 const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   nodes: [],
   edges: [],
@@ -391,6 +468,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   openModalCount: 0,
   isModalOpen: false,
   showQuickstart: true,
+  hoveredNodeId: null,
   isRunning: false,
   currentNodeIds: [],  // Changed from currentNodeId for parallel execution
   pausedAtNodeId: null,
@@ -438,6 +516,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   // Canvas navigation settings initial state
   canvasNavigationSettings: getCanvasNavigationSettings(),
 
+  // Switch dimming initial state
+  dimmedNodeIds: new Set<string>(),
+
   setEdgeStyle: (style: EdgeStyle) => {
     set({ edgeStyle: style });
   },
@@ -458,6 +539,14 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
   setShowQuickstart: (show: boolean) => {
     set({ showQuickstart: show });
+  },
+
+  setHoveredNodeId: (id: string | null) => {
+    if (hoverRafId !== null) cancelAnimationFrame(hoverRafId);
+    hoverRafId = requestAnimationFrame(() => {
+      hoverRafId = null;
+      if (get().hoveredNodeId !== id) set({ hoveredNodeId: id });
+    });
   },
 
   addNode: (type: NodeType, position: XYPosition, initialData?: Partial<WorkflowNodeData>) => {
@@ -490,6 +579,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => {
+    const node = get().nodes.find((n) => n.id === nodeId);
     set((state) => ({
       nodes: state.nodes.map((node) =>
         node.id === nodeId
@@ -498,6 +588,13 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       ) as WorkflowNode[],
       hasUnsavedChanges: true,
     }));
+    // Recompute dimming if this is a switch or conditionalSwitch node and their control data changed
+    if (node?.type === "switch" && "switches" in data) {
+      get().recomputeDimmedNodes();
+    }
+    if (node?.type === "conditionalSwitch" && ("rules" in data || "evaluationPaused" in data)) {
+      get().recomputeDimmedNodes();
+    }
   },
 
   removeNode: (nodeId: string) => {
@@ -534,6 +631,16 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     const hasMeaningfulChange = changes.some((c) => c.type !== "select");
     // Track manual changes only for remove operations (not selection)
     const hasRemoveChange = changes.some((c) => c.type === "remove");
+    const hasAddOrRemove = changes.some((c) => c.type === "add" || c.type === "remove");
+
+    // Capture removed edges before applyEdgeChanges removes them
+    let removedEdges: WorkflowEdge[] = [];
+    if (hasRemoveChange) {
+      const removeIds = new Set(
+        changes.filter((c) => c.type === "remove").map((c) => c.id)
+      );
+      removedEdges = get().edges.filter((e) => removeIds.has(e.id));
+    }
 
     set((state) => ({
       edges: applyEdgeChanges(changes, state.edges),
@@ -541,7 +648,13 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     }));
 
     if (hasRemoveChange) {
+      clearStaleInputImages(removedEdges, get);
       get().incrementManualChangeCount();
+    }
+
+    // Recompute dimming when edges are added or removed
+    if (hasAddOrRemove) {
+      get().recomputeDimmedNodes();
     }
   },
 
@@ -560,6 +673,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       };
     });
     get().incrementManualChangeCount();
+    get().recomputeDimmedNodes();
   },
 
   addEdgeWithType: (connection: Connection, edgeType: string, edgeDataOverrides?: Record<string, unknown>) => {
@@ -579,10 +693,12 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   removeEdge: (edgeId: string) => {
+    const removedEdge = get().edges.find((e) => e.id === edgeId);
     set((state) => ({
       edges: state.edges.filter((edge) => edge.id !== edgeId),
       hasUnsavedChanges: true,
     }));
+    if (removedEdge) clearStaleInputImages([removedEdge], get);
     get().incrementManualChangeCount();
   },
 
@@ -632,16 +748,25 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     });
 
     // Create new nodes with updated IDs and offset positions
-    const newNodes: WorkflowNode[] = clipboard.nodes.map((node) => ({
-      ...node,
-      id: idMapping.get(node.id)!,
-      position: {
-        x: node.position.x + offset.x,
-        y: node.position.y + offset.y,
-      },
-      selected: true, // Select newly pasted nodes
-      data: JSON.parse(JSON.stringify(node.data)),
-    }));
+    const newNodes: WorkflowNode[] = clipboard.nodes.map((node) => {
+      const defaults = defaultNodeDimensions[node.type as NodeType] || { width: 300, height: 280 };
+      return {
+        ...node,
+        id: idMapping.get(node.id)!,
+        position: {
+          x: node.position.x + offset.x,
+          y: node.position.y + offset.y,
+        },
+        selected: true, // Select newly pasted nodes
+        // Reset height to defaults so BaseNode's ResizeObserver
+        // can correctly add settings panel height from the right baseline
+        style: { width: node.style?.width ?? defaults.width, height: defaults.height },
+        width: undefined,
+        height: undefined,
+        measured: undefined,
+        data: JSON.parse(JSON.stringify(node.data)),
+      };
+    });
 
     // Create new edges with updated source/target IDs
     const newEdges: WorkflowEdge[] = clipboard.edges.map((edge) => ({
@@ -708,7 +833,6 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
     // Add padding around nodes
     const padding = 20;
-    const headerHeight = 32; // Match HEADER_HEIGHT in GroupsOverlay
 
     // Find next available color
     const usedColors = new Set(Object.values(groups).map((g) => g.color));
@@ -731,11 +855,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       color,
       position: {
         x: minX - padding,
-        y: minY - padding - headerHeight
+        y: minY - padding,
       },
       size: {
         width: maxX - minX + padding * 2,
-        height: maxY - minY + padding * 2 + headerHeight,
+        height: maxY - minY + padding * 2,
       },
     };
 
@@ -836,8 +960,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   getConnectedInputs: (nodeId: string) => {
-    const { edges, nodes } = get();
-    return getConnectedInputsPure(nodeId, nodes, edges);
+    const { edges, nodes, dimmedNodeIds } = get();
+    return getConnectedInputsPure(nodeId, nodes, edges, undefined, dimmedNodeIds);
   },
 
   validateWorkflow: () => {
@@ -914,6 +1038,18 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       // Check for abort before starting
       if (signal.aborted) {
         throw new DOMException('Aborted', 'AbortError');
+      }
+
+      // Check if node is dimmed (downstream of disabled Switch output)
+      const dimmedNodeIds = get().dimmedNodeIds;
+      if (dimmedNodeIds.has(node.id)) {
+        // Skip execution — node is dimmed
+        // Keep previous output visible (don't clear node data)
+        logger.info('node.execution', 'Node skipped (downstream of disabled Switch)', {
+          nodeId: node.id,
+          nodeType: node.type,
+        });
+        return;
       }
 
       // Check for pause edges on incoming connections (skip if resuming from this exact node)
@@ -1040,6 +1176,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
             break;
           case "maskPainter":
             await executeMaskPainter(executionCtx);
+            break;
+          case "router":
+            await executeRouter(executionCtx);
+            break;
+          case "switch":
+            await executeSwitch(executionCtx);
+            break;
+          case "conditionalSwitch":
+            await evaluateAndExecuteConditionalSwitch(node, executionCtx, get().getConnectedInputs, get().updateNodeData);
             break;
         }
     }; // End of executeSingleNode helper
@@ -1391,6 +1536,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         case "videoFrameGrab":
           await executeVideoFrameGrab(executionCtx);
           break;
+        case "router":
+          await executeRouter(executionCtx);
+          break;
+        case "switch":
+          await executeSwitch(executionCtx);
+          break;
+        case "conditionalSwitch":
+          await evaluateAndExecuteConditionalSwitch(node, executionCtx, get().getConnectedInputs, get().updateNodeData);
+          break;
       }
     };
 
@@ -1568,7 +1722,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       if (node.type === "nanoBanana") {
         const data = node.data as NanoBananaNodeData;
         if (data.model && !data.selectedModel) {
-          const displayName = data.model === "nano-banana" ? "Nano Banana" : "Nano Banana Pro";
+          const displayName = MODEL_DISPLAY_NAMES[data.model] || data.model;
           return {
             ...node,
             data: {
@@ -1706,6 +1860,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       useExternalImageStorage: savedConfig?.useExternalImageStorage ?? true,
       // Reset viewed comments when loading new workflow
       viewedCommentNodeIds: new Set<string>(),
+      // Dismiss welcome modal after loading a workflow
+      showQuickstart: false,
     });
 
     // Post-load: restore 3D models in GLB viewers with stale blob URLs
@@ -1778,6 +1934,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     if (!options?.preserveSnapshot) {
       get().clearSnapshot();
     }
+
+    // Recompute dimming after loading workflow
+    get().recomputeDimmedNodes();
   },
 
   clearWorkflow: () => {
@@ -1800,6 +1959,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       imageRefBasePath: null,
       // Reset viewed comments when clearing workflow
       viewedCommentNodeIds: new Set<string>(),
+      // Reset dimmed nodes
+      dimmedNodeIds: new Set<string>(),
     });
     get().clearSnapshot();
   },
@@ -2303,6 +2464,18 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     saveCanvasNavigationSettings(settings);
   },
 
+  // Switch dimming actions
+  recomputeDimmedNodes: () => {
+    const { nodes, edges } = get();
+    const newDimmed = computeDimmedNodes(nodes, edges);
+    // Only update if set contents changed (prevent unnecessary rerenders)
+    const currentDimmed = get().dimmedNodeIds;
+    if (newDimmed.size !== currentDimmed.size ||
+        [...newDimmed].some(id => !currentDimmed.has(id))) {
+      set({ dimmedNodeIds: newDimmed });
+    }
+  },
+
 });
 
 export const useWorkflowStore = create<WorkflowStore>()(workflowStoreImpl);
@@ -2321,6 +2494,7 @@ export const useWorkflowStore = create<WorkflowStore>()(workflowStoreImpl);
 export function useProviderApiKeys() {
   return useWorkflowStore(
     useShallow((state) => ({
+      geminiApiKey: state.providerSettings.providers.gemini?.apiKey ?? null,
       replicateApiKey: state.providerSettings.providers.replicate?.apiKey ?? null,
       falApiKey: state.providerSettings.providers.fal?.apiKey ?? null,
       kieApiKey: state.providerSettings.providers.kie?.apiKey ?? null,

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useMemo, useCallback } from "react";
 import { useWorkflowStore, WorkflowFile } from "@/store/workflowStore";
+import { useShallow } from "zustand/shallow";
 import { ProjectSetupModal } from "./ProjectSetupModal";
 import { CostIndicator } from "./CostIndicator";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
@@ -72,7 +73,23 @@ export function Header() {
     revertToSnapshot,
     shortcutsDialogOpen,
     setShortcutsDialogOpen,
-  } = useWorkflowStore();
+    setShowQuickstart,
+  } = useWorkflowStore(useShallow((state) => ({
+    workflowName: state.workflowName,
+    workflowId: state.workflowId,
+    saveDirectoryPath: state.saveDirectoryPath,
+    hasUnsavedChanges: state.hasUnsavedChanges,
+    lastSavedAt: state.lastSavedAt,
+    isSaving: state.isSaving,
+    setWorkflowMetadata: state.setWorkflowMetadata,
+    saveToFile: state.saveToFile,
+    loadWorkflow: state.loadWorkflow,
+    previousWorkflowSnapshot: state.previousWorkflowSnapshot,
+    revertToSnapshot: state.revertToSnapshot,
+    shortcutsDialogOpen: state.shortcutsDialogOpen,
+    setShortcutsDialogOpen: state.setShortcutsDialogOpen,
+    setShowQuickstart: state.setShowQuickstart,
+  })));
 
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projectModalMode, setProjectModalMode] = useState<"new" | "settings">("new");
@@ -218,10 +235,16 @@ export function Header() {
       />
       <header className="h-11 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-2">
-          <img src="/banana_icon.png" alt="Banana" className="w-6 h-6" />
-          <h1 className="text-2xl font-semibold text-neutral-100 tracking-tight">
-            Node Banana
-          </h1>
+          <button
+            onClick={() => setShowQuickstart(true)}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            title="Open welcome screen"
+          >
+            <img src="/banana_icon.png" alt="Banana" className="w-6 h-6" />
+            <h1 className="text-2xl font-semibold text-neutral-100 tracking-tight">
+              Node Banana
+            </h1>
+          </button>
 
           <div className="flex items-center gap-2 ml-4 pl-4 border-l border-neutral-700">
             {isProjectConfigured ? (

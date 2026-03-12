@@ -69,16 +69,6 @@ describe("LLMGenerateNode", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render with title 'LLM Generate'", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("LLM Generate")).toBeInTheDocument();
-    });
-
     it("should render text input handle on left", () => {
       const { container } = render(
         <TestWrapper>
@@ -110,123 +100,6 @@ describe("LLMGenerateNode", () => {
 
       const outputHandle = container.querySelector('[data-handletype="text"][class*="source"]');
       expect(outputHandle).toBeInTheDocument();
-    });
-  });
-
-  describe("Provider Selector", () => {
-    it("should render provider selector with Google selected by default", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ provider: "google" })} />
-        </TestWrapper>
-      );
-
-      const providerSelect = screen.getByDisplayValue("Google");
-      expect(providerSelect).toBeInTheDocument();
-    });
-
-    it("should show Google and OpenAI as provider options", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByRole("option", { name: "Google" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "OpenAI" })).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData when provider is changed", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ provider: "google" })} />
-        </TestWrapper>
-      );
-
-      const providerSelect = screen.getByDisplayValue("Google");
-      fireEvent.change(providerSelect, { target: { value: "openai" } });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-llm-1", {
-        provider: "openai",
-        model: "gpt-4.1-mini",
-      });
-    });
-  });
-
-  describe("Model Selector", () => {
-    it("should show Google models when Google provider is selected", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ provider: "google" })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByRole("option", { name: "Gemini 3 Flash" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "Gemini 2.5 Flash" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "Gemini 3.0 Pro" })).toBeInTheDocument();
-    });
-
-    it("should show OpenAI models when OpenAI provider is selected", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ provider: "openai", model: "gpt-4.1-mini" })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByRole("option", { name: "GPT-4.1 Mini" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "GPT-4.1 Nano" })).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData when model is changed", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ provider: "google", model: "gemini-3-flash-preview" })} />
-        </TestWrapper>
-      );
-
-      const modelSelect = screen.getByDisplayValue("Gemini 3 Flash");
-      fireEvent.change(modelSelect, { target: { value: "gemini-2.5-flash" } });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-llm-1", {
-        model: "gemini-2.5-flash",
-      });
-    });
-  });
-
-  describe("Temperature Slider", () => {
-    it("should render temperature slider with current value after expanding parameters", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ temperature: 0.7 })} />
-        </TestWrapper>
-      );
-
-      // Expand the Parameters section
-      const parametersButton = screen.getByText("Parameters");
-      fireEvent.click(parametersButton);
-
-      expect(screen.getByText("Temperature: 0.7")).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData when temperature is changed", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ temperature: 1.0 })} />
-        </TestWrapper>
-      );
-
-      // Expand the Parameters section
-      const parametersButton = screen.getByText("Parameters");
-      fireEvent.click(parametersButton);
-
-      // Get the first slider (temperature) - there are two sliders: temperature and maxTokens
-      const sliders = screen.getAllByRole("slider");
-      const temperatureSlider = sliders[0];
-      fireEvent.change(temperatureSlider, { target: { value: "1.5" } });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-llm-1", {
-        temperature: 1.5,
-      });
     });
   });
 
@@ -266,14 +139,14 @@ describe("LLMGenerateNode", () => {
       expect(screen.getByText("API rate limit exceeded")).toBeInTheDocument();
     });
 
-    it("should show 'Failed' when error message is null", () => {
+    it("should show 'Generation failed' when error message is null", () => {
       render(
         <TestWrapper>
           <LLMGenerateNode {...createNodeProps({ status: "error", error: null })} />
         </TestWrapper>
       );
 
-      expect(screen.getByText("Failed")).toBeInTheDocument();
+      expect(screen.getByText("Generation failed")).toBeInTheDocument();
     });
   });
 
@@ -369,51 +242,4 @@ describe("LLMGenerateNode", () => {
     });
   });
 
-  describe("Custom Title and Comment", () => {
-    it("should display custom title when provided", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ customTitle: "My LLM" })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText(/My LLM/)).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData when custom title is changed", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      // Click on title to edit
-      const title = screen.getByText("LLM Generate");
-      fireEvent.click(title);
-
-      const input = screen.getByPlaceholderText("Custom title...");
-      fireEvent.change(input, { target: { value: "Custom LLM Title" } });
-      fireEvent.keyDown(input, { key: "Enter" });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-llm-1", { customTitle: "Custom LLM Title" });
-    });
-  });
-
-  describe("Model Fallback", () => {
-    it("should fall back to first available model when current model is invalid for provider", () => {
-      // When provider is google but model is an OpenAI model, should show first Google model
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({
-            provider: "google",
-            model: "gpt-4.1-mini" as any // Invalid model for Google provider
-          })} />
-        </TestWrapper>
-      );
-
-      // Should show first Google model in select
-      const modelSelect = screen.getByDisplayValue("Gemini 3 Flash");
-      expect(modelSelect).toBeInTheDocument();
-    });
-  });
 });

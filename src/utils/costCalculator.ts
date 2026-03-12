@@ -1,25 +1,33 @@
-import { ModelType, Resolution, NanoBananaNodeData, GenerateVideoNodeData, Generate3DNodeData, GenerateAudioNodeData, SplitGridNodeData, WorkflowNode, ProviderType } from "@/types";
+import { ModelType, Resolution, MODEL_DISPLAY_NAMES, NanoBananaNodeData, GenerateVideoNodeData, Generate3DNodeData, GenerateAudioNodeData, SplitGridNodeData, WorkflowNode, ProviderType } from "@/types";
 
 // Pricing in USD per image (Gemini API)
 export const PRICING = {
   "nano-banana": {
+    "512": 0.039,
     "1K": 0.039,
     "2K": 0.039, // nano-banana only supports 1K
     "4K": 0.039,
   },
   "nano-banana-pro": {
+    "512": 0.134,
     "1K": 0.134,
     "2K": 0.134,
     "4K": 0.24,
   },
+  "nano-banana-2": {
+    "512": 0.045,
+    "1K": 0.067,
+    "2K": 0.101,
+    "4K": 0.151,
+  },
 } as const;
 
 export function calculateGenerationCost(model: ModelType, resolution: Resolution): number {
-  // nano-banana only supports 1K resolution
+  // nano-banana only supports 1K resolution (flat pricing)
   if (model === "nano-banana") {
     return PRICING["nano-banana"]["1K"];
   }
-  return PRICING["nano-banana-pro"][resolution];
+  return PRICING[model][resolution];
 }
 
 /**
@@ -132,12 +140,12 @@ export function calculatePredictedCost(
 
   /**
    * Get pricing for a model.
-   * Priority: 1) external modelPricing map, 2) hardcoded Gemini pricing.
+   * First checks modelPricing map, then falls back to hardcoded Gemini pricing.
    */
   function getPricing(
     provider: ProviderType,
     modelId: string,
-    resolution?: Resolution,
+    resolution?: Resolution
   ): { unitCost: number; unit: string } | null {
     // Check external pricing map first
     if (modelPricing?.has(modelId)) {
@@ -152,6 +160,10 @@ export function calculatePredictedCost(
       if (modelId === "nano-banana-pro" || modelId === "gemini-3-pro-image-preview") {
         const res = resolution || "1K";
         return { unitCost: PRICING["nano-banana-pro"][res], unit: "image" };
+      }
+      if (modelId === "nano-banana-2" || modelId === "gemini-3.1-flash-image-preview") {
+        const res = resolution || "1K";
+        return { unitCost: PRICING["nano-banana-2"][res], unit: "image" };
       }
     }
 
@@ -178,7 +190,7 @@ export function calculatePredictedCost(
         // Legacy Gemini-only model
         provider = "gemini";
         modelId = data.model;
-        modelName = data.model === "nano-banana" ? "Nano Banana" : "Nano Banana Pro";
+        modelName = MODEL_DISPLAY_NAMES[data.model] || data.model;
       }
 
       const resolution = data.model === "nano-banana" ? "1K" : data.resolution;
@@ -215,7 +227,7 @@ export function calculatePredictedCost(
       if (data.isConfigured && data.targetCount > 0) {
         const model = data.generateSettings.model;
         const resolution = model === "nano-banana" ? "1K" : data.generateSettings.resolution;
-        const modelName = model === "nano-banana" ? "Nano Banana" : "Nano Banana Pro";
+        const modelName = MODEL_DISPLAY_NAMES[model] || model;
 
         const pricing = getPricing("gemini", model, resolution);
         const unitCost = pricing?.unitCost ?? null;
@@ -270,6 +282,31 @@ export function calculatePredictedCost(
     nodeCount,
     unknownPricingCount,
   };
+}
+
+/**
+ * Check whether any generation node in the workflow uses a non-Gemini provider.
+ * Used to hide the CostIndicator when pricing data would be incomplete/misleading.
+ */
+export function hasNonGeminiProviders(nodes: WorkflowNode[]): boolean {
+  return nodes.some((node) => {
+    if (node.type === "nanoBanana") {
+      const data = node.data as NanoBananaNodeData;
+      return data.selectedModel?.provider !== undefined && data.selectedModel.provider !== "gemini";
+    }
+    if (node.type === "generateVideo") {
+      const data = node.data as GenerateVideoNodeData;
+      return data.selectedModel?.provider !== undefined && data.selectedModel.provider !== "gemini";
+    }
+    if (node.type === "generate3d") {
+      const data = node.data as Generate3DNodeData;
+      return data.selectedModel?.provider !== undefined && data.selectedModel.provider !== "gemini";
+    }
+    if (node.type === "generateAudio") {
+      return true; // Audio nodes are always non-Gemini
+    }
+    return false;
+  });
 }
 
 export function formatCost(cost: number): string {

@@ -26,8 +26,6 @@ export function PanoCropNode({ id, data, selected }: NodeProps<PanoCropNodeType>
     <BaseNode
       id={id}
       selected={selected}
-      title="Pano Crop"
-      commentNavigation={commentNavigation || undefined}
     >
       {/* Output Handle — perspective snapshot */}
       <Handle

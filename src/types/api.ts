@@ -15,7 +15,8 @@ export interface GenerateRequest {
   aspectRatio?: AspectRatio;
   resolution?: Resolution; // Only for Nano Banana Pro
   model?: ModelType;
-  useGoogleSearch?: boolean; // Only for Nano Banana Pro
+  useGoogleSearch?: boolean; // Only for Nano Banana Pro and Nano Banana 2
+  useImageSearch?: boolean; // Only for Nano Banana 2
   mediaType?: "image" | "video" | "3d" | "audio"; // Indicates expected output type for provider routing
 }
 

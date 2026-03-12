@@ -8,6 +8,7 @@ vi.mock("@xyflow/react", () => ({
   useReactFlow: () => ({
     getViewport: () => ({ zoom: 1, x: 0, y: 0 }),
   }),
+  useViewport: () => ({ zoom: 1, x: 0, y: 0 }),
   ViewportPortal: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="viewport-portal">{children}</div>
   ),
@@ -240,7 +241,7 @@ describe("GroupControlsOverlay", () => {
   });
 
   describe("Group Name Editing", () => {
-    it("should enable editing when name is clicked", () => {
+    it("should enable editing when name is double-clicked", () => {
       mockUseWorkflowStore.mockImplementation((selector) => {
         return selector(createDefaultState({
           groups: { "group-1": createMockGroup({ name: "Original Name" }) },
@@ -249,8 +250,8 @@ describe("GroupControlsOverlay", () => {
 
       render(<GroupControlsOverlay />);
 
-      // Click on name to edit
-      fireEvent.click(screen.getByText("Original Name"));
+      // Double-click on name to edit
+      fireEvent.doubleClick(screen.getByText("Original Name"));
 
       // Should show input
       const input = screen.getByRole("textbox");
@@ -267,8 +268,8 @@ describe("GroupControlsOverlay", () => {
 
       render(<GroupControlsOverlay />);
 
-      // Click to edit
-      fireEvent.click(screen.getByText("Original Name"));
+      // Double-click to edit
+      fireEvent.doubleClick(screen.getByText("Original Name"));
 
       const input = screen.getByRole("textbox");
       fireEvent.change(input, { target: { value: "New Name" } });
@@ -286,8 +287,8 @@ describe("GroupControlsOverlay", () => {
 
       render(<GroupControlsOverlay />);
 
-      // Click to edit
-      fireEvent.click(screen.getByText("Original Name"));
+      // Double-click to edit
+      fireEvent.doubleClick(screen.getByText("Original Name"));
 
       const input = screen.getByRole("textbox");
       fireEvent.change(input, { target: { value: "New Name" } });
@@ -308,8 +309,8 @@ describe("GroupControlsOverlay", () => {
 
       render(<GroupControlsOverlay />);
 
-      // Click to edit
-      fireEvent.click(screen.getByText("Original Name"));
+      // Double-click to edit
+      fireEvent.doubleClick(screen.getByText("Original Name"));
 
       const input = screen.getByRole("textbox");
       fireEvent.change(input, { target: { value: "Blurred Name" } });

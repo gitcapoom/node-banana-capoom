@@ -115,13 +115,10 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      // Check that gradient is defined with reference color
-      const gradient = container.querySelector("linearGradient");
-      expect(gradient).toBeInTheDocument();
-
-      // Gradient ID should contain "reference"
-      const gradientId = gradient?.getAttribute("id");
-      expect(gradientId).toContain("reference");
+      // Edges now reference shared gradient IDs instead of per-edge defs
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("edge-grad-reference-");
     });
   });
 
@@ -169,12 +166,10 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      const gradient = container.querySelector("linearGradient");
-      expect(gradient).toBeInTheDocument();
-
-      // Check that gradient ID contains "active"
-      const gradientId = gradient?.getAttribute("id");
-      expect(gradientId).toContain("active");
+      // Should reference the "active" shared gradient
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("-active");
     });
 
     it("should have dimmed opacity when not connected to selected node", () => {
@@ -190,12 +185,10 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      const gradient = container.querySelector("linearGradient");
-      expect(gradient).toBeInTheDocument();
-
-      // Check that gradient ID contains "dimmed"
-      const gradientId = gradient?.getAttribute("id");
-      expect(gradientId).toContain("dimmed");
+      // Should reference the "dimmed" shared gradient
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("-dimmed");
     });
 
     it("should be dimmed when no nodes are selected", () => {
@@ -211,12 +204,10 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      const gradient = container.querySelector("linearGradient");
-      expect(gradient).toBeInTheDocument();
-
-      // When no nodes selected, edge should be dimmed
-      const gradientId = gradient?.getAttribute("id");
-      expect(gradientId).toContain("dimmed");
+      // Should reference the "dimmed" shared gradient
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("-dimmed");
     });
   });
 
@@ -249,9 +240,9 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      const gradient = container.querySelector("linearGradient");
-      const gradientId = gradient?.getAttribute("id");
-      expect(gradientId).toContain("active");
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("-active");
     });
 
     it("should highlight when target node is selected", () => {
@@ -267,9 +258,9 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      const gradient = container.querySelector("linearGradient");
-      const gradientId = gradient?.getAttribute("id");
-      expect(gradientId).toContain("active");
+      const basePath = container.querySelector(".react-flow__edge-path");
+      const stroke = basePath?.getAttribute("style") ?? "";
+      expect(stroke).toContain("-active");
     });
   });
 });

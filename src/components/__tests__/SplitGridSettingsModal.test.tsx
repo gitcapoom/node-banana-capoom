@@ -425,7 +425,7 @@ describe("SplitGridSettingsModal", () => {
     it("should close modal when Escape is pressed", () => {
       const onClose = vi.fn();
 
-      const { container } = render(
+      render(
         <SplitGridSettingsModal
           nodeId="test-node"
           nodeData={createDefaultNodeData()}
@@ -433,8 +433,8 @@ describe("SplitGridSettingsModal", () => {
         />
       );
 
-      // Find the modal div and trigger keydown
-      const modal = container.querySelector(".bg-neutral-800.rounded-lg");
+      // The modal renders via createPortal to document.body, so use document.querySelector
+      const modal = document.querySelector(".bg-neutral-800.rounded-lg");
       fireEvent.keyDown(modal!, { key: "Escape" });
 
       expect(onClose).toHaveBeenCalled();
@@ -443,7 +443,7 @@ describe("SplitGridSettingsModal", () => {
 
   describe("Grid Preview", () => {
     it("should display visual grid preview for each target count option", () => {
-      const { container } = render(
+      render(
         <SplitGridSettingsModal
           nodeId="test-node"
           nodeData={createDefaultNodeData()}
@@ -451,8 +451,8 @@ describe("SplitGridSettingsModal", () => {
         />
       );
 
-      // Each layout button should have a grid preview
-      const gridPreviews = container.querySelectorAll(".aspect-video");
+      // The modal renders via createPortal to document.body, so use document.querySelectorAll
+      const gridPreviews = document.querySelectorAll(".aspect-video");
       expect(gridPreviews.length).toBe(7); // 7 layout options
     });
   });

@@ -3,7 +3,6 @@
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { Generate3DNodeData, ProviderType, SelectedModel, ModelInputDef } from "@/types";
@@ -11,21 +10,10 @@ import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
 import { ProviderBadge } from "./ProviderBadge";
-
-function copyToClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text);
-  }
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  document.body.removeChild(textarea);
-  return Promise.resolve();
-}
+import { getModelPageUrl, getProviderDisplayName } from "@/utils/providerUrls";
+import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { InlineParameterPanel } from "./InlineParameterPanel";
+import { browseRegistry } from "@/utils/browseRegistry";
 
 // 3D generation capabilities
 const THREE_D_CAPABILITIES: ModelCapability[] = ["text-to-3d", "image-to-3d"];
@@ -34,10 +22,18 @@ type Generate3DNodeType = Node<Generate3DNodeData, "generate3d">;
 
 export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const { replicateApiKey, falApiKey, kieApiKey } = useProviderApiKeys();
   const [isBrowseDialogOpen, setIsBrowseDialogOpen] = useState(false);
+
+  // Inline parameters infrastructure
+  const { inlineParametersEnabled } = useInlineParameters();
+
+  // Register browse callback for floating header button
+  useEffect(() => {
+    browseRegistry.register(id, () => setIsBrowseDialogOpen(true));
+    return () => { browseRegistry.unregister(id); };
+  }, [id]);
 
   // Get the current selected provider (default to fal since most 3D models are there)
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "fal";
@@ -89,12 +85,6 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
       provider: model.provider,
       modelId: model.id,
       displayName: model.name,
-      ...(model.pricing && {
-        pricing: {
-          type: model.pricing.type,
-          amount: model.pricing.amount,
-        },
-      }),
     };
     updateNodeData(id, { selectedModel: newSelectedModel, parameters: {} });
     setIsBrowseDialogOpen(false);
@@ -108,20 +98,12 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
     return "Select 3D model...";
   }, [nodeData.selectedModel?.displayName, nodeData.selectedModel?.modelId]);
 
-  // Provider badge as title prefix
-  const titlePrefix = useMemo(() => (
-    <ProviderBadge provider={currentProvider} />
-  ), [currentProvider]);
+  // Inline parameters: compute collapse state and toggle handler
+  const isParamsExpanded = nodeData.parametersExpanded ?? true; // default expanded
 
-  // Header action element - browse button
-  const headerAction = useMemo(() => (
-    <button
-      onClick={() => setIsBrowseDialogOpen(true)}
-      className="nodrag nopan text-[10px] py-0.5 px-1.5 bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
-    >
-      Browse
-    </button>
-  ), []);
+  const handleToggleParams = useCallback(() => {
+    updateNodeData(id, { parametersExpanded: !isParamsExpanded });
+  }, [id, isParamsExpanded, updateNodeData]);
 
   // Track previous status to detect error transitions
   const prevStatusRef = useRef(nodeData.status);
@@ -142,19 +124,46 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
     <>
     <BaseNode
       id={id}
-      title={displayTitle}
-      customTitle={nodeData.customTitle}
-      comment={nodeData.comment}
-      onCustomTitleChange={(title) => updateNodeData(id, { customTitle: title || undefined })}
-      onCommentChange={(comment) => updateNodeData(id, { comment: comment || undefined })}
-      onRun={handleRegenerate}
       selected={selected}
+      settingsExpanded={inlineParametersEnabled && isParamsExpanded}
       isExecuting={isRunning}
       hasError={nodeData.status === "error"}
-      headerAction={headerAction}
-      titlePrefix={titlePrefix}
-      commentNavigation={commentNavigation ?? undefined}
-      lastCost={nodeData.lastGenerationCost}
+      settingsPanel={inlineParametersEnabled ? (
+        <InlineParameterPanel
+          expanded={isParamsExpanded}
+          onToggle={handleToggleParams}
+          nodeId={id}
+        >
+          {/* Model selector: Browse button + current model display */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="text-[11px] text-neutral-200 truncate">
+                {displayTitle}
+              </div>
+              <div className="text-[9px] text-neutral-500">
+                {currentProvider}
+              </div>
+            </div>
+            <button
+              onClick={() => setIsBrowseDialogOpen(true)}
+              className="nodrag nopan shrink-0 px-2 py-1 text-[10px] bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
+            >
+              Browse
+            </button>
+          </div>
+
+          {/* External provider parameters - reuse ModelParameters component */}
+          {nodeData.selectedModel?.modelId && (
+            <ModelParameters
+              modelId={nodeData.selectedModel.modelId}
+              provider={currentProvider}
+              parameters={nodeData.parameters || {}}
+              onParametersChange={handleParametersChange}
+              onInputsLoaded={handleInputsLoaded}
+            />
+          )}
+        </InlineParameterPanel>
+      ) : undefined}
     >
       {/* Dynamic input handles based on model schema */}
       {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
@@ -175,10 +184,9 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
           }> = [];
 
           if (hasImageInput) {
-            imageInputs.forEach((input) => {
+            imageInputs.forEach((input, index) => {
               handles.push({
-                // Use schema name in handle ID for direct mapping in connectedInputs
-                id: `image-${input.name}`,
+                id: `image-${index}`,
                 type: "image",
                 label: input.label,
                 schemaName: input.name,
@@ -198,10 +206,9 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
           }
 
           if (hasTextInput) {
-            textInputs.forEach((input) => {
+            textInputs.forEach((input, index) => {
               handles.push({
-                // Use schema name in handle ID for direct mapping in connectedInputs
-                id: `text-${input.name}`,
+                id: `text-${index}`,
                 type: "text",
                 label: input.label,
                 schemaName: input.name,
@@ -378,7 +385,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
                   }
                 }}
                 className="nodrag nopan text-[10px] text-neutral-400 hover:text-orange-300 truncate max-w-full cursor-pointer transition-colors flex items-center gap-1"
-                title={`Copy path: ${nodeData.savedFilePath}`}
+                title={`Open in explorer: ${nodeData.savedFilePath}`}
               >
                 <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -446,8 +453,8 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
           </div>
         )}
 
-        {/* Model-specific parameters */}
-        {nodeData.selectedModel?.modelId && (
+        {/* Model-specific parameters (hidden when inline enabled - shown in panel below) */}
+        {!inlineParametersEnabled && nodeData.selectedModel?.modelId && (
           <ModelParameters
             modelId={nodeData.selectedModel.modelId}
             provider={currentProvider}
@@ -455,9 +462,9 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
             onParametersChange={handleParametersChange}
             onExpandChange={handleParametersExpandChange}
             onInputsLoaded={handleInputsLoaded}
-            inputNames={nodeData.inputSchema?.map(i => i.name)}
           />
         )}
+
       </div>
     </BaseNode>
 

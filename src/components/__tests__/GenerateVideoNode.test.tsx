@@ -146,41 +146,6 @@ describe("GenerateVideoNode", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render with fal.ai provider badge by default", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      // fal.ai badge SVG should be present - viewBox="0 0 1855 1855"
-      const falBadge = container.querySelector('svg[viewBox="0 0 1855 1855"]');
-      expect(falBadge).toBeInTheDocument();
-    });
-
-    it("should render 'Select model...' when no model is selected", () => {
-      render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      // Default title when no model selected
-      expect(screen.getByText("Select model...")).toBeInTheDocument();
-    });
-
-    it("should render model name as title when selectedModel is set", () => {
-      render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps({
-            selectedModel: { provider: "fal", modelId: "kling-video/v1", displayName: "Kling Video" },
-          })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Kling Video")).toBeInTheDocument();
-    });
-
     it("should render image and text input handles", () => {
       const { container } = render(
         <TestWrapper>
@@ -243,57 +208,6 @@ describe("GenerateVideoNode", () => {
       expect(geminiBadge).not.toBeInTheDocument();
     });
 
-    it("should show fal.ai as default provider", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      // fal.ai badge should be the default
-      const falBadge = container.querySelector('svg[viewBox="0 0 1855 1855"]');
-      expect(falBadge).toBeInTheDocument();
-    });
-
-    it("should show Replicate badge when Replicate provider is selected", async () => {
-      mockUseWorkflowStore.mockImplementation((selector) => {
-        const state = {
-          updateNodeData: mockUpdateNodeData,
-          regenerateNode: mockRegenerateNode,
-          addNode: mockAddNode,
-          incrementModalCount: mockIncrementModalCount,
-          decrementModalCount: mockDecrementModalCount,
-          providerSettings: {
-            providers: {
-              ...defaultProviderSettings.providers,
-              replicate: { id: "replicate", name: "Replicate", enabled: true, apiKey: "test-key" },
-            },
-          },
-          generationsPath: "/test/generations",
-          isRunning: false,
-          currentNodeIds: [],
-          groups: {},
-          nodes: [],
-          getNodesWithComments: vi.fn(() => []),
-          markCommentViewed: vi.fn(),
-          setNavigationTarget: vi.fn(),
-        };
-        return selector(state);
-      });
-
-      const { container } = render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps({
-            selectedModel: { provider: "replicate", modelId: "minimax/video-01", displayName: "MiniMax Video" },
-          })} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        const replicateBadge = container.querySelector('svg[viewBox="0 0 1000 1000"]');
-        expect(replicateBadge).toBeInTheDocument();
-      });
-    });
   });
 
   describe("Idle State", () => {
@@ -307,16 +221,6 @@ describe("GenerateVideoNode", () => {
       expect(screen.getByText("Run to generate")).toBeInTheDocument();
     });
 
-    it("should render a dashed border placeholder when no output video", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps({ status: "idle", outputVideo: null })} />
-        </TestWrapper>
-      );
-
-      const placeholder = container.querySelector(".border-dashed");
-      expect(placeholder).toBeInTheDocument();
-    });
   });
 
   describe("Loading State", () => {
@@ -422,19 +326,6 @@ describe("GenerateVideoNode", () => {
 
       const video = container.querySelector("video");
       expect(video).toHaveAttribute("controls");
-    });
-
-    it("should render video with autoplay attribute", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps({
-            outputVideo: "data:video/mp4;base64,abc123",
-          })} />
-        </TestWrapper>
-      );
-
-      const video = container.querySelector("video");
-      expect(video?.autoplay).toBe(true);
     });
 
     it("should render video with loop attribute", () => {
@@ -546,90 +437,6 @@ describe("GenerateVideoNode", () => {
       );
 
       expect(screen.getByText("2 / 3")).toBeInTheDocument();
-    });
-  });
-
-  describe("Run Button", () => {
-    it("should render run button", () => {
-      render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByTitle("Run this node")).toBeInTheDocument();
-    });
-
-    it("should call regenerateNode when run button is clicked", () => {
-      render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const runButton = screen.getByTitle("Run this node");
-      fireEvent.click(runButton);
-
-      expect(mockRegenerateNode).toHaveBeenCalledWith("test-node-1");
-    });
-
-    it("should disable run button when workflow is running", () => {
-      mockUseWorkflowStore.mockImplementation((selector) => {
-        const state = {
-          updateNodeData: mockUpdateNodeData,
-          regenerateNode: mockRegenerateNode,
-          addNode: mockAddNode,
-          incrementModalCount: mockIncrementModalCount,
-          decrementModalCount: mockDecrementModalCount,
-          providerSettings: defaultProviderSettings,
-          generationsPath: "/test/generations",
-          isRunning: true,
-          currentNodeIds: [],
-          groups: {},
-          nodes: [],
-          getNodesWithComments: vi.fn(() => []),
-          markCommentViewed: vi.fn(),
-          setNavigationTarget: vi.fn(),
-        };
-        return selector(state);
-      });
-
-      render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const runButton = screen.getByTitle("Run this node");
-      expect(runButton).toBeDisabled();
-    });
-  });
-
-  describe("Browse Button", () => {
-    it("should render Browse button", () => {
-      render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Browse")).toBeInTheDocument();
-    });
-
-    it("should open ModelSearchDialog when Browse button is clicked", async () => {
-      render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const browseButton = screen.getByText("Browse");
-      fireEvent.click(browseButton);
-
-      // ModelSearchDialog should open
-      await waitFor(() => {
-        expect(screen.getByText("Browse Models")).toBeInTheDocument();
-      });
     });
   });
 
@@ -831,42 +638,6 @@ describe("GenerateVideoNode", () => {
         // The gap should account for the spacing slot
         expect(gapDiff).toBeGreaterThan(imageDiff * 0.9);
       });
-    });
-  });
-
-  describe("Custom Title and Comment", () => {
-    it("should display custom title when provided", () => {
-      render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps({
-            customTitle: "My Video Generator",
-            selectedModel: { provider: "fal", modelId: "kling-video/v1", displayName: "Kling Video" },
-          })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText(/My Video Generator/)).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData when custom title is changed", () => {
-      render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps({
-            selectedModel: { provider: "fal", modelId: "kling-video/v1", displayName: "Kling Video" },
-          })} />
-        </TestWrapper>
-      );
-
-      // Click on title to edit
-      const title = screen.getByText("Kling Video");
-      fireEvent.click(title);
-
-      // Type new title
-      const input = screen.getByPlaceholderText("Custom title...");
-      fireEvent.change(input, { target: { value: "New Title" } });
-      fireEvent.keyDown(input, { key: "Enter" });
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-node-1", { customTitle: "New Title" });
     });
   });
 

@@ -583,4 +583,290 @@ describe("/api/llm route", () => {
       expect(data.error).toBe("No text in OpenAI response");
     });
   });
+
+  describe("Anthropic provider", () => {
+    beforeEach(() => {
+      global.fetch = mockFetch;
+    });
+
+    it("should generate text successfully with Anthropic", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            content: [{ type: "text", text: "Anthropic response text" }],
+          }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Test prompt",
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+        temperature: 0.7,
+        maxTokens: 1024,
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.text).toBe("Anthropic response text");
+
+      // Verify fetch was called with correct parameters
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.anthropic.com/v1/messages",
+        expect.objectContaining({
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": "test-anthropic-key",
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-5-20250929",
+            messages: [{ role: "user", content: [{ type: "text", text: "Test prompt" }] }],
+            temperature: 0.7,
+            max_tokens: 1024,
+          }),
+        })
+      );
+    });
+
+    it("should handle multimodal input with Anthropic content block structure", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            content: [{ type: "text", text: "Image description from Claude" }],
+          }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Describe this image",
+        images: ["data:image/png;base64,iVBORw0KGgo="],
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+        temperature: 0.7,
+        maxTokens: 1024,
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.text).toBe("Image description from Claude");
+
+      // Verify Anthropic content block structure
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.anthropic.com/v1/messages",
+        expect.objectContaining({
+          body: JSON.stringify({
+            model: "claude-sonnet-4-5-20250929",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "image",
+                    source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
+                  },
+                  { type: "text", text: "Describe this image" },
+                ],
+              },
+            ],
+            temperature: 0.7,
+            max_tokens: 1024,
+          }),
+        })
+      );
+    });
+
+    it("should reject missing Anthropic API key", async () => {
+      delete process.env.ANTHROPIC_API_KEY;
+
+      const request = createMockPostRequest({
+        prompt: "Test prompt",
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data.success).toBe(false);
+      expect(data.error).toContain("ANTHROPIC_API_KEY not configured");
+    });
+
+    it("should use X-Anthropic-API-Key header over env var", async () => {
+      process.env.ANTHROPIC_API_KEY = "env-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            content: [{ type: "text", text: "Response with header key" }],
+          }),
+      });
+
+      const request = createMockPostRequest(
+        {
+          prompt: "Test prompt",
+          provider: "anthropic",
+          model: "claude-sonnet-4.5",
+        },
+        { "X-Anthropic-API-Key": "header-anthropic-key" }
+      );
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+
+      // Verify fetch was called with header key (takes precedence)
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.anthropic.com/v1/messages",
+        expect.objectContaining({
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": "header-anthropic-key",
+            "anthropic-version": "2023-06-01",
+          },
+        })
+      );
+    });
+
+    it("should return 429 on rate limit errors", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: () =>
+          Promise.resolve({
+            error: { message: "429 Rate limit exceeded" },
+          }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Test prompt",
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(429);
+      expect(data.success).toBe(false);
+      expect(data.error).toBe("Rate limit reached. Please wait and try again.");
+    });
+
+    it("should handle Anthropic API error responses", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: () =>
+          Promise.resolve({
+            error: { message: "Invalid API key" },
+          }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Test prompt",
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data.success).toBe(false);
+      expect(data.error).toBe("Invalid API key");
+    });
+
+    it("should handle no text in Anthropic response", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            content: [],
+          }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Test prompt",
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(500);
+      expect(data.success).toBe(false);
+      expect(data.error).toBe("No text in Anthropic response");
+    });
+
+    it("should handle image without data URL prefix", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            content: [{ type: "text", text: "Image description" }],
+          }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Describe this",
+        images: ["iVBORw0KGgoAAAANSUhEUgAAAAUA"],
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+
+      // Verify fallback to PNG mime type
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.anthropic.com/v1/messages",
+        expect.objectContaining({
+          body: JSON.stringify({
+            model: "claude-sonnet-4-5-20250929",
+            messages: [
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "image",
+                    source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAUA" },
+                  },
+                  { type: "text", text: "Describe this" },
+                ],
+              },
+            ],
+            temperature: 0.7,
+            max_tokens: 1024,
+          }),
+        })
+      );
+    });
+  });
 });

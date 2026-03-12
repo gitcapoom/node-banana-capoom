@@ -298,6 +298,101 @@ describe("/api/generate route", () => {
       );
     });
 
+    it("should apply imageSearch searchType for nano-banana-2 with useImageSearch only", async () => {
+      process.env.GEMINI_API_KEY = "test-gemini-key";
+
+      mockGenerateContent.mockResolvedValueOnce(createGeminiImageResponse());
+
+      const request = createMockPostRequest({
+        prompt: "Find similar images",
+        model: "nano-banana-2",
+        useImageSearch: true,
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(mockGenerateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: [{ googleSearch: { searchTypes: { imageSearch: {} } } }],
+        })
+      );
+    });
+
+    it("should apply both webSearch and imageSearch for nano-banana-2 with both toggles", async () => {
+      process.env.GEMINI_API_KEY = "test-gemini-key";
+
+      mockGenerateContent.mockResolvedValueOnce(createGeminiImageResponse());
+
+      const request = createMockPostRequest({
+        prompt: "Latest technology with images",
+        model: "nano-banana-2",
+        useGoogleSearch: true,
+        useImageSearch: true,
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(mockGenerateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: [{ googleSearch: { searchTypes: { webSearch: {}, imageSearch: {} } } }],
+        })
+      );
+    });
+
+    it("should use webSearch searchType for nano-banana-2 with useGoogleSearch only", async () => {
+      process.env.GEMINI_API_KEY = "test-gemini-key";
+
+      mockGenerateContent.mockResolvedValueOnce(createGeminiImageResponse());
+
+      const request = createMockPostRequest({
+        prompt: "Latest technology trends",
+        model: "nano-banana-2",
+        useGoogleSearch: true,
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(mockGenerateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: [{ googleSearch: { searchTypes: { webSearch: {} } } }],
+        })
+      );
+    });
+
+    it("should ignore useImageSearch for nano-banana-pro", async () => {
+      process.env.GEMINI_API_KEY = "test-gemini-key";
+
+      mockGenerateContent.mockResolvedValueOnce(createGeminiImageResponse());
+
+      const request = createMockPostRequest({
+        prompt: "Test prompt",
+        model: "nano-banana-pro",
+        useGoogleSearch: true,
+        useImageSearch: true,
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      // nano-banana-pro should use old format, ignoring useImageSearch
+      expect(mockGenerateContent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: [{ googleSearch: {} }],
+        })
+      );
+    });
+
     it("should use nano-banana-pro as default model", async () => {
       process.env.GEMINI_API_KEY = "test-gemini-key";
 

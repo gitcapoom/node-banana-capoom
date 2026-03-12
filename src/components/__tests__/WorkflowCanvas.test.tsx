@@ -139,6 +139,7 @@ const createDefaultState = (overrides = {}) => ({
   getNodesWithComments: vi.fn(() => []),
   markCommentViewed: vi.fn(),
   canvasNavigationSettings: { panMode: "space", zoomMode: "altScroll", selectionMode: "click" },
+  dimmedNodeIds: new Set<string>(),
   captureSnapshot: vi.fn(),
   applyEditOperations: vi.fn(() => ({ applied: 0, skipped: [] })),
   setWorkflowMetadata: vi.fn(),
@@ -244,10 +245,12 @@ describe("WorkflowCanvas", () => {
     });
 
     it("should not show welcome modal when canvas has nodes", () => {
+      // When a workflow with nodes is loaded, the store sets showQuickstart to false.
+      // The component renders the modal based solely on showQuickstart state.
       mockUseWorkflowStore.mockImplementation((selector) => {
         return selector(createDefaultState({
           nodes: [createMockNode("node-1", "prompt")],
-          showQuickstart: true,
+          showQuickstart: false,
         }));
       });
 

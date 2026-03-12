@@ -174,7 +174,7 @@ describe("ModelParameters", () => {
       });
     });
 
-    it("should collapse when header is clicked", async () => {
+    it("should always show parameters (no collapse header)", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -189,11 +189,11 @@ describe("ModelParameters", () => {
         expect(screen.getByText("Test Param")).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByText("Parameters"));
-      expect(screen.queryByText("Test Param")).not.toBeInTheDocument();
+      // Component no longer has a collapsible "Parameters" header
+      expect(screen.queryByText("Parameters")).not.toBeInTheDocument();
     });
 
-    it("should expand when header is clicked again", async () => {
+    it("should render parameters directly without collapse toggle", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -208,18 +208,13 @@ describe("ModelParameters", () => {
         expect(screen.getByText("Test Param")).toBeInTheDocument();
       });
 
-      // Collapse
-      fireEvent.click(screen.getByText("Parameters"));
-      expect(screen.queryByText("Test Param")).not.toBeInTheDocument();
-
-      // Expand
-      fireEvent.click(screen.getByText("Parameters"));
+      // Parameters are always visible since there is no collapse mechanism
       expect(screen.getByText("Test Param")).toBeInTheDocument();
     });
   });
 
   describe("Parameter Count Display", () => {
-    it("should show parameter count when parameters have values", async () => {
+    it("should render all parameters that have values", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -239,7 +234,11 @@ describe("ModelParameters", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("(2)")).toBeInTheDocument();
+        // Both parameters should be rendered with their values
+        const inputs = screen.getAllByRole("textbox");
+        expect(inputs).toHaveLength(2);
+        expect(inputs[0]).toHaveValue("value1");
+        expect(inputs[1]).toHaveValue("value2");
       });
     });
   });
@@ -310,7 +309,7 @@ describe("ModelParameters", () => {
 
       await waitFor(() => {
         const input = screen.getByRole("textbox");
-        expect(input).toHaveAttribute("placeholder", "Default: realistic");
+        expect(input).toHaveAttribute("placeholder", "realistic");
       });
     });
   });

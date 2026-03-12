@@ -171,6 +171,7 @@ describe("localStorage utilities", () => {
         resolution: "1K",
         model: "nano-banana-pro",
         useGoogleSearch: false,
+        useImageSearch: false,
       });
     });
 
@@ -199,6 +200,7 @@ describe("localStorage utilities", () => {
         resolution: "1K",
         model: "nano-banana-pro",
         useGoogleSearch: false,
+        useImageSearch: false,
       });
     });
   });

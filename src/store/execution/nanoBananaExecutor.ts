@@ -101,6 +101,7 @@ export async function executeNanoBanana(
     resolution: nodeData.resolution,
     model: nodeData.model,
     useGoogleSearch: nodeData.useGoogleSearch,
+    useImageSearch: nodeData.useImageSearch,
     selectedModel: nodeData.selectedModel,
     parameters: nodeData.parameters,
     dynamicInputs: sanitizedDynamicInputs,
