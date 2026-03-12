@@ -21,7 +21,6 @@ import {
   VideoTrimNodeData,
   VideoFrameGrabNodeData,
   GLBViewerNodeData,
-  AppleSharpNodeData,
   SpzViewerNodeData,
   PanoCropNodeData,
   PanoViewerNodeData,
@@ -59,7 +58,6 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   videoTrim: { width: 360, height: 360 },
   videoFrameGrab: { width: 320, height: 320 },
   glbViewer: { width: 360, height: 380 },
-  appleSharp: { width: 300, height: 320 },
   spzViewer: { width: 300, height: 280 },
   worldLabsPano: { width: 320, height: 380 },
   worldLabsWorld: { width: 320, height: 360 },
@@ -311,19 +309,6 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         filename: null,
         capturedImage: null,
       } as GLBViewerNodeData;
-    case "appleSharp":
-      return {
-        serverUrl: "http://capoompc21:8080",
-        renderVideo: false,
-        inputImage: null,
-        output3dUrl: null,
-        outputVideoUrl: null,
-        savedFilename: null,
-        savedFilePath: null,
-        status: "idle",
-        error: null,
-        progress: null,
-      } as AppleSharpNodeData;
     case "spzViewer":
       return {
         spzUrl: null,

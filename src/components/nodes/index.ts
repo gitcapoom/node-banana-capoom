@@ -24,6 +24,5 @@ export { PanoEditorNode } from "./PanoEditorNode";
 export { MaskPainterNode } from "./MaskPainterNode";
 export { VideoTrimNode } from "./VideoTrimNode";
 export { VideoFrameGrabNode } from "./VideoFrameGrabNode";
-export { AppleSharpNode } from "./AppleSharpNode";
 export { VideoInputNode } from "./VideoInputNode";
 export { GroupNode } from "./GroupNode";

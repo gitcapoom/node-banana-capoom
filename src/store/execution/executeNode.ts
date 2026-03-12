@@ -28,7 +28,6 @@ import { executeVideoStitch, executeEaseCurve, executeVideoTrim, executeVideoFra
 import { executeWorldLabsPano } from "./worldLabsPanoExecutor";
 import { executeWorldLabsWorld } from "./worldLabsWorldExecutor";
 import { executeGenerateAudio } from "./generateAudioExecutor";
-import { executeAppleSharp } from "./appleSharpExecutor";
 
 export interface ExecuteNodeOptions {
   /** When true, executors that support it will fall back to stored inputs. */
@@ -131,9 +130,6 @@ export async function executeNode(
       break;
     case "videoFrameGrab":
       await executeVideoFrameGrab(ctx);
-      break;
-    case "appleSharp":
-      await executeAppleSharp(ctx);
       break;
   }
 }
