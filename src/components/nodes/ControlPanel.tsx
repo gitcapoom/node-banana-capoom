@@ -4,7 +4,7 @@ import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Node } from "@xyflow/react";
 import { useWorkflowStore, saveNanoBananaDefaults, useProviderApiKeys } from "@/store/workflowStore";
-import { NodeType, NanoBananaNodeData, LLMGenerateNodeData, GenerateVideoNodeData, Generate3DNodeData, GenerateAudioNodeData, EaseCurveNodeData, ConditionalSwitchNodeData, AspectRatio, Resolution, ModelType, MODEL_DISPLAY_NAMES, ProviderType, SelectedModel, LLMProvider, LLMModelType, MatchMode, ConditionalSwitchRule } from "@/types";
+import { NodeType, NanoBananaNodeData, LLMGenerateNodeData, GenerateVideoNodeData, Generate3DNodeData, GenerateAudioNodeData, EaseCurveNodeData, ConditionalSwitchNodeData, WorldLabsPanoNodeData, WorldLabsWorldNodeData, AppleSharpNodeData, AspectRatio, Resolution, ModelType, MODEL_DISPLAY_NAMES, ProviderType, SelectedModel, LLMProvider, LLMModelType, MatchMode, ConditionalSwitchRule } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { ModelParameters } from "./ModelParameters";
@@ -25,6 +25,9 @@ const CONFIGURABLE_NODE_TYPES: NodeType[] = [
   "llmGenerate",
   "easeCurve",
   "conditionalSwitch",
+  "worldLabsPano",
+  "worldLabsWorld",
+  "appleSharp",
 ];
 
 // Generation node types that can use inline parameters
@@ -34,6 +37,9 @@ const GENERATION_NODE_TYPES: NodeType[] = [
   "generate3d",
   "generateAudio",
   "llmGenerate",
+  "worldLabsPano",
+  "worldLabsWorld",
+  "appleSharp",
 ];
 
 // Base 10 aspect ratios (all Gemini image models)
@@ -175,6 +181,15 @@ export function ControlPanel() {
             {selectedNode.type === "conditionalSwitch" && (
               <ConditionalSwitchControls node={selectedNode} />
             )}
+            {selectedNode.type === "worldLabsPano" && (
+              <WorldLabsPanoControls node={selectedNode} />
+            )}
+            {selectedNode.type === "worldLabsWorld" && (
+              <WorldLabsWorldControls node={selectedNode} />
+            )}
+            {selectedNode.type === "appleSharp" && (
+              <AppleSharpControls node={selectedNode} />
+            )}
           </div>
         </div>
       </div>
@@ -191,8 +206,242 @@ function getNodeTypeTitle(type: NodeType): string {
     llmGenerate: "LLM Settings",
     easeCurve: "Ease Curve Settings",
     conditionalSwitch: "Conditional Switch Settings",
+    worldLabsPano: "Panorama Generator Settings",
+    worldLabsWorld: "World Generator Settings",
+    appleSharp: "SHARP (3D) Settings",
   };
   return titles[type] || "Settings";
+}
+
+/** Azimuth presets for WorldLabsPano multi-image generation */
+const AZIMUTH_OPTIONS = [
+  { label: "Front", value: 0 },
+  { label: "Right", value: 90 },
+  { label: "Back", value: 180 },
+  { label: "Left", value: 270 },
+] as const;
+const DEFAULT_AZIMUTHS = [0, 90, 180, 270];
+
+// WorldLabs Panorama Generator Controls
+function WorldLabsPanoControls({ node }: { node: Node }) {
+  const nodeData = node.data as WorldLabsPanoNodeData;
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const edges = useWorkflowStore((state) => state.edges);
+  const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const isRunning = useWorkflowStore((state) => state.isRunning);
+
+  const connectedImageCount = useMemo(() => {
+    return edges.filter(
+      (e) => e.target === node.id && e.targetHandle === "image"
+    ).length;
+  }, [edges, node.id]);
+
+  const showAzimuthControls = connectedImageCount >= 2;
+
+  return (
+    <div className="space-y-4">
+      {/* World Name */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">World Name</label>
+        <input
+          type="text"
+          value={nodeData.worldName}
+          onChange={(e) => updateNodeData(node.id, { worldName: e.target.value })}
+          className="w-full bg-neutral-900 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+          placeholder="My World"
+        />
+      </div>
+
+      {/* Model Selection */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">Model</label>
+        <select
+          value={nodeData.model}
+          onChange={(e) => updateNodeData(node.id, { model: e.target.value as WorldLabsPanoNodeData["model"] })}
+          className="w-full bg-neutral-900 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
+        >
+          <option value="Marble 0.1-mini">Marble 0.1 Mini (fast)</option>
+          <option value="Marble 0.1-plus">Marble 0.1 Plus</option>
+        </select>
+      </div>
+
+      {/* Seed */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">Seed (optional)</label>
+        <input
+          type="number"
+          value={nodeData.seed ?? ""}
+          onChange={(e) => {
+            const val = e.target.value.trim();
+            updateNodeData(node.id, { seed: val === "" ? null : parseInt(val, 10) || null });
+          }}
+          className="w-full bg-neutral-900 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+          placeholder="Random"
+        />
+      </div>
+
+      {/* Azimuth Controls */}
+      {showAzimuthControls && (
+        <div>
+          <label className="text-[10px] text-neutral-500 block mb-1.5">
+            Image Azimuths ({connectedImageCount} images)
+          </label>
+          <div className="space-y-1">
+            {Array.from({ length: connectedImageCount }, (_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-[10px] text-neutral-600 w-10 shrink-0">Img {i + 1}</span>
+                <select
+                  value={nodeData.imageAzimuths[i] ?? DEFAULT_AZIMUTHS[i % DEFAULT_AZIMUTHS.length]}
+                  onChange={(e) => updateNodeData(node.id, {
+                    imageAzimuths: { ...nodeData.imageAzimuths, [i]: Number(e.target.value) },
+                  })}
+                  className="flex-1 bg-neutral-900 text-neutral-200 text-[11px] rounded px-1.5 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
+                >
+                  {AZIMUTH_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label} ({opt.value}°)</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Run button */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => regenerateNode(node.id)}
+          disabled={isRunning}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+          {isRunning ? "Running..." : "Run"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// WorldLabs World Generator Controls
+function WorldLabsWorldControls({ node }: { node: Node }) {
+  const nodeData = node.data as WorldLabsWorldNodeData;
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const isRunning = useWorkflowStore((state) => state.isRunning);
+
+  return (
+    <div className="space-y-4">
+      {/* World Name */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">World Name</label>
+        <input
+          type="text"
+          value={nodeData.worldName}
+          onChange={(e) => updateNodeData(node.id, { worldName: e.target.value })}
+          className="w-full bg-neutral-900 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+          placeholder="My World"
+        />
+      </div>
+
+      {/* Model Selection */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">Model</label>
+        <select
+          value={nodeData.model}
+          onChange={(e) => updateNodeData(node.id, { model: e.target.value as WorldLabsWorldNodeData["model"] })}
+          className="w-full bg-neutral-900 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
+        >
+          <option value="Marble 0.1-plus">Marble 0.1 Plus</option>
+          <option value="Marble 0.1-mini">Marble 0.1 Mini</option>
+        </select>
+      </div>
+
+      {/* Seed */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">Seed (optional)</label>
+        <input
+          type="number"
+          value={nodeData.seed ?? ""}
+          onChange={(e) => {
+            const val = e.target.value.trim();
+            updateNodeData(node.id, { seed: val === "" ? null : parseInt(val, 10) || null });
+          }}
+          className="w-full bg-neutral-900 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+          placeholder="Random"
+        />
+      </div>
+
+      {/* Is Panorama */}
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={nodeData.isPano}
+          onChange={() => updateNodeData(node.id, { isPano: !nodeData.isPano })}
+          className="w-3.5 h-3.5 rounded bg-neutral-800 border-neutral-600 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0 cursor-pointer"
+        />
+        <span className="text-[11px] text-neutral-400">Input is panorama</span>
+      </label>
+
+      {/* Run button */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => regenerateNode(node.id)}
+          disabled={isRunning}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+          {isRunning ? "Running..." : "Run"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Apple SHARP (3D) Controls
+function AppleSharpControls({ node }: { node: Node }) {
+  const nodeData = node.data as AppleSharpNodeData;
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const isRunning = useWorkflowStore((state) => state.isRunning);
+
+  return (
+    <div className="space-y-4">
+      {/* Server URL */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">Server URL</label>
+        <input
+          type="text"
+          value={nodeData.serverUrl}
+          onChange={(e) => updateNodeData(node.id, { serverUrl: e.target.value })}
+          className="w-full bg-neutral-900 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-orange-500 focus:outline-none"
+          placeholder="http://capoompc21:8080"
+        />
+      </div>
+
+      {/* Render Video Toggle */}
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={nodeData.renderVideo}
+          onChange={() => updateNodeData(node.id, { renderVideo: !nodeData.renderVideo })}
+          className="w-3.5 h-3.5 rounded bg-neutral-800 border-neutral-600 text-orange-500 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer"
+        />
+        <span className="text-[11px] text-neutral-400">Render video</span>
+      </label>
+
+      {/* Run button */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => regenerateNode(node.id)}
+          disabled={isRunning}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+          {isRunning ? "Running..." : "Run"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // Generate Image Controls

@@ -3,8 +3,9 @@
 import React, { useCallback, useEffect, useState, useRef } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { InlineParameterPanel } from "./InlineParameterPanel";
 import type { AppleSharpNodeData } from "@/types";
 
 type AppleSharpNodeType = Node<AppleSharpNodeData, "appleSharp">;
@@ -15,13 +16,20 @@ export function AppleSharpNode({
   selected,
 }: NodeProps<AppleSharpNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
 
   const [serverHealthy, setServerHealthy] = useState<boolean | null>(null);
   const healthCheckRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Inline parameters infrastructure
+  const { inlineParametersEnabled } = useInlineParameters();
+  const isParamsExpanded = nodeData.parametersExpanded ?? true;
+
+  const handleToggleParams = useCallback(() => {
+    updateNodeData(id, { parametersExpanded: !isParamsExpanded });
+  }, [id, isParamsExpanded, updateNodeData]);
 
   // Check server health on mount and when serverUrl changes (debounced)
   useEffect(() => {
@@ -75,11 +83,69 @@ export function AppleSharpNode({
     }
   }, [nodeData.savedFilePath]);
 
+  // ─── Settings Controls (shared between inline and panel modes) ───
+
+  const settingsControls = (
+    <div className="space-y-3">
+      {/* Server URL */}
+      <div className="space-y-1">
+        <div className="flex items-center gap-1.5">
+          <label className="text-[10px] text-neutral-500 font-medium">
+            Server
+          </label>
+          {/* Health indicator */}
+          {serverHealthy === null ? (
+            <span className="w-1.5 h-1.5 rounded-full bg-neutral-600" />
+          ) : serverHealthy ? (
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-green-500"
+              title="Server online"
+            />
+          ) : (
+            <span
+              className="w-1.5 h-1.5 rounded-full bg-red-500"
+              title="Server unreachable"
+            />
+          )}
+        </div>
+        <input
+          type="text"
+          value={nodeData.serverUrl}
+          onChange={handleServerUrlChange}
+          className="nodrag nopan w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-300 focus:outline-none focus:border-orange-500 transition-colors"
+          placeholder="http://capoompc21:8080"
+        />
+      </div>
+
+      {/* Render Video Toggle */}
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={nodeData.renderVideo}
+          onChange={handleRenderVideoToggle}
+          className="nodrag nopan w-3.5 h-3.5 rounded bg-neutral-800 border-neutral-600 text-orange-500 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer"
+        />
+        <span className="text-[11px] text-neutral-400">Render video</span>
+      </label>
+    </div>
+  );
+
   return (
     <BaseNode
       id={id}
       selected={selected}
       isExecuting={isRunning}
+      hasError={nodeData.status === "error"}
+      settingsExpanded={inlineParametersEnabled && isParamsExpanded}
+      settingsPanel={inlineParametersEnabled ? (
+        <InlineParameterPanel
+          expanded={isParamsExpanded}
+          onToggle={handleToggleParams}
+          nodeId={id}
+        >
+          {settingsControls}
+        </InlineParameterPanel>
+      ) : undefined}
     >
       {/* Input Handle - Image */}
       <Handle
@@ -100,67 +166,6 @@ export function AppleSharpNode({
       />
 
       <div className="p-3 space-y-3">
-        {/* Header with provider badge */}
-        <div className="flex items-center gap-2">
-          <svg
-            className="w-4 h-4 text-orange-400 shrink-0"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9"
-            />
-          </svg>
-          <span className="text-xs font-medium text-neutral-300">
-            Image → 3D Gaussian Splat
-          </span>
-        </div>
-
-        {/* Server URL */}
-        <div className="space-y-1">
-          <div className="flex items-center gap-1.5">
-            <label className="text-[10px] text-neutral-500 font-medium">
-              Server
-            </label>
-            {/* Health indicator */}
-            {serverHealthy === null ? (
-              <span className="w-1.5 h-1.5 rounded-full bg-neutral-600" />
-            ) : serverHealthy ? (
-              <span
-                className="w-1.5 h-1.5 rounded-full bg-green-500"
-                title="Server online"
-              />
-            ) : (
-              <span
-                className="w-1.5 h-1.5 rounded-full bg-red-500"
-                title="Server unreachable"
-              />
-            )}
-          </div>
-          <input
-            type="text"
-            value={nodeData.serverUrl}
-            onChange={handleServerUrlChange}
-            className="w-full bg-neutral-900 border border-neutral-700 rounded px-2 py-1 text-xs text-neutral-300 focus:outline-none focus:border-orange-500 transition-colors"
-            placeholder="http://capoompc21:8080"
-          />
-        </div>
-
-        {/* Render Video Toggle */}
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={nodeData.renderVideo}
-            onChange={handleRenderVideoToggle}
-            className="w-3.5 h-3.5 rounded bg-neutral-800 border-neutral-600 text-orange-500 focus:ring-orange-500 focus:ring-offset-0 cursor-pointer"
-          />
-          <span className="text-[11px] text-neutral-400">Render video</span>
-        </label>
-
         {/* Status Area */}
         <div className="min-h-[60px]">
           {nodeData.status === "idle" && (
@@ -204,7 +209,7 @@ export function AppleSharpNode({
               {nodeData.savedFilename && (
                 <button
                   onClick={handleOpenFile}
-                  className="text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors truncate block max-w-full text-left"
+                  className="nodrag nopan text-[10px] text-neutral-500 hover:text-neutral-300 transition-colors truncate block max-w-full text-left"
                   title={nodeData.savedFilePath || nodeData.savedFilename}
                 >
                   {nodeData.savedFilename}

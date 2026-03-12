@@ -3,8 +3,9 @@
 import React, { useCallback, useMemo } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { InlineParameterPanel } from "./InlineParameterPanel";
 import { WorldLabsPanoNodeData } from "@/types";
 
 type WorldLabsPanoNodeType = Node<WorldLabsPanoNodeData, "worldLabsPano">;
@@ -31,11 +32,18 @@ const DEFAULT_AZIMUTHS = [0, 90, 180, 270];
  */
 export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPanoNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const edges = useWorkflowStore((state) => state.edges);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
+
+  // Inline parameters infrastructure
+  const { inlineParametersEnabled } = useInlineParameters();
+  const isParamsExpanded = nodeData.parametersExpanded ?? true;
+
+  const handleToggleParams = useCallback(() => {
+    updateNodeData(id, { parametersExpanded: !isParamsExpanded });
+  }, [id, isParamsExpanded, updateNodeData]);
 
   // Count connected image edges
   const connectedImageCount = useMemo(() => {
@@ -98,11 +106,94 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
 
   const previewUrl = nodeData.panoUrl || nodeData.thumbnailUrl;
 
+  // ─── Settings Controls (shared between inline and panel modes) ───
+
+  const settingsControls = (
+    <div className="space-y-3">
+      {/* World Name */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">World Name</label>
+        <input
+          type="text"
+          value={nodeData.worldName}
+          onChange={handleWorldNameChange}
+          className="nodrag nopan w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+          placeholder="My World"
+        />
+      </div>
+
+      {/* Model Selection */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">Model</label>
+        <select
+          value={nodeData.model}
+          onChange={handleModelChange}
+          className="nodrag nopan w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
+        >
+          <option value="Marble 0.1-mini">Marble 0.1 Mini (fast)</option>
+          <option value="Marble 0.1-plus">Marble 0.1 Plus</option>
+        </select>
+      </div>
+
+      {/* Seed (Optional) */}
+      <div>
+        <label className="text-[10px] text-neutral-500 block mb-1">Seed (optional)</label>
+        <input
+          type="number"
+          value={nodeData.seed ?? ""}
+          onChange={handleSeedChange}
+          className="nodrag nopan w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+          placeholder="Random"
+        />
+      </div>
+
+      {/* Azimuth Controls (shown when 2+ images connected) */}
+      {showAzimuthControls && (
+        <div>
+          <label className="text-[10px] text-neutral-500 block mb-1.5">
+            Image Azimuths ({connectedImageCount} images)
+          </label>
+          <div className="space-y-1">
+            {Array.from({ length: connectedImageCount }, (_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="text-[10px] text-neutral-600 w-10 shrink-0">
+                  Img {i + 1}
+                </span>
+                <select
+                  value={nodeData.imageAzimuths[i] ?? DEFAULT_AZIMUTHS[i % DEFAULT_AZIMUTHS.length]}
+                  onChange={(e) => handleAzimuthChange(i, Number(e.target.value))}
+                  className="nodrag nopan flex-1 bg-neutral-800 text-neutral-200 text-[11px] rounded px-1.5 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
+                >
+                  {AZIMUTH_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label} ({opt.value}°)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <BaseNode
       id={id}
       selected={selected}
       isExecuting={isRunning}
+      hasError={nodeData.status === "error"}
+      settingsExpanded={inlineParametersEnabled && isParamsExpanded}
+      settingsPanel={inlineParametersEnabled ? (
+        <InlineParameterPanel
+          expanded={isParamsExpanded}
+          onToggle={handleToggleParams}
+          nodeId={id}
+        >
+          {settingsControls}
+        </InlineParameterPanel>
+      ) : undefined}
     >
       {/* Input Handles */}
       <Handle
@@ -139,81 +230,6 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
       />
 
       <div className="p-3 space-y-3">
-        {/* Header */}
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-indigo-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <circle cx="12" cy="12" r="10" />
-            <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-          </svg>
-          <span className="text-xs font-medium text-neutral-300">Panorama</span>
-        </div>
-
-        {/* World Name */}
-        <div>
-          <label className="text-[10px] text-neutral-500 block mb-1">World Name</label>
-          <input
-            type="text"
-            value={nodeData.worldName}
-            onChange={handleWorldNameChange}
-            className="w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
-            placeholder="My World"
-          />
-        </div>
-
-        {/* Model Selection */}
-        <div>
-          <label className="text-[10px] text-neutral-500 block mb-1">Model</label>
-          <select
-            value={nodeData.model}
-            onChange={handleModelChange}
-            className="w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
-          >
-            <option value="Marble 0.1-mini">Marble 0.1 Mini (fast)</option>
-            <option value="Marble 0.1-plus">Marble 0.1 Plus</option>
-          </select>
-        </div>
-
-        {/* Seed (Optional) */}
-        <div>
-          <label className="text-[10px] text-neutral-500 block mb-1">Seed (optional)</label>
-          <input
-            type="number"
-            value={nodeData.seed ?? ""}
-            onChange={handleSeedChange}
-            className="w-full bg-neutral-800 text-neutral-200 text-xs rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
-            placeholder="Random"
-          />
-        </div>
-
-        {/* Azimuth Controls (shown when 2+ images connected) */}
-        {showAzimuthControls && (
-          <div>
-            <label className="text-[10px] text-neutral-500 block mb-1.5">
-              Image Azimuths ({connectedImageCount} images)
-            </label>
-            <div className="space-y-1">
-              {Array.from({ length: connectedImageCount }, (_, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <span className="text-[10px] text-neutral-600 w-10 shrink-0">
-                    Img {i + 1}
-                  </span>
-                  <select
-                    value={nodeData.imageAzimuths[i] ?? DEFAULT_AZIMUTHS[i % DEFAULT_AZIMUTHS.length]}
-                    onChange={(e) => handleAzimuthChange(i, Number(e.target.value))}
-                    className="flex-1 bg-neutral-800 text-neutral-200 text-[11px] rounded px-1.5 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
-                  >
-                    {AZIMUTH_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label} ({opt.value}°)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* Status / Preview Area */}
         <div className="bg-neutral-900 rounded-lg overflow-hidden min-h-[80px] flex items-center justify-center">
           {nodeData.status === "idle" && (

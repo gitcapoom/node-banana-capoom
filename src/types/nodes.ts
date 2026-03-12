@@ -266,6 +266,7 @@ export interface WorldLabsPanoNodeData extends BaseNodeData {
   caption: string | null;
   /** Per-image azimuth angles for multi-image generation. Maps connection index → degrees. */
   imageAzimuths: Record<number, number>;
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
 }
 
 /**
@@ -291,6 +292,7 @@ export interface WorldLabsWorldNodeData extends BaseNodeData {
   marbleViewerUrl: string | null;
   caption: string | null;
   viewerWindowOpen: boolean;
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
 }
 
 /**
@@ -308,6 +310,7 @@ export interface AppleSharpNodeData extends BaseNodeData {
   status: NodeStatus;
   error: string | null;
   progress: string | null;
+  parametersExpanded?: boolean; // Collapse state for inline parameter display
 }
 
 /**

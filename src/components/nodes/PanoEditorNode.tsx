@@ -3,7 +3,6 @@
 import React, { useCallback } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
-import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { PanoEditorNodeData } from "@/types";
 
@@ -22,7 +21,6 @@ type PanoEditorNodeType = Node<PanoEditorNodeData, "panoEditor">;
  */
 export function PanoEditorNode({ id, data, selected }: NodeProps<PanoEditorNodeType>) {
   const nodeData = data;
-  const commentNavigation = useCommentNavigation(id);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
 
@@ -87,14 +85,8 @@ export function PanoEditorNode({ id, data, selected }: NodeProps<PanoEditorNodeT
       />
 
       <div className="p-3 space-y-3">
-        {/* Header */}
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-orange-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="12" cy="12" r="3" />
-            <path d="M3 12h6M15 12h6M12 3v6M12 15v6" />
-          </svg>
-          <span className="text-xs font-medium text-neutral-300">Pano Editor</span>
+        {/* Status badge */}
+        <div className="flex items-center">
           <span className={`text-[9px] ml-auto ${statusColor}`}>
             {nodeData.status === "loading" && (
               <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse inline-block mr-1" />
