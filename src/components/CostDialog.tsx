@@ -73,6 +73,9 @@ function getModelUrl(provider: ProviderType, modelId: string): string | null {
     // modelId format: "fal-ai/flux/dev" or similar
     return `https://fal.ai/models/${modelId}`;
   }
+  if (provider === "kie") {
+    return `https://docs.kie.ai/`;
+  }
   if (provider === "wavespeed") {
     // modelId format: "wavespeed-ai/model-name"
     return `https://wavespeed.ai`;

@@ -1,4 +1,4 @@
-import { ModelType, Resolution, NanoBananaNodeData, GenerateVideoNodeData, SplitGridNodeData, WorkflowNode, ProviderType } from "@/types";
+import { ModelType, Resolution, NanoBananaNodeData, GenerateVideoNodeData, Generate3DNodeData, GenerateAudioNodeData, SplitGridNodeData, WorkflowNode, ProviderType } from "@/types";
 
 // Pricing in USD per image (Gemini API)
 export const PRICING = {
@@ -222,6 +222,38 @@ export function calculatePredictedCost(
         const unit = pricing?.unit ?? "image";
 
         addToBreakdown("gemini", model, modelName, unit, unitCost, data.targetCount);
+      }
+    }
+
+    // Handle generate3d nodes
+    if (node.type === "generate3d") {
+      const data = node.data as Generate3DNodeData;
+      if (data.selectedModel) {
+        const provider = data.selectedModel.provider;
+        const modelId = data.selectedModel.modelId;
+        const modelName = data.selectedModel.displayName;
+
+        const pricing = getPricing(provider, modelId);
+        const unitCost = pricing?.unitCost ?? null;
+        const unit = pricing?.unit ?? "model";
+
+        addToBreakdown(provider, modelId, modelName, unit, unitCost);
+      }
+    }
+
+    // Handle generateAudio nodes
+    if (node.type === "generateAudio") {
+      const data = node.data as GenerateAudioNodeData;
+      if (data.selectedModel) {
+        const provider = data.selectedModel.provider;
+        const modelId = data.selectedModel.modelId;
+        const modelName = data.selectedModel.displayName;
+
+        const pricing = getPricing(provider, modelId);
+        const unitCost = pricing?.unitCost ?? null;
+        const unit = pricing?.unit ?? "audio";
+
+        addToBreakdown(provider, modelId, modelName, unit, unitCost);
       }
     }
   });
