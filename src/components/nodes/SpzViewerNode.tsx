@@ -150,7 +150,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
 
     const params = new URLSearchParams({
       url: nodeData.spzUrl,
-      name: nodeData.filename || "SPZ Viewer",
+      name: nodeData.filename || "Gaussian Splat Viewer",
       worldId: id, // Use node ID for postMessage routing
     });
 
@@ -273,7 +273,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
             <circle cx="12" cy="12" r="10" />
             <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
           </svg>
-          <span className="text-xs font-medium text-neutral-300">SPZ Viewer</span>
+          <span className="text-xs font-medium text-neutral-300">Gaussian Splat Viewer</span>
           {nodeData.viewerOpen && (
             <span className="text-[9px] text-emerald-400 ml-auto flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />

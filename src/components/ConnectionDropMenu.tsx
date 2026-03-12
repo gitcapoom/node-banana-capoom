@@ -318,7 +318,7 @@ const IMAGE_SOURCE_OPTIONS: MenuOption[] = [
   },
   {
     type: "spzViewer",
-    label: "SPZ Viewer",
+    label: "Gaussian Splat Viewer",
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <circle cx="12" cy="12" r="10" />
@@ -733,7 +733,7 @@ const THREE_D_TARGET_OPTIONS: MenuOption[] = [
   },
   {
     type: "spzViewer",
-    label: "SPZ Viewer",
+    label: "Gaussian Splat Viewer",
     icon: (
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <circle cx="12" cy="12" r="10" />

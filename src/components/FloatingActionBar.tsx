@@ -16,7 +16,7 @@ const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: str
       { type: "videoInput", label: "Video Input" },
       { type: "audioInput", label: "Audio Input" },
       { type: "glbViewer", label: "3D Viewer" },
-      { type: "spzViewer", label: "SPZ Viewer" },
+      { type: "spzViewer", label: "Gaussian Splat Viewer" },
       { type: "panoViewer", label: "Pano Viewer" },
     ],
   },

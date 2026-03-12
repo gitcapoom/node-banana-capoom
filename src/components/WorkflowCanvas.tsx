@@ -412,7 +412,7 @@ export function WorkflowCanvas() {
     conditionalSwitch: 'Conditional Switch',
     worldLabsPano: 'Panorama Generator',
     worldLabsWorld: 'World Generator',
-    spzViewer: 'SPZ Viewer',
+    spzViewer: 'Gaussian Splat Viewer',
     panoViewer: 'Pano Viewer',
     panoCrop: 'Pano Crop',
     panoEditor: 'Pano Editor',
