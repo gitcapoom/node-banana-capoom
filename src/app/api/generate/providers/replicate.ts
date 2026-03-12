@@ -165,11 +165,14 @@ export async function generateWithReplicate(
   const prediction = await createResponse.json();
   console.log(`[API:${requestId}] Prediction created: ${prediction.id}`);
 
-  // Poll for completion — video models get a longer timeout
+  // Poll for completion — video models get a longer processing timeout.
+  // Queue wait time is NOT counted against the timeout so cold-start models
+  // (e.g. kfarr/sharp-ml) can sit in queue indefinitely without timing out.
+  // The server.js 10-minute request timeout acts as the outer safety net.
   const isVideoModel = input.model.capabilities.some(c => c.includes("video"));
-  const maxWaitTime = isVideoModel ? 10 * 60 * 1000 : 5 * 60 * 1000;
+  const maxProcessingTime = isVideoModel ? 10 * 60 * 1000 : 5 * 60 * 1000;
   const pollInterval = 1000; // 1 second
-  const startTime = Date.now();
+  let processingStartTime: number | null = null;
 
   let currentPrediction = prediction;
   let lastStatus = "";
@@ -179,10 +182,15 @@ export async function generateWithReplicate(
     currentPrediction.status !== "failed" &&
     currentPrediction.status !== "canceled"
   ) {
-    if (Date.now() - startTime > maxWaitTime) {
+    // Start the timeout clock only once processing begins (not while queued)
+    if (processingStartTime === null && currentPrediction.status === "processing") {
+      processingStartTime = Date.now();
+    }
+
+    if (processingStartTime !== null && Date.now() - processingStartTime > maxProcessingTime) {
       return {
         success: false,
-        error: `${input.model.name}: Generation timed out after ${maxWaitTime / 60000} minutes.`,
+        error: `${input.model.name}: Generation timed out after ${maxProcessingTime / 60000} minutes of processing.`,
       };
     }
 
