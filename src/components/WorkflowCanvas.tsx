@@ -414,6 +414,15 @@ export function WorkflowCanvas() {
     router: 'Router',
     switch: 'Switch',
     conditionalSwitch: 'Conditional Switch',
+    worldLabsPano: 'Panorama Generator',
+    worldLabsWorld: 'World Generator',
+    appleSharp: 'SHARP (3D)',
+    spzViewer: 'SPZ Viewer',
+    panoViewer: 'Pano Viewer',
+    panoCrop: 'Pano Crop',
+    panoEditor: 'Pano Editor',
+    maskPainter: 'Mask Painter',
+    videoInput: 'Video Input',
     glbViewer: '3D Viewer',
   };
 
