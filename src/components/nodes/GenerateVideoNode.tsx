@@ -628,7 +628,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
               controls
               loop
               muted
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
               playsInline
             />
             {/* Loading overlay for generation */}

@@ -111,7 +111,7 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
           <img
             src={nodeData.image}
             alt={nodeData.filename || "Uploaded image"}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-contain"
           />
           <button
             onClick={handleRemove}

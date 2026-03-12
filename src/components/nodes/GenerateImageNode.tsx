@@ -686,7 +686,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
             <img
               src={nodeData.outputImage}
               alt="Generated"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
             />
             {/* Loading overlay for generation */}
             {nodeData.status === "loading" && (

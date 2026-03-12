@@ -157,14 +157,14 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
                     loop
                     muted
                     playsInline
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                     onClick={(e) => e.stopPropagation()}
                   />
                 ) : (
                   <img
                     src={contentSrc}
                     alt="Output"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                   />
                 )}
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center pointer-events-none">
