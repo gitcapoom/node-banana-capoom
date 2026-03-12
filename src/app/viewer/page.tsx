@@ -364,7 +364,7 @@ export function captureDepthImage(
 export default function StandaloneViewerPage() {
   // Parse URL params on client
   const [spzUrl, setSpzUrl] = useState<string | null>(null);
-  const [worldName, setWorldName] = useState("SPZ Viewer");
+  const [worldName, setWorldName] = useState("Gaussian Splat Viewer");
   const [worldId, setWorldId] = useState<string | null>(null);
 
   // State
@@ -389,6 +389,11 @@ export default function StandaloneViewerPage() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ frame: number; total: number } | null>(null);
+
+  // Transform state (applied to splat mesh)
+  const [showTransform, setShowTransform] = useState(false);
+  const defaultTransform = { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
+  const [transform, setTransform] = useState(defaultTransform);
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -786,6 +791,7 @@ export default function StandaloneViewerPage() {
     setLoading(true);
     setError(null);
     setSplatLoaded(false);
+    setTransform(defaultTransform);
 
     try {
       const { SplatMesh } = await import("@sparkjsdev/spark");
@@ -831,6 +837,7 @@ export default function StandaloneViewerPage() {
     setLoading(true);
     setError(null);
     setSplatLoaded(false);
+    setTransform(defaultTransform);
     setWorldName(file.name.replace(/\.spz$/i, ""));
 
     try {
@@ -886,6 +893,20 @@ export default function StandaloneViewerPage() {
     cameraRef.current.fov = vFov;
     cameraRef.current.updateProjectionMatrix();
   }, [vFov]);
+
+  // ─── Apply transform to splat mesh ─────────────────────────────
+
+  useEffect(() => {
+    const mesh = splatMeshRef.current as THREE.Object3D | null;
+    if (!mesh) return;
+    mesh.position.set(transform.position.x, transform.position.y, transform.position.z);
+    mesh.rotation.set(
+      THREE.MathUtils.degToRad(transform.rotation.x),
+      THREE.MathUtils.degToRad(transform.rotation.y),
+      THREE.MathUtils.degToRad(transform.rotation.z)
+    );
+    mesh.scale.set(transform.scale.x, transform.scale.y, transform.scale.z);
+  }, [transform]);
 
   // ─── Capture screenshot ────────────────────────────────────────
 
@@ -1427,7 +1448,7 @@ export default function StandaloneViewerPage() {
           </svg>
 
           <h1 className="text-neutral-200 text-lg font-medium mb-2">
-            SPZ Viewer
+            Gaussian Splat Viewer
           </h1>
           <p className="text-neutral-500 text-sm mb-6">
             Drag and drop a <code className="text-indigo-400">.spz</code> or{" "}
@@ -1640,8 +1661,81 @@ export default function StandaloneViewerPage() {
               </div>
             </div>
 
+            {/* Transform Panel */}
+            {showTransform && (
+              <div className="bg-black/70 backdrop-blur-md rounded-lg p-3 pointer-events-auto min-w-[340px]">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-medium text-neutral-300">Transform</span>
+                  <button
+                    onClick={() => setTransform(defaultTransform)}
+                    className="text-[9px] text-neutral-500 hover:text-neutral-300 transition-colors"
+                    title="Reset all transforms"
+                  >
+                    Reset All
+                  </button>
+                </div>
+                {(["position", "rotation", "scale"] as const).map((prop) => {
+                  const defaults = { position: 0, rotation: 0, scale: 1 };
+                  const step = prop === "rotation" ? 1 : 0.1;
+                  return (
+                    <div key={prop} className="flex items-center gap-2 mb-1.5 last:mb-0">
+                      <label className="text-[9px] text-neutral-500 w-12 shrink-0 capitalize">{prop}</label>
+                      {(["x", "y", "z"] as const).map((axis) => (
+                        <div key={axis} className="flex items-center gap-0.5 flex-1">
+                          <span className={`text-[9px] font-medium ${axis === "x" ? "text-red-400" : axis === "y" ? "text-green-400" : "text-blue-400"}`}>{axis.toUpperCase()}</span>
+                          <input
+                            type="number"
+                            step={step}
+                            value={transform[prop][axis]}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setTransform((prev) => ({
+                                ...prev,
+                                [prop]: { ...prev[prop], [axis]: val },
+                              }));
+                            }}
+                            className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-1.5 py-0.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => {
+                          const d = defaults[prop];
+                          setTransform((prev) => ({
+                            ...prev,
+                            [prop]: { x: d, y: d, z: d },
+                          }));
+                        }}
+                        className="text-neutral-600 hover:text-neutral-300 transition-colors shrink-0"
+                        title={`Reset ${prop}`}
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Right side buttons */}
             <div className="flex items-center gap-2 pointer-events-auto">
+              {/* Transform toggle */}
+              <button
+                onClick={() => setShowTransform((v) => !v)}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
+                  showTransform
+                    ? "bg-indigo-600 text-white"
+                    : "bg-neutral-800/80 text-neutral-400 hover:text-white"
+                }`}
+                title="Toggle transform controls"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 21L3 9m18 12L17 9M12 3v18M3 9h18" />
+                </svg>
+              </button>
+
               {/* Timeline toggle */}
               <button
                 onClick={() => setIsTimelineVisible((v) => !v)}
