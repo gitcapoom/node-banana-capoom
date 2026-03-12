@@ -24,7 +24,6 @@ import {
   PromptConstructorNodeData,
   LLMGenerateNodeData,
   GLBViewerNodeData,
-  AppleSharpNodeData,
   SpzViewerNodeData,
   WorldLabsPanoNodeData,
   WorldLabsWorldNodeData,
@@ -86,8 +85,6 @@ function getSourceOutput(
   } else if (sourceNode.type === "generate3d") {
     const g3dData = sourceNode.data as Generate3DNodeData;
     return { type: "3d", value: g3dData.output3dUrl };
-  } else if (sourceNode.type === "appleSharp") {
-    return { type: "3d", value: (sourceNode.data as AppleSharpNodeData).output3dUrl };
   } else if (sourceNode.type === "generateVideo") {
     return { type: "video", value: (sourceNode.data as GenerateVideoNodeData).outputVideo };
   } else if (sourceNode.type === "generateAudio") {

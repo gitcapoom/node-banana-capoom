@@ -47,7 +47,6 @@ import {
   MaskPainterNode,
   VideoTrimNode,
   VideoFrameGrabNode,
-  AppleSharpNode,
   VideoInputNode,
 } from "./nodes";
 
@@ -90,7 +89,6 @@ const nodeTypes: NodeTypes = {
   videoTrim: VideoTrimNode,
   videoFrameGrab: VideoFrameGrabNode,
   glbViewer: GLBViewerNode,
-  appleSharp: AppleSharpNode,
   spzViewer: SpzViewerNode,
   worldLabsPano: WorldLabsPanoNode,
   worldLabsWorld: WorldLabsWorldNode,
@@ -172,8 +170,6 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["video"], outputs: ["image"] };
     case "glbViewer":
       return { inputs: ["3d"], outputs: ["image"] };
-    case "appleSharp":
-      return { inputs: ["image"], outputs: ["3d"] };
     case "spzViewer":
       return { inputs: ["3d"], outputs: ["image"] };
     case "worldLabsPano":
@@ -1201,7 +1197,6 @@ export function WorkflowCanvas() {
             videoTrim: { width: 360, height: 360 },
             videoFrameGrab: { width: 320, height: 320 },
             glbViewer: { width: 360, height: 380 },
-            appleSharp: { width: 300, height: 320 },
             spzViewer: { width: 300, height: 280 },
             worldLabsPano: { width: 320, height: 380 },
             worldLabsWorld: { width: 320, height: 360 },
@@ -1849,8 +1844,6 @@ export function WorkflowCanvas() {
                 return "#38bdf8"; // sky-400 (image from video)
               case "glbViewer":
                 return "#0ea5e9"; // sky-500 (3D viewport)
-              case "appleSharp":
-                return "#f97316"; // orange-500 (Apple SHARP 3D)
               case "spzViewer":
                 return "#34d399"; // emerald-400 (SPZ/PLY viewer)
               case "worldLabsPano":

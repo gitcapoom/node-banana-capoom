@@ -46,8 +46,6 @@ export {
   executeVideoFrameGrab,
 } from "./videoProcessingExecutors";
 
-export { executeAppleSharp } from "./appleSharpExecutor";
-
 export { executeWorldLabsPano } from "./worldLabsPanoExecutor";
 export { executeWorldLabsWorld } from "./worldLabsWorldExecutor";
 

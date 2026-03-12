@@ -33,7 +33,6 @@ const VALID_NODE_TYPES: NodeType[] = [
   "videoTrim",
   "videoFrameGrab",
   "glbViewer",
-  "appleSharp",
   "spzViewer",
   "worldLabsPano",
   "worldLabsWorld",
@@ -68,7 +67,6 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   videoTrim: { width: 360, height: 360 },
   videoFrameGrab: { width: 320, height: 320 },
   glbViewer: { width: 360, height: 380 },
-  appleSharp: { width: 300, height: 320 },
   spzViewer: { width: 300, height: 280 },
   worldLabsPano: { width: 320, height: 380 },
   worldLabsWorld: { width: 320, height: 360 },
@@ -421,19 +419,6 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         glbUrl: null,
         filename: null,
         capturedImage: null,
-      };
-    case "appleSharp":
-      return {
-        serverUrl: "http://capoompc21:8080",
-        renderVideo: false,
-        inputImage: null,
-        output3dUrl: null,
-        outputVideoUrl: null,
-        savedFilename: null,
-        savedFilePath: null,
-        status: "idle",
-        error: null,
-        progress: null,
       };
     case "spzViewer":
       return {
