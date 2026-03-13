@@ -207,7 +207,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         id={id}
         selected={selected}
         isExecuting={isRunning}
-        contentClassName="flex-1 min-h-0 relative"
+        contentClassName="flex-1 min-h-0 relative flex flex-col"
         className="min-w-[200px]"
         aspectFitMedia={isAudio ? null : contentSrc}
       >
@@ -226,7 +226,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
           style={{ top: "60%", background: "rgb(167, 139, 250)", zIndex: 10 }}
         />
 
-        <div className="relative w-full h-full overflow-hidden rounded-lg">
+        <div className="relative w-full flex-1 min-h-0 overflow-hidden rounded-lg">
         {contentSrc ? (
           <>
             {isAudio ? (
@@ -289,7 +289,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
 
         {/* Output Now button */}
         {contentSrc && (
-          <div className="px-2 py-1.5">
+          <div className="px-2 py-1.5 shrink-0">
             <button
               onClick={handleOutputNow}
               disabled={saveStatus === "saving"}
