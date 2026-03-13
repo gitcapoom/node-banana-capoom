@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 import { WorkflowFile } from "@/store/workflowStore";
 import { QuickstartView } from "@/types/quickstart";
 import { QuickstartInitialView } from "./QuickstartInitialView";
 import { TemplateExplorerView } from "./TemplateExplorerView";
 import { PromptWorkflowView } from "./PromptWorkflowView";
+import { FileOpenDialog } from "../FileOpenDialog";
 
 interface WelcomeModalProps {
-  onWorkflowGenerated: (workflow: WorkflowFile) => void;
+  onWorkflowGenerated: (workflow: WorkflowFile, directoryPath?: string, fileName?: string) => void;
   onClose: () => void;
   onNewProject: () => void;
 }
@@ -19,7 +20,7 @@ export function WelcomeModal({
   onNewProject,
 }: WelcomeModalProps) {
   const [currentView, setCurrentView] = useState<QuickstartView>("initial");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showFileOpen, setShowFileOpen] = useState(false);
 
   const handleNewProject = useCallback(() => {
     onNewProject();
@@ -34,36 +35,37 @@ export function WelcomeModal({
   }, []);
 
   const handleSelectLoad = useCallback(() => {
-    fileInputRef.current?.click();
+    setShowFileOpen(true);
   }, []);
 
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+  const handleFileOpenSelected = useCallback(async (filePath: string) => {
+    setShowFileOpen(false);
 
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        try {
-          const workflow = JSON.parse(
-            event.target?.result as string
-          ) as WorkflowFile;
-          if (workflow.version && workflow.nodes && workflow.edges) {
-            onWorkflowGenerated(workflow);
-          } else {
-            alert("Invalid workflow file format");
-          }
-        } catch {
-          alert("Failed to parse workflow file");
-        }
-      };
-      reader.readAsText(file);
+    try {
+      // Read the workflow file server-side (gives us the full path + directory)
+      const response = await fetch("/api/workflow", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath }),
+      });
+      const result = await response.json();
 
-      // Reset input so same file can be loaded again
-      e.target.value = "";
-    },
-    [onWorkflowGenerated]
-  );
+      if (!result.success) {
+        alert(`Failed to open: ${result.error}`);
+        return;
+      }
+
+      const workflow = result.workflow as WorkflowFile;
+      if (!workflow.version || !workflow.nodes || !workflow.edges) {
+        alert("Invalid workflow file format");
+        return;
+      }
+
+      onWorkflowGenerated(workflow, result.directoryPath, result.fileName);
+    } catch (error) {
+      alert(`Failed to open workflow: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
+  }, [onWorkflowGenerated]);
 
   const handleBack = useCallback(() => {
     setCurrentView("initial");
@@ -81,41 +83,42 @@ export function WelcomeModal({
   const dialogHeight = currentView === "templates" ? "max-h-[85vh]" : "max-h-[80vh]";
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      onWheelCapture={(e) => e.stopPropagation()}
-      onClick={onClose}
-    >
-      <div className={`w-full ${dialogWidth} mx-4 bg-neutral-800 rounded-xl border border-neutral-700 shadow-2xl overflow-clip ${dialogHeight} flex flex-col`} onClick={(e) => e.stopPropagation()}>
-        {currentView === "initial" && (
-          <QuickstartInitialView
-            onNewProject={handleNewProject}
-            onSelectTemplates={handleSelectTemplates}
-            onSelectVibe={handleSelectVibe}
-            onSelectLoad={handleSelectLoad}
-          />
-        )}
-        {currentView === "templates" && (
-          <TemplateExplorerView
-            onBack={handleBack}
-            onWorkflowSelected={handleWorkflowSelected}
-          />
-        )}
-        {currentView === "vibe" && (
-          <PromptWorkflowView
-            onBack={handleBack}
-            onWorkflowGenerated={handleWorkflowSelected}
-          />
-        )}
-        {/* Hidden file input for loading workflows */}
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          accept=".json"
-          className="hidden"
-        />
+    <>
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+        onWheelCapture={(e) => e.stopPropagation()}
+        onClick={onClose}
+      >
+        <div className={`w-full ${dialogWidth} mx-4 bg-neutral-800 rounded-xl border border-neutral-700 shadow-2xl overflow-clip ${dialogHeight} flex flex-col`} onClick={(e) => e.stopPropagation()}>
+          {currentView === "initial" && (
+            <QuickstartInitialView
+              onNewProject={handleNewProject}
+              onSelectTemplates={handleSelectTemplates}
+              onSelectVibe={handleSelectVibe}
+              onSelectLoad={handleSelectLoad}
+            />
+          )}
+          {currentView === "templates" && (
+            <TemplateExplorerView
+              onBack={handleBack}
+              onWorkflowSelected={handleWorkflowSelected}
+            />
+          )}
+          {currentView === "vibe" && (
+            <PromptWorkflowView
+              onBack={handleBack}
+              onWorkflowGenerated={handleWorkflowSelected}
+            />
+          )}
+        </div>
       </div>
-    </div>
+
+      {showFileOpen && (
+        <FileOpenDialog
+          onFileSelected={handleFileOpenSelected}
+          onCancel={() => setShowFileOpen(false)}
+        />
+      )}
+    </>
   );
 }

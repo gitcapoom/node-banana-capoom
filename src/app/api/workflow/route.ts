@@ -194,3 +194,83 @@ export async function GET(request: NextRequest) {
     });
   }
 }
+
+// PUT: Load workflow from a file path (server-side, returns JSON + directory)
+export async function PUT(request: NextRequest) {
+  let filePath: string | undefined;
+  try {
+    const body = await request.json();
+    filePath = body.filePath;
+
+    logger.info('file.load', 'Workflow open-by-path request received', {
+      filePath,
+    });
+
+    if (!filePath) {
+      return NextResponse.json(
+        { success: false, error: "filePath is required" },
+        { status: 400 }
+      );
+    }
+
+    // Validate the directory path to prevent traversal attacks
+    const dirPath = path.dirname(filePath);
+    const pathValidation = validateWorkflowPath(dirPath);
+    if (!pathValidation.valid) {
+      logger.warn('file.error', 'Workflow open-by-path failed: invalid path', {
+        filePath,
+        dirPath,
+        error: pathValidation.error,
+      });
+      return NextResponse.json(
+        { success: false, error: pathValidation.error },
+        { status: 400 }
+      );
+    }
+
+    // Ensure file is a JSON file
+    if (!filePath.toLowerCase().endsWith('.json')) {
+      return NextResponse.json(
+        { success: false, error: "File must be a .json file" },
+        { status: 400 }
+      );
+    }
+
+    // Read and parse the workflow file
+    const content = await fs.readFile(filePath, 'utf-8');
+    const workflow = JSON.parse(content);
+
+    // Basic validation that it's a workflow file
+    if (!workflow.version || !workflow.nodes || !workflow.edges) {
+      return NextResponse.json(
+        { success: false, error: "File is not a valid workflow (missing version, nodes, or edges)" },
+        { status: 400 }
+      );
+    }
+
+    logger.info('file.load', 'Workflow opened by path successfully', {
+      filePath,
+      dirPath,
+      nodeCount: workflow.nodes?.length,
+      edgeCount: workflow.edges?.length,
+    });
+
+    return NextResponse.json({
+      success: true,
+      workflow,
+      directoryPath: dirPath,
+      fileName: path.basename(filePath, '.json'),
+    });
+  } catch (error) {
+    logger.error('file.error', 'Failed to open workflow by path', {
+      filePath,
+    }, error instanceof Error ? error : undefined);
+    return NextResponse.json(
+      {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to read workflow file",
+      },
+      { status: 500 }
+    );
+  }
+}

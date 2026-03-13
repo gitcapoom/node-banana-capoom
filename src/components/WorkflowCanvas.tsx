@@ -18,7 +18,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { useWorkflowStore, WorkflowFile } from "@/store/workflowStore";
+import { useWorkflowStore, WorkflowFile, generateWorkflowId } from "@/store/workflowStore";
 import { useShallow } from "zustand/shallow";
 import { useToast } from "@/components/Toast";
 import dynamic from "next/dynamic";
@@ -2032,8 +2032,13 @@ export function WorkflowCanvas() {
       {/* Welcome Modal */}
       {showQuickstart && (
         <WelcomeModal
-          onWorkflowGenerated={async (workflow) => {
-            await loadWorkflow(workflow);
+          onWorkflowGenerated={async (workflow, directoryPath, fileName) => {
+            await loadWorkflow(workflow, directoryPath);
+            if (directoryPath) {
+              const id = workflow.id || generateWorkflowId();
+              const name = workflow.name || fileName || "Untitled";
+              setWorkflowMetadata(id, name, directoryPath);
+            }
             setShowQuickstart(false);
           }}
           onClose={() => setShowQuickstart(false)}

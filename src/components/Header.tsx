@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useMemo, useCallback } from "react";
-import { useWorkflowStore, WorkflowFile } from "@/store/workflowStore";
+import { useState, useMemo, useCallback } from "react";
+import { useWorkflowStore, WorkflowFile, generateWorkflowId } from "@/store/workflowStore";
 import { useShallow } from "zustand/shallow";
 import { ProjectSetupModal } from "./ProjectSetupModal";
 import { CostIndicator } from "./CostIndicator";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
+import { FileOpenDialog } from "./FileOpenDialog";
 
 function CommentsNavigationIcon() {
   // Subscribe to nodes so we re-render when comments change
@@ -93,7 +94,7 @@ export function Header() {
 
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projectModalMode, setProjectModalMode] = useState<"new" | "settings">("new");
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showFileOpenDialog, setShowFileOpenDialog] = useState(false);
 
   const isProjectConfigured = !!workflowName;
   const canSave = !!(workflowId && workflowName && saveDirectoryPath);
@@ -116,30 +117,42 @@ export function Header() {
   };
 
   const handleOpenFile = () => {
-    fileInputRef.current?.click();
+    setShowFileOpenDialog(true);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFileOpenSelected = async (filePath: string) => {
+    setShowFileOpenDialog(false);
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const workflow = JSON.parse(event.target?.result as string) as WorkflowFile;
-        if (workflow.version && workflow.nodes && workflow.edges) {
-          await loadWorkflow(workflow);
-        } else {
-          alert("Invalid workflow file format");
-        }
-      } catch {
-        alert("Failed to parse workflow file");
+    try {
+      // Read the workflow file server-side (gives us the full path + directory)
+      const response = await fetch("/api/workflow", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath }),
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        alert(`Failed to open: ${result.error}`);
+        return;
       }
-    };
-    reader.readAsText(file);
 
-    // Reset input so same file can be loaded again
-    e.target.value = "";
+      const workflow = result.workflow as WorkflowFile;
+      if (!workflow.version || !workflow.nodes || !workflow.edges) {
+        alert("Invalid workflow file format");
+        return;
+      }
+
+      // Load workflow with directory path — images will be auto-hydrated
+      await loadWorkflow(workflow, result.directoryPath);
+
+      // Auto-configure project: set directory, name, and generate ID if needed
+      const id = workflow.id || generateWorkflowId();
+      const name = workflow.name || result.fileName;
+      setWorkflowMetadata(id, name, result.directoryPath);
+    } catch (error) {
+      alert(`Failed to open workflow: ${error instanceof Error ? error.message : "Unknown error"}`);
+    }
   };
 
   const handleProjectSave = async (id: string, name: string, path: string) => {
@@ -225,13 +238,6 @@ export function Header() {
         onClose={() => setShowProjectModal(false)}
         onSave={handleProjectSave}
         mode={projectModalMode}
-      />
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".json"
-        onChange={handleFileChange}
-        className="hidden"
       />
       <header className="h-11 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 shrink-0">
         <div className="flex items-center gap-2">
@@ -442,6 +448,13 @@ export function Header() {
         isOpen={shortcutsDialogOpen}
         onClose={() => setShortcutsDialogOpen(false)}
       />
+
+      {showFileOpenDialog && (
+        <FileOpenDialog
+          onFileSelected={handleFileOpenSelected}
+          onCancel={() => setShowFileOpenDialog(false)}
+        />
+      )}
     </>
   );
 }
