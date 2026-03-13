@@ -10,9 +10,10 @@ export interface DirectoryEntry {
   size?: number;
 }
 
-// GET: List contents of a directory (folders + .json files only)
+// GET: List contents of a directory (folders + .json files by default, or all files)
 export async function GET(request: NextRequest) {
   const dirPath = request.nextUrl.searchParams.get("path");
+  const showAllFiles = request.nextUrl.searchParams.get("showAllFiles") === "true";
 
   // If no path provided, return the user's home directory as a starting point
   if (!dirPath) {
@@ -20,7 +21,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       path: homedir,
-      entries: await listDirectory(homedir),
+      entries: await listDirectory(homedir, showAllFiles),
     });
   }
 
@@ -42,7 +43,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const entries = await listDirectory(dirPath);
+    const entries = await listDirectory(dirPath, showAllFiles);
 
     return NextResponse.json({
       success: true,
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function listDirectory(dirPath: string): Promise<DirectoryEntry[]> {
+async function listDirectory(dirPath: string, showAllFiles = false): Promise<DirectoryEntry[]> {
   const rawEntries = await fs.readdir(dirPath, { withFileTypes: true });
   const entries: DirectoryEntry[] = [];
 
@@ -82,7 +83,7 @@ async function listDirectory(dirPath: string): Promise<DirectoryEntry[]> {
 
     if (entry.isDirectory()) {
       entries.push({ name: entry.name, type: "directory" });
-    } else if (entry.name.toLowerCase().endsWith(".json")) {
+    } else if (showAllFiles || entry.name.toLowerCase().endsWith(".json")) {
       try {
         const filePath = path.join(dirPath, entry.name);
         const stat = await fs.stat(filePath);

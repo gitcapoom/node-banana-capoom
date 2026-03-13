@@ -205,6 +205,7 @@ export interface WorkflowFile {
   edges: WorkflowEdge[];
   edgeStyle: EdgeStyle;
   groups?: Record<string, NodeGroup>;  // Optional for backward compatibility
+  embedded?: boolean;  // true = sidecar workflow with base64-embedded images (import, don't replace)
 }
 
 // Clipboard data structure for copy/paste
@@ -277,6 +278,7 @@ interface WorkflowStore {
   // Save/Load
   saveWorkflow: (name?: string) => void;
   loadWorkflow: (workflow: WorkflowFile, workflowPath?: string, options?: { preserveSnapshot?: boolean }) => Promise<void>;
+  importWorkflow: (workflow: WorkflowFile) => void;
   clearWorkflow: () => void;
 
   // Helpers
@@ -1936,6 +1938,60 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     }
 
     // Recompute dimming after loading workflow
+    get().recomputeDimmedNodes();
+  },
+
+  importWorkflow: (workflow: WorkflowFile) => {
+    const { nodes: existingNodes, edges: existingEdges } = get();
+
+    // 1. Build ID remap: increment counter for each imported node to avoid collisions
+    const idMap = new Map<string, string>();
+    for (const node of workflow.nodes) {
+      const newId = `${node.type}-${++nodeIdCounter}`;
+      idMap.set(node.id, newId);
+    }
+
+    // 2. Calculate offset: place imported nodes to the right of existing content
+    let offsetX = 200;
+    let offsetY = 0;
+    if (existingNodes.length > 0) {
+      const maxX = Math.max(...existingNodes.map((n) => n.position.x + 300));
+      const minY = Math.min(...existingNodes.map((n) => n.position.y));
+      offsetX = maxX + 100; // 100px gap to the right
+      // Calculate the min Y of imported nodes to align vertically
+      const importMinY = Math.min(...workflow.nodes.map((n) => n.position.y));
+      offsetY = minY - importMinY;
+    }
+
+    // 3. Remap node IDs and offset positions
+    const newNodes: WorkflowNode[] = workflow.nodes.map((node) => ({
+      ...structuredClone(node),
+      id: idMap.get(node.id) || node.id,
+      position: {
+        x: node.position.x + offsetX,
+        y: node.position.y + offsetY,
+      },
+      selected: false,
+    }));
+
+    // 4. Remap edge source/target IDs
+    const newEdges: WorkflowEdge[] = workflow.edges
+      .filter((e) => idMap.has(e.source) && idMap.has(e.target))
+      .map((edge) => ({
+        ...edge,
+        id: `e-${idMap.get(edge.source)}-${idMap.get(edge.target)}-${Date.now()}`,
+        source: idMap.get(edge.source) || edge.source,
+        target: idMap.get(edge.target) || edge.target,
+      }));
+
+    // 5. Merge into existing workflow
+    set({
+      nodes: [...existingNodes, ...newNodes],
+      edges: [...existingEdges, ...newEdges],
+      hasUnsavedChanges: true,
+    });
+
+    // Recompute dimming
     get().recomputeDimmedNodes();
   },
 

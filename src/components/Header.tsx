@@ -70,6 +70,7 @@ export function Header() {
     setWorkflowMetadata,
     saveToFile,
     loadWorkflow,
+    importWorkflow,
     previousWorkflowSnapshot,
     revertToSnapshot,
     shortcutsDialogOpen,
@@ -85,6 +86,7 @@ export function Header() {
     setWorkflowMetadata: state.setWorkflowMetadata,
     saveToFile: state.saveToFile,
     loadWorkflow: state.loadWorkflow,
+    importWorkflow: state.importWorkflow,
     previousWorkflowSnapshot: state.previousWorkflowSnapshot,
     revertToSnapshot: state.revertToSnapshot,
     shortcutsDialogOpen: state.shortcutsDialogOpen,
@@ -143,7 +145,13 @@ export function Header() {
         return;
       }
 
-      // Load workflow with directory path — images will be auto-hydrated
+      // Embedded sidecar workflows get imported into the current workflow
+      if (workflow.embedded) {
+        importWorkflow(workflow);
+        return;
+      }
+
+      // Regular workflows replace the current workflow
       await loadWorkflow(workflow, result.directoryPath);
 
       // Auto-configure project: set directory, name, and generate ID if needed

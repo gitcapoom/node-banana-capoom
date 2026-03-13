@@ -209,25 +209,6 @@ export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
       video: null,
       contentType: "audio",
     });
-
-    // Save to /outputs directory if we have a project path
-    if (saveDirectoryPath) {
-      const outputNodeData = node.data as OutputNodeData;
-      const outputsPath = `${saveDirectoryPath}/outputs`;
-
-      fetch("/api/save-generation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          directoryPath: outputsPath,
-          audio: audioContent,
-          customFilename: outputNodeData.outputFilename || undefined,
-          createDirectory: true,
-        }),
-      }).catch((err) => {
-        console.error("Failed to save output:", err);
-      });
-    }
     return;
   }
 
@@ -239,25 +220,6 @@ export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
       video: videoContent,
       contentType: "video",
     });
-
-    // Save to /outputs directory if we have a project path
-    if (saveDirectoryPath) {
-      const outputNodeData = node.data as OutputNodeData;
-      const outputsPath = `${saveDirectoryPath}/outputs`;
-
-      fetch("/api/save-generation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          directoryPath: outputsPath,
-          video: videoContent,
-          customFilename: outputNodeData.outputFilename || undefined,
-          createDirectory: true,
-        }),
-      }).catch((err) => {
-        console.error("Failed to save output:", err);
-      });
-    }
   } else if (images.length > 0) {
     const content = images[0];
     // Fallback pattern matching for edge cases (video data that ended up in images array)
@@ -278,26 +240,6 @@ export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
         image: content,
         video: null,
         contentType: "image",
-      });
-    }
-
-    // Save to /outputs directory if we have a project path
-    if (saveDirectoryPath) {
-      const outputNodeData = node.data as OutputNodeData;
-      const outputsPath = `${saveDirectoryPath}/outputs`;
-
-      fetch("/api/save-generation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          directoryPath: outputsPath,
-          image: isVideoContent ? undefined : content,
-          video: isVideoContent ? content : undefined,
-          customFilename: outputNodeData.outputFilename || undefined,
-          createDirectory: true,
-        }),
-      }).catch((err) => {
-        console.error("Failed to save output:", err);
       });
     }
   }

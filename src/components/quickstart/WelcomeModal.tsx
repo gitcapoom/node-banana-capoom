@@ -61,6 +61,7 @@ export function WelcomeModal({
         return;
       }
 
+      // Pass the workflow — the parent handler will detect embedded vs regular
       onWorkflowGenerated(workflow, result.directoryPath, result.fileName);
     } catch (error) {
       alert(`Failed to open workflow: ${error instanceof Error ? error.message : "Unknown error"}`);

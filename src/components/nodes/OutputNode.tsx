@@ -8,6 +8,8 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { OutputNodeData } from "@/types";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
 import { useVideoAutoplay } from "@/hooks/useVideoAutoplay";
+import { FileSaveDialog } from "../FileSaveDialog";
+import { extractUpstreamWorkflow } from "@/utils/upstreamExtractor";
 
 type OutputNodeType = Node<OutputNodeData, "output">;
 
@@ -20,7 +22,13 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     (state) => state.edges.filter((edge) => edge.target === id).length
   );
   const isRunning = useWorkflowStore((state) => state.isRunning);
+  const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
+  const nodes = useWorkflowStore((state) => state.nodes);
+  const edges = useWorkflowStore((state) => state.edges);
+  const edgeStyle = useWorkflowStore((state) => state.edgeStyle);
   const [showLightbox, setShowLightbox] = useState(false);
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const previousEdgeCountRef = useRef<number | null>(null);
   const videoAutoplayRef = useVideoAutoplay(id, selected);
 
@@ -69,6 +77,76 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     regenerateNode(id);
   }, [id, regenerateNode]);
 
+  // Handle "Output Now" button click
+  const handleOutputNow = useCallback(() => {
+    if (!saveDirectoryPath) {
+      alert("Please set a project directory first (File > Save As).");
+      return;
+    }
+    setShowSaveDialog(true);
+  }, [saveDirectoryPath]);
+
+  // Handle save from dialog
+  const handleSave = useCallback(async (directoryPath: string, filename: string) => {
+    setShowSaveDialog(false);
+    setSaveStatus("saving");
+
+    try {
+      // 1. Save the output file (image/video/audio)
+      const savePayload: Record<string, unknown> = {
+        directoryPath,
+        customFilename: filename,
+        createDirectory: true,
+      };
+
+      if (isAudio && contentSrc) {
+        savePayload.audio = contentSrc;
+      } else if (isVideo && contentSrc) {
+        savePayload.video = contentSrc;
+      } else if (contentSrc) {
+        savePayload.image = contentSrc;
+      }
+
+      const saveResponse = await fetch("/api/save-generation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(savePayload),
+      });
+
+      const saveResult = await saveResponse.json();
+      if (!saveResult.success) {
+        throw new Error(saveResult.error || "Failed to save output file");
+      }
+
+      // 2. Save the sidecar JSON (upstream workflow with embedded images)
+      const sidecarWorkflow = extractUpstreamWorkflow(
+        id,
+        nodes,
+        edges,
+        edgeStyle,
+        filename
+      );
+
+      await fetch("/api/save-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          directoryPath,
+          filename,
+          content: sidecarWorkflow,
+          createDirectory: true,
+        }),
+      });
+
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    } catch (error) {
+      console.error("Failed to save output:", error);
+      setSaveStatus("error");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    }
+  }, [id, contentSrc, isAudio, isVideo, nodes, edges, edgeStyle]);
+
   const handleDownload = useCallback(async () => {
     if (!contentSrc) return;
 
@@ -107,6 +185,21 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     link.click();
     document.body.removeChild(link);
   }, [contentSrc, isAudio, isVideo, nodeData.outputFilename]);
+
+  // Default filename for save dialog
+  const defaultFilename = useMemo(() => {
+    if (nodeData.outputFilename) return nodeData.outputFilename;
+    return `output-${Date.now()}`;
+  }, [nodeData.outputFilename]);
+
+  // Default save path
+  const defaultSavePath = useMemo(() => {
+    if (saveDirectoryPath) {
+      const sep = saveDirectoryPath.includes("/") ? "/" : "\\";
+      return `${saveDirectoryPath}${sep}outputs`;
+    }
+    return undefined;
+  }, [saveDirectoryPath]);
 
   return (
     <>
@@ -193,7 +286,59 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
           </div>
         )}
         </div>
+
+        {/* Output Now button */}
+        {contentSrc && (
+          <div className="px-2 py-1.5">
+            <button
+              onClick={handleOutputNow}
+              disabled={saveStatus === "saving"}
+              className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+                saveStatus === "saved"
+                  ? "bg-green-600 text-white"
+                  : saveStatus === "error"
+                  ? "bg-red-600 text-white"
+                  : saveStatus === "saving"
+                  ? "bg-blue-700 text-white opacity-70 cursor-wait"
+                  : "bg-blue-600 hover:bg-blue-500 text-white"
+              }`}
+            >
+              {saveStatus === "saving" ? (
+                <>
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Saving...
+                </>
+              ) : saveStatus === "saved" ? (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                  </svg>
+                  Saved!
+                </>
+              ) : saveStatus === "error" ? (
+                "Save Failed"
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                  </svg>
+                  Output Now
+                </>
+              )}
+            </button>
+          </div>
+        )}
       </BaseNode>
+
+      {/* File Save Dialog */}
+      {showSaveDialog && (
+        <FileSaveDialog
+          onSave={handleSave}
+          onCancel={() => setShowSaveDialog(false)}
+          initialPath={defaultSavePath}
+          defaultFilename={defaultFilename}
+        />
+      )}
 
       {/* Lightbox Modal (skip for audio) */}
       {showLightbox && contentSrc && !isAudio && (

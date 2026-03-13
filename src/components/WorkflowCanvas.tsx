@@ -319,6 +319,7 @@ export function WorkflowCanvas() {
   const addNode = useWorkflowStore((state) => state.addNode);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const loadWorkflow = useWorkflowStore((state) => state.loadWorkflow);
+  const importWorkflow = useWorkflowStore((state) => state.importWorkflow);
   const getNodeById = useWorkflowStore((state) => state.getNodeById);
   const addToGlobalHistory = useWorkflowStore((state) => state.addToGlobalHistory);
   const setNodeGroupId = useWorkflowStore((state) => state.setNodeGroupId);
@@ -1876,7 +1877,12 @@ export function WorkflowCanvas() {
           try {
             const workflow = JSON.parse(e.target?.result as string) as WorkflowFile;
             if (workflow.version && workflow.nodes && workflow.edges) {
-              await loadWorkflow(workflow);
+              // Embedded sidecar workflows get imported into the current workflow
+              if (workflow.embedded) {
+                importWorkflow(workflow);
+              } else {
+                await loadWorkflow(workflow);
+              }
             } else {
               alert("Invalid workflow file format");
             }
@@ -1991,7 +1997,7 @@ export function WorkflowCanvas() {
         reader.readAsDataURL(file);
       });
     },
-    [screenToFlowPosition, addNode, updateNodeData, loadWorkflow]
+    [screenToFlowPosition, addNode, updateNodeData, loadWorkflow, importWorkflow]
   );
 
   return (
@@ -2033,6 +2039,12 @@ export function WorkflowCanvas() {
       {showQuickstart && (
         <WelcomeModal
           onWorkflowGenerated={async (workflow, directoryPath, fileName) => {
+            // Embedded sidecar workflows get imported into the current workflow
+            if (workflow.embedded) {
+              importWorkflow(workflow);
+              setShowQuickstart(false);
+              return;
+            }
             await loadWorkflow(workflow, directoryPath);
             if (directoryPath) {
               const id = workflow.id || generateWorkflowId();
