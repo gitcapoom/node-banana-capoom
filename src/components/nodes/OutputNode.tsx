@@ -207,7 +207,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         id={id}
         selected={selected}
         isExecuting={isRunning}
-        contentClassName="flex-1 min-h-0 relative flex flex-col"
+        contentClassName="flex-1 min-h-0 relative"
         className="min-w-[200px]"
         aspectFitMedia={isAudio ? null : contentSrc}
       >
@@ -226,7 +226,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
           style={{ top: "60%", background: "rgb(167, 139, 250)", zIndex: 10 }}
         />
 
-        <div className="relative w-full flex-1 min-h-0 overflow-hidden rounded-lg">
+        <div className="relative w-full h-full overflow-hidden rounded-lg">
         {contentSrc ? (
           <>
             {isAudio ? (
@@ -287,13 +287,13 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         )}
         </div>
 
-        {/* Output Now button */}
+        {/* Output Now button — absolute overlay at bottom */}
         {contentSrc && (
-          <div className="px-2 py-1.5 shrink-0">
+          <div className="absolute bottom-2 left-2 right-2 z-20">
             <button
               onClick={handleOutputNow}
               disabled={saveStatus === "saving"}
-              className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors ${
+              className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded shadow-lg transition-colors ${
                 saveStatus === "saved"
                   ? "bg-green-600 text-white"
                   : saveStatus === "error"
