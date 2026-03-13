@@ -350,7 +350,8 @@ export interface OutputNodeData extends BaseNodeData {
   imageRef?: string; // External image reference for storage optimization
   video?: string | null; // Video data URL or HTTP URL
   audio?: string | null; // Audio data URL or HTTP URL
-  contentType?: "image" | "video" | "audio"; // Explicit content type hint
+  model3d?: string | null; // 3D model URL (GLB, SPZ, etc.)
+  contentType?: "image" | "video" | "audio" | "3d"; // Explicit content type hint
   outputFilename?: string; // Custom filename for saved outputs (without extension)
 }
 

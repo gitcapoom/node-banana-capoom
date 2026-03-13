@@ -183,10 +183,10 @@ export async function executePromptConstructor(ctx: NodeExecutionContext): Promi
  */
 export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
   const { node, getConnectedInputs, updateNodeData, saveDirectoryPath, getEdges, getNodes } = ctx;
-  const { images, videos, audio } = getConnectedInputs(node.id);
+  const { images, videos, audio, model3d } = getConnectedInputs(node.id);
 
   // Diagnostic logging to help debug cases where Output node stays empty
-  if (images.length === 0 && videos.length === 0 && audio.length === 0) {
+  if (images.length === 0 && videos.length === 0 && audio.length === 0 && !model3d) {
     const edges = getEdges();
     const nodes = getNodes();
     const incomingEdges = edges.filter((e) => e.target === node.id);
@@ -195,7 +195,7 @@ export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
       return `${src?.type || "unknown"}(${e.source}) via ${e.sourceHandle}->${e.targetHandle}`;
     });
     console.warn(
-      `[Workflow] Output node ${node.id}: No images, videos, or audio received.`,
+      `[Workflow] Output node ${node.id}: No images, videos, audio, or 3D models received.`,
       `Connected sources: [${sourceInfo.join(", ")}]`
     );
   }
@@ -207,7 +207,20 @@ export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
       audio: audioContent,
       image: null,
       video: null,
+      model3d: null,
       contentType: "audio",
+    });
+    return;
+  }
+
+  // Check 3D model
+  if (model3d) {
+    updateNodeData(node.id, {
+      model3d: model3d,
+      image: null,
+      video: null,
+      audio: null,
+      contentType: "3d",
     });
     return;
   }
@@ -218,6 +231,7 @@ export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
     updateNodeData(node.id, {
       image: videoContent,
       video: videoContent,
+      model3d: null,
       contentType: "video",
     });
   } else if (images.length > 0) {
@@ -233,12 +247,14 @@ export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
       updateNodeData(node.id, {
         image: content,
         video: content,
+        model3d: null,
         contentType: "video",
       });
     } else {
       updateNodeData(node.id, {
         image: content,
         video: null,
+        model3d: null,
         contentType: "image",
       });
     }

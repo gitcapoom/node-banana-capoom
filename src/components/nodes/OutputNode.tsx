@@ -50,12 +50,21 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     return false;
   }, [isAudio, nodeData.video, nodeData.contentType, nodeData.image]);
 
-  // Get the content source (audio, video, or image)
+  // Determine if content is a 3D model
+  const isModel3d = useMemo(() => {
+    if (isAudio || isVideo) return false;
+    if (nodeData.model3d) return true;
+    if (nodeData.contentType === "3d") return true;
+    return false;
+  }, [isAudio, isVideo, nodeData.model3d, nodeData.contentType]);
+
+  // Get the content source (audio, video, 3D model, or image)
   const contentSrc = useMemo(() => {
     if (nodeData.audio) return nodeData.audio;
     if (nodeData.video) return nodeData.video;
+    if (nodeData.model3d) return nodeData.model3d;
     return nodeData.image;
-  }, [nodeData.audio, nodeData.video, nodeData.image]);
+  }, [nodeData.audio, nodeData.video, nodeData.model3d, nodeData.image]);
 
   const videoBlobUrl = useVideoBlobUrl(isVideo ? contentSrc ?? null : null);
 
@@ -92,7 +101,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     setSaveStatus("saving");
 
     try {
-      // 1. Save the output file (image/video/audio)
+      // 1. Save the output file (image/video/audio/3d)
       const savePayload: Record<string, unknown> = {
         directoryPath,
         customFilename: filename,
@@ -103,6 +112,8 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         savePayload.audio = contentSrc;
       } else if (isVideo && contentSrc) {
         savePayload.video = contentSrc;
+      } else if (isModel3d && contentSrc) {
+        savePayload.model3d = contentSrc;
       } else if (contentSrc) {
         savePayload.image = contentSrc;
       }
@@ -145,13 +156,13 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
       setSaveStatus("error");
       setTimeout(() => setSaveStatus("idle"), 3000);
     }
-  }, [id, contentSrc, isAudio, isVideo, nodes, edges, edgeStyle]);
+  }, [id, contentSrc, isAudio, isVideo, isModel3d, nodes, edges, edgeStyle]);
 
   const handleDownload = useCallback(async () => {
     if (!contentSrc) return;
 
     const timestamp = Date.now();
-    const extension = isAudio ? "mp3" : isVideo ? "mp4" : "png";
+    const extension = isAudio ? "mp3" : isVideo ? "mp4" : isModel3d ? "glb" : "png";
     // Use custom filename if provided, otherwise use timestamp
     const filename = nodeData.outputFilename
       ? `${nodeData.outputFilename}.${extension}`
@@ -184,7 +195,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [contentSrc, isAudio, isVideo, nodeData.outputFilename]);
+  }, [contentSrc, isAudio, isVideo, isModel3d, nodeData.outputFilename]);
 
   // Default filename for save dialog
   const defaultFilename = useMemo(() => {
@@ -201,6 +212,64 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     return undefined;
   }, [saveDirectoryPath]);
 
+  // Extract filename from 3D model URL for display
+  const model3dFilename = useMemo(() => {
+    if (!isModel3d || !contentSrc) return null;
+    try {
+      const url = new URL(contentSrc);
+      const segments = url.pathname.split("/").filter(Boolean);
+      const last = segments[segments.length - 1];
+      if (last && last.includes(".")) return last;
+    } catch { /* not a URL */ }
+    return "3D Model";
+  }, [isModel3d, contentSrc]);
+
+  // Determine the aspect-fit media for BaseNode (only for visual content, not 3D/audio)
+  const aspectMedia = useMemo(() => {
+    if (isAudio || isModel3d) return null;
+    return contentSrc;
+  }, [isAudio, isModel3d, contentSrc]);
+
+  // Output Now button component (shared across all content types)
+  const outputNowButton = (
+    <button
+      onClick={(e) => { e.stopPropagation(); handleOutputNow(); }}
+      disabled={saveStatus === "saving"}
+      className={`absolute bottom-2 left-2 right-2 z-10 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded shadow-lg transition-colors ${
+        saveStatus === "saved"
+          ? "bg-green-600 text-white"
+          : saveStatus === "error"
+          ? "bg-red-600 text-white"
+          : saveStatus === "saving"
+          ? "bg-blue-700 text-white opacity-70 cursor-wait"
+          : "bg-blue-600 hover:bg-blue-500 text-white"
+      }`}
+    >
+      {saveStatus === "saving" ? (
+        <>
+          <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          Saving...
+        </>
+      ) : saveStatus === "saved" ? (
+        <>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+          </svg>
+          Saved!
+        </>
+      ) : saveStatus === "error" ? (
+        "Save Failed"
+      ) : (
+        <>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          Output Now
+        </>
+      )}
+    </button>
+  );
+
   return (
     <>
       <BaseNode
@@ -209,7 +278,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         isExecuting={isRunning}
         contentClassName="flex-1 min-h-0 relative"
         className="min-w-[200px]"
-        aspectFitMedia={isAudio ? null : contentSrc}
+        aspectFitMedia={aspectMedia}
       >
         <Handle
           type="target"
@@ -236,6 +305,17 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
                   controls
                   className="w-full rounded"
                 />
+              </div>
+            ) : isModel3d ? (
+              /* 3D model placeholder — show icon + filename */
+              <div className="w-full h-full bg-neutral-900/60 flex flex-col items-center justify-center gap-3 p-4">
+                <svg className="w-12 h-12 text-cyan-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+                </svg>
+                <span className="text-xs text-neutral-300 text-center break-all max-w-full">
+                  {model3dFilename}
+                </span>
+                <span className="text-[10px] text-neutral-500">3D Model</span>
               </div>
             ) : (
               <div
@@ -277,42 +357,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
               </svg>
             </button>
             {/* Output Now button */}
-            <button
-              onClick={(e) => { e.stopPropagation(); handleOutputNow(); }}
-              disabled={saveStatus === "saving"}
-              className={`absolute bottom-2 left-2 right-2 z-10 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded shadow-lg transition-colors ${
-                saveStatus === "saved"
-                  ? "bg-green-600 text-white"
-                  : saveStatus === "error"
-                  ? "bg-red-600 text-white"
-                  : saveStatus === "saving"
-                  ? "bg-blue-700 text-white opacity-70 cursor-wait"
-                  : "bg-blue-600 hover:bg-blue-500 text-white"
-              }`}
-            >
-              {saveStatus === "saving" ? (
-                <>
-                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Saving...
-                </>
-              ) : saveStatus === "saved" ? (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                  Saved!
-                </>
-              ) : saveStatus === "error" ? (
-                "Save Failed"
-              ) : (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                  </svg>
-                  Output Now
-                </>
-              )}
-            </button>
+            {outputNowButton}
           </>
         ) : (
           <div className="w-full h-full bg-neutral-900/40 flex flex-col items-center justify-center">
@@ -335,8 +380,8 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         />
       )}
 
-      {/* Lightbox Modal (skip for audio) */}
-      {showLightbox && contentSrc && !isAudio && (
+      {/* Lightbox Modal (skip for audio and 3D) */}
+      {showLightbox && contentSrc && !isAudio && !isModel3d && (
         <div
           className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-8"
           onClick={() => setShowLightbox(false)}
