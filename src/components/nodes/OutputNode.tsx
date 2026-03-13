@@ -276,24 +276,11 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
             </button>
-          </>
-        ) : (
-          <div className="w-full h-full bg-neutral-900/40 flex flex-col items-center justify-center">
-            <svg className="w-8 h-8 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-            </svg>
-            <span className="text-xs text-neutral-500 mt-2">Connect input</span>
-          </div>
-        )}
-        </div>
-
-        {/* Output Now button — absolute overlay at bottom */}
-        {contentSrc && (
-          <div className="absolute bottom-2 left-2 right-2 z-20">
+            {/* Output Now button */}
             <button
-              onClick={handleOutputNow}
+              onClick={(e) => { e.stopPropagation(); handleOutputNow(); }}
               disabled={saveStatus === "saving"}
-              className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded shadow-lg transition-colors ${
+              className={`absolute bottom-2 left-2 right-2 z-10 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded shadow-lg transition-colors ${
                 saveStatus === "saved"
                   ? "bg-green-600 text-white"
                   : saveStatus === "error"
@@ -326,8 +313,16 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
                 </>
               )}
             </button>
+          </>
+        ) : (
+          <div className="w-full h-full bg-neutral-900/40 flex flex-col items-center justify-center">
+            <svg className="w-8 h-8 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+            </svg>
+            <span className="text-xs text-neutral-500 mt-2">Connect input</span>
           </div>
         )}
+        </div>
       </BaseNode>
 
       {/* File Save Dialog */}
