@@ -1761,6 +1761,20 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       return edge;
     });
 
+    // Migrate legacy output node handle IDs: "image"/"audio"/"3d" → "universal"
+    // Output nodes now use a single "universal" handle instead of separate typed handles.
+    const outputNodeIds = new Set(
+      workflow.nodes.filter((n) => n.type === "output").map((n) => n.id)
+    );
+    workflow.edges = workflow.edges.map((edge) => {
+      if (!outputNodeIds.has(edge.target)) return edge;
+      const th = edge.targetHandle;
+      if (th === "image" || th === "audio" || th === "3d") {
+        return { ...edge, targetHandle: "universal" };
+      }
+      return edge;
+    });
+
     // Deduplicate edges by ID (keep the last occurrence, which is the most recent)
     const edgeById = new Map<string, WorkflowEdge>();
     for (const edge of workflow.edges) {
@@ -1974,7 +1988,20 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       selected: false,
     }));
 
-    // 4. Remap edge source/target IDs
+    // 4. Migrate legacy output node handle IDs before remapping
+    const outputNodeIds = new Set(
+      workflow.nodes.filter((n) => n.type === "output").map((n) => n.id)
+    );
+    workflow.edges = workflow.edges.map((edge) => {
+      if (!outputNodeIds.has(edge.target)) return edge;
+      const th = edge.targetHandle;
+      if (th === "image" || th === "audio" || th === "3d") {
+        return { ...edge, targetHandle: "universal" };
+      }
+      return edge;
+    });
+
+    // 5. Remap edge source/target IDs
     const newEdges: WorkflowEdge[] = workflow.edges
       .filter((e) => idMap.has(e.source) && idMap.has(e.target))
       .map((edge) => ({
