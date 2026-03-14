@@ -174,7 +174,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "splitGrid":
       return { inputs: ["image"], outputs: ["reference"] };
     case "output":
-      return { inputs: ["image", "video", "audio"], outputs: [] };
+      return { inputs: ["image", "video", "audio", "3d"], outputs: [] };
     case "outputGallery":
       return { inputs: ["image"], outputs: [] };
     case "imageCompare":
@@ -570,12 +570,13 @@ export function WorkflowCanvas() {
         return false;
       }
 
-      // 3D connections: 3d handles can only connect to matching 3d handles (or router)
+      // 3D connections: 3d handles can connect to matching 3d handles, router, or output nodes
       if (sourceType === "3d" || targetType === "3d") {
-        // Allow 3d connections to router nodes
         const sourceNode = nodes.find((n) => n.id === connection.source);
         const targetNode = nodes.find((n) => n.id === connection.target);
         if (sourceNode?.type === "router" || targetNode?.type === "router") return true;
+        // Allow 3d output to connect to output node's 3d handle
+        if (sourceType === "3d" && targetNode?.type === "output") return true;
         return sourceType === "3d" && targetType === "3d";
       }
 
@@ -871,6 +872,11 @@ export function WorkflowCanvas() {
         // For audio output connecting to output node, use the "audio" input handle
         if (handleType === "audio" && needInput && node.type === "output") {
           return "audio";
+        }
+
+        // For 3D output connecting to output node, use the "3d" input handle
+        if (handleType === "3d" && needInput && node.type === "output") {
+          return "3d";
         }
 
         // Then check each handle's type

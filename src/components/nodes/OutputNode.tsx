@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState, useMemo, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
@@ -10,6 +11,7 @@ import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
 import { useVideoAutoplay } from "@/hooks/useVideoAutoplay";
 import { FileSaveDialog } from "../FileSaveDialog";
 import { extractUpstreamWorkflow } from "@/utils/upstreamExtractor";
+import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 
 type OutputNodeType = Node<OutputNodeData, "output">;
 
@@ -31,6 +33,55 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const previousEdgeCountRef = useRef<number | null>(null);
   const videoAutoplayRef = useVideoAutoplay(id, selected);
+
+  // ── Reactively pull upstream content (fixes #3 and #4) ──
+  // This watches all connected upstream nodes' output data and auto-populates
+  // the output node when upstream content becomes available, without requiring
+  // the workflow execution system to run.
+  const upstreamContent = useWorkflowStore(
+    useCallback((state) => {
+      const { images, videos, audio, model3d } = getConnectedInputsPure(id, state.nodes, state.edges);
+      if (audio.length > 0) return { type: "audio" as const, value: audio[0] };
+      if (model3d) return { type: "3d" as const, value: model3d };
+      if (videos.length > 0) return { type: "video" as const, value: videos[0] };
+      if (images.length > 0) {
+        const content = images[0];
+        const isVid =
+          content.startsWith("data:video/") ||
+          content.includes(".mp4") ||
+          content.includes(".webm") ||
+          content.includes("fal.media");
+        return { type: isVid ? ("video" as const) : ("image" as const), value: content };
+      }
+      return null;
+    }, [id])
+  );
+
+  // Track previous upstream content to prevent unnecessary updates
+  const prevUpstreamRef = useRef<{ type: string; value: string } | null>(null);
+
+  // Sync pulled upstream content to this node's display data
+  useEffect(() => {
+    if (!upstreamContent) {
+      prevUpstreamRef.current = null;
+      return;
+    }
+    const { type, value } = upstreamContent;
+
+    // Skip if upstream content hasn't changed
+    if (prevUpstreamRef.current?.type === type && prevUpstreamRef.current?.value === value) return;
+    prevUpstreamRef.current = { type, value };
+
+    if (type === "audio" && value !== nodeData.audio) {
+      updateNodeData(id, { audio: value, image: null, video: null, model3d: null, contentType: "audio" });
+    } else if (type === "3d" && value !== nodeData.model3d) {
+      updateNodeData(id, { model3d: value, image: null, video: null, audio: null, contentType: "3d" });
+    } else if (type === "video" && value !== nodeData.video) {
+      updateNodeData(id, { image: value, video: value, model3d: null, audio: null, contentType: "video" });
+    } else if (type === "image" && value !== nodeData.image) {
+      updateNodeData(id, { image: value, video: null, model3d: null, audio: null, contentType: "image" });
+    }
+  }, [upstreamContent, id, nodeData.audio, nodeData.video, nodeData.image, nodeData.model3d, updateNodeData]);
 
   // Determine if content is audio
   const isAudio = useMemo(() => {
@@ -87,11 +138,31 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   }, [id, regenerateNode]);
 
   // Handle "Output Now" button click
-  const handleOutputNow = useCallback(() => {
+  // Fix #1: Ensure output folder exists before opening save dialog
+  const handleOutputNow = useCallback(async () => {
     if (!saveDirectoryPath) {
       alert("Please set a project directory first (File > Save As).");
       return;
     }
+
+    // Create the outputs subdirectory if it doesn't exist
+    const sep = saveDirectoryPath.includes("/") ? "/" : "\\";
+    const outputsDir = `${saveDirectoryPath}${sep}outputs`;
+    try {
+      await fetch("/api/save-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          directoryPath: outputsDir,
+          filename: ".keep",
+          content: "",
+          createDirectory: true,
+        }),
+      });
+    } catch {
+      // Ignore errors — the directory might already exist
+    }
+
     setShowSaveDialog(true);
   }, [saveDirectoryPath]);
 
@@ -294,6 +365,14 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
           data-handletype="audio"
           style={{ top: "60%", background: "rgb(167, 139, 250)", zIndex: 10 }}
         />
+        {/* Fix #2: 3D input handle so 3D sources can connect */}
+        <Handle
+          type="target"
+          position={Position.Left}
+          id="3d"
+          data-handletype="3d"
+          style={{ top: "80%", background: "#06b6d4", zIndex: 10 }}
+        />
 
         <div className="relative w-full h-full overflow-hidden rounded-lg">
         {contentSrc ? (
@@ -370,18 +449,20 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         </div>
       </BaseNode>
 
-      {/* File Save Dialog */}
-      {showSaveDialog && (
+      {/* Fix #5: File Save Dialog — portaled to document.body so it renders
+          as a full-screen overlay, not clipped by React Flow's node transform */}
+      {showSaveDialog && typeof document !== "undefined" && createPortal(
         <FileSaveDialog
           onSave={handleSave}
           onCancel={() => setShowSaveDialog(false)}
           initialPath={defaultSavePath}
           defaultFilename={defaultFilename}
-        />
+        />,
+        document.body
       )}
 
-      {/* Lightbox Modal (skip for audio and 3D) */}
-      {showLightbox && contentSrc && !isAudio && !isModel3d && (
+      {/* Lightbox Modal (skip for audio and 3D) — also portaled */}
+      {showLightbox && contentSrc && !isAudio && !isModel3d && typeof document !== "undefined" && createPortal(
         <div
           className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-8"
           onClick={() => setShowLightbox(false)}
@@ -413,7 +494,8 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
               </svg>
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
