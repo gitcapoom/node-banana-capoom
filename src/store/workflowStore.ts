@@ -2004,9 +2004,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // 5. Remap edge source/target IDs
     const newEdges: WorkflowEdge[] = workflow.edges
       .filter((e) => idMap.has(e.source) && idMap.has(e.target))
-      .map((edge) => ({
+      .map((edge, idx) => ({
         ...edge,
-        id: `e-${idMap.get(edge.source)}-${idMap.get(edge.target)}-${Date.now()}`,
+        id: `e-${idMap.get(edge.source)}-${idMap.get(edge.target)}-${Date.now()}-${idx}`,
         source: idMap.get(edge.source) || edge.source,
         target: idMap.get(edge.target) || edge.target,
       }));
