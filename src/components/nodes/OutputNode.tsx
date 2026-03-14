@@ -38,12 +38,14 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   // This watches all connected upstream nodes' output data and auto-populates
   // the output node when upstream content becomes available, without requiring
   // the workflow execution system to run.
-  const upstreamContent = useWorkflowStore(
+  // Returns a stable string "type|value" (primitive) to avoid Zustand infinite loops
+  // from returning new object references on every selector call.
+  const upstreamKey = useWorkflowStore(
     useCallback((state) => {
       const { images, videos, audio, model3d } = getConnectedInputsPure(id, state.nodes, state.edges);
-      if (audio.length > 0) return { type: "audio" as const, value: audio[0] };
-      if (model3d) return { type: "3d" as const, value: model3d };
-      if (videos.length > 0) return { type: "video" as const, value: videos[0] };
+      if (audio.length > 0) return `audio|${audio[0]}`;
+      if (model3d) return `3d|${model3d}`;
+      if (videos.length > 0) return `video|${videos[0]}`;
       if (images.length > 0) {
         const content = images[0];
         const isVid =
@@ -51,26 +53,29 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
           content.includes(".mp4") ||
           content.includes(".webm") ||
           content.includes("fal.media");
-        return { type: isVid ? ("video" as const) : ("image" as const), value: content };
+        return `${isVid ? "video" : "image"}|${content}`;
       }
       return null;
     }, [id])
   );
 
-  // Track previous upstream content to prevent unnecessary updates
-  const prevUpstreamRef = useRef<{ type: string; value: string } | null>(null);
+  // Track previous upstream key to prevent unnecessary updates
+  const prevUpstreamKeyRef = useRef<string | null>(null);
 
   // Sync pulled upstream content to this node's display data
   useEffect(() => {
-    if (!upstreamContent) {
-      prevUpstreamRef.current = null;
+    if (!upstreamKey) {
+      prevUpstreamKeyRef.current = null;
       return;
     }
-    const { type, value } = upstreamContent;
 
     // Skip if upstream content hasn't changed
-    if (prevUpstreamRef.current?.type === type && prevUpstreamRef.current?.value === value) return;
-    prevUpstreamRef.current = { type, value };
+    if (prevUpstreamKeyRef.current === upstreamKey) return;
+    prevUpstreamKeyRef.current = upstreamKey;
+
+    const pipeIdx = upstreamKey.indexOf("|");
+    const type = upstreamKey.substring(0, pipeIdx);
+    const value = upstreamKey.substring(pipeIdx + 1);
 
     if (type === "audio" && value !== nodeData.audio) {
       updateNodeData(id, { audio: value, image: null, video: null, model3d: null, contentType: "audio" });
@@ -81,7 +86,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     } else if (type === "image" && value !== nodeData.image) {
       updateNodeData(id, { image: value, video: null, model3d: null, audio: null, contentType: "image" });
     }
-  }, [upstreamContent, id, nodeData.audio, nodeData.video, nodeData.image, nodeData.model3d, updateNodeData]);
+  }, [upstreamKey, id, nodeData.audio, nodeData.video, nodeData.image, nodeData.model3d, updateNodeData]);
 
   // Determine if content is audio
   const isAudio = useMemo(() => {
