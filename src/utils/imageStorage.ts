@@ -236,6 +236,8 @@ async function externalizeNodeImages(
       const d = data as import("@/types").GenerateVideoNodeData;
       let inputImageRefs = d.inputImageRefs ? [...d.inputImageRefs] : [];
       const inputImages: string[] = [];
+      let outputVideoRef = d.outputVideoRef;
+      let outputVideo = d.outputVideo;
 
       // Handle input images array (save to inputs)
       // Skip if corresponding inputImageRef already exists
@@ -253,11 +255,47 @@ async function externalizeNodeImages(
         }
       }
 
-      // Note: outputVideo is a video URL, not saved as an image
+      // Externalize output video — save to generations folder
+      const selectedVideoIndex = d.selectedVideoHistoryIndex || 0;
+      const expectedVideoRef = d.videoHistory?.[selectedVideoIndex]?.id;
+
+      if (d.outputVideoRef && isBase64DataUrl(d.outputVideo)) {
+        outputVideo = null; // Already has ref, just clear base64
+      } else if (isBase64DataUrl(d.outputVideo)) {
+        outputVideoRef = await saveImageAndGetId(d.outputVideo, workflowPath, savedImageIds, "generations", expectedVideoRef);
+        outputVideo = null;
+      }
+
       newData = {
         ...d,
         inputImages: inputImages.length > 0 && inputImages.every(i => i === "") ? [] : inputImages,
         inputImageRefs: inputImageRefs.length > 0 ? inputImageRefs : undefined,
+        outputVideo,
+        outputVideoRef,
+      };
+      break;
+    }
+
+    case "generateAudio": {
+      const d = data as import("@/types").GenerateAudioNodeData;
+      let outputAudioRef = d.outputAudioRef;
+      let outputAudio = d.outputAudio;
+
+      // Externalize output audio — save to generations folder
+      const selectedAudioIndex = d.selectedAudioHistoryIndex || 0;
+      const expectedAudioRef = d.audioHistory?.[selectedAudioIndex]?.id;
+
+      if (d.outputAudioRef && isBase64DataUrl(d.outputAudio)) {
+        outputAudio = null; // Already has ref, just clear base64
+      } else if (isBase64DataUrl(d.outputAudio)) {
+        outputAudioRef = await saveImageAndGetId(d.outputAudio, workflowPath, savedImageIds, "generations", expectedAudioRef);
+        outputAudio = null;
+      }
+
+      newData = {
+        ...d,
+        outputAudio,
+        outputAudioRef,
       };
       break;
     }
@@ -496,9 +534,37 @@ async function hydrateNodeImages(
         }
       }
 
+      // Hydrate video: only load thumbnail, not the full video (loaded on-demand in overlay)
+      // The thumbnail is stored in the video history item or as a separate _thumb file
+      let thumbnailImage = d.thumbnailImage;
+      if (!thumbnailImage && d.outputVideoRef) {
+        // Try to load thumbnail from generations folder
+        const thumbId = `${d.outputVideoRef}_thumb`;
+        const thumb = await loadImageById(thumbId, workflowPath, loadedImages, "generations");
+        if (thumb) thumbnailImage = thumb;
+      }
+
       newData = {
         ...d,
         inputImages,
+        outputVideo: null, // Don't hydrate full video — loaded on-demand in overlay
+        thumbnailImage,
+      };
+      break;
+    }
+
+    case "generateAudio": {
+      const d = data as import("@/types").GenerateAudioNodeData;
+
+      // Hydrate audio from ref
+      let outputAudio = d.outputAudio;
+      if (d.outputAudioRef && !d.outputAudio) {
+        outputAudio = await loadImageById(d.outputAudioRef, workflowPath, loadedImages, "generations");
+      }
+
+      newData = {
+        ...d,
+        outputAudio,
       };
       break;
     }

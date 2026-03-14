@@ -11,7 +11,7 @@ const LEGACY_IMAGES_FOLDER = ".images"; // For backward compatibility
 
 // Helper to extract MIME type and extension from data URL
 function getMimeAndExtension(dataUrl: string): { mime: string; extension: string } {
-  const match = dataUrl.match(/^data:(image\/\w+);base64,/);
+  const match = dataUrl.match(/^data:([^;]+);base64,/);
   if (match) {
     const mime = match[1];
     const mimeToExt: Record<string, string> = {
@@ -20,6 +20,14 @@ function getMimeAndExtension(dataUrl: string): { mime: string; extension: string
       "image/jpg": "jpg",
       "image/gif": "gif",
       "image/webp": "webp",
+      "video/mp4": "mp4",
+      "video/webm": "webm",
+      "video/quicktime": "mov",
+      "audio/mpeg": "mp3",
+      "audio/wav": "wav",
+      "audio/ogg": "ogg",
+      "audio/flac": "flac",
+      "audio/aac": "aac",
     };
     return { mime, extension: mimeToExt[mime] || "png" };
   }
@@ -151,7 +159,7 @@ export async function POST(request: NextRequest) {
     const filePath = path.join(targetFolder, filename);
 
     // Extract base64 data and convert to buffer
-    const base64Data = imageData.replace(/^data:image\/\w+;base64,/, "");
+    const base64Data = imageData.replace(/^data:[^;]+;base64,/, "");
     const buffer = Buffer.from(base64Data, "base64");
 
     // Write the image file

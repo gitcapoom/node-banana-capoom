@@ -4,10 +4,16 @@ import * as path from "path";
 import { logger } from "@/utils/logger";
 
 // Supported file extensions
-const SUPPORTED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm', 'mov'];
+const SUPPORTED_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'mp4', 'webm', 'mov', 'mp3', 'wav', 'ogg', 'flac', 'aac', 'glb', 'gltf', 'fbx', 'obj', 'spz', 'ply', 'usdz', 'stl'];
 
 // Video extensions
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov'];
+
+// Audio extensions
+const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'flac', 'aac'];
+
+// 3D model extensions
+const MODEL3D_EXTENSIONS = ['glb', 'gltf', 'fbx', 'obj', 'spz', 'ply', 'usdz', 'stl'];
 
 // Extension to MIME type mapping
 const EXT_TO_MIME: Record<string, string> = {
@@ -19,6 +25,19 @@ const EXT_TO_MIME: Record<string, string> = {
   mp4: 'video/mp4',
   webm: 'video/webm',
   mov: 'video/quicktime',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  flac: 'audio/flac',
+  aac: 'audio/aac',
+  glb: 'model/gltf-binary',
+  gltf: 'model/gltf+json',
+  fbx: 'application/octet-stream',
+  obj: 'text/plain',
+  spz: 'application/octet-stream',
+  ply: 'application/octet-stream',
+  usdz: 'model/vnd.usdz+zip',
+  stl: 'model/stl',
 };
 
 // POST: Load a generated image or video from the generations folder by ID
@@ -108,7 +127,9 @@ export async function POST(request: NextRequest) {
 
     // Determine content type
     const isVideo = VIDEO_EXTENSIONS.includes(foundExtension);
-    const contentType = isVideo ? 'video' : 'image';
+    const isAudio = AUDIO_EXTENSIONS.includes(foundExtension);
+    const is3D = MODEL3D_EXTENSIONS.includes(foundExtension);
+    const contentType = isVideo ? 'video' : isAudio ? 'audio' : is3D ? '3d' : 'image';
 
     logger.info('file.load', 'Generation loaded successfully', {
       filePath,
@@ -116,6 +137,16 @@ export async function POST(request: NextRequest) {
       contentType,
       fileSize: buffer.length,
     });
+
+    // For 3D models, return a file URL instead of base64 (too large for JSON)
+    if (is3D) {
+      return NextResponse.json({
+        success: true,
+        contentType,
+        model3d: dataUrl,
+        filePath,
+      });
+    }
 
     // Return appropriate response field based on content type
     const response: Record<string, unknown> = {
@@ -125,6 +156,8 @@ export async function POST(request: NextRequest) {
 
     if (isVideo) {
       response.video = dataUrl;
+    } else if (isAudio) {
+      response.audio = dataUrl;
     } else {
       response.image = dataUrl;
     }
