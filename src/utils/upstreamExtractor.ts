@@ -38,7 +38,9 @@ export function extractUpstreamWorkflow(
 
   traverseUpstream(outputNodeId);
 
-  // 2. Filter nodes and edges to only the upstream subgraph
+  // 2. Filter nodes and edges to only the upstream subgraph (exclude the output node itself)
+  upstreamIds.delete(outputNodeId);
+
   const upstreamNodes = nodes
     .filter((n) => upstreamIds.has(n.id))
     .map((n) => structuredClone(n)); // Deep clone to avoid mutating original
@@ -79,11 +81,6 @@ export function extractUpstreamWorkflow(
       data.imageRef = undefined;
     }
 
-    // For output nodes, clear external refs
-    if (node.type === "output") {
-      const data = node.data as Record<string, unknown>;
-      data.imageRef = undefined;
-    }
   }
 
   // 4. Build the embedded workflow file
