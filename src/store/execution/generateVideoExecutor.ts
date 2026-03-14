@@ -131,12 +131,14 @@ export async function executeGenerateVideo(
       const timestamp = Date.now();
       const videoId = `${timestamp}`;
 
-      // Add to node's video history
+      // Add to node's video history (with full settings snapshot for recall)
       const newHistoryItem = {
         id: videoId,
         timestamp,
         prompt: text || "",
         model: nodeData.selectedModel?.modelId || "",
+        selectedModel: nodeData.selectedModel,
+        parameters: nodeData.parameters ? { ...nodeData.parameters } : undefined,
       };
       const updatedHistory = [newHistoryItem, ...(nodeData.videoHistory || [])].slice(0, 50);
 

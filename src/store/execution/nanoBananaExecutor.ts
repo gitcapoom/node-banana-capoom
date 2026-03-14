@@ -166,13 +166,18 @@ export async function executeNanoBanana(
         model: nodeData.model,
       });
 
-      // Add to node's carousel history
+      // Add to node's carousel history (with full settings snapshot for recall)
       const newHistoryItem = {
         id: imageId,
         timestamp,
         prompt: promptText,
         aspectRatio: nodeData.aspectRatio,
         model: nodeData.model,
+        resolution: nodeData.resolution,
+        selectedModel: nodeData.selectedModel,
+        parameters: nodeData.parameters ? { ...nodeData.parameters } : undefined,
+        useGoogleSearch: nodeData.useGoogleSearch,
+        useImageSearch: nodeData.useImageSearch,
       };
       const updatedHistory = [newHistoryItem, ...(nodeData.imageHistory || [])].slice(0, 50);
 

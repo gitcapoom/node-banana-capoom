@@ -204,9 +204,12 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         output3dUrl: null,
         savedFilename: null,
         savedFilePath: null,
+        thumbnailImage: null,
         selectedModel: nodeDefaults.generate3d?.selectedModel,
         status: "idle",
         error: null,
+        model3dHistory: [],
+        selectedModel3dHistoryIndex: 0,
         lastGenerationCost: null,
       } as Generate3DNodeData;
     }

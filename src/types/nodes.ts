@@ -157,6 +157,12 @@ export interface CarouselImageItem {
   prompt: string;
   aspectRatio: AspectRatio;
   model: ModelType;
+  // Settings snapshot for recall when browsing history
+  resolution?: Resolution;
+  selectedModel?: SelectedModel;
+  parameters?: Record<string, unknown>;
+  useGoogleSearch?: boolean;
+  useImageSearch?: boolean;
 }
 
 /**
@@ -167,6 +173,10 @@ export interface CarouselVideoItem {
   timestamp: number;
   prompt: string;
   model: string; // Model ID for video (not ModelType since external providers)
+  // Settings snapshot for recall when browsing history
+  selectedModel?: SelectedModel;
+  parameters?: Record<string, unknown>;
+  thumbnailId?: string; // ref to first-frame thumbnail in generations folder
 }
 
 /**
@@ -214,6 +224,7 @@ export interface GenerateVideoNodeData extends BaseNodeData {
   inputPrompt: string | null;
   outputVideo: string | null; // Video data URL or URL
   outputVideoRef?: string; // External video reference for storage optimization
+  thumbnailImage?: string | null; // First frame thumbnail for canvas display
   selectedModel?: SelectedModel; // Required for video generation (no legacy fallback)
   parameters?: Record<string, unknown>; // Model-specific parameters
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
@@ -235,12 +246,15 @@ export interface Generate3DNodeData extends BaseNodeData {
   output3dUrl: string | null;
   savedFilename: string | null;
   savedFilePath: string | null;
+  thumbnailImage?: string | null; // Input image or prompt-based thumbnail for canvas display
   selectedModel?: SelectedModel;
   parameters?: Record<string, unknown>;
   inputSchema?: ModelInputDef[];
   parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
+  model3dHistory: Carousel3DItem[]; // Carousel history (IDs only)
+  selectedModel3dHistoryIndex: number; // Currently selected 3D model in carousel
   lastGenerationCost?: number | null; // Cost of the last generation run
 }
 
@@ -302,6 +316,22 @@ export interface CarouselAudioItem {
   timestamp: number;
   prompt: string;
   model: string; // Model ID for audio (not ModelType since external providers)
+  // Settings snapshot for recall when browsing history
+  selectedModel?: SelectedModel;
+  parameters?: Record<string, unknown>;
+}
+
+/**
+ * Carousel 3D item for per-node 3D model history
+ */
+export interface Carousel3DItem {
+  id: string;
+  timestamp: number;
+  prompt: string;
+  model: string;
+  selectedModel?: SelectedModel;
+  parameters?: Record<string, unknown>;
+  thumbnailId?: string; // ref to thumbnail image in generations folder
 }
 
 /**

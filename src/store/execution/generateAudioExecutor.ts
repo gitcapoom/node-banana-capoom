@@ -126,12 +126,14 @@ export async function executeGenerateAudio(
       const timestamp = Date.now();
       const audioId = `${timestamp}`;
 
-      // Add to node's audio history
+      // Add to node's audio history (with full settings snapshot for recall)
       const newHistoryItem = {
         id: audioId,
         timestamp,
         prompt: text || "",
         model: nodeData.selectedModel?.modelId || "",
+        selectedModel: nodeData.selectedModel,
+        parameters: nodeData.parameters ? { ...nodeData.parameters } : undefined,
       };
       const updatedHistory = [newHistoryItem, ...(nodeData.audioHistory || [])].slice(0, 50);
 

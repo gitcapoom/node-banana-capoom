@@ -5,7 +5,7 @@
  * Extracted from nanoBananaExecutor's 3D handling code.
  */
 
-import type { Generate3DNodeData } from "@/types";
+import type { Generate3DNodeData, Carousel3DItem } from "@/types";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
 import type { NodeExecutionContext } from "./types";
 
@@ -27,6 +27,7 @@ export async function executeGenerate3D(
     providerSettings,
     addIncurredCost,
     generationsPath,
+    getNodes,
     trackSaveGeneration,
   } = ctx;
 
@@ -110,10 +111,30 @@ export async function executeGenerate3D(
     const result = await response.json();
 
     if (result.success && result.model3dUrl) {
+      const timestamp = Date.now();
+      const model3dId = `${timestamp}`;
+
+      // Use input image as thumbnail (if available), otherwise null
+      const thumbnailImage = images.length > 0 ? images[0] : null;
+
+      // Add to node's 3D history (with full settings snapshot for recall)
+      const newHistoryItem: Carousel3DItem = {
+        id: model3dId,
+        timestamp,
+        prompt: promptText || "",
+        model: nodeData.selectedModel?.modelId || "",
+        selectedModel: nodeData.selectedModel,
+        parameters: nodeData.parameters ? { ...nodeData.parameters } : undefined,
+      };
+      const updatedHistory = [newHistoryItem, ...(nodeData.model3dHistory || [])].slice(0, 50);
+
       updateNodeData(node.id, {
         output3dUrl: result.model3dUrl,
+        thumbnailImage,
         status: "complete",
         error: null,
+        model3dHistory: updatedHistory,
+        selectedModel3dHistoryIndex: 0,
       });
 
       // Track cost from server response
@@ -131,6 +152,7 @@ export async function executeGenerate3D(
             directoryPath: generationsPath,
             model3d: result.model3dUrl,
             prompt: promptText,
+            imageId: model3dId,
           }),
         })
           .then((res) => res.json())
@@ -140,13 +162,40 @@ export async function executeGenerate3D(
                 savedFilename: saveResult.filename,
                 savedFilePath: saveResult.filePath,
               });
+              // Sync history ID if server returns a different one
+              if (saveResult.imageId && saveResult.imageId !== model3dId) {
+                const currentNode = ctx.getNodes().find((n) => n.id === node.id);
+                if (currentNode) {
+                  const currentData = currentNode.data as Generate3DNodeData;
+                  const histCopy = [...(currentData.model3dHistory || [])];
+                  const entryIndex = histCopy.findIndex((h) => h.id === model3dId);
+                  if (entryIndex !== -1) {
+                    histCopy[entryIndex] = { ...histCopy[entryIndex], id: saveResult.imageId };
+                    updateNodeData(node.id, { model3dHistory: histCopy });
+                  }
+                }
+              }
             }
           })
           .catch((err) => {
             console.error("Failed to save 3D model:", err);
           });
 
-        trackSaveGeneration(`3d-${Date.now()}`, savePromise);
+        trackSaveGeneration(model3dId, savePromise);
+
+        // Save thumbnail image to generations folder if we have one
+        if (thumbnailImage) {
+          fetch("/api/save-generation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              directoryPath: generationsPath,
+              image: thumbnailImage,
+              prompt: promptText,
+              imageId: `${model3dId}_thumb`,
+            }),
+          }).catch(() => {});
+        }
       }
     } else {
       updateNodeData(node.id, {
