@@ -356,27 +356,13 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         className="min-w-[200px]"
         aspectFitMedia={aspectMedia}
       >
+        {/* Single universal input handle — accepts image, video, audio, 3D */}
         <Handle
           type="target"
           position={Position.Left}
-          id="image"
-          data-handletype="image"
+          id="universal"
+          data-handletype="universal"
           style={{ zIndex: 10 }}
-        />
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="audio"
-          data-handletype="audio"
-          style={{ top: "60%", background: "rgb(167, 139, 250)", zIndex: 10 }}
-        />
-        {/* Fix #2: 3D input handle so 3D sources can connect */}
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="3d"
-          data-handletype="3d"
-          style={{ top: "80%", background: "#06b6d4", zIndex: 10 }}
         />
 
         <div className="relative w-full h-full overflow-hidden rounded-lg">

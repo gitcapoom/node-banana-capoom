@@ -768,7 +768,7 @@ const THREE_D_SOURCE_OPTIONS: MenuOption[] = [
 
 interface ConnectionDropMenuProps {
   position: { x: number; y: number };
-  handleType: "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | null;
+  handleType: "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | "universal" | null;
   connectionType: "source" | "target"; // source = dragging from output, target = dragging from input
   onSelect: (selection: { type: NodeType | MenuAction; isAction: boolean }) => void;
   onClose: () => void;

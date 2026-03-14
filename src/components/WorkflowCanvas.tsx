@@ -127,10 +127,12 @@ const edgeTypes: EdgeTypes = {
 // - Video handles can only connect to generateVideo or output nodes
 // Helper to determine handle type from handle ID
 // For dynamic handles, we use naming convention: image inputs contain "image", text inputs are "prompt" or "negative_prompt"
-const getHandleType = (handleId: string | null | undefined): "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | null => {
+const getHandleType = (handleId: string | null | undefined): "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | "universal" | null => {
   if (!handleId) return null;
   // Generic Router handles — return null to allow any type connection
   if (handleId === "generic-input" || handleId === "generic-output") return null;
+  // Universal handle (output node) — accepts any media type
+  if (handleId === "universal") return "universal";
   // EaseCurve handles (must check before other types)
   if (handleId === "easeCurve") return "easeCurve";
   // 3D handles
@@ -174,7 +176,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "splitGrid":
       return { inputs: ["image"], outputs: ["reference"] };
     case "output":
-      return { inputs: ["image", "video", "audio", "3d"], outputs: [] };
+      return { inputs: ["universal"], outputs: [] };
     case "outputGallery":
       return { inputs: ["image"], outputs: [] };
     case "imageCompare":
@@ -222,7 +224,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
 interface ConnectionDropState {
   position: { x: number; y: number };
   flowPosition: { x: number; y: number };
-  handleType: "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | null;
+  handleType: "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | "universal" | null;
   connectionType: "source" | "target";
   sourceNodeId: string | null;
   sourceHandleId: string | null;
@@ -542,6 +544,10 @@ export function WorkflowCanvas() {
       // If we can't determine types, allow the connection
       if (!sourceType || !targetType) return true;
 
+      // Universal handle (output node) accepts any media type
+      if (targetType === "universal") return sourceType !== "text";
+      if (sourceType === "universal") return true;
+
       // EaseCurve connections: only between easeCurve nodes (or router)
       if (sourceType === "easeCurve" || targetType === "easeCurve") {
         const targetNode = nodes.find((n) => n.id === connection.target);
@@ -776,7 +782,7 @@ export function WorkflowCanvas() {
       // Helper to find a compatible handle on a node by type
       const findCompatibleHandle = (
         node: Node,
-        handleType: "image" | "text" | "video" | "audio" | "3d" | "easeCurve",
+        handleType: "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | "universal",
         needInput: boolean,
         batchUsed?: Set<string>
       ): string | null => {
@@ -861,23 +867,13 @@ export function WorkflowCanvas() {
         const staticHandles = getNodeHandles(node.type || "");
         const handleList = needInput ? staticHandles.inputs : staticHandles.outputs;
 
+        // Output node has a single "universal" input that accepts any media type
+        if (needInput && node.type === "output" && handleList.includes("universal")) {
+          if (handleType !== "text") return "universal";
+        }
+
         // First try exact match
         if (handleList.includes(handleType)) return handleType;
-
-        // For video output connecting to output node, allow "image" input (output node accepts both)
-        if (handleType === "video" && needInput && node.type === "output") {
-          return "image";
-        }
-
-        // For audio output connecting to output node, use the "audio" input handle
-        if (handleType === "audio" && needInput && node.type === "output") {
-          return "audio";
-        }
-
-        // For 3D output connecting to output node, use the "3d" input handle
-        if (handleType === "3d" && needInput && node.type === "output") {
-          return "3d";
-        }
 
         // Then check each handle's type
         for (const h of handleList) {
