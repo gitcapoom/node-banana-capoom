@@ -278,7 +278,7 @@ interface WorkflowStore {
   // Save/Load
   saveWorkflow: (name?: string) => void;
   loadWorkflow: (workflow: WorkflowFile, workflowPath?: string, options?: { preserveSnapshot?: boolean }) => Promise<void>;
-  importWorkflow: (workflow: WorkflowFile) => void;
+  importWorkflow: (workflow: WorkflowFile, dropPosition?: { x: number; y: number }) => void;
   clearWorkflow: () => void;
 
   // Helpers
@@ -1955,7 +1955,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     get().recomputeDimmedNodes();
   },
 
-  importWorkflow: (workflow: WorkflowFile) => {
+  importWorkflow: (workflow: WorkflowFile, dropPosition?: { x: number; y: number }) => {
     const { nodes: existingNodes, edges: existingEdges } = get();
 
     // 1. Build ID remap: increment counter for each imported node to avoid collisions
@@ -1965,16 +1965,69 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       idMap.set(node.id, newId);
     }
 
-    // 2. Calculate offset: place imported nodes to the right of existing content
-    let offsetX = 200;
-    let offsetY = 0;
-    if (existingNodes.length > 0) {
-      const maxX = Math.max(...existingNodes.map((n) => n.position.x + 300));
-      const minY = Math.min(...existingNodes.map((n) => n.position.y));
-      offsetX = maxX + 100; // 100px gap to the right
-      // Calculate the min Y of imported nodes to align vertically
-      const importMinY = Math.min(...workflow.nodes.map((n) => n.position.y));
-      offsetY = minY - importMinY;
+    // 2. Calculate offset to position imported nodes
+    const NODE_W = 300; // estimated node width
+    const NODE_H = 280; // estimated node height
+    const GAP = 50;     // gap between node groups
+
+    // Compute the bounding box of the imported subgraph
+    const importMinX = Math.min(...workflow.nodes.map((n) => n.position.x));
+    const importMinY = Math.min(...workflow.nodes.map((n) => n.position.y));
+    const importMaxX = Math.max(...workflow.nodes.map((n) => n.position.x + NODE_W));
+    const importMaxY = Math.max(...workflow.nodes.map((n) => n.position.y + NODE_H));
+    const importW = importMaxX - importMinX;
+    const importH = importMaxY - importMinY;
+
+    let offsetX: number;
+    let offsetY: number;
+
+    if (dropPosition) {
+      // Center the imported subgraph on the drop position
+      offsetX = dropPosition.x - importMinX - importW / 2;
+      offsetY = dropPosition.y - importMinY - importH / 2;
+
+      // Check for overlap with existing nodes and nudge right if needed
+      if (existingNodes.length > 0) {
+        const placedMinX = () => importMinX + offsetX;
+        const placedMaxX = () => importMaxX + offsetX;
+        const placedMinY = importMinY + offsetY;
+        const placedMaxY = importMaxY + offsetY;
+
+        // Keep nudging right until no existing node overlaps
+        let hasOverlap = true;
+        while (hasOverlap) {
+          hasOverlap = false;
+          for (const en of existingNodes) {
+            const enW = (en.measured?.width as number) || (en.style?.width as number) || NODE_W;
+            const enH = (en.measured?.height as number) || (en.style?.height as number) || NODE_H;
+            const enMaxX = en.position.x + enW;
+            const enMaxY = en.position.y + enH;
+
+            // Check AABB overlap
+            if (
+              placedMinX() < enMaxX + GAP &&
+              placedMaxX() > en.position.x - GAP &&
+              placedMinY < enMaxY + GAP &&
+              placedMaxY > en.position.y - GAP
+            ) {
+              // Nudge right past this node
+              offsetX = enMaxX + GAP - importMinX;
+              hasOverlap = true;
+              break; // restart overlap check with new position
+            }
+          }
+        }
+      }
+    } else {
+      // No drop position — place to the right of existing content (legacy behavior)
+      offsetX = 200;
+      offsetY = 0;
+      if (existingNodes.length > 0) {
+        const maxX = Math.max(...existingNodes.map((n) => n.position.x + NODE_W));
+        const minY = Math.min(...existingNodes.map((n) => n.position.y));
+        offsetX = maxX + GAP + GAP - importMinX;
+        offsetY = minY - importMinY;
+      }
     }
 
     // 3. Remap node IDs and offset positions

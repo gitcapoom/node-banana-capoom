@@ -1881,7 +1881,11 @@ export function WorkflowCanvas() {
             if (workflow.version && workflow.nodes && workflow.edges) {
               // Embedded sidecar workflows get imported into the current workflow
               if (workflow.embedded) {
-                importWorkflow(workflow);
+                const flowPos = screenToFlowPosition({
+                  x: event.clientX,
+                  y: event.clientY,
+                });
+                importWorkflow(workflow, flowPos);
               } else {
                 await loadWorkflow(workflow);
               }
