@@ -12,6 +12,7 @@ interface FileOpenDialogProps {
   onFileSelected: (filePath: string) => void;
   onCancel: () => void;
   initialPath?: string;
+  mode?: "file" | "directory";
 }
 
 const STORAGE_KEY = "fileOpenDialog_lastPath";
@@ -23,7 +24,8 @@ function formatSize(bytes?: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function FileOpenDialog({ onFileSelected, onCancel, initialPath }: FileOpenDialogProps) {
+export function FileOpenDialog({ onFileSelected, onCancel, initialPath, mode = "file" }: FileOpenDialogProps) {
+  const isDirectoryMode = mode === "directory";
   const [currentPath, setCurrentPath] = useState<string>(initialPath || "");
   const [pathInput, setPathInput] = useState<string>("");
   const [entries, setEntries] = useState<DirectoryEntry[]>([]);
@@ -38,8 +40,11 @@ export function FileOpenDialog({ onFileSelected, onCancel, initialPath }: FileOp
     setSelectedFile(null);
 
     try {
-      const params = dirPath ? `?path=${encodeURIComponent(dirPath)}` : "";
-      const response = await fetch(`/api/list-directory${params}`);
+      const searchParams = new URLSearchParams();
+      if (dirPath) searchParams.set("path", dirPath);
+      if (isDirectoryMode) searchParams.set("showAllFiles", "true");
+      const qs = searchParams.toString();
+      const response = await fetch(`/api/list-directory${qs ? `?${qs}` : ""}`);
       const result = await response.json();
 
       if (!result.success) {
@@ -50,7 +55,11 @@ export function FileOpenDialog({ onFileSelected, onCancel, initialPath }: FileOp
 
       setCurrentPath(result.path);
       setPathInput(result.path);
-      setEntries(result.entries);
+      // In directory mode, only show directories (no files)
+      setEntries(isDirectoryMode
+        ? result.entries.filter((e: DirectoryEntry) => e.type === "directory")
+        : result.entries
+      );
 
       // Remember last browsed path
       try {
@@ -61,7 +70,7 @@ export function FileOpenDialog({ onFileSelected, onCancel, initialPath }: FileOp
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isDirectoryMode]);
 
   // Load initial directory on mount
   useEffect(() => {
@@ -145,7 +154,7 @@ export function FileOpenDialog({ onFileSelected, onCancel, initialPath }: FileOp
           <svg className="w-5 h-5 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
           </svg>
-          <h2 className="text-sm font-medium text-neutral-200">Open Workflow</h2>
+          <h2 className="text-sm font-medium text-neutral-200">{isDirectoryMode ? "Choose Directory" : "Open Workflow"}</h2>
         </div>
 
         {/* Path bar */}
@@ -200,7 +209,7 @@ export function FileOpenDialog({ onFileSelected, onCancel, initialPath }: FileOp
 
           {!loading && !error && entries.length === 0 && (
             <div className="flex items-center justify-center h-full">
-              <p className="text-neutral-500 text-sm">No folders or JSON files in this directory</p>
+              <p className="text-neutral-500 text-sm">{isDirectoryMode ? "No folders in this directory" : "No folders or JSON files in this directory"}</p>
             </div>
           )}
 
@@ -236,11 +245,15 @@ export function FileOpenDialog({ onFileSelected, onCancel, initialPath }: FileOp
         {/* Footer */}
         <div className="px-4 py-3 border-t border-neutral-700 flex items-center justify-between gap-3">
           <div className="flex-1 min-w-0">
-            {selectedFile && (
+            {isDirectoryMode ? (
+              <p className="text-xs text-neutral-400 truncate">
+                <span className="text-neutral-200">{currentPath}</span>
+              </p>
+            ) : selectedFile ? (
               <p className="text-xs text-neutral-400 truncate">
                 Selected: <span className="text-neutral-200">{selectedFile}</span>
               </p>
-            )}
+            ) : null}
           </div>
           <div className="flex gap-2 shrink-0">
             <button
@@ -249,17 +262,31 @@ export function FileOpenDialog({ onFileSelected, onCancel, initialPath }: FileOp
             >
               Cancel
             </button>
-            <button
-              onClick={handleOpen}
-              disabled={!selectedFile}
-              className={`px-4 py-1.5 text-xs rounded transition-colors ${
-                selectedFile
-                  ? "bg-blue-600 hover:bg-blue-500 text-white"
-                  : "bg-neutral-700 text-neutral-500 cursor-not-allowed"
-              }`}
-            >
-              Open
-            </button>
+            {isDirectoryMode ? (
+              <button
+                onClick={() => onFileSelected(currentPath)}
+                disabled={!currentPath}
+                className={`px-4 py-1.5 text-xs rounded transition-colors ${
+                  currentPath
+                    ? "bg-blue-600 hover:bg-blue-500 text-white"
+                    : "bg-neutral-700 text-neutral-500 cursor-not-allowed"
+                }`}
+              >
+                Select Folder
+              </button>
+            ) : (
+              <button
+                onClick={handleOpen}
+                disabled={!selectedFile}
+                className={`px-4 py-1.5 text-xs rounded transition-colors ${
+                  selectedFile
+                    ? "bg-blue-600 hover:bg-blue-500 text-white"
+                    : "bg-neutral-700 text-neutral-500 cursor-not-allowed"
+                }`}
+              >
+                Open
+              </button>
+            )}
           </div>
         </div>
       </div>

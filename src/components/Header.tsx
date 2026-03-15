@@ -256,7 +256,7 @@ export function Header() {
           >
             <img src="/banana_icon.png" alt="Banana" className="w-6 h-6" />
             <h1 className="text-2xl font-semibold text-neutral-100 tracking-tight">
-              Node Banana
+              Node Banana Capoom
             </h1>
           </button>
 

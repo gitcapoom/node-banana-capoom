@@ -286,6 +286,7 @@ describe("executeOutput", () => {
     expect(ctx.updateNodeData).toHaveBeenCalledWith("out", {
       image: "data:video/mp4;base64,abc",
       video: "data:video/mp4;base64,abc",
+      model3d: null,
       contentType: "video",
     });
   });
@@ -308,6 +309,7 @@ describe("executeOutput", () => {
     expect(ctx.updateNodeData).toHaveBeenCalledWith("out", {
       image: "data:image/png;base64,img",
       video: null,
+      model3d: null,
       contentType: "image",
     });
   });
@@ -330,6 +332,7 @@ describe("executeOutput", () => {
     expect(ctx.updateNodeData).toHaveBeenCalledWith("out", {
       image: "data:video/mp4;base64,vid",
       video: "data:video/mp4;base64,vid",
+      model3d: null,
       contentType: "video",
     });
   });
@@ -352,6 +355,7 @@ describe("executeOutput", () => {
     expect(ctx.updateNodeData).toHaveBeenCalledWith("out", {
       image: "https://fal.media/files/abc123.mp4",
       video: "https://fal.media/files/abc123.mp4",
+      model3d: null,
       contentType: "video",
     });
   });

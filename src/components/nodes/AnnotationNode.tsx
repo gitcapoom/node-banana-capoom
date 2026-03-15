@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useAnnotationStore } from "@/store/annotationStore";
@@ -15,7 +15,6 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
   const edges = useWorkflowStore((state) => state.edges);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Reactively update sourceImage when an edge is connected
   useEffect(() => {
@@ -25,64 +24,10 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
     }
   }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
 
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      if (!file.type.match(/^image\/(png|jpeg|webp)$/)) {
-        alert("Unsupported format. Use PNG, JPG, or WebP.");
-        return;
-      }
-
-      if (file.size > 10 * 1024 * 1024) {
-        alert("Image too large. Maximum size is 10MB.");
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
-        updateNodeData(id, {
-          sourceImage: base64,
-          sourceImageRef: undefined,
-          outputImage: null,
-          outputImageRef: undefined,
-          annotations: [],
-        });
-      };
-      reader.readAsDataURL(file);
-    },
-    [id, updateNodeData]
-  );
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const file = e.dataTransfer.files?.[0];
-      if (!file) return;
-
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      if (fileInputRef.current) {
-        fileInputRef.current.files = dt.files;
-        fileInputRef.current.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    },
-    []
-  );
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }, []);
-
   const handleEdit = useCallback(() => {
     const imageToEdit = nodeData.sourceImage || nodeData.outputImage;
     if (!imageToEdit) {
-      alert("No image available. Connect an image or load one manually.");
+      alert("No image available. Connect an image input.");
       return;
     }
     openModal(id, imageToEdit, nodeData.annotations);
@@ -107,14 +52,6 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
       contentClassName="flex-1 min-h-0 overflow-clip"
       aspectFitMedia={nodeData.outputImage}
     >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        onChange={handleFileChange}
-        className="hidden"
-      />
-
       <Handle
         type="target"
         position={Position.Left}
@@ -129,10 +66,7 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
       />
 
       {displayImage ? (
-        <div
-          className="relative group cursor-pointer w-full h-full"
-          onClick={handleEdit}
-        >
+        <div className="relative group w-full h-full">
           <img
             src={displayImage}
             alt="Annotated"
@@ -149,24 +83,23 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
+          {/* Edit button — only way to open the annotation editor */}
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center pointer-events-none">
-            <span className="text-xs font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 px-3 py-1.5 rounded">
+            <button
+              onClick={handleEdit}
+              className="nodrag nopan text-xs font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 px-3 py-1.5 rounded pointer-events-auto cursor-pointer hover:bg-black/80"
+            >
               {nodeData.annotations.length > 0 ? `Edit (${nodeData.annotations.length})` : "Add annotations"}
-            </span>
+            </button>
           </div>
         </div>
       ) : (
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          className="w-full h-full bg-neutral-900/40 flex flex-col items-center justify-center cursor-pointer hover:bg-neutral-800/60 transition-colors"
-        >
-          <svg className="w-8 h-8 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+        <div className="w-full h-full bg-neutral-900/40 flex flex-col items-center justify-center">
+          <svg className="w-6 h-6 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
           </svg>
-          <span className="text-xs text-neutral-500 mt-2">
-            Drop, click, or connect
+          <span className="text-[10px] text-neutral-500 mt-1">
+            Connect an image
           </span>
         </div>
       )}

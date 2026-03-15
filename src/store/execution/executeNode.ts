@@ -16,6 +16,7 @@ import {
   executeOutput,
   executeOutputGallery,
   executeImageCompare,
+  executeVideoCompare,
   executeGlbViewer,
   executeSpzViewer,
 } from "./simpleNodeExecutors";
@@ -100,6 +101,9 @@ export async function executeNode(
       break;
     case "imageCompare":
       await executeImageCompare(ctx);
+      break;
+    case "videoCompare":
+      await executeVideoCompare(ctx);
       break;
     case "videoStitch":
       await executeVideoStitch(ctx);

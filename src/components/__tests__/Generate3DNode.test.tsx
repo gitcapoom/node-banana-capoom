@@ -65,6 +65,17 @@ vi.mock("react-dom", async () => {
   };
 });
 
+// Mock ThreeModelViewer (requires WebGL which isn't available in jsdom)
+vi.mock("@/components/ThreeModelViewer", () => ({
+  ThreeModelViewer: () => null,
+}));
+
+// Mock saveMediaImmediately
+vi.mock("@/utils/mediaStorage", () => ({
+  saveMediaImmediately: vi.fn().mockResolvedValue(null),
+  loadMediaById: vi.fn().mockResolvedValue(null),
+}));
+
 // Mock fetch
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -85,10 +96,12 @@ describe("Generate3DNode", () => {
       const state = {
         updateNodeData: mockUpdateNodeData,
         regenerateNode: mockRegenerateNode,
+        addNode: vi.fn(),
         isRunning: false,
         currentNodeIds: [],
         groups: {},
         nodes: [],
+        edges: [],
         recentModels: [],
         trackModelUsage: vi.fn(),
         incrementModalCount: vi.fn(),
@@ -97,6 +110,7 @@ describe("Generate3DNode", () => {
         markCommentViewed: vi.fn(),
         setNavigationTarget: vi.fn(),
         generationsPath: null,
+        saveDirectoryPath: null,
       };
       return selector(state);
     });
@@ -176,15 +190,18 @@ describe("Generate3DNode", () => {
   });
 
   describe("Output States", () => {
-    it("should show 3D model generated indicator when output exists", () => {
-      render(
+    it("should show 3D output area with clear button when output exists", () => {
+      const { container } = render(
         <TestWrapper>
           <Generate3DNode {...createNodeProps({ output3dUrl: "https://example.com/model.glb" })} />
         </TestWrapper>
       );
 
-      expect(screen.getByText("3D Model Generated")).toBeInTheDocument();
-      expect(screen.getByText("Connect to 3D Viewer")).toBeInTheDocument();
+      // Should show the clear button
+      expect(screen.getByTitle("Clear 3D model")).toBeInTheDocument();
+
+      // Should show "double click to view" hint
+      expect(screen.getByText("double click to view")).toBeInTheDocument();
     });
 
     it("should show error message when status is error", () => {

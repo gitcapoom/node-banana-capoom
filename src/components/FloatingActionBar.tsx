@@ -15,9 +15,6 @@ const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: str
       { type: "imageInput", label: "Image Input" },
       { type: "videoInput", label: "Video Input" },
       { type: "audioInput", label: "Audio Input" },
-      { type: "glbViewer", label: "3D Viewer" },
-      { type: "spzViewer", label: "Gaussian Splat Viewer" },
-      { type: "panoViewer", label: "Pano Viewer" },
     ],
   },
   {
@@ -52,6 +49,7 @@ const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: str
       { type: "easeCurve", label: "Ease Curve" },
       { type: "videoFrameGrab", label: "Frame Grab" },
       { type: "imageCompare", label: "Image Compare" },
+      { type: "videoCompare", label: "Video Compare" },
     ],
   },
   {
@@ -67,6 +65,14 @@ const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: str
     nodes: [
       { type: "output", label: "Output" },
       { type: "outputGallery", label: "Output Gallery" },
+    ],
+  },
+  {
+    label: "View",
+    nodes: [
+      { type: "glbViewer", label: "3D Viewer" },
+      { type: "spzViewer", label: "Gaussian Splat Viewer" },
+      { type: "panoViewer", label: "Pano Viewer" },
     ],
   },
 ];

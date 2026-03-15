@@ -7,7 +7,7 @@
  * Provides a draggable/resizable rectangle overlay for selecting a crop region.
  * On capture, extracts a perspective view at the rectangle's position using
  * equirectangular projection math, and sends the result + metadata back to
- * the parent window (Node Banana) via postMessage.
+ * the parent window (Node Banana Capoom) via postMessage.
  *
  * URL params:
  *   - url: equirectangular image URL or base64

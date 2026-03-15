@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { AnnotationNode } from "@/components/nodes/AnnotationNode";
 import { ReactFlowProvider } from "@xyflow/react";
@@ -34,23 +34,6 @@ vi.mock("@/store/annotationStore", () => ({
 // Mock alert
 const mockAlert = vi.fn();
 
-// Mock DataTransfer
-class MockDataTransfer {
-  items: { add: (file: File) => void };
-  private _files: File[] = [];
-  get files() {
-    const fileList = Object.assign(this._files, {
-      item: (index: number) => this._files[index] || null,
-    });
-    return fileList as unknown as FileList;
-  }
-  constructor() {
-    this.items = {
-      add: (file: File) => this._files.push(file),
-    };
-  }
-}
-
 // Wrapper component for React Flow context
 function TestWrapper({ children }: { children: ReactNode }) {
   return <ReactFlowProvider>{children}</ReactFlowProvider>;
@@ -59,7 +42,6 @@ function TestWrapper({ children }: { children: ReactNode }) {
 describe("AnnotationNode", () => {
   beforeAll(() => {
     vi.stubGlobal("alert", mockAlert);
-    vi.stubGlobal("DataTransfer", MockDataTransfer);
   });
 
   afterAll(() => {
@@ -76,6 +58,8 @@ describe("AnnotationNode", () => {
         currentNodeIds: [],
         groups: {},
         nodes: [],
+        edges: [],
+        getConnectedInputs: vi.fn(() => ({ images: [], text: null, dynamicInputs: {} })),
         getNodesWithComments: vi.fn(() => []),
         markCommentViewed: vi.fn(),
         setNavigationTarget: vi.fn(),
@@ -135,25 +119,26 @@ describe("AnnotationNode", () => {
   });
 
   describe("Empty State", () => {
-    it("should show empty state message when no image", () => {
+    it("should show 'Connect an image' message when no image", () => {
       render(
         <TestWrapper>
           <AnnotationNode {...createNodeProps({ sourceImage: null, outputImage: null })} />
         </TestWrapper>
       );
 
-      expect(screen.getByText("Drop, click, or connect")).toBeInTheDocument();
+      expect(screen.getByText("Connect an image")).toBeInTheDocument();
     });
 
-    it("should render drop zone when no image", () => {
-      render(
+    it("should not have any clickable/droppable empty state", () => {
+      const { container } = render(
         <TestWrapper>
           <AnnotationNode {...createNodeProps()} />
         </TestWrapper>
       );
 
-      const dropZone = screen.getByText("Drop, click, or connect").parentElement!;
-      expect(dropZone).toBeInTheDocument();
+      // No file input should exist
+      const fileInput = container.querySelector('input[type="file"]');
+      expect(fileInput).not.toBeInTheDocument();
     });
   });
 
@@ -237,7 +222,7 @@ describe("AnnotationNode", () => {
       expect(screen.getByText("Edit (2)")).toBeInTheDocument();
     });
 
-    it("should open annotation modal when image is clicked", () => {
+    it("should open annotation modal when edit button is clicked", () => {
       render(
         <TestWrapper>
           <AnnotationNode {...createNodeProps({
@@ -247,8 +232,8 @@ describe("AnnotationNode", () => {
         </TestWrapper>
       );
 
-      const img = screen.getByAltText("Annotated");
-      fireEvent.click(img.parentElement!);
+      const editButton = screen.getByText("Add annotations");
+      fireEvent.click(editButton);
 
       expect(mockOpenModal).toHaveBeenCalledWith(
         "test-annotation-1",
@@ -271,8 +256,8 @@ describe("AnnotationNode", () => {
         </TestWrapper>
       );
 
-      const img = screen.getByAltText("Annotated");
-      fireEvent.click(img.parentElement!);
+      const editButton = screen.getByText("Edit (1)");
+      fireEvent.click(editButton);
 
       expect(mockOpenModal).toHaveBeenCalledWith(
         "test-annotation-1",
@@ -281,18 +266,15 @@ describe("AnnotationNode", () => {
       );
     });
 
-    it("should show alert when trying to edit without an image", () => {
-      // Test when trying to trigger edit without image
-      // The handleEdit function alerts when there's no image
+    it("should show connect message when trying to edit without an image", () => {
+      // When no image, empty state shows "Connect an image" instead of edit controls
       render(
         <TestWrapper>
           <AnnotationNode {...createNodeProps({ sourceImage: null, outputImage: null })} />
         </TestWrapper>
       );
 
-      // Empty state doesn't have the clickable edit area
-      // But we can verify the empty state is shown
-      expect(screen.getByText("Drop, click, or connect")).toBeInTheDocument();
+      expect(screen.getByText("Connect an image")).toBeInTheDocument();
     });
   });
 
@@ -345,8 +327,8 @@ describe("AnnotationNode", () => {
     });
   });
 
-  describe("File Upload", () => {
-    it("should render hidden file input", () => {
+  describe("Input-only (no file upload/drop)", () => {
+    it("should not render any file input element", () => {
       const { container } = render(
         <TestWrapper>
           <AnnotationNode {...createNodeProps()} />
@@ -354,138 +336,23 @@ describe("AnnotationNode", () => {
       );
 
       const fileInput = container.querySelector('input[type="file"]');
-      expect(fileInput).toBeInTheDocument();
-      expect(fileInput).toHaveClass("hidden");
+      expect(fileInput).not.toBeInTheDocument();
     });
 
-    it("should trigger file input click when drop zone is clicked", () => {
-      render(
+    it("should not have any clickable drop zone in empty state", () => {
+      const { container } = render(
         <TestWrapper>
           <AnnotationNode {...createNodeProps()} />
         </TestWrapper>
       );
 
-      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-      const clickSpy = vi.spyOn(fileInput, "click");
+      // The empty state should show "Connect an image" and not be interactive
+      const connectText = screen.getByText("Connect an image");
+      expect(connectText).toBeInTheDocument();
 
-      const dropZone = screen.getByText("Drop, click, or connect").parentElement!;
-      fireEvent.click(dropZone);
-
-      expect(clickSpy).toHaveBeenCalled();
-    });
-
-    it("should process valid image file and call updateNodeData", async () => {
-      // Mock FileReader using vi.stubGlobal for proper cleanup
-      const mockReadAsDataURL = vi.fn();
-      class MockFileReader {
-        onload: ((event: ProgressEvent<FileReader>) => void) | null = null;
-        result: string = "data:image/png;base64,uploadedImage";
-        readAsDataURL(file: Blob) {
-          mockReadAsDataURL(file);
-          setTimeout(() => {
-            this.onload?.({ target: { result: this.result } } as ProgressEvent<FileReader>);
-          }, 0);
-        }
-      }
-      vi.stubGlobal("FileReader", MockFileReader);
-
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-      const file = new File(["test"], "test.png", { type: "image/png" });
-      Object.defineProperty(fileInput, "files", { value: [file] });
-
-      fireEvent.change(fileInput);
-
-      await waitFor(() => {
-        expect(mockUpdateNodeData).toHaveBeenCalledWith("test-annotation-1", {
-          sourceImage: "data:image/png;base64,uploadedImage",
-          sourceImageRef: undefined,
-          outputImage: null,
-          outputImageRef: undefined,
-          annotations: [],
-        });
-      });
-
-      // Restore FileReader
-      vi.unstubAllGlobals();
-      // Re-stub the globals we need for other tests
-      vi.stubGlobal("alert", mockAlert);
-      vi.stubGlobal("DataTransfer", MockDataTransfer);
-    });
-
-    it("should reject non-image file types", () => {
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-      const file = new File(["test"], "test.txt", { type: "text/plain" });
-      Object.defineProperty(fileInput, "files", { value: [file] });
-
-      fireEvent.change(fileInput);
-
-      expect(mockAlert).toHaveBeenCalledWith("Unsupported format. Use PNG, JPG, or WebP.");
-      expect(mockUpdateNodeData).not.toHaveBeenCalled();
-    });
-
-    it("should reject files larger than 10MB", () => {
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-      const file = new File([""], "large.png", { type: "image/png" });
-      Object.defineProperty(file, "size", { value: 11 * 1024 * 1024 });
-      Object.defineProperty(fileInput, "files", { value: [file] });
-
-      fireEvent.change(fileInput);
-
-      expect(mockAlert).toHaveBeenCalledWith("Image too large. Maximum size is 10MB.");
-      expect(mockUpdateNodeData).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("Drag and Drop", () => {
-    it("should handle dragOver event", () => {
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const dropZone = screen.getByText("Drop, click, or connect").parentElement!;
-
-      // Use fireEvent.dragOver for idiomatic testing
-      fireEvent.dragOver(dropZone);
-
-      // Should handle without error
-      expect(dropZone).toBeInTheDocument();
-    });
-
-    it("should handle drop event with empty files", () => {
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps()} />
-        </TestWrapper>
-      );
-
-      const dropZone = screen.getByText("Drop, click, or connect").parentElement!;
-
-      fireEvent.drop(dropZone, {
-        dataTransfer: { files: [] },
-      });
-
-      // Should handle gracefully without updating node data
-      expect(mockUpdateNodeData).not.toHaveBeenCalled();
+      // Verify no cursor-pointer on the container
+      const emptyContainer = connectText.parentElement!;
+      expect(emptyContainer.className).not.toContain("cursor-pointer");
     });
   });
 

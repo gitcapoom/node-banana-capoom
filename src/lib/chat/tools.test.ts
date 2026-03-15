@@ -91,11 +91,11 @@ function buildSimpleContext(): WorkflowContext {
 
 describe("buildEditSystemPrompt", () => {
   describe("basic prompt structure", () => {
-    it("returns string containing Node Banana domain expertise", () => {
+    it("returns string containing Node Banana Capoom domain expertise", () => {
       const context = buildWorkflowContext([], []);
       const prompt = buildEditSystemPrompt(context);
 
-      expect(prompt).toContain("Node Banana");
+      expect(prompt).toContain("Node Banana Capoom");
     });
 
     it("contains CURRENT WORKFLOW section", () => {

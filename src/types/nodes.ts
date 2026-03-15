@@ -39,6 +39,7 @@ export type NodeType =
   | "output"
   | "outputGallery"
   | "imageCompare"
+  | "videoCompare"
   | "videoStitch"
   | "easeCurve"
   | "videoTrim"
@@ -87,6 +88,9 @@ export interface AudioInputNodeData extends BaseNodeData {
  */
 export interface VideoInputNodeData extends BaseNodeData {
   videoFile: string | null;      // Base64 data URL of the video file
+  videoFileRef?: string;         // External ref to video saved in inputs/
+  thumbnailImage?: string | null; // First frame thumbnail for canvas display
+  thumbnailImageRef?: string;    // External ref to thumbnail saved in inputs/
   filename: string | null;       // Original filename for display
   duration: number | null;       // Duration in seconds
   format: string | null;         // MIME type (video/mp4, video/webm, etc.)
@@ -225,6 +229,7 @@ export interface GenerateVideoNodeData extends BaseNodeData {
   outputVideo: string | null; // Video data URL or URL
   outputVideoRef?: string; // External video reference for storage optimization
   thumbnailImage?: string | null; // First frame thumbnail for canvas display
+  thumbnailImageRef?: string; // External ref to thumbnail saved in generations/
   selectedModel?: SelectedModel; // Required for video generation (no legacy fallback)
   parameters?: Record<string, unknown>; // Model-specific parameters
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles
@@ -247,6 +252,7 @@ export interface Generate3DNodeData extends BaseNodeData {
   savedFilename: string | null;
   savedFilePath: string | null;
   thumbnailImage?: string | null; // Input image or prompt-based thumbnail for canvas display
+  thumbnailImageRef?: string;    // External ref to thumbnail saved in generations/
   selectedModel?: SelectedModel;
   parameters?: Record<string, unknown>;
   inputSchema?: ModelInputDef[];
@@ -256,6 +262,11 @@ export interface Generate3DNodeData extends BaseNodeData {
   model3dHistory: Carousel3DItem[]; // Carousel history (IDs only)
   selectedModel3dHistoryIndex: number; // Currently selected 3D model in carousel
   lastGenerationCost?: number | null; // Cost of the last generation run
+  // Camera settings for 3D viewer overlay
+  sensorIndex?: number;      // Index into SENSOR_PRESETS (default 0 = Super 35mm)
+  lensIndex?: number;        // Index into LENS_FOCAL_LENGTHS (default 5 = 35mm)
+  aspectIndex?: number;      // Index into ASPECT_RATIO_PRESETS (default 2 = 16:9)
+  showGrid?: boolean;        // 3D grid visibility (default false)
 }
 
 /**
@@ -398,6 +409,18 @@ export interface OutputGalleryNodeData extends BaseNodeData {
 export interface ImageCompareNodeData extends BaseNodeData {
   imageA: string | null;
   imageB: string | null;
+  compareMode: "slide" | "blend" | "difference";
+  blendOpacity: number;
+}
+
+/**
+ * Video Compare node - side-by-side video comparison with slider, blend, and difference modes
+ */
+export interface VideoCompareNodeData extends BaseNodeData {
+  videoA: string | null;
+  videoB: string | null;
+  compareMode: "slide" | "blend" | "difference";
+  blendOpacity: number;
 }
 
 /**
@@ -540,8 +563,17 @@ export interface SplitGridNodeData extends BaseNodeData {
  */
 export interface GLBViewerNodeData extends BaseNodeData {
   glbUrl: string | null;       // Object URL for the loaded GLB file
+  glbFileRef?: string;         // External ref for the GLB file (persisted to disk)
   filename: string | null;     // Original filename for display
   capturedImage: string | null; // Base64 PNG snapshot of the 3D viewport
+  capturedImageRef?: string;   // External ref for capturedImage
+  thumbnailImage?: string | null; // Auto-generated thumbnail for canvas display
+  thumbnailImageRef?: string;  // External ref for thumbnail
+  // Camera settings for 3D viewer overlay
+  sensorIndex?: number;      // Index into SENSOR_PRESETS (default 0 = Super 35mm)
+  lensIndex?: number;        // Index into LENS_FOCAL_LENGTHS (default 5 = 35mm)
+  aspectIndex?: number;      // Index into ASPECT_RATIO_PRESETS (default 2 = 16:9)
+  showGrid?: boolean;        // 3D grid visibility (default false)
 }
 
 /**
@@ -551,7 +583,9 @@ export interface SpzViewerNodeData extends BaseNodeData {
   spzUrl: string | null;         // SPZ/PLY file URL (HTTP or blob)
   filename: string | null;       // Display name
   capturedImage: string | null;  // Latest captured screenshot from viewer
+  capturedImageRef?: string;     // External ref for capturedImage
   capturedDepthImage: string | null; // Depth map from latest capture (grayscale)
+  capturedDepthImageRef?: string; // External ref for capturedDepthImage
   viewerOpen: boolean;           // Whether the viewer window is currently open
 }
 
@@ -570,6 +604,7 @@ export interface PanoViewerNodeData extends BaseNodeData {
  */
 export interface PanoCropNodeData extends BaseNodeData {
   image: string | null;            // Perspective snapshot (base64)
+  imageRef?: string;               // External ref for externalized crop image
   metadata: string | null;         // JSON-serialized PanoCropMetadata
   filename: string | null;
   dimensions: { width: number; height: number } | null;
@@ -606,6 +641,7 @@ export type WorkflowNodeData =
   | OutputNodeData
   | OutputGalleryNodeData
   | ImageCompareNodeData
+  | VideoCompareNodeData
   | VideoStitchNodeData
   | EaseCurveNodeData
   | VideoTrimNodeData

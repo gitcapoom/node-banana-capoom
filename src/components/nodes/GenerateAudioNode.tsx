@@ -14,6 +14,7 @@ import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { browseRegistry } from "@/utils/browseRegistry";
+import { MediaOverlay } from "../MediaOverlay";
 
 type GenerateAudioNodeType = Node<GenerateAudioNodeData, "generateAudio">;
 
@@ -23,6 +24,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   const [isBrowseDialogOpen, setIsBrowseDialogOpen] = useState(false);
   const [isLoadingCarouselAudio, setIsLoadingCarouselAudio] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
@@ -143,46 +145,45 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
     }
   }, [generationsPath]);
 
-  // Carousel navigation handlers
-  const handleCarouselPrevious = useCallback(async () => {
+  // Navigate carousel and recall settings from the history item
+  const navigateCarousel = useCallback(async (newIndex: number) => {
     const history = nodeData.audioHistory || [];
     if (history.length === 0 || isLoadingCarouselAudio) return;
 
-    const currentIndex = nodeData.selectedAudioHistoryIndex || 0;
-    const newIndex = currentIndex === 0 ? history.length - 1 : currentIndex - 1;
     const audioItem = history[newIndex];
-
     setIsLoadingCarouselAudio(true);
     const audio = await loadAudioById(audioItem.id);
     setIsLoadingCarouselAudio(false);
 
     if (audio) {
-      updateNodeData(id, {
+      // Recall stored settings from the history item
+      const settingsUpdate: Record<string, unknown> = {
         outputAudio: audio,
         selectedAudioHistoryIndex: newIndex,
-      });
+      };
+      if (audioItem.prompt !== undefined) settingsUpdate.inputPrompt = audioItem.prompt;
+      if (audioItem.selectedModel) settingsUpdate.selectedModel = audioItem.selectedModel;
+      if (audioItem.parameters) settingsUpdate.parameters = audioItem.parameters;
+
+      updateNodeData(id, settingsUpdate);
     }
-  }, [id, nodeData.audioHistory, nodeData.selectedAudioHistoryIndex, isLoadingCarouselAudio, loadAudioById, updateNodeData]);
+  }, [id, nodeData.audioHistory, isLoadingCarouselAudio, loadAudioById, updateNodeData]);
+
+  const handleCarouselPrevious = useCallback(async () => {
+    const history = nodeData.audioHistory || [];
+    if (history.length === 0) return;
+    const currentIndex = nodeData.selectedAudioHistoryIndex || 0;
+    const newIndex = currentIndex === 0 ? history.length - 1 : currentIndex - 1;
+    await navigateCarousel(newIndex);
+  }, [nodeData.audioHistory, nodeData.selectedAudioHistoryIndex, navigateCarousel]);
 
   const handleCarouselNext = useCallback(async () => {
     const history = nodeData.audioHistory || [];
-    if (history.length === 0 || isLoadingCarouselAudio) return;
-
+    if (history.length === 0) return;
     const currentIndex = nodeData.selectedAudioHistoryIndex || 0;
     const newIndex = (currentIndex + 1) % history.length;
-    const audioItem = history[newIndex];
-
-    setIsLoadingCarouselAudio(true);
-    const audio = await loadAudioById(audioItem.id);
-    setIsLoadingCarouselAudio(false);
-
-    if (audio) {
-      updateNodeData(id, {
-        outputAudio: audio,
-        selectedAudioHistoryIndex: newIndex,
-      });
-    }
-  }, [id, nodeData.audioHistory, nodeData.selectedAudioHistoryIndex, isLoadingCarouselAudio, loadAudioById, updateNodeData]);
+    await navigateCarousel(newIndex);
+  }, [nodeData.audioHistory, nodeData.selectedAudioHistoryIndex, navigateCarousel]);
 
   const handleBrowseModelSelect = useCallback((model: ProviderModel) => {
     const newSelectedModel: SelectedModel = {
@@ -292,7 +293,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
 
         {/* Output audio player */}
         {nodeData.outputAudio && (
-          <div className="relative group mt-2">
+          <div className="relative group mt-2" onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}>
             {/* Waveform visualization */}
             {isLoadingWaveform ? (
               <div className="flex items-center justify-center bg-neutral-900/50 rounded h-16">
@@ -385,6 +386,10 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
+            {/* Double-click hint — always visible */}
+            <div className="text-center mt-1">
+              <span className="text-[10px] text-white/30">double click to view</span>
+            </div>
           </div>
         )}
 
@@ -435,6 +440,18 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
           onModelSelected={handleBrowseModelSelect}
           initialProvider={currentProvider}
           initialCapabilityFilter="audio"
+        />
+      )}
+      {showOverlay && nodeData.outputAudio && (
+        <MediaOverlay
+          content={nodeData.outputAudio}
+          mediaType="audio"
+          currentIndex={nodeData.selectedAudioHistoryIndex || 0}
+          totalCount={(nodeData.audioHistory || []).length}
+          isLoading={isLoadingCarouselAudio}
+          onPrevious={handleCarouselPrevious}
+          onNext={handleCarouselNext}
+          onClose={() => setShowOverlay(false)}
         />
       )}
     </>

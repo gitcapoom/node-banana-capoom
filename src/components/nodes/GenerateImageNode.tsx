@@ -15,6 +15,7 @@ import { ProviderBadge } from "./ProviderBadge";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { browseRegistry } from "@/utils/browseRegistry";
+import { MediaOverlay } from "../MediaOverlay";
 
 /** Reorder items so they read column-first in a row-based CSS grid.
  *  e.g. [1,2,3,4,5,6,7,8] with 2 cols → [1,5,2,6,3,7,4,8] */
@@ -59,6 +60,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   // Use stable selector for API keys to prevent unnecessary re-fetches
   const { replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const [isLoadingCarouselImage, setIsLoadingCarouselImage] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelsFetchError, setModelsFetchError] = useState<string | null>(null);
@@ -339,45 +341,50 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     }
   }, [generationsPath]);
 
-  const handleCarouselPrevious = useCallback(async () => {
+  // Navigate carousel and recall settings from the history item
+  const navigateCarousel = useCallback(async (newIndex: number) => {
     const history = nodeData.imageHistory || [];
     if (history.length === 0 || isLoadingCarouselImage) return;
 
-    const currentIndex = nodeData.selectedHistoryIndex || 0;
-    const newIndex = currentIndex === 0 ? history.length - 1 : currentIndex - 1;
     const imageItem = history[newIndex];
-
     setIsLoadingCarouselImage(true);
     const image = await loadImageById(imageItem.id);
     setIsLoadingCarouselImage(false);
 
     if (image) {
-      updateNodeData(id, {
+      // Recall stored settings from the history item
+      const settingsUpdate: Record<string, unknown> = {
         outputImage: image,
         selectedHistoryIndex: newIndex,
-      });
+      };
+      if (imageItem.prompt !== undefined) settingsUpdate.inputPrompt = imageItem.prompt;
+      if (imageItem.aspectRatio) settingsUpdate.aspectRatio = imageItem.aspectRatio;
+      if (imageItem.model) settingsUpdate.model = imageItem.model;
+      if (imageItem.resolution) settingsUpdate.resolution = imageItem.resolution;
+      if (imageItem.selectedModel) settingsUpdate.selectedModel = imageItem.selectedModel;
+      if (imageItem.parameters) settingsUpdate.parameters = imageItem.parameters;
+      if (imageItem.useGoogleSearch !== undefined) settingsUpdate.useGoogleSearch = imageItem.useGoogleSearch;
+      if (imageItem.useImageSearch !== undefined) settingsUpdate.useImageSearch = imageItem.useImageSearch;
+
+      updateNodeData(id, settingsUpdate);
     }
-  }, [id, nodeData.imageHistory, nodeData.selectedHistoryIndex, isLoadingCarouselImage, loadImageById, updateNodeData]);
+  }, [id, nodeData.imageHistory, isLoadingCarouselImage, loadImageById, updateNodeData]);
+
+  const handleCarouselPrevious = useCallback(async () => {
+    const history = nodeData.imageHistory || [];
+    if (history.length === 0) return;
+    const currentIndex = nodeData.selectedHistoryIndex || 0;
+    const newIndex = currentIndex === 0 ? history.length - 1 : currentIndex - 1;
+    await navigateCarousel(newIndex);
+  }, [nodeData.imageHistory, nodeData.selectedHistoryIndex, navigateCarousel]);
 
   const handleCarouselNext = useCallback(async () => {
     const history = nodeData.imageHistory || [];
-    if (history.length === 0 || isLoadingCarouselImage) return;
-
+    if (history.length === 0) return;
     const currentIndex = nodeData.selectedHistoryIndex || 0;
     const newIndex = (currentIndex + 1) % history.length;
-    const imageItem = history[newIndex];
-
-    setIsLoadingCarouselImage(true);
-    const image = await loadImageById(imageItem.id);
-    setIsLoadingCarouselImage(false);
-
-    if (image) {
-      updateNodeData(id, {
-        outputImage: image,
-        selectedHistoryIndex: newIndex,
-      });
-    }
-  }, [id, nodeData.imageHistory, nodeData.selectedHistoryIndex, isLoadingCarouselImage, loadImageById, updateNodeData]);
+    await navigateCarousel(newIndex);
+  }, [nodeData.imageHistory, nodeData.selectedHistoryIndex, navigateCarousel]);
 
   // Handle model selection from browse dialog
   const handleBrowseModelSelect = useCallback((model: ProviderModel) => {
@@ -686,7 +693,8 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
             <img
               src={nodeData.outputImage}
               alt="Generated"
-              className="w-full h-full object-contain"
+              className="w-full h-full object-contain cursor-pointer"
+              onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}
             />
             {/* Loading overlay for generation */}
             {nodeData.status === "loading" && (
@@ -765,8 +773,8 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
               </button>
             </div>
 
-            {/* Carousel controls - overlaid on image bottom */}
-            {hasCarouselImages && (
+            {/* Carousel controls OR double-click hint — never both */}
+            {hasCarouselImages ? (
               <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-2 py-1.5 bg-neutral-900/60 backdrop-blur-sm">
                 <button
                   onClick={handleCarouselPrevious}
@@ -791,6 +799,10 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
+              </div>
+            ) : nodeData.status !== "loading" && (
+              <div className="absolute bottom-0 left-0 right-0 text-center py-1 bg-neutral-900/40">
+                <span className="text-[10px] text-white/30">double click to view</span>
               </div>
             )}
           </>
@@ -838,6 +850,18 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
         onClose={() => setIsBrowseDialogOpen(false)}
         onModelSelected={handleBrowseModelSelect}
         initialCapabilityFilter="image"
+      />
+    )}
+    {showOverlay && nodeData.outputImage && (
+      <MediaOverlay
+        content={nodeData.outputImage}
+        mediaType="image"
+        currentIndex={nodeData.selectedHistoryIndex || 0}
+        totalCount={(nodeData.imageHistory || []).length}
+        isLoading={isLoadingCarouselImage}
+        onPrevious={handleCarouselPrevious}
+        onNext={handleCarouselNext}
+        onClose={() => setShowOverlay(false)}
       />
     )}
     </>

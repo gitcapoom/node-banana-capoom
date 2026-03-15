@@ -38,6 +38,7 @@ import {
   OutputNode,
   OutputGalleryNode,
   ImageCompareNode,
+  VideoCompareNode,
   VideoStitchNode,
   EaseCurveNode,
   WorldLabsPanoNode,
@@ -98,6 +99,7 @@ const nodeTypes: NodeTypes = {
   output: OutputNode,
   outputGallery: OutputGalleryNode,
   imageCompare: ImageCompareNode,
+  videoCompare: VideoCompareNode,
   videoStitch: VideoStitchNode,
   easeCurve: EaseCurveNode,
   videoTrim: VideoTrimNode,
@@ -181,6 +183,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image"], outputs: [] };
     case "imageCompare":
       return { inputs: ["image"], outputs: [] };
+    case "videoCompare":
+      return { inputs: ["video"], outputs: [] };
     case "videoStitch":
       return { inputs: ["video", "audio"], outputs: ["video"] };
     case "easeCurve":
@@ -199,7 +203,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       // Conditional Switch has one text input and dynamic rule outputs + default
       return { inputs: ["text"], outputs: [] }; // Outputs handled dynamically in ConditionalSwitchNode
     case "glbViewer":
-      return { inputs: ["3d"], outputs: ["image"] };
+      return { inputs: ["image"], outputs: [] };
     case "spzViewer":
       return { inputs: ["3d"], outputs: ["image"] };
     case "worldLabsPano":
@@ -406,6 +410,7 @@ export function WorkflowCanvas() {
     output: 'Output',
     outputGallery: 'Output Gallery',
     imageCompare: 'Image Compare',
+    videoCompare: 'Video Compare',
     videoStitch: 'Video Stitch',
     easeCurve: 'Ease Curve',
     videoTrim: 'Video Trim',
@@ -567,7 +572,7 @@ export function WorkflowCanvas() {
         if (!targetNode) return false;
 
         const targetNodeType = targetNode.type;
-        if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "easeCurve" || targetNodeType === "videoTrim" || targetNodeType === "videoFrameGrab" || targetNodeType === "output" || targetNodeType === "router") {
+        if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "videoCompare" || targetNodeType === "easeCurve" || targetNodeType === "videoTrim" || targetNodeType === "videoFrameGrab" || targetNodeType === "output" || targetNodeType === "router") {
           // For output node, we allow video even though its handle is typed as "image"
           // because output node can display both images and videos
           return true;
@@ -606,7 +611,7 @@ export function WorkflowCanvas() {
     (connection: Connection) => {
       if (!isValidConnection(connection)) return;
 
-      // For imageCompare nodes, redirect to the second handle if the first is occupied
+      // For imageCompare/videoCompare nodes, redirect to the second handle if the first is occupied
       const resolveImageCompareHandle = (conn: Connection, batchUsed?: Set<string>): Connection => {
         const targetNode = nodes.find((n) => n.id === conn.target);
         if (targetNode?.type === "imageCompare" && conn.targetHandle === "image") {
@@ -615,6 +620,14 @@ export function WorkflowCanvas() {
           ) || batchUsed?.has("image");
           if (imageOccupied) {
             return { ...conn, targetHandle: "image-1" };
+          }
+        }
+        if (targetNode?.type === "videoCompare" && conn.targetHandle === "video") {
+          const videoOccupied = edges.some(
+            (e) => e.target === conn.target && e.targetHandle === "video"
+          ) || batchUsed?.has("video");
+          if (videoOccupied) {
+            return { ...conn, targetHandle: "video-1" };
           }
         }
         return conn;
@@ -818,6 +831,17 @@ export function WorkflowCanvas() {
         if (node.type === "videoStitch" && needInput && handleType === "video") {
           for (let i = 0; i < 50; i++) {
             const candidateHandle = `video-${i}`;
+            const isOccupied = edges.some(
+              (edge) => edge.target === node.id && edge.targetHandle === candidateHandle
+            ) || batchUsed?.has(candidateHandle);
+            if (!isOccupied) return candidateHandle;
+          }
+          return null;
+        }
+
+        // VideoCompare has two video input handles (video, video-1)
+        if (node.type === "videoCompare" && needInput && handleType === "video") {
+          for (const candidateHandle of ["video", "video-1"]) {
             const isOccupied = edges.some(
               (edge) => edge.target === node.id && edge.targetHandle === candidateHandle
             ) || batchUsed?.has(candidateHandle);
@@ -1182,7 +1206,9 @@ export function WorkflowCanvas() {
           sourceHandleIdForNewNode = "default";
         }
       } else if (handleType === "image") {
-        if (nodeType === "annotation" || nodeType === "maskPainter" || nodeType === "output" || nodeType === "splitGrid" || nodeType === "outputGallery" || nodeType === "imageCompare") {
+        if (nodeType === "output") {
+          targetHandleId = "universal";
+        } else if (nodeType === "annotation" || nodeType === "maskPainter" || nodeType === "splitGrid" || nodeType === "outputGallery" || nodeType === "imageCompare") {
           targetHandleId = "image";
           // annotation and maskPainter also have an image output
           if (nodeType === "annotation" || nodeType === "maskPainter") {
@@ -1225,9 +1251,12 @@ export function WorkflowCanvas() {
         } else if (nodeType === "generateVideo") {
           // GenerateVideo outputs video
           sourceHandleIdForNewNode = "video";
+        } else if (nodeType === "videoCompare") {
+          // VideoCompare accepts video input
+          targetHandleId = "video";
         } else if (nodeType === "output") {
-          // Output accepts video on its image handle (it detects video content type)
-          targetHandleId = "image";
+          // Output accepts all media types on its universal handle
+          targetHandleId = "universal";
         }
       } else if (handleType === "audio") {
         if (nodeType === "audioInput") {
@@ -1241,12 +1270,14 @@ export function WorkflowCanvas() {
           // VideoStitch accepts audio
           targetHandleId = "audio";
         } else if (nodeType === "output") {
-          // Output accepts audio on its audio handle
-          targetHandleId = "audio";
+          // Output accepts all media types on its universal handle
+          targetHandleId = "universal";
         }
       } else if (handleType === "3d") {
         if (nodeType === "glbViewer") {
           targetHandleId = "3d";
+        } else if (nodeType === "output") {
+          targetHandleId = "universal";
         } else if (nodeType === "nanoBanana") {
           sourceHandleIdForNewNode = "3d";
         }
@@ -1268,10 +1299,13 @@ export function WorkflowCanvas() {
 
         selectedNodes.forEach((node) => {
           if (connectionType === "source" && targetHandleId) {
-            // For imageCompare, alternate between image and image-1
+            // For imageCompare/videoCompare, alternate between first and second handle
             let resolvedTargetHandle = targetHandleId;
             if (nodeType === "imageCompare" && targetHandleId === "image" && batchUsed.has("image")) {
               resolvedTargetHandle = "image-1";
+            }
+            if (nodeType === "videoCompare" && targetHandleId === "video" && batchUsed.has("video")) {
+              resolvedTargetHandle = "video-1";
             }
             // For videoStitch, find next available video-N handle
             if (nodeType === "videoStitch" && targetHandleId.startsWith("video-")) {
@@ -1518,6 +1552,7 @@ export function WorkflowCanvas() {
             output: { width: 320, height: 320 },
             outputGallery: { width: 320, height: 360 },
             imageCompare: { width: 400, height: 360 },
+            videoCompare: { width: 400, height: 360 },
             videoStitch: { width: 400, height: 280 },
             easeCurve: { width: 340, height: 480 },
             videoTrim: { width: 360, height: 360 },
@@ -2190,6 +2225,8 @@ export function WorkflowCanvas() {
                 return "#ec4899";
               case "imageCompare":
                 return "#14b8a6";
+              case "videoCompare":
+                return "#0d9488";
               case "videoStitch":
                 return "#f97316";
               case "easeCurve":

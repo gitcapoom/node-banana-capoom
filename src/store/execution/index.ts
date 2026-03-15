@@ -17,6 +17,7 @@ export {
   executeOutput,
   executeOutputGallery,
   executeImageCompare,
+  executeVideoCompare,
   executeGlbViewer,
   executeSpzViewer,
   executePanoViewer,

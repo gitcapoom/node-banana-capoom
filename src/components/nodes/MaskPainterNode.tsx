@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useMaskPainterStore } from "@/store/maskPainterStore";
@@ -15,7 +15,6 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
   const edges = useWorkflowStore((state) => state.edges);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Reactively update sourceImage when an edge is connected
   useEffect(() => {
@@ -25,62 +24,10 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
     }
   }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
 
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      if (!file.type.match(/^image\/(png|jpeg|webp)$/)) {
-        alert("Unsupported format. Use PNG, JPG, or WebP.");
-        return;
-      }
-
-      if (file.size > 10 * 1024 * 1024) {
-        alert("Image too large. Maximum size is 10MB.");
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
-        updateNodeData(id, {
-          sourceImage: base64,
-          strokes: [],
-          outputMask: null,
-        });
-      };
-      reader.readAsDataURL(file);
-    },
-    [id, updateNodeData]
-  );
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      const file = e.dataTransfer.files?.[0];
-      if (!file) return;
-
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      if (fileInputRef.current) {
-        fileInputRef.current.files = dt.files;
-        fileInputRef.current.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-    },
-    []
-  );
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  }, []);
-
   const handleEdit = useCallback(() => {
     const imageToEdit = nodeData.sourceImage;
     if (!imageToEdit) {
-      alert("No image available. Connect an image or load one manually.");
+      alert("No image available. Connect an image input.");
       return;
     }
     openModal(id, imageToEdit, nodeData.strokes);
@@ -102,14 +49,6 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
       id={id}
       selected={selected}
     >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp"
-        onChange={handleFileChange}
-        className="hidden"
-      />
-
       <Handle
         type="target"
         position={Position.Left}
@@ -124,10 +63,7 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
       />
 
       {displayImage ? (
-        <div
-          className="relative group cursor-pointer flex-1 flex flex-col min-h-0"
-          onClick={handleEdit}
-        >
+        <div className="relative group flex-1 flex flex-col min-h-0">
           <img
             src={displayImage}
             alt="Mask"
@@ -144,36 +80,37 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
+          {/* Edit button — only way to open the mask painter editor */}
           <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded flex items-center justify-center pointer-events-none">
-            <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-2 py-1 rounded">
+            <button
+              onClick={handleEdit}
+              className="nodrag nopan text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-2 py-1 rounded pointer-events-auto cursor-pointer hover:bg-black/70"
+            >
               {nodeData.strokes.length > 0 ? `Edit mask (${nodeData.strokes.length} elements)` : "Paint mask"}
-            </span>
+            </button>
           </div>
         </div>
       ) : nodeData.sourceImage ? (
-        <div
-          className="relative group cursor-pointer flex-1 flex flex-col min-h-0"
-          onClick={handleEdit}
-        >
+        <div className="relative group flex-1 flex flex-col min-h-0">
           <div className="w-full flex-1 min-h-[112px] bg-black rounded flex flex-col items-center justify-center">
             <svg className="w-5 h-5 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 0 0-5.78 1.128 2.25 2.25 0 0 1-2.4 2.245 4.5 4.5 0 0 0 8.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 0 0 3.388-1.62m-5.043-.025a15.994 15.994 0 0 1 1.622-3.395m3.42 3.42a15.995 15.995 0 0 0 4.764-4.648l3.876-5.814a1.151 1.151 0 0 0-1.597-1.597L14.146 6.32a15.996 15.996 0 0 0-4.649 4.763m3.42 3.42a6.776 6.776 0 0 0-3.42-3.42" />
             </svg>
-            <span className="text-[10px] text-neutral-400 mt-1">Click to paint mask</span>
+            <button
+              onClick={handleEdit}
+              className="nodrag nopan text-[10px] text-neutral-400 mt-1 hover:text-white transition-colors cursor-pointer"
+            >
+              Click to paint mask
+            </button>
           </div>
         </div>
       ) : (
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          className="w-full flex-1 min-h-[112px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center cursor-pointer hover:border-neutral-500 hover:bg-neutral-700/50 transition-colors"
-        >
-          <svg className="w-5 h-5 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+        <div className="w-full flex-1 min-h-[112px] rounded flex flex-col items-center justify-center bg-neutral-900/40">
+          <svg className="w-6 h-6 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
           </svg>
-          <span className="text-[10px] text-neutral-400 mt-1">
-            Drop, click, or connect
+          <span className="text-[10px] text-neutral-500 mt-1">
+            Connect an image
           </span>
         </div>
       )}

@@ -18,6 +18,7 @@ import {
   OutputNodeData,
   OutputGalleryNodeData,
   ImageCompareNodeData,
+  VideoCompareNodeData,
   EaseCurveNodeData,
   VideoTrimNodeData,
   VideoFrameGrabNodeData,
@@ -58,6 +59,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   output: { width: 320, height: 320 },
   outputGallery: { width: 320, height: 360 },
   imageCompare: { width: 400, height: 360 },
+  videoCompare: { width: 400, height: 360 },
   videoStitch: { width: 400, height: 280 },
   easeCurve: { width: 340, height: 480 },
   videoTrim: { width: 360, height: 360 },
@@ -211,6 +213,10 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         model3dHistory: [],
         selectedModel3dHistoryIndex: 0,
         lastGenerationCost: null,
+        sensorIndex: 0,
+        lensIndex: 5,
+        aspectIndex: 2,  // 16:9
+        showGrid: false,
       } as Generate3DNodeData;
     }
     case "generateAudio": {
@@ -275,7 +281,16 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
       return {
         imageA: null,
         imageB: null,
+        compareMode: "slide",
+        blendOpacity: 0.5,
       } as ImageCompareNodeData;
+    case "videoCompare":
+      return {
+        videoA: null,
+        videoB: null,
+        compareMode: "slide",
+        blendOpacity: 0.5,
+      } as VideoCompareNodeData;
     case "videoStitch":
       return {
         clips: [],
@@ -344,6 +359,11 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         glbUrl: null,
         filename: null,
         capturedImage: null,
+        thumbnailImage: null,
+        sensorIndex: 0,
+        lensIndex: 5,
+        aspectIndex: 2,  // 16:9
+        showGrid: false,
       } as GLBViewerNodeData;
     case "spzViewer":
       return {

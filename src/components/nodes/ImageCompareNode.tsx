@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import {
   ReactCompareSlider,
@@ -12,6 +12,12 @@ import { ImageCompareNodeData } from "@/types";
 
 type ImageCompareNodeType = Node<ImageCompareNodeData, "imageCompare">;
 
+const MODE_OPTIONS = [
+  { value: "slide" as const, label: "Slide" },
+  { value: "blend" as const, label: "Blend" },
+  { value: "difference" as const, label: "Diff" },
+];
+
 export function ImageCompareNode({
   id,
   data,
@@ -21,6 +27,23 @@ export function ImageCompareNode({
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const edges = useWorkflowStore((state) => state.edges);
   const nodes = useWorkflowStore((state) => state.nodes);
+
+  const compareMode = nodeData.compareMode || "slide";
+  const blendOpacity = nodeData.blendOpacity ?? 0.5;
+
+  const setMode = useCallback(
+    (mode: "slide" | "blend" | "difference") => {
+      updateNodeData(id, { compareMode: mode });
+    },
+    [id, updateNodeData]
+  );
+
+  const setOpacity = useCallback(
+    (opacity: number) => {
+      updateNodeData(id, { blendOpacity: opacity });
+    },
+    [id, updateNodeData]
+  );
 
   // Collect images in real-time from connected nodes (same pattern as OutputGalleryNode)
   const displayImages = useMemo(() => {
@@ -96,34 +119,129 @@ export function ImageCompareNode({
         B
       </div>
 
+      {/* Mode selector */}
+      <div className="flex gap-1 mb-2 nodrag">
+        {MODE_OPTIONS.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => setMode(opt.value)}
+            className={`flex-1 text-[10px] font-medium py-1 px-2 rounded transition-colors ${
+              compareMode === opt.value
+                ? "bg-blue-600 text-white"
+                : "bg-neutral-700 text-neutral-400 hover:bg-neutral-600 hover:text-neutral-300"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Opacity slider for blend/difference modes */}
+      {compareMode !== "slide" && imageA && imageB && (
+        <div className="flex items-center gap-2 mb-2 nodrag px-1">
+          <span className="text-[9px] text-neutral-400 whitespace-nowrap">
+            Opacity
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={blendOpacity}
+            onChange={(e) => setOpacity(parseFloat(e.target.value))}
+            className="flex-1 h-1 accent-blue-500 cursor-pointer"
+          />
+          <span className="text-[9px] text-neutral-400 w-[28px] text-right tabular-nums">
+            {Math.round(blendOpacity * 100)}%
+          </span>
+        </div>
+      )}
+
       {/* Comparison view or placeholder */}
       {imageA && imageB ? (
         <div className="flex-1 relative nodrag nopan nowheel">
-          <ReactCompareSlider
-            itemOne={
-              <ReactCompareSliderImage
+          {compareMode === "slide" && (
+            <>
+              <ReactCompareSlider
+                itemOne={
+                  <ReactCompareSliderImage
+                    src={imageA}
+                    alt="Image A"
+                    style={{ objectFit: "contain" }}
+                  />
+                }
+                itemTwo={
+                  <ReactCompareSliderImage
+                    src={imageB}
+                    alt="Image B"
+                    style={{ objectFit: "contain" }}
+                  />
+                }
+                portrait={false}
+                style={{ width: "100%", height: "100%" }}
+              />
+              {/* Corner labels */}
+              <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
+                A
+              </div>
+              <div className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
+                B
+              </div>
+            </>
+          )}
+
+          {compareMode === "blend" && (
+            <div className="relative w-full h-full" style={{ minHeight: 200 }}>
+              <img
                 src={imageA}
                 alt="Image A"
-                style={{ objectFit: "contain" }}
+                className="w-full h-full object-contain"
+                draggable={false}
               />
-            }
-            itemTwo={
-              <ReactCompareSliderImage
+              <img
                 src={imageB}
                 alt="Image B"
-                style={{ objectFit: "contain" }}
+                className="absolute inset-0 w-full h-full object-contain"
+                style={{ opacity: blendOpacity }}
+                draggable={false}
               />
-            }
-            portrait={false}
-            style={{ width: "100%", height: "100%" }}
-          />
-          {/* Corner labels */}
-          <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
-            A
-          </div>
-          <div className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
-            B
-          </div>
+              {/* Corner labels */}
+              <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
+                A
+              </div>
+              <div className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
+                B ({Math.round(blendOpacity * 100)}%)
+              </div>
+            </div>
+          )}
+
+          {compareMode === "difference" && (
+            <div className="relative w-full h-full" style={{ minHeight: 200 }}>
+              <img
+                src={imageA}
+                alt="Image A"
+                className="w-full h-full object-contain"
+                draggable={false}
+              />
+              <img
+                src={imageB}
+                alt="Image B"
+                className="absolute inset-0 w-full h-full object-contain"
+                style={{
+                  opacity: blendOpacity,
+                  mixBlendMode: "difference",
+                }}
+                draggable={false}
+              />
+              {/* Corner labels */}
+              <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
+                A
+              </div>
+              <div className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
+                Diff ({Math.round(blendOpacity * 100)}%)
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="w-full flex-1 min-h-[200px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center gap-2">

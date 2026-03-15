@@ -7,8 +7,7 @@ import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { OutputNodeData } from "@/types";
-import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
-import { useVideoAutoplay } from "@/hooks/useVideoAutoplay";
+
 import { FileSaveDialog } from "../FileSaveDialog";
 import { extractUpstreamWorkflow } from "@/utils/upstreamExtractor";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
@@ -32,20 +31,23 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const previousEdgeCountRef = useRef<number | null>(null);
-  const videoAutoplayRef = useVideoAutoplay(id, selected);
 
-  // ── Reactively pull upstream content (fixes #3 and #4) ──
-  // This watches all connected upstream nodes' output data and auto-populates
-  // the output node when upstream content becomes available, without requiring
-  // the workflow execution system to run.
-  // Returns a stable string "type|value" (primitive) to avoid Zustand infinite loops
-  // from returning new object references on every selector call.
+  // ── Reactively pull upstream content ──
+  // Watches connected upstream nodes' output data and auto-populates
+  // the output node when upstream content becomes available.
+  //
+  // PERF: Returns a short fingerprint (type + length + prefix) instead of the
+  // full content value. Large data URLs (3D models, videos) can be megabytes;
+  // embedding them in the selector key would cause O(n) string creation and
+  // comparison on every Zustand state change, making the entire workflow sluggish.
   const upstreamKey = useWorkflowStore(
     useCallback((state) => {
       const { images, videos, audio, model3d } = getConnectedInputsPure(id, state.nodes, state.edges);
-      if (audio.length > 0) return `audio|${audio[0]}`;
-      if (model3d) return `3d|${model3d}`;
-      if (videos.length > 0) return `video|${videos[0]}`;
+      // Short fingerprint: for small strings (URLs) use full value; for large data URLs use length+prefix
+      const fp = (v: string) => v.length <= 200 ? v : `${v.length}:${v.substring(0, 80)}`;
+      if (audio.length > 0) return `audio|${fp(audio[0])}`;
+      if (model3d) return `3d|${fp(model3d)}`;
+      if (videos.length > 0) return `video|${fp(videos[0])}`;
       if (images.length > 0) {
         const content = images[0];
         const isVid =
@@ -53,38 +55,35 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
           content.includes(".mp4") ||
           content.includes(".webm") ||
           content.includes("fal.media");
-        return `${isVid ? "video" : "image"}|${content}`;
+        return `${isVid ? "video" : "image"}|${fp(content)}`;
       }
       return null;
     }, [id])
   );
 
-  // Track previous upstream key to prevent unnecessary updates
-  const prevUpstreamKeyRef = useRef<string | null>(null);
-
   // Sync pulled upstream content to this node's display data
+  // Re-reads full values from the store (the key only has fingerprints).
+  // Runs whenever upstreamKey OR node data changes — the data comparison
+  // (e.g. videos[0] !== nodeData.video) prevents infinite update loops while
+  // ensuring re-sync if node data is overwritten externally (e.g. auto-save merge).
   useEffect(() => {
-    if (!upstreamKey) {
-      prevUpstreamKeyRef.current = null;
-      return;
-    }
+    if (!upstreamKey) return;
 
-    // Skip if upstream content hasn't changed
-    if (prevUpstreamKeyRef.current === upstreamKey) return;
-    prevUpstreamKeyRef.current = upstreamKey;
+    // Re-read full upstream content from store (key only has fingerprint, not full value)
+    const state = useWorkflowStore.getState();
+    const { images, videos, audio, model3d } = getConnectedInputsPure(id, state.nodes, state.edges);
 
     const pipeIdx = upstreamKey.indexOf("|");
     const type = upstreamKey.substring(0, pipeIdx);
-    const value = upstreamKey.substring(pipeIdx + 1);
 
-    if (type === "audio" && value !== nodeData.audio) {
-      updateNodeData(id, { audio: value, image: null, video: null, model3d: null, contentType: "audio" });
-    } else if (type === "3d" && value !== nodeData.model3d) {
-      updateNodeData(id, { model3d: value, image: null, video: null, audio: null, contentType: "3d" });
-    } else if (type === "video" && value !== nodeData.video) {
-      updateNodeData(id, { image: value, video: value, model3d: null, audio: null, contentType: "video" });
-    } else if (type === "image" && value !== nodeData.image) {
-      updateNodeData(id, { image: value, video: null, model3d: null, audio: null, contentType: "image" });
+    if (type === "audio" && audio.length > 0 && audio[0] !== nodeData.audio) {
+      updateNodeData(id, { audio: audio[0], image: null, video: null, model3d: null, contentType: "audio" });
+    } else if (type === "3d" && model3d && model3d !== nodeData.model3d) {
+      updateNodeData(id, { model3d: model3d, image: null, video: null, audio: null, contentType: "3d" });
+    } else if (type === "video" && videos.length > 0 && videos[0] !== nodeData.video) {
+      updateNodeData(id, { image: videos[0], video: videos[0], model3d: null, audio: null, contentType: "video" });
+    } else if (type === "image" && images.length > 0 && images[0] !== nodeData.image) {
+      updateNodeData(id, { image: images[0], video: null, model3d: null, audio: null, contentType: "image" });
     }
   }, [upstreamKey, id, nodeData.audio, nodeData.video, nodeData.image, nodeData.model3d, updateNodeData]);
 
@@ -121,8 +120,6 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     if (nodeData.model3d) return nodeData.model3d;
     return nodeData.image;
   }, [nodeData.audio, nodeData.video, nodeData.model3d, nodeData.image]);
-
-  const videoBlobUrl = useVideoBlobUrl(isVideo ? contentSrc ?? null : null);
 
   // Auto-trigger execution when a new connection is made
   useEffect(() => {
@@ -177,6 +174,19 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     setSaveStatus("saving");
 
     try {
+      // Resolve content — blob URLs can't be fetched server-side, so convert to base64
+      let resolvedContent = contentSrc;
+      if (contentSrc && contentSrc.startsWith("blob:")) {
+        const response = await fetch(contentSrc);
+        const blob = await response.blob();
+        resolvedContent = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }
+
       // 1. Save the output file (image/video/audio/3d)
       const savePayload: Record<string, unknown> = {
         directoryPath,
@@ -184,14 +194,14 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         createDirectory: true,
       };
 
-      if (isAudio && contentSrc) {
-        savePayload.audio = contentSrc;
-      } else if (isVideo && contentSrc) {
-        savePayload.video = contentSrc;
-      } else if (isModel3d && contentSrc) {
-        savePayload.model3d = contentSrc;
-      } else if (contentSrc) {
-        savePayload.image = contentSrc;
+      if (isAudio && resolvedContent) {
+        savePayload.audio = resolvedContent;
+      } else if (isVideo && resolvedContent) {
+        savePayload.video = resolvedContent;
+      } else if (isModel3d && resolvedContent) {
+        savePayload.model3d = resolvedContent;
+      } else if (resolvedContent) {
+        savePayload.image = resolvedContent;
       }
 
       const saveResponse = await fetch("/api/save-generation", {
@@ -300,11 +310,11 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     return "3D Model";
   }, [isModel3d, contentSrc]);
 
-  // Determine the aspect-fit media for BaseNode (only for visual content, not 3D/audio)
+  // Determine the aspect-fit media for BaseNode (only for images, not 3D/audio/video)
   const aspectMedia = useMemo(() => {
-    if (isAudio || isModel3d) return null;
+    if (isAudio || isModel3d || isVideo) return null;
     return contentSrc;
-  }, [isAudio, isModel3d, contentSrc]);
+  }, [isAudio, isModel3d, isVideo, contentSrc]);
 
   // Output Now button component (shared across all content types)
   const outputNowButton = (
@@ -387,29 +397,24 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
                 </span>
                 <span className="text-[10px] text-neutral-500">3D Model</span>
               </div>
+            ) : isVideo ? (
+              /* Video placeholder — show icon instead of embedded player */
+              <div className="w-full h-full bg-neutral-900/60 flex flex-col items-center justify-center gap-3 p-4">
+                <svg className="w-12 h-12 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+                </svg>
+                <span className="text-[10px] text-neutral-500">Video</span>
+              </div>
             ) : (
               <div
                 className="relative cursor-pointer group w-full h-full"
                 onClick={() => setShowLightbox(true)}
               >
-                {isVideo ? (
-                  <video
-                    ref={videoAutoplayRef}
-                    src={videoBlobUrl ?? undefined}
-                    controls
-                    loop
-                    muted
-                    playsInline
-                    className="w-full h-full object-contain"
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <img
-                    src={contentSrc}
-                    alt="Output"
-                    className="w-full h-full object-contain"
-                  />
-                )}
+                <img
+                  src={contentSrc}
+                  alt="Output"
+                  className="w-full h-full object-contain"
+                />
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center pointer-events-none">
                   <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/50 px-2 py-1 rounded">
                     View full size
@@ -452,30 +457,18 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         document.body
       )}
 
-      {/* Lightbox Modal (skip for audio and 3D) — also portaled */}
-      {showLightbox && contentSrc && !isAudio && !isModel3d && typeof document !== "undefined" && createPortal(
+      {/* Lightbox Modal (images only) — also portaled */}
+      {showLightbox && contentSrc && !isAudio && !isModel3d && !isVideo && typeof document !== "undefined" && createPortal(
         <div
           className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-8"
           onClick={() => setShowLightbox(false)}
         >
           <div className="relative max-w-full max-h-full">
-            {isVideo ? (
-              <video
-                src={videoBlobUrl ?? undefined}
-                controls
-                loop
-                autoPlay
-                playsInline
-                className="max-w-full max-h-[90vh] object-contain rounded"
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <img
-                src={contentSrc}
-                alt="Output full size"
-                className="max-w-full max-h-[90vh] object-contain rounded"
-              />
-            )}
+            <img
+              src={contentSrc}
+              alt="Output full size"
+              className="max-w-full max-h-[90vh] object-contain rounded"
+            />
             <button
               onClick={() => setShowLightbox(false)}
               className="absolute top-4 right-4 w-8 h-8 bg-white/10 hover:bg-white/20 rounded text-white text-sm transition-colors flex items-center justify-center"

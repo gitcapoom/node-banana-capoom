@@ -12,11 +12,13 @@ import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
 import { getVideoDimensions, calculateNodeSizePreservingHeight } from "@/utils/nodeDimensions";
 import { ProviderBadge } from "./ProviderBadge";
-import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
-import { useVideoAutoplay } from "@/hooks/useVideoAutoplay";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { captureVideoThumbnail } from "@/utils/mediaCapture";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { browseRegistry } from "@/utils/browseRegistry";
+import { MediaOverlay } from "../MediaOverlay";
+import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
+import { saveMediaImmediately } from "@/utils/mediaStorage";
 
 // Video generation capabilities
 const VIDEO_CAPABILITIES: ModelCapability[] = ["text-to-video", "image-to-video"];
@@ -46,16 +48,20 @@ type GenerateVideoNodeType = Node<GenerateVideoNodeData, "generateVideo">;
 export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVideoNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const addNode = useWorkflowStore((state) => state.addNode);
+  const nodes = useWorkflowStore((state) => state.nodes);
   // Use stable selector for API keys to prevent unnecessary re-fetches
   const { geminiApiKey, replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
+  const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelsFetchError, setModelsFetchError] = useState<string | null>(null);
   const [isBrowseDialogOpen, setIsBrowseDialogOpen] = useState(false);
   const [isLoadingCarouselVideo, setIsLoadingCarouselVideo] = useState(false);
-  const videoBlobUrl = useVideoBlobUrl(nodeData.outputVideo ?? null);
-  const videoAutoplayRef = useVideoAutoplay(id, selected);
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [frameGrabCount, setFrameGrabCount] = useState(0);
+  const [videoThumbnail, setVideoThumbnail] = useState<string | null>(null);
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
@@ -257,46 +263,45 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     }
   }, [generationsPath]);
 
-  // Carousel navigation handlers
-  const handleCarouselPrevious = useCallback(async () => {
+  // Navigate carousel and recall settings from the history item
+  const navigateCarousel = useCallback(async (newIndex: number) => {
     const history = nodeData.videoHistory || [];
     if (history.length === 0 || isLoadingCarouselVideo) return;
 
-    const currentIndex = nodeData.selectedVideoHistoryIndex || 0;
-    const newIndex = currentIndex === 0 ? history.length - 1 : currentIndex - 1;
     const videoItem = history[newIndex];
-
     setIsLoadingCarouselVideo(true);
     const video = await loadVideoById(videoItem.id);
     setIsLoadingCarouselVideo(false);
 
     if (video) {
-      updateNodeData(id, {
+      // Recall stored settings from the history item
+      const settingsUpdate: Record<string, unknown> = {
         outputVideo: video,
         selectedVideoHistoryIndex: newIndex,
-      });
+      };
+      if (videoItem.prompt !== undefined) settingsUpdate.inputPrompt = videoItem.prompt;
+      if (videoItem.selectedModel) settingsUpdate.selectedModel = videoItem.selectedModel;
+      if (videoItem.parameters) settingsUpdate.parameters = videoItem.parameters;
+
+      updateNodeData(id, settingsUpdate);
     }
-  }, [id, nodeData.videoHistory, nodeData.selectedVideoHistoryIndex, isLoadingCarouselVideo, loadVideoById, updateNodeData]);
+  }, [id, nodeData.videoHistory, isLoadingCarouselVideo, loadVideoById, updateNodeData]);
+
+  const handleCarouselPrevious = useCallback(async () => {
+    const history = nodeData.videoHistory || [];
+    if (history.length === 0) return;
+    const currentIndex = nodeData.selectedVideoHistoryIndex || 0;
+    const newIndex = currentIndex === 0 ? history.length - 1 : currentIndex - 1;
+    await navigateCarousel(newIndex);
+  }, [nodeData.videoHistory, nodeData.selectedVideoHistoryIndex, navigateCarousel]);
 
   const handleCarouselNext = useCallback(async () => {
     const history = nodeData.videoHistory || [];
-    if (history.length === 0 || isLoadingCarouselVideo) return;
-
+    if (history.length === 0) return;
     const currentIndex = nodeData.selectedVideoHistoryIndex || 0;
     const newIndex = (currentIndex + 1) % history.length;
-    const videoItem = history[newIndex];
-
-    setIsLoadingCarouselVideo(true);
-    const video = await loadVideoById(videoItem.id);
-    setIsLoadingCarouselVideo(false);
-
-    if (video) {
-      updateNodeData(id, {
-        outputVideo: video,
-        selectedVideoHistoryIndex: newIndex,
-      });
-    }
-  }, [id, nodeData.videoHistory, nodeData.selectedVideoHistoryIndex, isLoadingCarouselVideo, loadVideoById, updateNodeData]);
+    await navigateCarousel(newIndex);
+  }, [nodeData.videoHistory, nodeData.selectedVideoHistoryIndex, navigateCarousel]);
 
   // Handle model selection from browse dialog
   const handleBrowseModelSelect = useCallback((model: ProviderModel) => {
@@ -326,6 +331,45 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   const titlePrefix = useMemo(() => (
     <ProviderBadge provider={currentProvider} />
   ), [currentProvider]);
+
+  // Frame grab: create a new ImageInput node with the captured frame
+  const handleFrameGrab = useCallback(async (frameDataUrl: string) => {
+    const currentNode = nodes.find((n) => n.id === id);
+    const nodeX = currentNode?.position?.x ?? 0;
+    const nodeY = currentNode?.position?.y ?? 0;
+    const nodeDims = defaultNodeDimensions.generateVideo;
+    const imgNodeHeight = defaultNodeDimensions.imageInput.height;
+
+    const offsetX = nodeDims.width + 40;
+    const baseOffsetY = frameGrabCount * (imgNodeHeight + 20);
+
+    // Save frame to inputs folder
+    let imageRef: string | undefined;
+    if (saveDirectoryPath) {
+      const refId = await saveMediaImmediately(frameDataUrl, saveDirectoryPath, "inputs");
+      if (refId) imageRef = refId;
+    }
+
+    addNode("imageInput", {
+      x: nodeX + offsetX,
+      y: nodeY + baseOffsetY,
+    });
+
+    // Update the new node with captured image data
+    setTimeout(() => {
+      const latestNodes = useWorkflowStore.getState().nodes;
+      const newNode = latestNodes[latestNodes.length - 1];
+      if (newNode && newNode.type === "imageInput") {
+        updateNodeData(newNode.id, {
+          image: frameDataUrl,
+          imageRef,
+          filename: `frame-grab-${Date.now()}.png`,
+        });
+      }
+    }, 50);
+
+    setFrameGrabCount((c) => c + 1);
+  }, [id, nodes, addNode, updateNodeData, frameGrabCount, saveDirectoryPath]);
 
   const hasCarouselVideos = (nodeData.videoHistory || []).length > 1;
 
@@ -374,6 +418,58 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       });
     });
   }, [id, nodeData.outputVideo, setNodes]);
+
+  // Generate thumbnail when outputVideo changes — persist to node data for save/reload
+  useEffect(() => {
+    if (nodeData.outputVideo) {
+      captureVideoThumbnail(nodeData.outputVideo).then(async (thumb) => {
+        setVideoThumbnail(thumb);
+        if (thumb) {
+          // Persist thumbnail to node data so it survives save/reload
+          let thumbnailImageRef: string | undefined;
+          if (saveDirectoryPath) {
+            const historyItem = (nodeData.videoHistory || [])[nodeData.selectedVideoHistoryIndex || 0];
+            const refId = await saveMediaImmediately(
+              thumb,
+              saveDirectoryPath,
+              "generations",
+              historyItem ? `${historyItem.id}_thumb` : undefined
+            );
+            if (refId) thumbnailImageRef = refId;
+          }
+          updateNodeData(id, { thumbnailImage: thumb, thumbnailImageRef });
+        }
+      });
+    } else {
+      setVideoThumbnail(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeData.outputVideo]);
+
+  // Whether video output exists (either in-memory or externalized to disk)
+  const hasVideoOutput = !!(nodeData.outputVideo || nodeData.outputVideoRef);
+
+  // Display thumbnail: prefer freshly captured, then hydrated from disk
+  const displayThumbnail = videoThumbnail || nodeData.thumbnailImage || null;
+
+  // Lazy-load video from ref for overlay playback
+  const [isLoadingVideoForOverlay, setIsLoadingVideoForOverlay] = useState(false);
+  const handleOpenOverlay = useCallback(async () => {
+    if (nodeData.outputVideo) {
+      setShowOverlay(true);
+      return;
+    }
+    // Load from generations folder via the current history item
+    if (nodeData.outputVideoRef && generationsPath) {
+      setIsLoadingVideoForOverlay(true);
+      const video = await loadVideoById(nodeData.outputVideoRef);
+      setIsLoadingVideoForOverlay(false);
+      if (video) {
+        updateNodeData(id, { outputVideo: video });
+        setShowOverlay(true);
+      }
+    }
+  }, [id, nodeData.outputVideo, nodeData.outputVideoRef, generationsPath, loadVideoById, updateNodeData]);
 
   return (
     <>
@@ -619,52 +715,49 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
         {/* Preview area */}
-        {nodeData.outputVideo ? (
+        {hasVideoOutput ? (
           <>
-            <video
-              ref={videoAutoplayRef}
-              key={nodeData.videoHistory?.[nodeData.selectedVideoHistoryIndex || 0]?.id}
-              src={videoBlobUrl ?? undefined}
-              controls
-              loop
-              muted
-              className="w-full h-full object-contain"
-              playsInline
-            />
+            {/* Show thumbnail instead of inline video */}
+            {displayThumbnail ? (
+              <img
+                src={displayThumbnail}
+                alt="Video thumbnail"
+                className="w-full h-full object-contain cursor-pointer"
+                draggable={false}
+                onDoubleClick={(e) => { e.stopPropagation(); handleOpenOverlay(); }}
+              />
+            ) : (
+              <div
+                className="w-full h-full bg-neutral-900/40 flex items-center justify-center cursor-pointer"
+                onDoubleClick={(e) => { e.stopPropagation(); handleOpenOverlay(); }}
+              >
+                <svg className="w-10 h-10 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+                </svg>
+              </div>
+            )}
+            {/* Loading overlay when fetching video from disk for overlay */}
+            {isLoadingVideoForOverlay && (
+              <div className="absolute inset-0 bg-neutral-900/70 flex items-center justify-center">
+                <svg className="w-5 h-5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              </div>
+            )}
             {/* Loading overlay for generation */}
             {nodeData.status === "loading" && (
               <div className="absolute inset-0 bg-neutral-900/70 flex items-center justify-center">
-                <svg
-                  className="w-6 h-6 animate-spin text-white"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
+                <svg className="w-6 h-6 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
               </div>
             )}
             {/* Error overlay when generation failed */}
             {nodeData.status === "error" && (
               <div className="absolute inset-0 bg-red-900/40 flex flex-col items-center justify-center gap-1">
-                <svg
-                  className="w-6 h-6 text-white"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <span className="text-white text-xs font-medium">Generation failed</span>
@@ -674,24 +767,9 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             {/* Loading overlay for carousel navigation */}
             {isLoadingCarouselVideo && (
               <div className="absolute inset-0 bg-neutral-900/50 flex items-center justify-center">
-                <svg
-                  className="w-4 h-4 animate-spin text-white"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  />
+                <svg className="w-4 h-4 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
               </div>
             )}
@@ -708,8 +786,8 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
               </button>
             </div>
 
-            {/* Carousel controls - overlaid on video bottom */}
-            {hasCarouselVideos && (
+            {/* Carousel controls OR double-click hint — never both */}
+            {hasCarouselVideos ? (
               <div className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-2 py-1.5 bg-neutral-900/60 backdrop-blur-sm">
                 <button
                   onClick={handleCarouselPrevious}
@@ -734,6 +812,10 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
+              </div>
+            ) : nodeData.status !== "loading" && (
+              <div className="absolute bottom-0 left-0 right-0 text-center py-1 bg-neutral-900/40">
+                <span className="text-[10px] text-white/30">double click to view</span>
               </div>
             )}
           </>
@@ -795,6 +877,19 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
         onClose={() => setIsBrowseDialogOpen(false)}
         onModelSelected={handleBrowseModelSelect}
         initialCapabilityFilter="video"
+      />
+    )}
+    {showOverlay && nodeData.outputVideo && (
+      <MediaOverlay
+        content={nodeData.outputVideo}
+        mediaType="video"
+        currentIndex={nodeData.selectedVideoHistoryIndex || 0}
+        totalCount={(nodeData.videoHistory || []).length}
+        isLoading={isLoadingCarouselVideo}
+        onPrevious={handleCarouselPrevious}
+        onNext={handleCarouselNext}
+        onClose={() => setShowOverlay(false)}
+        onFrameGrab={handleFrameGrab}
       />
     )}
     </>

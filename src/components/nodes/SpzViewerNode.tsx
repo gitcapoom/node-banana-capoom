@@ -7,6 +7,7 @@ import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { SpzViewerNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
+import { saveMediaImmediately } from "@/utils/mediaStorage";
 
 type SpzViewerNodeType = Node<SpzViewerNodeData, "spzViewer">;
 
@@ -30,6 +31,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const addNode = useWorkflowStore((state) => state.addNode);
   const nodes = useWorkflowStore((state) => state.nodes);
+  const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
 
@@ -46,12 +48,6 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
       if (event.data.worldId !== id) return;
 
       const { image, depthImage, filename, width, height } = event.data;
-
-      // Store captured images in this node
-      updateNodeData(id, {
-        capturedImage: image,
-        capturedDepthImage: depthImage || null,
-      });
 
       // Create ImageInput nodes to the right with the capture
       const currentNode = nodes.find((n) => n.id === id);
@@ -71,13 +67,22 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
         y: nodeY + baseOffsetY,
       });
 
-      // Update the RGB node with captured image data
-      setTimeout(() => {
+      // Save captures to inputs folder and update the new nodes
+      const saveAndUpdate = async () => {
         const latestNodes = useWorkflowStore.getState().nodes;
         const newNode = latestNodes[latestNodes.length - 1];
+
+        // Save RGB image to inputs folder
+        let imageRef: string | undefined;
+        if (saveDirectoryPath && image) {
+          const refId = await saveMediaImmediately(image, saveDirectoryPath, "inputs");
+          if (refId) imageRef = refId;
+        }
+
         if (newNode && newNode.type === "imageInput") {
           updateNodeData(newNode.id, {
             image,
+            imageRef,
             filename: `${filename}.png`,
             dimensions: width && height ? { width, height } : null,
           });
@@ -90,19 +95,29 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
             y: nodeY + baseOffsetY + imgNodeHeight + 20,
           });
 
-          setTimeout(() => {
+          setTimeout(async () => {
             const depthNodes = useWorkflowStore.getState().nodes;
             const depthNode = depthNodes[depthNodes.length - 1];
+
+            let depthRef: string | undefined;
+            if (saveDirectoryPath && depthImage) {
+              const refId = await saveMediaImmediately(depthImage, saveDirectoryPath, "inputs");
+              if (refId) depthRef = refId;
+            }
+
             if (depthNode && depthNode.type === "imageInput") {
               updateNodeData(depthNode.id, {
                 image: depthImage,
+                imageRef: depthRef,
                 filename: `${filename}_depth.png`,
                 dimensions: width && height ? { width, height } : null,
               });
             }
           }, 50);
         }
-      }, 50);
+      };
+
+      setTimeout(saveAndUpdate, 50);
 
       setCaptureCount((c) => c + 1);
     };
@@ -366,29 +381,6 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {/* Capture preview — RGB + Depth side by side */}
-        {nodeData.capturedImage && (
-          <div className="bg-neutral-900 rounded-lg overflow-hidden">
-            <div className={nodeData.capturedDepthImage ? "grid grid-cols-2 gap-px bg-neutral-800" : ""}>
-              <img
-                src={nodeData.capturedImage}
-                alt="Captured view"
-                className="w-full h-auto object-cover"
-              />
-              {nodeData.capturedDepthImage && (
-                <img
-                  src={nodeData.capturedDepthImage}
-                  alt="Depth map"
-                  className="w-full h-auto object-cover"
-                />
-              )}
-            </div>
-            <p className="text-[9px] text-neutral-500 px-2 py-1">
-              Latest capture{nodeData.capturedDepthImage ? " + depth" : ""}
-            </p>
           </div>
         )}
 

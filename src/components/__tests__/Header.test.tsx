@@ -68,7 +68,7 @@ describe("Header", () => {
   describe("Basic Rendering", () => {
     it("should render the app title", () => {
       render(<Header />);
-      expect(screen.getByText("Node Banana")).toBeInTheDocument();
+      expect(screen.getByText("Node Banana Capoom")).toBeInTheDocument();
     });
 
     it("should render the banana icon", () => {

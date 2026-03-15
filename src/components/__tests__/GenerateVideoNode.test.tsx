@@ -70,6 +70,17 @@ vi.mock("react-dom", async () => {
   };
 });
 
+// Mock captureVideoThumbnail (requires video element which doesn't work in jsdom)
+vi.mock("@/utils/mediaCapture", () => ({
+  captureVideoThumbnail: vi.fn().mockResolvedValue(null),
+}));
+
+// Mock saveMediaImmediately
+vi.mock("@/utils/mediaStorage", () => ({
+  saveMediaImmediately: vi.fn().mockResolvedValue(null),
+  loadMediaById: vi.fn().mockResolvedValue(null),
+}));
+
 // Mock fetch
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
@@ -109,6 +120,7 @@ describe("GenerateVideoNode", () => {
         decrementModalCount: mockDecrementModalCount,
         providerSettings: defaultProviderSettings,
         generationsPath: "/test/generations",
+        saveDirectoryPath: null,
         isRunning: false,
         currentNodeIds: [],
         groups: {},
@@ -245,13 +257,9 @@ describe("GenerateVideoNode", () => {
         </TestWrapper>
       );
 
-      // Should show the spinner overlay on top of the video
+      // Should show the spinner overlay on top of the thumbnail
       const spinner = container.querySelector(".animate-spin");
       expect(spinner).toBeInTheDocument();
-
-      // Should still show the video element
-      const video = container.querySelector("video");
-      expect(video).toBeInTheDocument();
     });
   });
 
@@ -301,8 +309,8 @@ describe("GenerateVideoNode", () => {
   });
 
   describe("Output Video Display", () => {
-    it("should render video element when data.outputVideo exists", () => {
-      const { container } = render(
+    it("should render thumbnail display when data.outputVideo exists", () => {
+      render(
         <TestWrapper>
           <GenerateVideoNode {...createNodeProps({
             outputVideo: "data:video/mp4;base64,abc123",
@@ -310,13 +318,12 @@ describe("GenerateVideoNode", () => {
         </TestWrapper>
       );
 
-      const video = container.querySelector("video");
-      expect(video).toBeInTheDocument();
-      expect(video).toHaveAttribute("src", "data:video/mp4;base64,abc123");
+      // Should show "double click to view" hint on the thumbnail
+      expect(screen.getByText("double click to view")).toBeInTheDocument();
     });
 
-    it("should render video with controls attribute", () => {
-      const { container } = render(
+    it("should show double-click hint when no carousel", () => {
+      render(
         <TestWrapper>
           <GenerateVideoNode {...createNodeProps({
             outputVideo: "data:video/mp4;base64,abc123",
@@ -324,11 +331,10 @@ describe("GenerateVideoNode", () => {
         </TestWrapper>
       );
 
-      const video = container.querySelector("video");
-      expect(video).toHaveAttribute("controls");
+      expect(screen.getByText("double click to view")).toBeInTheDocument();
     });
 
-    it("should render video with loop attribute", () => {
+    it("should not render inline video element (uses thumbnail instead)", () => {
       const { container } = render(
         <TestWrapper>
           <GenerateVideoNode {...createNodeProps({
@@ -337,21 +343,9 @@ describe("GenerateVideoNode", () => {
         </TestWrapper>
       );
 
+      // Video is no longer rendered inline - only in the overlay
       const video = container.querySelector("video");
-      expect(video).toHaveAttribute("loop");
-    });
-
-    it("should render video with muted attribute", () => {
-      const { container } = render(
-        <TestWrapper>
-          <GenerateVideoNode {...createNodeProps({
-            outputVideo: "data:video/mp4;base64,abc123",
-          })} />
-        </TestWrapper>
-      );
-
-      const video = container.querySelector("video");
-      expect(video?.muted).toBe(true);
+      expect(video).not.toBeInTheDocument();
     });
 
     it("should render clear button when output video exists", () => {

@@ -6,6 +6,10 @@ import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { VideoInputNodeData } from "@/types";
+import { MediaOverlay } from "../MediaOverlay";
+import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
+import { captureVideoThumbnail } from "@/utils/mediaCapture";
+import { saveMediaImmediately, loadMediaById } from "@/utils/mediaStorage";
 
 type VideoInputNodeType = Node<VideoInputNodeData, "videoInput">;
 
@@ -13,62 +17,12 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
   const nodeData = data;
   const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const addNode = useWorkflowStore((state) => state.addNode);
+  const nodes = useWorkflowStore((state) => state.nodes);
+  const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [videoDuration, setVideoDuration] = useState(0);
-
-  // Sync video element time updates
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const onTimeUpdate = () => setCurrentTime(video.currentTime);
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
-    const onEnded = () => setIsPlaying(false);
-    const onLoadedMetadata = () => {
-      setVideoDuration(video.duration);
-      if (nodeData.duration !== video.duration) {
-        updateNodeData(id, { duration: video.duration });
-      }
-    };
-
-    video.addEventListener("timeupdate", onTimeUpdate);
-    video.addEventListener("play", onPlay);
-    video.addEventListener("pause", onPause);
-    video.addEventListener("ended", onEnded);
-    video.addEventListener("loadedmetadata", onLoadedMetadata);
-
-    return () => {
-      video.removeEventListener("timeupdate", onTimeUpdate);
-      video.removeEventListener("play", onPlay);
-      video.removeEventListener("pause", onPause);
-      video.removeEventListener("ended", onEnded);
-      video.removeEventListener("loadedmetadata", onLoadedMetadata);
-    };
-  }, [id, nodeData.duration, updateNodeData]);
-
-  const handlePlayPause = useCallback(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      video.play();
-    } else {
-      video.pause();
-    }
-  }, []);
-
-  const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const video = videoRef.current;
-    if (!video || !videoDuration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const fraction = Math.max(0, Math.min(1, x / rect.width));
-    video.currentTime = fraction * videoDuration;
-  }, [videoDuration]);
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [frameGrabCount, setFrameGrabCount] = useState(0);
 
   const formatTime = useCallback((seconds: number) => {
     if (!isFinite(seconds)) return "0:00";
@@ -93,34 +47,63 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
       }
 
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const base64 = event.target?.result as string;
 
         // Extract duration using HTML Video element
         const tempVideo = document.createElement("video");
         tempVideo.preload = "metadata";
-        tempVideo.onloadedmetadata = () => {
-          updateNodeData(id, {
-            videoFile: base64,
-            filename: file.name,
-            format: file.type,
-            duration: tempVideo.duration,
-          });
-        };
-        tempVideo.onerror = () => {
-          updateNodeData(id, {
-            videoFile: base64,
-            filename: file.name,
-            format: file.type,
-            duration: null,
-          });
-        };
+
+        const durationPromise = new Promise<number | null>((resolve) => {
+          tempVideo.onloadedmetadata = () => resolve(tempVideo.duration);
+          tempVideo.onerror = () => resolve(null);
+          setTimeout(() => resolve(null), 5000);
+        });
+
         tempVideo.src = base64;
+        const duration = await durationPromise;
+
+        // Capture first frame as thumbnail
+        const thumbnail = await captureVideoThumbnail(base64);
+
+        // Save video and thumbnail to inputs folder if possible
+        let videoFileRef: string | undefined;
+        let thumbnailImageRef: string | undefined;
+        if (saveDirectoryPath) {
+          const videoRefId = await saveMediaImmediately(base64, saveDirectoryPath, "inputs");
+          if (videoRefId) videoFileRef = videoRefId;
+
+          if (thumbnail) {
+            const thumbRefId = await saveMediaImmediately(thumbnail, saveDirectoryPath, "inputs");
+            if (thumbRefId) thumbnailImageRef = thumbRefId;
+          }
+        }
+
+        updateNodeData(id, {
+          videoFile: base64,
+          videoFileRef,
+          thumbnailImage: thumbnail,
+          thumbnailImageRef,
+          filename: file.name,
+          format: file.type,
+          duration,
+        });
       };
       reader.readAsDataURL(file);
     },
-    [id, updateNodeData]
+    [id, updateNodeData, saveDirectoryPath]
   );
+
+  // Generate thumbnail if videoFile exists but thumbnailImage is missing (e.g. loaded from save)
+  useEffect(() => {
+    if (nodeData.videoFile && !nodeData.thumbnailImage) {
+      captureVideoThumbnail(nodeData.videoFile).then((thumbnail) => {
+        if (thumbnail) {
+          updateNodeData(id, { thumbnailImage: thumbnail });
+        }
+      });
+    }
+  }, [id, nodeData.videoFile, nodeData.thumbnailImage, updateNodeData]);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -146,26 +129,93 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
   }, []);
 
   const handleRemove = useCallback(() => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-    }
-    setIsPlaying(false);
-    setCurrentTime(0);
-    setVideoDuration(0);
     updateNodeData(id, {
       videoFile: null,
+      videoFileRef: undefined,
+      thumbnailImage: null,
+      thumbnailImageRef: undefined,
       filename: null,
       duration: null,
       format: null,
     });
   }, [id, updateNodeData]);
 
+  // No-op handlers for overlay (single video, no carousel)
+  const noop = useCallback(() => {}, []);
+
+  // Frame grab: create a new ImageInput node with the captured frame
+  const handleFrameGrab = useCallback(async (frameDataUrl: string) => {
+    const currentNode = nodes.find((n) => n.id === id);
+    const nodeX = currentNode?.position?.x ?? 0;
+    const nodeY = currentNode?.position?.y ?? 0;
+    const nodeDims = defaultNodeDimensions.videoInput;
+    const imgNodeHeight = defaultNodeDimensions.imageInput.height;
+
+    const offsetX = nodeDims.width + 40;
+    const baseOffsetY = frameGrabCount * (imgNodeHeight + 20);
+
+    // Save frame to inputs folder
+    let imageRef: string | undefined;
+    if (saveDirectoryPath) {
+      const refId = await saveMediaImmediately(frameDataUrl, saveDirectoryPath, "inputs");
+      if (refId) imageRef = refId;
+    }
+
+    addNode("imageInput", {
+      x: nodeX + offsetX,
+      y: nodeY + baseOffsetY,
+    });
+
+    // Update the new node with captured image data
+    setTimeout(() => {
+      const latestNodes = useWorkflowStore.getState().nodes;
+      const newNode = latestNodes[latestNodes.length - 1];
+      if (newNode && newNode.type === "imageInput") {
+        updateNodeData(newNode.id, {
+          image: frameDataUrl,
+          imageRef,
+          filename: `frame-grab-${Date.now()}.png`,
+        });
+      }
+    }, 50);
+
+    setFrameGrabCount((c) => c + 1);
+  }, [id, nodes, addNode, updateNodeData, frameGrabCount, saveDirectoryPath]);
+
+  // Whether a video is loaded (either in-memory or externalized to disk)
+  const hasVideo = !!(nodeData.videoFile || nodeData.videoFileRef);
+
+  // Display thumbnail of the video on canvas
+  const displayImage = nodeData.thumbnailImage;
+
+  // Lazy-load video from ref for overlay playback
+  const [isLoadingVideo, setIsLoadingVideo] = useState(false);
+  const handleOpenOverlay = useCallback(async () => {
+    if (nodeData.videoFile) {
+      // Video already in memory
+      setShowOverlay(true);
+      return;
+    }
+    if (nodeData.videoFileRef && saveDirectoryPath) {
+      // Load from disk
+      setIsLoadingVideo(true);
+      const video = await loadMediaById(nodeData.videoFileRef, saveDirectoryPath, "inputs");
+      setIsLoadingVideo(false);
+      if (video) {
+        updateNodeData(id, { videoFile: video });
+        setShowOverlay(true);
+      }
+    }
+  }, [id, nodeData.videoFile, nodeData.videoFileRef, saveDirectoryPath, updateNodeData]);
+
   return (
+    <>
     <BaseNode
       id={id}
       selected={selected}
-      minWidth={280}
-      minHeight={200}
+      contentClassName="flex-1 min-h-0 overflow-clip"
+      aspectFitMedia={displayImage}
+      fullBleed
     >
       <input
         ref={fileInputRef}
@@ -175,98 +225,74 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
         className="hidden"
       />
 
-      {nodeData.videoFile ? (
-        <div className="relative group flex-1 flex flex-col min-h-0 gap-1.5">
-          {/* Filename and duration */}
-          <div className="flex items-center justify-between shrink-0">
-            <span className="text-[10px] text-neutral-400 truncate max-w-[180px]" title={nodeData.filename || ""}>
-              {nodeData.filename}
-            </span>
+      {hasVideo ? (
+        <div className="relative group w-full h-full">
+          {/* Show thumbnail (first frame) instead of full video */}
+          {displayImage ? (
+            <img
+              src={displayImage}
+              alt={nodeData.filename || "Video thumbnail"}
+              className="w-full h-full object-contain cursor-pointer"
+              draggable={false}
+              onDoubleClick={(e) => { e.stopPropagation(); handleOpenOverlay(); }}
+            />
+          ) : (
+            <div
+              className="w-full h-full bg-neutral-900/40 flex flex-col items-center justify-center cursor-pointer"
+              onDoubleClick={(e) => { e.stopPropagation(); handleOpenOverlay(); }}
+            >
+              <svg className="w-10 h-10 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+              </svg>
+            </div>
+          )}
+
+          {/* Filename and duration badge */}
+          <div className="absolute top-1 left-1 flex items-center gap-1">
+            {nodeData.filename && (
+              <span className="text-[9px] text-white/70 bg-black/50 px-1.5 py-0.5 rounded truncate max-w-[120px]">
+                {nodeData.filename}
+              </span>
+            )}
             {nodeData.duration != null && (
-              <span className="text-[10px] text-neutral-500 bg-neutral-700/50 px-1.5 py-0.5 rounded">
+              <span className="text-[9px] text-white/70 bg-black/50 px-1.5 py-0.5 rounded">
                 {formatTime(nodeData.duration)}
               </span>
             )}
           </div>
 
-          {/* Video player */}
-          <div className="flex-1 min-h-[120px] bg-black rounded overflow-hidden relative">
-            <video
-              ref={videoRef}
-              src={nodeData.videoFile}
-              className="w-full h-full object-contain"
-              preload="metadata"
-              playsInline
-              onClick={handlePlayPause}
-            />
-            {/* Big play overlay when paused */}
-            {!isPlaying && (
-              <div
-                className="absolute inset-0 flex items-center justify-center bg-black/20 cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity"
-                onClick={handlePlayPause}
-              >
-                <div className="w-10 h-10 flex items-center justify-center bg-black/60 rounded-full">
-                  <svg className="w-5 h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Playback controls */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={handlePlayPause}
-              className="w-7 h-7 flex items-center justify-center bg-purple-600 hover:bg-purple-500 rounded transition-colors"
-              title={isPlaying ? "Pause" : "Play"}
-            >
-              {isPlaying ? (
-                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-                </svg>
-              ) : (
-                <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              )}
-            </button>
-
-            {/* Progress bar / scrubber */}
-            <div
-              className="flex-1 h-1.5 bg-neutral-700 rounded-full overflow-hidden relative cursor-pointer"
-              onClick={handleSeek}
-            >
-              {videoDuration > 0 && (
-                <div
-                  className="h-full bg-purple-500 transition-all"
-                  style={{ width: `${(currentTime / videoDuration) * 100}%` }}
-                />
-              )}
-            </div>
-
-            {/* Current time */}
-            <span className="text-[10px] text-neutral-500 min-w-[32px] text-right">
-              {formatTime(currentTime)}
-            </span>
-          </div>
-
           {/* Remove button */}
           <button
             onClick={handleRemove}
-            className="absolute top-1 right-1 w-5 h-5 bg-black/60 text-white rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
+            aria-label="Remove video"
+            className="absolute top-1 right-1 w-5 h-5 bg-black/60 hover:bg-red-600/80 text-white rounded text-xs opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
           >
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
+
+          {/* Loading overlay when fetching video from disk */}
+          {isLoadingVideo && (
+            <div className="absolute inset-0 bg-neutral-900/70 flex items-center justify-center">
+              <svg className="w-5 h-5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            </div>
+          )}
+
+          {/* Double-click hint */}
+          <div className="absolute bottom-0 left-0 right-0 text-center py-1 bg-neutral-900/40">
+            <span className="text-[10px] text-white/30">double click to view</span>
+          </div>
         </div>
       ) : (
         <div
           onClick={() => fileInputRef.current?.click()}
           onDrop={handleDrop}
           onDragOver={handleDragOver}
-          className="w-full flex-1 min-h-[140px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center cursor-pointer hover:border-neutral-500 hover:bg-neutral-700/50 transition-colors"
+          className="w-full h-full min-h-[140px] bg-neutral-900/40 flex flex-col items-center justify-center cursor-pointer hover:bg-neutral-900/60 transition-colors"
         >
           <svg className="w-6 h-6 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
@@ -290,5 +316,19 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
         data-handletype="video"
       />
     </BaseNode>
+
+    {showOverlay && nodeData.videoFile && (
+      <MediaOverlay
+        content={nodeData.videoFile}
+        mediaType="video"
+        currentIndex={0}
+        totalCount={1}
+        onPrevious={noop}
+        onNext={noop}
+        onClose={() => setShowOverlay(false)}
+        onFrameGrab={handleFrameGrab}
+      />
+    )}
+    </>
   );
 }

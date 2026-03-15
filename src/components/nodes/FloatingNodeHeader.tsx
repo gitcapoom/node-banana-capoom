@@ -8,6 +8,54 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 import { ProviderBadge } from "./ProviderBadge";
 
+const NODE_HEADER_COLORS: Record<string, string> = {
+  // Input — green zone (lime → green → emerald)
+  imageInput: "#84cc16",        // lime-500
+  videoInput: "#22c55e",        // green-500
+  audioInput: "#10b981",        // emerald-500
+
+  // Text — blue zone (sky → blue → indigo)
+  prompt: "#0ea5e9",            // sky-500
+  promptConstructor: "#3b82f6", // blue-500
+  array: "#6366f1",             // indigo-500
+
+  // Generate — magenta zone (pink → rose → fuchsia → purple → violet)
+  nanoBanana: "#ec4899",        // pink-500
+  generateVideo: "#d946ef",     // fuchsia-500
+  generate3d: "#f43f5e",        // rose-500
+  generateAudio: "#a855f7",     // purple-500
+  llmGenerate: "#f472b6",       // pink-400
+  worldLabsPano: "#8b5cf6",     // violet-500
+  worldLabsWorld: "#c026d3",    // fuchsia-600
+
+  // Process — warm zone (yellow → amber → orange)
+  annotation: "#fde047",        // yellow-300
+  panoEditor: "#f97316",        // orange-500
+  maskPainter: "#eab308",       // yellow-500
+  splitGrid: "#ea580c",         // orange-600
+  videoStitch: "#fbbf24",       // amber-400
+  videoTrim: "#d97706",         // amber-600
+  easeCurve: "#facc15",         // yellow-400
+  videoFrameGrab: "#f59e0b",    // amber-500
+  imageCompare: "#b45309",      // amber-700
+  videoCompare: "#92400e",      // amber-800
+  panoCrop: "#fb923c",          // orange-400
+
+  // Route — cyan zone
+  router: "#06b6d4",            // cyan-500
+  switch: "#22d3ee",            // cyan-400
+  conditionalSwitch: "#0891b2", // cyan-600
+
+  // Output — greys
+  output: "#6b7280",            // gray-500
+  outputGallery: "#9ca3af",     // gray-400
+
+  // View — red zone (red → red-dark → rose)
+  glbViewer: "#ef4444",         // red-500
+  spzViewer: "#b91c1c",         // red-700
+  panoViewer: "#f87171",        // red-400
+};
+
 export interface CommentNavigationProps {
   currentIndex: number;
   totalCount: number;
@@ -319,7 +367,10 @@ export const FloatingNodeHeader = memo(function FloatingNodeHeader({
       }}
     >
       <div
-        className="px-1 py-1 flex items-center justify-between w-full pointer-events-auto cursor-grab"
+        className="px-1 py-1 flex items-center justify-between w-full pointer-events-auto cursor-grab rounded-t-lg"
+        style={{
+          backgroundColor: `${NODE_HEADER_COLORS[type] || "#94a3b8"}55`,
+        }}
         onMouseEnter={() => setIsHeaderHovered(true)}
         onMouseLeave={() => setIsHeaderHovered(false)}
         onPointerDown={handleHeaderPointerDown}

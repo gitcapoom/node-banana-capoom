@@ -238,6 +238,8 @@ async function externalizeNodeImages(
       const inputImages: string[] = [];
       let outputVideoRef = d.outputVideoRef;
       let outputVideo = d.outputVideo;
+      let thumbnailImageRef = d.thumbnailImageRef;
+      let thumbnailImage = d.thumbnailImage;
 
       // Handle input images array (save to inputs)
       // Skip if corresponding inputImageRef already exists
@@ -266,12 +268,22 @@ async function externalizeNodeImages(
         outputVideo = null;
       }
 
+      // Externalize thumbnail
+      if (d.thumbnailImageRef && isBase64DataUrl(d.thumbnailImage)) {
+        thumbnailImage = null;
+      } else if (isBase64DataUrl(d.thumbnailImage)) {
+        thumbnailImageRef = await saveImageAndGetId(d.thumbnailImage!, workflowPath, savedImageIds, "generations");
+        thumbnailImage = null;
+      }
+
       newData = {
         ...d,
         inputImages: inputImages.length > 0 && inputImages.every(i => i === "") ? [] : inputImages,
         inputImageRefs: inputImageRefs.length > 0 ? inputImageRefs : undefined,
         outputVideo,
         outputVideoRef,
+        thumbnailImage,
+        thumbnailImageRef,
       };
       break;
     }
@@ -303,8 +315,8 @@ async function externalizeNodeImages(
     case "output": {
       const d = data as import("@/types").OutputNodeData;
       // Output content is saved to /outputs during workflow execution, not here
-      // Clear image data to keep workflow file small - outputs are regenerated on each run
-      newData = { ...d, image: null, imageRef: undefined, video: null };
+      // Clear ALL media fields to keep workflow file small - outputs are re-pulled from upstream on load
+      newData = { ...d, image: null, imageRef: undefined, video: null, model3d: null, audio: null };
       break;
     }
 
@@ -320,6 +332,152 @@ async function externalizeNodeImages(
       } else {
         newData = d;
       }
+      break;
+    }
+
+    case "videoInput": {
+      const d = data as import("@/types").VideoInputNodeData;
+      let videoFileRef = d.videoFileRef;
+      let videoFile = d.videoFile;
+      let thumbnailImageRef = d.thumbnailImageRef;
+      let thumbnailImage = d.thumbnailImage;
+
+      // Externalize video file
+      if (d.videoFileRef && isBase64DataUrl(d.videoFile)) {
+        videoFile = null;
+      } else if (isBase64DataUrl(d.videoFile)) {
+        videoFileRef = await saveImageAndGetId(d.videoFile, workflowPath, savedImageIds, "inputs");
+        videoFile = null;
+      }
+
+      // Externalize thumbnail
+      if (d.thumbnailImageRef && isBase64DataUrl(d.thumbnailImage)) {
+        thumbnailImage = null;
+      } else if (isBase64DataUrl(d.thumbnailImage)) {
+        thumbnailImageRef = await saveImageAndGetId(d.thumbnailImage!, workflowPath, savedImageIds, "inputs");
+        thumbnailImage = null;
+      }
+
+      newData = { ...d, videoFile, videoFileRef, thumbnailImage, thumbnailImageRef };
+      break;
+    }
+
+    case "generate3d": {
+      const d = data as import("@/types").Generate3DNodeData;
+      let thumbnailImageRef = d.thumbnailImageRef;
+      let thumbnailImage = d.thumbnailImage;
+
+      if (d.thumbnailImageRef && isBase64DataUrl(d.thumbnailImage)) {
+        thumbnailImage = null;
+      } else if (isBase64DataUrl(d.thumbnailImage)) {
+        thumbnailImageRef = await saveImageAndGetId(d.thumbnailImage!, workflowPath, savedImageIds, "generations");
+        thumbnailImage = null;
+      }
+
+      // Also externalize inputImages (same pattern as nanoBanana)
+      let inputImageRefs = d.inputImageRefs ? [...d.inputImageRefs] : [];
+      const inputImages = [...d.inputImages];
+      for (let i = 0; i < inputImages.length; i++) {
+        if (isBase64DataUrl(inputImages[i])) {
+          const existingRef = inputImageRefs[i];
+          if (existingRef) {
+            inputImages[i] = "";
+          } else {
+            const ref = await saveImageAndGetId(inputImages[i], workflowPath, savedImageIds, "inputs");
+            inputImageRefs[i] = ref;
+            inputImages[i] = "";
+          }
+        }
+      }
+
+      newData = { ...d, thumbnailImage, thumbnailImageRef, inputImages, inputImageRefs, output3dUrl: null };
+      break;
+    }
+
+    case "glbViewer": {
+      const d = data as import("@/types").GLBViewerNodeData;
+      let capturedImageRef = d.capturedImageRef;
+      let capturedImage = d.capturedImage;
+      let thumbnailImageRef = d.thumbnailImageRef;
+      let thumbnailImage = d.thumbnailImage;
+      let glbFileRef = d.glbFileRef;
+
+      if (d.capturedImageRef && isBase64DataUrl(d.capturedImage)) {
+        capturedImage = null;
+      } else if (isBase64DataUrl(d.capturedImage)) {
+        capturedImageRef = await saveImageAndGetId(d.capturedImage!, workflowPath, savedImageIds, "inputs");
+        capturedImage = null;
+      }
+
+      if (d.thumbnailImageRef && isBase64DataUrl(d.thumbnailImage)) {
+        thumbnailImage = null;
+      } else if (isBase64DataUrl(d.thumbnailImage)) {
+        thumbnailImageRef = await saveImageAndGetId(d.thumbnailImage!, workflowPath, savedImageIds, "inputs");
+        thumbnailImage = null;
+      }
+
+      // Fallback: save GLB file from blob URL if glbFileRef was never set
+      // (e.g. saveDirectoryPath was null at upload time, or save failed due to MIME type)
+      if (!glbFileRef && d.glbUrl && d.glbUrl.startsWith("blob:")) {
+        try {
+          const response = await fetch(d.glbUrl);
+          const blob = await response.blob();
+          // Re-wrap with explicit MIME type for correct file extension
+          const glbBlob = new Blob([blob], { type: "model/gltf-binary" });
+          const glbDataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(glbBlob);
+          });
+          glbFileRef = await saveImageAndGetId(glbDataUrl, workflowPath, savedImageIds, "inputs");
+        } catch (error) {
+          console.warn("Failed to save GLB file during externalization:", error);
+        }
+      }
+
+      // Clear blob URL (cannot persist across reloads); glbFileRef preserves the file on disk
+      newData = { ...d, capturedImage, capturedImageRef, thumbnailImage, thumbnailImageRef, glbUrl: null, glbFileRef };
+      break;
+    }
+
+    case "panoCrop": {
+      const d = data as import("@/types").PanoCropNodeData;
+      if (d.imageRef && isBase64DataUrl(d.image)) {
+        newData = { ...d, image: null };
+      } else if (isBase64DataUrl(d.image)) {
+        const imageId = await saveImageAndGetId(d.image, workflowPath, savedImageIds, "inputs");
+        newData = { ...d, image: null, imageRef: imageId };
+      } else {
+        newData = d;
+      }
+      break;
+    }
+
+    case "maskPainter": {
+      const d = data as import("@/types").MaskPainterNodeData;
+      let sourceImageRef = d.sourceImageRef;
+      let sourceImage = d.sourceImage;
+      let outputMaskRef = d.outputMaskRef;
+      let outputMask = d.outputMask;
+
+      // Externalize source image
+      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
+        sourceImage = null;
+      } else if (isBase64DataUrl(d.sourceImage)) {
+        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
+        sourceImage = null;
+      }
+
+      // Externalize output mask
+      if (d.outputMaskRef && isBase64DataUrl(d.outputMask)) {
+        outputMask = null;
+      } else if (isBase64DataUrl(d.outputMask)) {
+        outputMaskRef = await saveImageAndGetId(d.outputMask!, workflowPath, savedImageIds, "inputs");
+        outputMask = null;
+      }
+
+      newData = { ...d, sourceImage, sourceImageRef, outputMask, outputMaskRef };
       break;
     }
 
@@ -401,6 +559,25 @@ async function saveImageAndGetId(
     throw error;
   } finally {
     inFlightSaves.delete(hash);
+  }
+}
+
+/**
+ * Convert a base64 data URL to a blob Object URL.
+ * Used to restore binary files (e.g. GLB models) as blob URLs after workflow reload.
+ */
+function dataUrlToObjectUrl(dataUrl: string): string | null {
+  try {
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) return null;
+    const [, mime, base64] = match;
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: mime });
+    return URL.createObjectURL(blob);
+  } catch {
+    return null;
   }
 }
 
@@ -534,11 +711,13 @@ async function hydrateNodeImages(
         }
       }
 
-      // Hydrate video: only load thumbnail, not the full video (loaded on-demand in overlay)
-      // The thumbnail is stored in the video history item or as a separate _thumb file
+      // Hydrate thumbnail from ref (don't load full video — loaded on-demand in overlay)
       let thumbnailImage = d.thumbnailImage;
+      if (!thumbnailImage && d.thumbnailImageRef) {
+        thumbnailImage = await loadImageById(d.thumbnailImageRef, workflowPath, loadedImages, "generations");
+      }
+      // Fallback: try _thumb convention from history item
       if (!thumbnailImage && d.outputVideoRef) {
-        // Try to load thumbnail from generations folder
         const thumbId = `${d.outputVideoRef}_thumb`;
         const thumb = await loadImageById(thumbId, workflowPath, loadedImages, "generations");
         if (thumb) thumbnailImage = thumb;
@@ -587,6 +766,109 @@ async function hydrateNodeImages(
       } else {
         newData = d;
       }
+      break;
+    }
+
+    case "videoInput": {
+      const d = data as import("@/types").VideoInputNodeData;
+      let thumbnailImage = d.thumbnailImage;
+
+      // Hydrate thumbnail only — full video is loaded on-demand in overlay
+      if (d.thumbnailImageRef && !d.thumbnailImage) {
+        thumbnailImage = await loadImageById(d.thumbnailImageRef, workflowPath, loadedImages, "inputs");
+      }
+
+      newData = {
+        ...d,
+        videoFile: null, // Don't hydrate full video — loaded on-demand in overlay
+        thumbnailImage,
+      };
+      break;
+    }
+
+    case "generate3d": {
+      const d = data as import("@/types").Generate3DNodeData;
+      let thumbnailImage = d.thumbnailImage;
+      const inputImages = [...(d.inputImages || [])];
+
+      // Hydrate thumbnail
+      if (d.thumbnailImageRef && !d.thumbnailImage) {
+        thumbnailImage = await loadImageById(d.thumbnailImageRef, workflowPath, loadedImages, "generations");
+      }
+
+      // Hydrate input images from refs
+      if (d.inputImageRefs && d.inputImageRefs.length > 0) {
+        for (let i = 0; i < d.inputImageRefs.length; i++) {
+          const ref = d.inputImageRefs[i];
+          if (ref) {
+            inputImages[i] = await loadImageById(ref, workflowPath, loadedImages, "inputs");
+          }
+        }
+      }
+
+      newData = {
+        ...d,
+        thumbnailImage,
+        inputImages,
+      };
+      break;
+    }
+
+    case "glbViewer": {
+      const d = data as import("@/types").GLBViewerNodeData;
+      let capturedImage = d.capturedImage;
+      let thumbnailImage = d.thumbnailImage;
+
+      if (d.capturedImageRef && !d.capturedImage) {
+        capturedImage = await loadImageById(d.capturedImageRef, workflowPath, loadedImages, "inputs");
+      }
+      if (d.thumbnailImageRef && !d.thumbnailImage) {
+        thumbnailImage = await loadImageById(d.thumbnailImageRef, workflowPath, loadedImages, "inputs");
+      }
+
+      // GLB file (glbUrl) is NOT hydrated here — the component self-hydrates
+      // via useEffect (matching Generate3DNode's pattern) so that the React Flow
+      // re-render triggers handle position re-computation for edge rendering.
+
+      newData = {
+        ...d,
+        capturedImage,
+        thumbnailImage,
+      };
+      break;
+    }
+
+    case "panoCrop": {
+      const d = data as import("@/types").PanoCropNodeData;
+      if (d.imageRef && !d.image) {
+        const image = await loadImageById(d.imageRef, workflowPath, loadedImages, "inputs");
+        newData = {
+          ...d,
+          image,
+        };
+      } else {
+        newData = d;
+      }
+      break;
+    }
+
+    case "maskPainter": {
+      const d = data as import("@/types").MaskPainterNodeData;
+      let sourceImage = d.sourceImage;
+      let outputMask = d.outputMask;
+
+      if (d.sourceImageRef && !d.sourceImage) {
+        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
+      }
+      if (d.outputMaskRef && !d.outputMask) {
+        outputMask = await loadImageById(d.outputMaskRef, workflowPath, loadedImages, "inputs");
+      }
+
+      newData = {
+        ...d,
+        sourceImage,
+        outputMask,
+      };
       break;
     }
 

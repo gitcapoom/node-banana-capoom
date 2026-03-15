@@ -114,9 +114,6 @@ export async function executeGenerate3D(
       const timestamp = Date.now();
       const model3dId = `${timestamp}`;
 
-      // Use input image as thumbnail (if available), otherwise null
-      const thumbnailImage = images.length > 0 ? images[0] : null;
-
       // Add to node's 3D history (with full settings snapshot for recall)
       const newHistoryItem: Carousel3DItem = {
         id: model3dId,
@@ -130,7 +127,8 @@ export async function executeGenerate3D(
 
       updateNodeData(node.id, {
         output3dUrl: result.model3dUrl,
-        thumbnailImage,
+        thumbnailImage: null,
+        thumbnailImageRef: undefined,
         status: "complete",
         error: null,
         model3dHistory: updatedHistory,
@@ -182,20 +180,6 @@ export async function executeGenerate3D(
           });
 
         trackSaveGeneration(model3dId, savePromise);
-
-        // Save thumbnail image to generations folder if we have one
-        if (thumbnailImage) {
-          fetch("/api/save-generation", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              directoryPath: generationsPath,
-              image: thumbnailImage,
-              prompt: promptText,
-              imageId: `${model3dId}_thumb`,
-            }),
-          }).catch(() => {});
-        }
       }
     } else {
       updateNodeData(node.id, {

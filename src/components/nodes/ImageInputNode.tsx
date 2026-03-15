@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { ImageInputNodeData } from "@/types";
+import { MediaOverlay } from "../MediaOverlay";
 
 type ImageInputNodeType = Node<ImageInputNodeData, "imageInput">;
 
@@ -14,6 +15,7 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
   const commentNavigation = useCommentNavigation(id);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showOverlay, setShowOverlay] = useState(false);
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -81,7 +83,11 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
     });
   }, [id, updateNodeData]);
 
+  // No-op handlers for overlay (single image, no carousel)
+  const noop = useCallback(() => {}, []);
+
   return (
+    <>
     <BaseNode
       id={id}
       selected={selected}
@@ -111,7 +117,8 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
           <img
             src={nodeData.image}
             alt={nodeData.filename || "Uploaded image"}
-            className="w-full h-full object-contain"
+            className="w-full h-full object-contain cursor-pointer"
+            onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}
           />
           <button
             onClick={handleRemove}
@@ -122,6 +129,10 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
+          {/* Double-click hint */}
+          <div className="absolute bottom-0 left-0 right-0 text-center py-1 bg-neutral-900/40">
+            <span className="text-[10px] text-white/30">double click to view</span>
+          </div>
         </div>
       ) : (
         <div
@@ -153,5 +164,18 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
         data-handletype="image"
       />
     </BaseNode>
+
+    {showOverlay && nodeData.image && (
+      <MediaOverlay
+        content={nodeData.image}
+        mediaType="image"
+        currentIndex={0}
+        totalCount={1}
+        onPrevious={noop}
+        onNext={noop}
+        onClose={() => setShowOverlay(false)}
+      />
+    )}
+    </>
   );
 }

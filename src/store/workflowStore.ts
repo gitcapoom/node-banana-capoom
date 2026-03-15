@@ -73,6 +73,7 @@ import {
   executeOutput,
   executeOutputGallery,
   executeImageCompare,
+  executeVideoCompare,
   executeNanoBanana,
   executeGenerateVideo,
   executeGenerate3D,
@@ -96,6 +97,121 @@ import {
 import type { NodeExecutionContext } from "./execution";
 export type { LevelGroup } from "./utils/executionUtils";
 export { CONCURRENCY_SETTINGS_KEY } from "./utils/executionUtils";
+
+/**
+ * Strip generation outputs from node data when pasting, keeping settings intact.
+ * Generation nodes should paste clean (no outputs/history) but with all their
+ * configuration (model, parameters, prompts, etc.) preserved.
+ */
+function stripGenerationOutputs(nodeType: string, data: Record<string, unknown>): Record<string, unknown> {
+  switch (nodeType) {
+    case "nanoBanana":
+      return {
+        ...data,
+        inputImages: [],
+        inputImageRefs: undefined,
+        inputPrompt: null,
+        outputImage: null,
+        outputImageRef: undefined,
+        status: "idle",
+        error: null,
+        imageHistory: [],
+        selectedHistoryIndex: 0,
+        lastGenerationCost: null,
+      };
+    case "generateVideo":
+      return {
+        ...data,
+        inputImages: [],
+        inputImageRefs: undefined,
+        inputPrompt: null,
+        outputVideo: null,
+        outputVideoRef: undefined,
+        thumbnailImage: null,
+        thumbnailImageRef: undefined,
+        status: "idle",
+        error: null,
+        videoHistory: [],
+        selectedVideoHistoryIndex: 0,
+        lastGenerationCost: null,
+      };
+    case "generate3d":
+      return {
+        ...data,
+        inputImages: [],
+        inputImageRefs: undefined,
+        inputPrompt: null,
+        output3dUrl: null,
+        savedFilename: null,
+        savedFilePath: null,
+        thumbnailImage: null,
+        thumbnailImageRef: undefined,
+        status: "idle",
+        error: null,
+        model3dHistory: [],
+        selectedModel3dHistoryIndex: 0,
+        lastGenerationCost: null,
+      };
+    case "generateAudio":
+      return {
+        ...data,
+        inputPrompt: null,
+        outputAudio: null,
+        outputAudioRef: undefined,
+        status: "idle",
+        error: null,
+        audioHistory: [],
+        selectedAudioHistoryIndex: 0,
+        duration: null,
+        format: null,
+        lastGenerationCost: null,
+      };
+    case "llmGenerate":
+      return {
+        ...data,
+        inputPrompt: null,
+        inputImages: [],
+        inputImageRefs: undefined,
+        outputText: null,
+        status: "idle",
+        error: null,
+        lastGenerationCost: null,
+      };
+    case "worldLabsPano":
+      return {
+        ...data,
+        inputImages: [],
+        inputPrompt: null,
+        operationId: null,
+        worldId: null,
+        status: "idle",
+        error: null,
+        progress: null,
+        panoUrl: null,
+        thumbnailUrl: null,
+        caption: null,
+      };
+    case "worldLabsWorld":
+      return {
+        ...data,
+        inputImages: [],
+        inputPrompt: null,
+        operationId: null,
+        worldId: null,
+        status: "idle",
+        error: null,
+        progress: null,
+        spzUrls: null,
+        panoUrl: null,
+        thumbnailUrl: null,
+        marbleViewerUrl: null,
+        caption: null,
+        viewerWindowOpen: false,
+      };
+    default:
+      return data;
+  }
+}
 
 /**
  * Evaluate conditional switch rules against incoming text, update node data, then execute.
@@ -752,6 +868,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // Create new nodes with updated IDs and offset positions
     const newNodes: WorkflowNode[] = clipboard.nodes.map((node) => {
       const defaults = defaultNodeDimensions[node.type as NodeType] || { width: 300, height: 280 };
+      const clonedData = JSON.parse(JSON.stringify(node.data));
+
+      // Strip generation outputs from generation nodes (keep settings)
+      const cleanedData = stripGenerationOutputs(node.type as string, clonedData);
+
       return {
         ...node,
         id: idMapping.get(node.id)!,
@@ -766,7 +887,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         width: undefined,
         height: undefined,
         measured: undefined,
-        data: JSON.parse(JSON.stringify(node.data)),
+        data: cleanedData,
       };
     });
 
@@ -1164,6 +1285,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           case "imageCompare":
             await executeImageCompare(executionCtx);
             break;
+          case "videoCompare":
+            await executeVideoCompare(executionCtx);
+            break;
           case "videoStitch":
             await executeVideoStitch(executionCtx);
             break;
@@ -1394,6 +1518,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
             break;
           case "imageCompare":
             await executeImageCompare(targetCtx);
+            break;
+          case "videoCompare":
+            await executeVideoCompare(targetCtx);
             break;
         }
       }
@@ -1645,6 +1772,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
                 await executeImageCompare(targetCtx);
                 propagated.add(edge.target);
                 break;
+              case "videoCompare":
+                await executeVideoCompare(targetCtx);
+                propagated.add(edge.target);
+                break;
             }
           }
         }
@@ -1800,6 +1931,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         // Validate compound dynamic handles (e.g. "image-mask_url") against inputSchema
         const th = edge.targetHandle;
         if (th) {
+          // Skip static handles that are hardcoded on components (not schema-derived)
+          if (th === "image-bg") {
+            return true;
+          }
           const dashIdx = th.indexOf("-");
           if (dashIdx > 0) {
             const suffix = th.slice(dashIdx + 1);
@@ -2073,6 +2208,64 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
     // Recompute dimming
     get().recomputeDimmedNodes();
+
+    // 6. Post-import: extract embedded base64 content to generations folder (async, non-blocking)
+    const generationsPath = get().generationsPath;
+    if (generationsPath) {
+      const extractContent = async () => {
+        for (const node of newNodes) {
+          const d = node.data as Record<string, unknown>;
+          const nodeType = node.type;
+
+          // Collect base64 data URLs to save: { field, content, prompt? }
+          const toSave: Array<{ field: string; content: string; prompt?: string }> = [];
+
+          if (nodeType === "nanoBanana" && typeof d.outputImage === "string" && (d.outputImage as string).startsWith("data:")) {
+            toSave.push({ field: "outputImage", content: d.outputImage as string, prompt: d.inputPrompt as string });
+          }
+          if (nodeType === "generateVideo" && typeof d.outputVideo === "string" && (d.outputVideo as string).startsWith("data:")) {
+            toSave.push({ field: "outputVideo", content: d.outputVideo as string, prompt: d.inputPrompt as string });
+          }
+          if (nodeType === "generateAudio" && typeof d.outputAudio === "string" && (d.outputAudio as string).startsWith("data:")) {
+            toSave.push({ field: "outputAudio", content: d.outputAudio as string, prompt: d.inputPrompt as string });
+          }
+          if (nodeType === "imageInput" && typeof d.image === "string" && (d.image as string).startsWith("data:")) {
+            toSave.push({ field: "image", content: d.image as string });
+          }
+
+          for (const item of toSave) {
+            try {
+              const isVideo = item.content.startsWith("data:video/");
+              const isAudio = item.content.startsWith("data:audio/");
+              const savePayload: Record<string, unknown> = {
+                directoryPath: generationsPath,
+                prompt: item.prompt || "",
+                imageId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              };
+              if (isVideo) {
+                savePayload.video = item.content;
+              } else if (isAudio) {
+                // Audio — save as image field (the API handles all media types)
+                savePayload.image = item.content;
+              } else {
+                savePayload.image = item.content;
+              }
+
+              await fetch("/api/save-generation", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(savePayload),
+              });
+            } catch (err) {
+              console.warn("Failed to extract imported content:", err);
+            }
+          }
+        }
+      };
+
+      // Fire and forget — don't block the import
+      extractContent().catch((err) => console.warn("Import content extraction failed:", err));
+    }
   },
 
   clearWorkflow: () => {
@@ -2249,11 +2442,17 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         // If we externalized images, update store nodes with the refs
         // This prevents duplicate images on subsequent saves
         if (useExternalImageStorage && workflow.nodes !== currentNodes) {
-          // Merge refs from externalized nodes into current nodes (keeping image data)
-          const nodesWithRefs = currentNodes.map((node, index) => {
-            const externalizedNode = workflow.nodes[index];
-            if (!externalizedNode || node.id !== externalizedNode.id) {
-              return node; // Safety check - nodes should match
+          // Merge refs from externalized nodes into LATEST store nodes (not the stale
+          // snapshot captured at save start). This prevents the async save from
+          // overwriting node data that was updated while externalization was in progress
+          // (e.g. a video generation completing during save).
+          const latestNodes = get().nodes;
+          const nodesWithRefs = latestNodes.map((node) => {
+            // Find the matching externalized node by ID (not index — nodes may have been
+            // added/removed during the async save)
+            const externalizedNode = workflow.nodes.find((en) => en.id === node.id);
+            if (!externalizedNode) {
+              return node; // Node was added after save started — keep as-is
             }
 
             // Copy refs from externalized node while keeping current image data
@@ -2273,6 +2472,21 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
             }
             if (extData.inputImageRefs && Array.isArray(extData.inputImageRefs)) {
               mergedData.inputImageRefs = extData.inputImageRefs;
+            }
+            // GLB file ref (created during externalization fallback for glbViewer nodes)
+            if (extData.glbFileRef && typeof extData.glbFileRef === 'string') {
+              mergedData.glbFileRef = extData.glbFileRef;
+            }
+            // Video refs (generateVideo nodes)
+            if (extData.outputVideoRef && typeof extData.outputVideoRef === 'string') {
+              mergedData.outputVideoRef = extData.outputVideoRef;
+            }
+            if (extData.thumbnailImageRef && typeof extData.thumbnailImageRef === 'string') {
+              mergedData.thumbnailImageRef = extData.thumbnailImageRef;
+            }
+            // Audio ref (generateAudio nodes)
+            if (extData.outputAudioRef && typeof extData.outputAudioRef === 'string') {
+              mergedData.outputAudioRef = extData.outputAudioRef;
             }
 
             return { ...node, data: mergedData as WorkflowNodeData } as WorkflowNode;

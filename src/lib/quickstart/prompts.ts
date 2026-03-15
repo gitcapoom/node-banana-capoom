@@ -9,7 +9,7 @@ export function buildQuickstartPrompt(
 ): string {
   const timestamp = Date.now();
 
-  return `You are a workflow designer for Node Banana, a visual node-based AI image generation tool. Your task is to create a workflow JSON based on the user's description.
+  return `You are a workflow designer for Node Banana Capoom, a visual node-based AI generation tool. Your task is to create a workflow JSON based on the user's description.
 
 ## CRITICAL: OUTPUT FORMAT
 You MUST output ONLY valid JSON. No explanations, no markdown, no code blocks. Just the raw JSON object starting with { and ending with }.
@@ -410,7 +410,7 @@ OUTPUT ONLY THE JSON:`;
  * Build a simpler prompt for quick generation
  */
 export function buildSimplePrompt(description: string): string {
-  return `Create a Node Banana workflow JSON for: "${description}"
+  return `Create a Node Banana Capoom workflow JSON for: "${description}"
 
 Node types: imageInput (output: image), prompt (output: text), nanoBanana (inputs: image+text, output: image), llmGenerate (input: text, output: text), annotation (input: image, output: image), splitGrid (input: image, creates child nodes for each cell), output (input: image).
 

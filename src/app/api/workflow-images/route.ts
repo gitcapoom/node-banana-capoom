@@ -28,6 +28,8 @@ function getMimeAndExtension(dataUrl: string): { mime: string; extension: string
       "audio/ogg": "ogg",
       "audio/flac": "flac",
       "audio/aac": "aac",
+      "model/gltf-binary": "glb",
+      "application/octet-stream": "glb",
     };
     return { mime, extension: mimeToExt[mime] || "png" };
   }
@@ -254,7 +256,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Construct file path - check folders and extensions in order
-    const possibleExtensions = ["png", "jpg", "jpeg", "gif", "webp"];
+    const possibleExtensions = [
+      "png", "jpg", "jpeg", "gif", "webp",        // images
+      "mp4", "webm", "mov",                        // video
+      "mp3", "wav", "ogg",                         // audio
+      "glb", "spz",                                // 3D
+    ];
     const inputsFolder = path.join(workflowPath, IMAGES_FOLDER);
     const generationsFolder = path.join(workflowPath, "generations");
     const legacyFolder = path.join(workflowPath, LEGACY_IMAGES_FOLDER);
@@ -306,9 +313,14 @@ export async function GET(request: NextRequest) {
 
     // Convert to base64 data URL with correct MIME type
     const base64 = buffer.toString("base64");
-    const mimeType = foundExtension === "jpg" || foundExtension === "jpeg"
-      ? "image/jpeg"
-      : `image/${foundExtension}`;
+    const mimeMap: Record<string, string> = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+      gif: "image/gif", webp: "image/webp",
+      mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
+      mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
+      glb: "model/gltf-binary", spz: "application/octet-stream",
+    };
+    const mimeType = mimeMap[foundExtension] || "application/octet-stream";
     const dataUrl = `data:${mimeType};base64,${base64}`;
 
     logger.info('file.load', 'Workflow image loaded successfully', {

@@ -8,6 +8,7 @@ import { EnvStatusResponse } from "@/app/api/env-status/route";
 import { loadNodeDefaults, saveNodeDefaults } from "@/store/utils/localStorage";
 import { ProviderModel } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
+import { FileOpenDialog } from "@/components/FileOpenDialog";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 
 // LLM provider and model options (mirrored from LLMGenerateNode)
@@ -152,7 +153,7 @@ export function ProjectSetupModal({
   const [directoryPath, setDirectoryPath] = useState("");
   const [externalStorage, setExternalStorage] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
-  const [isBrowsing, setIsBrowsing] = useState(false);
+  // isBrowsing removed — FileOpenDialog handles its own state
   const [error, setError] = useState<string | null>(null);
 
   // Provider tab state
@@ -237,33 +238,16 @@ export function ProjectSetupModal({
     }
   }, [isOpen, mode, workflowName, saveDirectoryPath, useExternalImageStorage, providerSettings, canvasNavigationSettings]);
 
-  const handleBrowse = async () => {
-    setIsBrowsing(true);
+  const [showBrowseDialog, setShowBrowseDialog] = useState(false);
+
+  const handleBrowse = () => {
     setError(null);
+    setShowBrowseDialog(true);
+  };
 
-    try {
-      const response = await fetch("/api/browse-directory");
-      const result = await response.json();
-
-      if (!result.success) {
-        setError(result.error || "Failed to open directory picker");
-        return;
-      }
-
-      if (result.cancelled) {
-        return;
-      }
-
-      if (result.path) {
-        setDirectoryPath(result.path);
-      }
-    } catch (err) {
-      setError(
-        `Failed to open directory picker: ${err instanceof Error ? err.message : "Unknown error"}`
-      );
-    } finally {
-      setIsBrowsing(false);
-    }
+  const handleBrowseSelect = (selectedPath: string) => {
+    setDirectoryPath(selectedPath);
+    setShowBrowseDialog(false);
   };
 
   const handleSaveProject = async () => {
@@ -358,7 +342,7 @@ export function ProjectSetupModal({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !isValidating && !isBrowsing) {
+    if (e.key === "Enter" && !isValidating && !showBrowseDialog) {
       handleSave();
     }
     if (e.key === "Escape") {
@@ -467,10 +451,9 @@ export function ProjectSetupModal({
                 <button
                   type="button"
                   onClick={handleBrowse}
-                  disabled={isBrowsing}
-                  className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 disabled:bg-neutral-700 disabled:opacity-50 text-neutral-200 text-sm rounded-lg transition-colors"
+                  className="px-3 py-2 bg-neutral-700 hover:bg-neutral-600 text-neutral-200 text-sm rounded-lg transition-colors"
                 >
-                  {isBrowsing ? "..." : "Browse"}
+                  Browse
                 </button>
               </div>
               <p className="text-xs text-neutral-400 mt-1">
@@ -1231,7 +1214,7 @@ export function ProjectSetupModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={activeTab === "project" && (isValidating || isBrowsing)}
+            disabled={activeTab === "project" && isValidating}
             className="px-4 py-2 text-sm bg-white text-neutral-900 rounded-lg hover:bg-neutral-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {activeTab === "project"
@@ -1283,6 +1266,16 @@ export function ProjectSetupModal({
             setShowVideoModelDialog(false);
           }}
           initialCapabilityFilter="video"
+        />
+      )}
+
+      {/* Directory Browse Dialog */}
+      {showBrowseDialog && (
+        <FileOpenDialog
+          mode="directory"
+          initialPath={directoryPath || undefined}
+          onFileSelected={handleBrowseSelect}
+          onCancel={() => setShowBrowseDialog(false)}
         />
       )}
     </div>

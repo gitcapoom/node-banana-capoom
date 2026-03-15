@@ -55,8 +55,10 @@ export type MaskElement = MaskStroke | MaskRect | MaskCircle;
  */
 export interface MaskPainterNodeData extends BaseNodeData {
   sourceImage: string | null;
+  sourceImageRef?: string;         // ref to externalized source image
   strokes: MaskElement[];
   outputMask: string | null;       // White-on-black mask data URL
+  outputMaskRef?: string;          // ref to externalized mask
   brushSize: number;               // Default 30
   blurRadius: number;              // Post-blur in pixels, default 0
   invertMask: boolean;             // Default false

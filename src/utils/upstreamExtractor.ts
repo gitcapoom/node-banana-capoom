@@ -4,6 +4,7 @@ import {
   WorkflowNode,
   NanoBananaNodeData,
   GenerateVideoNodeData,
+  Generate3DNodeData,
   GenerateAudioNodeData,
 } from "@/types/nodes";
 
@@ -68,6 +69,13 @@ export function extractUpstreamWorkflow(
       data.videoHistory = [];
       data.selectedVideoHistoryIndex = -1;
       data.outputVideoRef = undefined;
+    } else if (node.type === "generate3d") {
+      const data = node.data as Generate3DNodeData;
+      // Keep only the active output3dUrl, clear carousel history
+      data.model3dHistory = [];
+      data.selectedModel3dHistoryIndex = -1;
+      data.inputImageRefs = undefined;
+      data.thumbnailImageRef = undefined;
     } else if (node.type === "generateAudio") {
       const data = node.data as GenerateAudioNodeData;
       data.audioHistory = [];

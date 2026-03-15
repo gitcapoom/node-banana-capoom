@@ -6,7 +6,7 @@
  * and connections rather than internal node state.
  */
 export function buildProposalPrompt(description: string): string {
-  return `You are a workflow designer for Node Banana, a visual node-based AI image generation tool. Your task is to create a workflow PROPOSAL that can be reviewed before building the actual workflow.
+  return `You are a workflow designer for Node Banana Capoom, a visual node-based AI generation tool. Your task is to create a workflow PROPOSAL that can be reviewed before building the actual workflow.
 
 ## CRITICAL: OUTPUT FORMAT
 You MUST output ONLY valid JSON. No explanations, no markdown, no code blocks. Just the raw JSON object starting with { and ending with }.

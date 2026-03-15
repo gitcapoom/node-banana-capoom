@@ -66,7 +66,7 @@ describe("WelcomeModal", () => {
         />
       );
 
-      expect(screen.getByText("Node Banana")).toBeInTheDocument();
+      expect(screen.getByText("Node Banana Capoom")).toBeInTheDocument();
       expect(screen.getByText("New project")).toBeInTheDocument();
       expect(screen.getByText("Templates")).toBeInTheDocument();
       expect(screen.getByText("Prompt a workflow")).toBeInTheDocument();
@@ -160,7 +160,7 @@ describe("WelcomeModal", () => {
         fireEvent.click(screen.getByText("Back"));
       });
 
-      expect(screen.getByText("Node Banana")).toBeInTheDocument();
+      expect(screen.getByText("Node Banana Capoom")).toBeInTheDocument();
       expect(screen.getByText("New project")).toBeInTheDocument();
     });
 
@@ -180,7 +180,7 @@ describe("WelcomeModal", () => {
       // Click back
       fireEvent.click(screen.getByText("Back"));
 
-      expect(screen.getByText("Node Banana")).toBeInTheDocument();
+      expect(screen.getByText("Node Banana Capoom")).toBeInTheDocument();
     });
   });
 

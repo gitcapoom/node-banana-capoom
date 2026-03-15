@@ -70,7 +70,7 @@ function isTextHandle(handleId: string | null | undefined): boolean {
  * Extract output data and type from a source node.
  * sourceHandleId is used for multi-output nodes (e.g. WorldLabs outputs both "image" and "3d").
  */
-function getSourceOutput(
+export function getSourceOutput(
   sourceNode: WorkflowNode,
   sourceHandle: string | null | undefined,
   edgeData?: Record<string, unknown>
@@ -319,6 +319,9 @@ export function getConnectedInputsPure(
 
       if (!value) return;
 
+      // Background image handle — visual only, not a model input
+      if (handleId === "image-bg") return;
+
       // Map normalized handle ID to schema name for dynamicInputs
       if (handleId && handleToSchemaName[handleId]) {
         const schemaName = handleToSchemaName[handleId];
@@ -343,7 +346,7 @@ export function getConnectedInputsPure(
         // Defensive: ensure text values are always strings
         // (Guards against corrupted node data during parallel execution)
         text = typeof value === 'string' ? value : String(value);
-      } else if (isImageHandle(handleId) || !handleId) {
+      } else if (type === "image" || isImageHandle(handleId) || !handleId) {
         images.push(value);
       }
     });

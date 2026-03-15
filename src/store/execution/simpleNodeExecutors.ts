@@ -192,7 +192,14 @@ export async function executeOutput(ctx: NodeExecutionContext): Promise<void> {
     const incomingEdges = edges.filter((e) => e.target === node.id);
     const sourceInfo = incomingEdges.map((e) => {
       const src = nodes.find((n) => n.id === e.source);
-      return `${src?.type || "unknown"}(${e.source}) via ${e.sourceHandle}->${e.targetHandle}`;
+      const srcData = src?.data as Record<string, unknown> | undefined;
+      const contentKeys = srcData
+        ? Object.entries(srcData)
+            .filter(([, v]) => v != null && typeof v === "string" && (v as string).length > 0)
+            .map(([k]) => k)
+            .join(", ")
+        : "none";
+      return `${src?.type || "unknown"}(${e.source}) via ${e.sourceHandle}->${e.targetHandle} [has: ${contentKeys}]`;
     });
     console.warn(
       `[Workflow] Output node ${node.id}: No images, videos, audio, or 3D models received.`,
@@ -286,6 +293,18 @@ export async function executeImageCompare(ctx: NodeExecutionContext): Promise<vo
   updateNodeData(node.id, {
     imageA: images[0] || null,
     imageB: images[1] || null,
+  });
+}
+
+/**
+ * VideoCompare node: takes two upstream videos for side-by-side comparison.
+ */
+export async function executeVideoCompare(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  const { videos } = getConnectedInputs(node.id);
+  updateNodeData(node.id, {
+    videoA: videos[0] || null,
+    videoB: videos[1] || null,
   });
 }
 

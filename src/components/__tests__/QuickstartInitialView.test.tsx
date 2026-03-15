@@ -17,7 +17,7 @@ describe("QuickstartInitialView", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render the Node Banana title and logo", () => {
+    it("should render the Node Banana Capoom title and logo", () => {
       render(
         <QuickstartInitialView
           onNewProject={mockOnNewProject}
@@ -27,7 +27,7 @@ describe("QuickstartInitialView", () => {
         />
       );
 
-      expect(screen.getByText("Node Banana")).toBeInTheDocument();
+      expect(screen.getByText("Node Banana Capoom")).toBeInTheDocument();
       expect(screen.getByAltText("")).toBeInTheDocument(); // Logo image
     });
 
@@ -42,7 +42,7 @@ describe("QuickstartInitialView", () => {
       );
 
       expect(
-        screen.getByText(/node based workflow editor for AI image generation/i)
+        screen.getByText(/node based workflow editor for AI generation of all sorts/i)
       ).toBeInTheDocument();
     });
 
@@ -174,7 +174,7 @@ describe("QuickstartInitialView", () => {
   });
 
   describe("External Links", () => {
-    it("should render Discord link with correct URL", () => {
+    it("should render Node Banana attribution link", () => {
       render(
         <QuickstartInitialView
           onNewProject={mockOnNewProject}
@@ -184,29 +184,13 @@ describe("QuickstartInitialView", () => {
         />
       );
 
-      const discordLink = screen.getByText("Discord").closest("a");
-      expect(discordLink).toHaveAttribute(
+      const nodeBananaLink = screen.getByText(/"Node Banana"/).closest("a");
+      expect(nodeBananaLink).toHaveAttribute(
         "href",
-        "https://discord.com/invite/89Nr6EKkTf"
+        "https://github.com/shrimbly/node-banana"
       );
-      expect(discordLink).toHaveAttribute("target", "_blank");
-      expect(discordLink).toHaveAttribute("rel", "noopener noreferrer");
-    });
-
-    it("should render Twitter/X link with correct URL", () => {
-      render(
-        <QuickstartInitialView
-          onNewProject={mockOnNewProject}
-          onSelectTemplates={mockOnSelectTemplates}
-          onSelectVibe={mockOnSelectVibe}
-          onSelectLoad={mockOnSelectLoad}
-        />
-      );
-
-      const twitterLink = screen.getByText("Willie").closest("a");
-      expect(twitterLink).toHaveAttribute("href", "https://x.com/ReflctWillie");
-      expect(twitterLink).toHaveAttribute("target", "_blank");
-      expect(twitterLink).toHaveAttribute("rel", "noopener noreferrer");
+      expect(nodeBananaLink).toHaveAttribute("target", "_blank");
+      expect(nodeBananaLink).toHaveAttribute("rel", "noopener noreferrer");
     });
 
     it("should render docs link", () => {

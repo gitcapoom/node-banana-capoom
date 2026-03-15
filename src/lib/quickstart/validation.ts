@@ -28,6 +28,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "output",
   "outputGallery",
   "imageCompare",
+  "videoCompare",
   "videoStitch",
   "easeCurve",
   "videoTrim",
@@ -65,6 +66,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   output: { width: 320, height: 320 },
   outputGallery: { width: 320, height: 360 },
   imageCompare: { width: 400, height: 360 },
+  videoCompare: { width: 400, height: 360 },
   videoStitch: { width: 400, height: 280 },
   easeCurve: { width: 340, height: 480 },
   videoTrim: { width: 360, height: 360 },
@@ -380,6 +382,15 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
       return {
         imageA: null,
         imageB: null,
+        compareMode: "slide",
+        blendOpacity: 0.5,
+      };
+    case "videoCompare":
+      return {
+        videoA: null,
+        videoB: null,
+        compareMode: "slide",
+        blendOpacity: 0.5,
       };
     case "videoStitch":
       return {
