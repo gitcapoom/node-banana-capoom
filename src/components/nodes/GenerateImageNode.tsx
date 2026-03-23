@@ -281,6 +281,50 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     [id, updateNodeData]
   );
 
+  // Fetch input schema eagerly when model changes (so dynamic handles appear
+  // even before the parameter panel is opened)
+  useEffect(() => {
+    const modelId = nodeData.selectedModel?.modelId;
+    const provider = nodeData.selectedModel?.provider;
+    if (!modelId || !provider || provider === "gemini") {
+      // Gemini models don't have extra image inputs via schema
+      if (nodeData.inputSchema && nodeData.inputSchema.length > 0) {
+        updateNodeData(id, { inputSchema: [] });
+      }
+      return;
+    }
+
+    // Check localStorage cache first (same cache as ModelParameters)
+    try {
+      const cache = JSON.parse(localStorage.getItem("node-banana-schema-cache") || "{}");
+      const entry = cache[`${provider}:${modelId}`];
+      if (entry && Date.now() - entry.timestamp < 48 * 60 * 60 * 1000) {
+        if (entry.inputs && entry.inputs.length > 0) {
+          updateNodeData(id, { inputSchema: entry.inputs });
+        } else if (nodeData.inputSchema && nodeData.inputSchema.length > 0) {
+          updateNodeData(id, { inputSchema: [] });
+        }
+        return;
+      }
+    } catch { /* ignore cache errors */ }
+
+    // Fetch schema from API
+    const headers: HeadersInit = {};
+    if (replicateApiKey) headers["X-Replicate-Key"] = replicateApiKey;
+    if (falApiKey) headers["X-Fal-Key"] = falApiKey;
+    if (kieApiKey) headers["X-Kie-Key"] = kieApiKey;
+
+    const encodedModelId = encodeURIComponent(modelId);
+    deduplicatedFetch(`/api/models/${encodedModelId}?provider=${provider}`, { headers })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const data = await response.json();
+        const inputs = data.inputs || [];
+        updateNodeData(id, { inputSchema: inputs });
+      })
+      .catch(() => { /* schema fetch failed — handles stay static */ });
+  }, [nodeData.selectedModel?.modelId, nodeData.selectedModel?.provider]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Handle parameters expand/collapse - resize node height
   const { setNodes } = useReactFlow();
   const handleParametersExpandChange = useCallback(
