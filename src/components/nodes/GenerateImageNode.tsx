@@ -623,49 +623,181 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
         </InlineParameterPanel>
       ) : undefined}
     >
-      {/* Input handles - ALWAYS use same IDs and positions for connection stability */}
-      {/* Image input at 35%, Text input at 65% - never changes regardless of model */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="image"
-        style={{ top: "35%", zIndex: 10 }}
-        data-handletype="image"
-        isConnectable={true}
-      />
-      {/* Image label */}
-      <div
-        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-        style={{
-          right: `calc(100% + 8px)`,
-          top: "calc(35% - 18px)",
-          color: "var(--handle-color-image)",
-          zIndex: 10,
-        }}
-      >
-        Image
-      </div>
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="text"
-        style={{ top: "65%", zIndex: 10 }}
-        data-handletype="text"
-        isConnectable={true}
-      />
-      {/* Prompt label */}
-      <div
-        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-        style={{
-          right: `calc(100% + 8px)`,
-          top: "calc(65% - 18px)",
-          color: "var(--handle-color-text)",
-          zIndex: 10,
-        }}
-      >
-        Prompt
-      </div>
-      {/* Output handle */}
+      {/* Dynamic input handles based on model schema */}
+      {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
+        (() => {
+          const imageInputs = nodeData.inputSchema!.filter(i => i.type === "image");
+          const textInputs = nodeData.inputSchema!.filter(i => i.type === "text");
+
+          const hasImageInput = imageInputs.length > 0;
+          const hasTextInput = textInputs.length > 0;
+
+          const handles: Array<{
+            id: string;
+            type: "image" | "text";
+            label: string;
+            schemaName: string | null;
+            description: string | null;
+            isPlaceholder: boolean;
+          }> = [];
+
+          if (hasImageInput) {
+            imageInputs.forEach((input, index) => {
+              handles.push({
+                id: `image-${index}`,
+                type: "image",
+                label: input.label,
+                schemaName: input.name,
+                description: input.description || null,
+                isPlaceholder: false,
+              });
+            });
+          } else {
+            handles.push({
+              id: "image",
+              type: "image",
+              label: "Image",
+              schemaName: null,
+              description: "Not used by this model",
+              isPlaceholder: true,
+            });
+          }
+
+          if (hasTextInput) {
+            textInputs.forEach((input, index) => {
+              handles.push({
+                id: `text-${index}`,
+                type: "text",
+                label: input.label,
+                schemaName: input.name,
+                description: input.description || null,
+                isPlaceholder: false,
+              });
+            });
+          } else {
+            handles.push({
+              id: "text",
+              type: "text",
+              label: "Prompt",
+              schemaName: null,
+              description: "Not used by this model",
+              isPlaceholder: true,
+            });
+          }
+
+          const imageHandles = handles.filter(h => h.type === "image");
+          const textHandles = handles.filter(h => h.type === "text");
+          const totalSlots = imageHandles.length + textHandles.length + 1; // +1 for gap
+
+          const renderedHandles = handles.map((handle) => {
+            const isImage = handle.type === "image";
+            const typeIndex = isImage
+              ? imageHandles.findIndex(h => h.id === handle.id)
+              : textHandles.findIndex(h => h.id === handle.id);
+            const adjustedIndex = isImage ? typeIndex : imageHandles.length + 1 + typeIndex;
+            const topPercent = ((adjustedIndex + 1) / (totalSlots + 1)) * 100;
+
+            return (
+              <React.Fragment key={handle.id}>
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id={handle.id}
+                  style={{
+                    top: `${topPercent}%`,
+                    opacity: handle.isPlaceholder ? 0.3 : 1,
+                    zIndex: 10,
+                  }}
+                  data-handletype={handle.type}
+                  data-schema-name={handle.schemaName || undefined}
+                  isConnectable={true}
+                  title={handle.description || handle.label}
+                />
+                <div
+                  className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
+                  style={{
+                    right: `calc(100% + 8px)`,
+                    top: `calc(${topPercent}% - 18px)`,
+                    color: isImage ? "var(--handle-color-image)" : "var(--handle-color-text)",
+                    opacity: handle.isPlaceholder ? 0.3 : 1,
+                    zIndex: 10,
+                  }}
+                >
+                  {handle.label}
+                </div>
+              </React.Fragment>
+            );
+          });
+
+          return (
+            <>
+              {renderedHandles}
+              {/* Hidden backward-compat handles for edges using non-indexed IDs */}
+              {hasImageInput && (
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id="image"
+                  style={{ top: "35%", opacity: 0, pointerEvents: "none" }}
+                  isConnectable={false}
+                />
+              )}
+              {hasTextInput && (
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id="text"
+                  style={{ top: "65%", opacity: 0, pointerEvents: "none" }}
+                  isConnectable={false}
+                />
+              )}
+            </>
+          );
+        })()
+      ) : (
+        /* Default handles when no schema */
+        <>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="image"
+            style={{ top: "35%", zIndex: 10 }}
+            data-handletype="image"
+            isConnectable={true}
+          />
+          <div
+            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
+            style={{
+              right: `calc(100% + 8px)`,
+              top: "calc(35% - 18px)",
+              color: "var(--handle-color-image)",
+              zIndex: 10,
+            }}
+          >
+            Image
+          </div>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="text"
+            style={{ top: "65%", zIndex: 10 }}
+            data-handletype="text"
+            isConnectable={true}
+          />
+          <div
+            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
+            style={{
+              right: `calc(100% + 8px)`,
+              top: "calc(65% - 18px)",
+              color: "var(--handle-color-text)",
+              zIndex: 10,
+            }}
+          >
+            Prompt
+          </div>
+        </>
+      )}
+      {/* Output handle - always static */}
       <Handle
         type="source"
         position={Position.Right}
@@ -673,7 +805,6 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
         style={{ top: "50%", zIndex: 10 }}
         data-handletype="image"
       />
-      {/* Output label */}
       <div
         className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none"
         style={{
