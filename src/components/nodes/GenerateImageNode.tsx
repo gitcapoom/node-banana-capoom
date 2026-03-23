@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
+import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, saveNanoBananaDefaults, useProviderApiKeys } from "@/store/workflowStore";
@@ -68,6 +68,12 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  // Tell React Flow to recalculate handle positions when schema changes
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, nodeData.inputSchema, updateNodeInternals]);
 
   // Register browse callback for floating header button
   useEffect(() => {
@@ -776,13 +782,14 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
           return (
             <>
               {renderedHandles}
-              {/* Hidden backward-compat handles for edges using non-indexed IDs */}
+              {/* Hidden backward-compat handles for edges using non-indexed IDs.
+                  Positioned off-screen so they don't interfere with connection targeting. */}
               {hasImageInput && (
                 <Handle
                   type="target"
                   position={Position.Left}
                   id="image"
-                  style={{ top: "35%", opacity: 0, pointerEvents: "none" }}
+                  style={{ top: "-9999px", opacity: 0, pointerEvents: "none", position: "absolute" }}
                   isConnectable={false}
                 />
               )}
@@ -791,7 +798,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                   type="target"
                   position={Position.Left}
                   id="text"
-                  style={{ top: "65%", opacity: 0, pointerEvents: "none" }}
+                  style={{ top: "-9999px", opacity: 0, pointerEvents: "none", position: "absolute" }}
                   isConnectable={false}
                 />
               )}
