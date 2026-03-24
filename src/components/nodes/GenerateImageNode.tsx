@@ -694,7 +694,8 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
           if (hasImageInput) {
             imageInputs.forEach((input, index) => {
               handles.push({
-                id: `image-${index}`,
+                // First image handle keeps id "image" for backward compat with existing edges
+                id: index === 0 ? "image" : `image-${index}`,
                 type: "image",
                 label: input.label,
                 schemaName: input.name,
@@ -716,7 +717,8 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
           if (hasTextInput) {
             textInputs.forEach((input, index) => {
               handles.push({
-                id: `text-${index}`,
+                // First text handle keeps id "text" for backward compat with existing edges
+                id: index === 0 ? "text" : `text-${index}`,
                 type: "text",
                 label: input.label,
                 schemaName: input.name,
@@ -779,31 +781,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
             );
           });
 
-          return (
-            <>
-              {renderedHandles}
-              {/* Hidden backward-compat handles for edges using non-indexed IDs.
-                  Positioned off-screen so they don't interfere with connection targeting. */}
-              {hasImageInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="image"
-                  style={{ top: "-9999px", opacity: 0, pointerEvents: "none", position: "absolute" }}
-                  isConnectable={false}
-                />
-              )}
-              {hasTextInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="text"
-                  style={{ top: "-9999px", opacity: 0, pointerEvents: "none", position: "absolute" }}
-                  isConnectable={false}
-                />
-              )}
-            </>
-          );
+          return <>{renderedHandles}</>;
         })()
       ) : (
         /* Default handles when no schema */
