@@ -605,15 +605,6 @@ export function WorkflowCanvas() {
         return sourceType === "3d" && targetType === "3d";
       }
 
-      // Audio connections: audio handles connect to audio handles, plus output node (or router)
-      if (sourceType === "audio" || targetType === "audio") {
-        if (sourceType === "audio") {
-          const targetNode = nodes.find((n) => n.id === connection.target);
-          if (targetNode?.type === "output" || targetNode?.type === "router") return true;
-        }
-        return sourceType === "audio" && targetType === "audio";
-      }
-
       // Standard type matching for image and text
       // Image handles connect to image handles, text handles connect to text handles
       return sourceType === targetType;

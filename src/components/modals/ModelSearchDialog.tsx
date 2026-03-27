@@ -702,6 +702,19 @@ export function ModelSearchDialog({
                   <WaveSpeedIcon />
                 </button>
               )}
+              {availableProviders.has("muapi") && (
+                <button
+                  onClick={() => setProviderFilter("muapi")}
+                  title="muapi.ai"
+                  className={`px-2 py-1.5 text-[10px] font-bold rounded transition-colors ${
+                    providerFilter === "muapi"
+                      ? "bg-cyan-500/20 text-cyan-300"
+                      : "text-neutral-400 hover:text-cyan-300 hover:bg-neutral-700"
+                  }`}
+                >
+                  mu
+                </button>
+              )}
             </div>
 
             {/* Capability Filter */}
