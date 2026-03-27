@@ -123,7 +123,9 @@ function inferCapabilities(model: ReplicateModel): ModelCapability[] {
     searchText.includes("animate") ||
     searchText.includes("motion")
   ) {
-    if (searchText.includes("img2vid") || searchText.includes("image-to-video")) {
+    if (searchText.includes("vid2vid") || searchText.includes("video-to-video")) {
+      capabilities.push("video-to-video");
+    } else if (searchText.includes("img2vid") || searchText.includes("image-to-video")) {
       capabilities.push("image-to-video");
     } else {
       capabilities.push("text-to-video");

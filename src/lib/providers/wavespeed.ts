@@ -153,7 +153,7 @@ const WAVESPEED_MODELS: ProviderModel[] = [
  * Infer output type from model capabilities
  */
 function inferOutputType(capabilities: ModelCapability[]): "image" | "video" {
-  if (capabilities.includes("text-to-video") || capabilities.includes("image-to-video")) {
+  if (capabilities.includes("text-to-video") || capabilities.includes("image-to-video") || capabilities.includes("video-to-video")) {
     return "video";
   }
   return "image";

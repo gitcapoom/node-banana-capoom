@@ -36,6 +36,7 @@ const RELEVANT_CATEGORIES = [
   "image-to-image",
   "text-to-video",
   "image-to-video",
+  "video-to-video",
 ];
 
 /**
