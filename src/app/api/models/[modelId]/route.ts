@@ -976,6 +976,25 @@ function getKieSchema(modelId: string): ExtractedSchema {
         { name: "video_urls", type: "video", required: true, label: "Video", isArray: true },
       ],
     },
+    "runway/aleph-video-to-video": {
+      parameters: [
+        { name: "duration", type: "string", description: "Video duration in seconds", enum: ["5", "10"], default: "5" },
+        { name: "resolution", type: "string", description: "Output resolution", enum: ["720p", "1080p"], default: "720p" },
+      ],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "video_url", type: "video", required: true, label: "Video" },
+      ],
+    },
+    "luma/modify-video": {
+      parameters: [
+        { name: "duration", type: "string", description: "Video duration in seconds", enum: ["5", "10"], default: "5" },
+      ],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+        { name: "video_url", type: "video", required: true, label: "Video" },
+      ],
+    },
     "topaz/video-upscale": {
       parameters: [
         { name: "upscale_factor", type: "string", description: "Upscale factor", enum: ["1", "2", "4"], default: "2" },

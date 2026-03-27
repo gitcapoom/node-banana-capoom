@@ -147,6 +147,30 @@ const WAVESPEED_MODELS: ProviderModel[] = [
       currency: "USD",
     },
   },
+  {
+    id: "wavespeed-ai/wan-2.2/animate",
+    name: "WAN 2.2 Animate",
+    description: "Character animation & replacement model — replicates movement and expression from reference video",
+    provider: "wavespeed",
+    capabilities: ["video-to-video"],
+    pricing: {
+      type: "per-run",
+      amount: 0.08,
+      currency: "USD",
+    },
+  },
+  {
+    id: "kwaivgi/kling-v2.6-pro/motion-control",
+    name: "Kling 2.6 Pro Motion Control",
+    description: "Transfer movement from reference motion clips while preserving identity and consistency",
+    provider: "wavespeed",
+    capabilities: ["video-to-video"],
+    pricing: {
+      type: "per-run",
+      amount: 0.10,
+      currency: "USD",
+    },
+  },
 ];
 
 /**
