@@ -262,7 +262,7 @@ const KIE_MODELS: ProviderModel[] = [
     name: "Wan 2.6 V2V",
     description: "Wan 2.6 video-to-video transformation via Kie.ai.",
     provider: "kie",
-    capabilities: ["image-to-video"],
+    capabilities: ["video-to-video"],
     coverImage: undefined,
     pageUrl: "https://kie.ai/wan-2-6",
   },

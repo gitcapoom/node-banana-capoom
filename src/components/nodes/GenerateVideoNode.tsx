@@ -515,36 +515,42 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
         (() => {
           const imageInputs = nodeData.inputSchema!.filter(i => i.type === "image");
           const textInputs = nodeData.inputSchema!.filter(i => i.type === "text");
+          const videoInputs = nodeData.inputSchema!.filter(i => i.type === "video");
+          const audioInputs = nodeData.inputSchema!.filter(i => i.type === "audio");
 
           // Always include at least one image and one text handle for connection stability
           const hasImageInput = imageInputs.length > 0;
           const hasTextInput = textInputs.length > 0;
 
           // Build the handles array: schema inputs + fallback defaults if missing
+          type HandleType = "image" | "text" | "video" | "audio";
           const handles: Array<{
             id: string;
-            type: "image" | "text";
+            type: HandleType;
             label: string;
             schemaName: string | null;
             description: string | null;
             isPlaceholder: boolean;
           }> = [];
 
-          // Add image handles from schema, or a placeholder if none exist
-          if (hasImageInput) {
-            imageInputs.forEach((input, index) => {
+          // Helper to add handles for a given type
+          const addHandles = (inputs: typeof imageInputs, handleType: HandleType) => {
+            inputs.forEach((input, index) => {
               handles.push({
-                // First image handle keeps id "image" for backward compat with existing edges
-                id: index === 0 ? "image" : `image-${index}`,
-                type: "image",
+                id: index === 0 ? handleType : `${handleType}-${index}`,
+                type: handleType,
                 label: input.label,
                 schemaName: input.name,
                 description: input.description || null,
                 isPlaceholder: false,
               });
             });
+          };
+
+          // Add image handles from schema, or a placeholder if none exist
+          if (hasImageInput) {
+            addHandles(imageInputs, "image");
           } else {
-            // No image inputs in schema - add placeholder to preserve connections
             handles.push({
               id: "image",
               type: "image",
@@ -555,21 +561,16 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             });
           }
 
+          // Add video handles from schema (no placeholder — not all models need video)
+          addHandles(videoInputs, "video");
+
+          // Add audio handles from schema
+          addHandles(audioInputs, "audio");
+
           // Add text handles from schema, or a placeholder if none exist
           if (hasTextInput) {
-            textInputs.forEach((input, index) => {
-              handles.push({
-                // First text handle keeps id "text" for backward compat with existing edges
-                id: index === 0 ? "text" : `text-${index}`,
-                type: "text",
-                label: input.label,
-                schemaName: input.name,
-                description: input.description || null,
-                isPlaceholder: false,
-              });
-            });
+            addHandles(textInputs, "text");
           } else {
-            // No text inputs in schema - add placeholder to preserve connections
             handles.push({
               id: "text",
               type: "text",
@@ -580,18 +581,22 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             });
           }
 
-          // Calculate positions
-          const imageHandles = handles.filter(h => h.type === "image");
+          // Calculate positions — group order: image, video, audio, gap, text
+          const handleColors: Record<HandleType, string> = {
+            image: "var(--handle-color-image, #3b82f6)",
+            video: "var(--handle-color-video, #0d9488)",
+            audio: "var(--handle-color-audio, #8b5cf6)",
+            text: "var(--handle-color-text, #f59e0b)",
+          };
+          const mediaHandles = handles.filter(h => h.type !== "text");
           const textHandles = handles.filter(h => h.type === "text");
-          const totalSlots = imageHandles.length + textHandles.length + 1; // +1 for gap
+          const totalSlots = mediaHandles.length + textHandles.length + 1; // +1 for gap
 
-          const renderedHandles = handles.map((handle, index) => {
-            // Position: images first, then gap, then text
-            const isImage = handle.type === "image";
-            const typeIndex = isImage
-              ? imageHandles.findIndex(h => h.id === handle.id)
-              : textHandles.findIndex(h => h.id === handle.id);
-            const adjustedIndex = isImage ? typeIndex : imageHandles.length + 1 + typeIndex;
+          const renderedHandles = handles.map((handle) => {
+            const isText = handle.type === "text";
+            const typeGroup = isText ? textHandles : mediaHandles;
+            const typeIndex = typeGroup.findIndex(h => h.id === handle.id);
+            const adjustedIndex = isText ? mediaHandles.length + 1 + typeIndex : typeIndex;
             const topPercent = ((adjustedIndex + 1) / (totalSlots + 1)) * 100;
 
             return (
@@ -616,7 +621,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                   style={{
                     right: `calc(100% + 8px)`,
                     top: `calc(${topPercent}% - 18px)`,
-                    color: isImage ? "var(--handle-color-image)" : "var(--handle-color-text)",
+                    color: handleColors[handle.type],
                     opacity: handle.isPlaceholder ? 0.3 : 1,
                     zIndex: 10,
                   }}

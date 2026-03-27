@@ -56,6 +56,28 @@ const IMAGE_INPUT_PATTERNS = [
   "control_image",
 ];
 
+// Video input property patterns
+const VIDEO_INPUT_PATTERNS = [
+  "video_url",
+  "video_urls",
+  "video",
+  "videos",
+  "video_input",
+  "input_video",
+  "source_video",
+];
+
+// Audio input property patterns
+const AUDIO_INPUT_PATTERNS = [
+  "audio_url",
+  "audio_urls",
+  "audio",
+  "audio_input",
+  "input_audio",
+  "source_audio",
+  "voice_audio",
+];
+
 // Text input properties
 const TEXT_INPUT_NAMES = ["prompt", "negative_prompt"];
 
@@ -193,6 +215,46 @@ function isImageInput(name: string, prop: Record<string, unknown>, schemaCompone
          name.endsWith("_image_url") ||
          name.startsWith("image_") ||
          name.includes("_image_");
+}
+
+/**
+ * Check if property is a video input based on name patterns.
+ * Must be checked BEFORE isImageInput to prevent video URLs from being mislabeled.
+ */
+function isVideoInput(name: string, prop: Record<string, unknown>, schemaComponents?: Record<string, unknown>): boolean {
+  // Must be a string or array type (URLs)
+  const resolved = resolvePropertyType(prop, schemaComponents);
+  const propType = resolved.type;
+  if (propType !== "string" && propType !== "array") return false;
+
+  if (VIDEO_INPUT_PATTERNS.includes(name)) return true;
+
+  // Check description for video-related keywords
+  const description = (prop.description as string || "").toLowerCase();
+  if (description.includes("video url") || description.includes("video file") || description.includes("url of the video")) {
+    return true;
+  }
+
+  return name.endsWith("_video") || name.endsWith("_video_url") || name.startsWith("video_") && !name.includes("_size") && !name.includes("_count");
+}
+
+/**
+ * Check if property is an audio input based on name patterns.
+ * Must be checked BEFORE isImageInput to prevent audio URLs from being mislabeled.
+ */
+function isAudioInput(name: string, prop: Record<string, unknown>, schemaComponents?: Record<string, unknown>): boolean {
+  const resolved = resolvePropertyType(prop, schemaComponents);
+  const propType = resolved.type;
+  if (propType !== "string" && propType !== "array") return false;
+
+  if (AUDIO_INPUT_PATTERNS.includes(name)) return true;
+
+  const description = (prop.description as string || "").toLowerCase();
+  if (description.includes("audio url") || description.includes("audio file") || description.includes("url of the audio")) {
+    return true;
+  }
+
+  return name.endsWith("_audio") || name.endsWith("_audio_url") || name.startsWith("audio_") && !name.includes("_size") && !name.includes("_count");
 }
 
 /**
@@ -569,8 +631,34 @@ function extractParametersFromSchema(
       }
     }
 
-    // Check if this is a connectable input (image or text)
-    // Pass both name AND prop to check schema type, not just name
+    // Check if this is a connectable input (video, audio, image, or text)
+    // Video/audio checks MUST come before image to prevent mislabeling
+    if (isVideoInput(name, prop, schemaComponents)) {
+      const resolvedType = resolvePropertyType(prop, schemaComponents).type;
+      inputs.push({
+        name,
+        type: "video",
+        required: required.includes(name),
+        label: toLabel(name),
+        description: (prop.description || rawProp.description) as string | undefined,
+        isArray: resolvedType === "array",
+      });
+      continue;
+    }
+
+    if (isAudioInput(name, prop, schemaComponents)) {
+      const resolvedType = resolvePropertyType(prop, schemaComponents).type;
+      inputs.push({
+        name,
+        type: "audio",
+        required: required.includes(name),
+        label: toLabel(name),
+        description: (prop.description || rawProp.description) as string | undefined,
+        isArray: resolvedType === "array",
+      });
+      continue;
+    }
+
     if (isImageInput(name, prop, schemaComponents)) {
       const resolvedType = resolvePropertyType(prop, schemaComponents).type;
       inputs.push({
@@ -829,7 +917,7 @@ function getKieSchema(modelId: string): ExtractedSchema {
       inputs: [
         { name: "prompt", type: "text", required: false, label: "Prompt" },
         { name: "input_urls", type: "image", required: true, label: "Image", isArray: true },
-        { name: "video_urls", type: "image", required: true, label: "Video", isArray: true },
+        { name: "video_urls", type: "video", required: true, label: "Video", isArray: true },
       ],
     },
     "kling/v2-5-turbo-text-to-video-pro": {
@@ -885,7 +973,7 @@ function getKieSchema(modelId: string): ExtractedSchema {
       ],
       inputs: [
         { name: "prompt", type: "text", required: false, label: "Prompt" },
-        { name: "video_urls", type: "image", required: true, label: "Video", isArray: true },
+        { name: "video_urls", type: "video", required: true, label: "Video", isArray: true },
       ],
     },
     "topaz/video-upscale": {
@@ -893,7 +981,7 @@ function getKieSchema(modelId: string): ExtractedSchema {
         { name: "upscale_factor", type: "string", description: "Upscale factor", enum: ["1", "2", "4"], default: "2" },
       ],
       inputs: [
-        { name: "video_url", type: "image", required: true, label: "Video" },
+        { name: "video_url", type: "video", required: true, label: "Video" },
       ],
     },
     "veo3/text-to-video": {

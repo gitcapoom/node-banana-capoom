@@ -188,7 +188,7 @@ export interface CarouselVideoItem {
  */
 export interface ModelInputDef {
   name: string;
-  type: "image" | "text";
+  type: "image" | "text" | "video" | "audio";
   required: boolean;
   label: string;
   description?: string;
