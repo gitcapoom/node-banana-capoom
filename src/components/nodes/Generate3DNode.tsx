@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
+import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
@@ -40,6 +40,13 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
   const [showOverlay, setShowOverlay] = useState(false);
   const [isAutoCapturing, setIsAutoCapturing] = useState(false);
   const [frameGrabCount, setFrameGrabCount] = useState(0);
+
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  // Tell React Flow to recalculate handle positions when schema changes
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, nodeData.inputSchema, updateNodeInternals]);
 
   // Resolve background image from "image-bg" handle connection
   const backgroundImage = useMemo(() => {
@@ -495,7 +502,8 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
           if (hasImageInput) {
             imageInputs.forEach((input, index) => {
               handles.push({
-                id: `image-${index}`,
+                // First image handle keeps id "image" for backward compat with existing edges
+                id: index === 0 ? "image" : `image-${index}`,
                 type: "image",
                 label: input.label,
                 schemaName: input.name,
@@ -517,7 +525,8 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
           if (hasTextInput) {
             textInputs.forEach((input, index) => {
               handles.push({
-                id: `text-${index}`,
+                // First text handle keeps id "text" for backward compat with existing edges
+                id: index === 0 ? "text" : `text-${index}`,
                 type: "text",
                 label: input.label,
                 schemaName: input.name,
@@ -578,29 +587,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
             );
           });
 
-          return (
-            <>
-              {renderedHandles}
-              {hasImageInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="image"
-                  style={{ top: "35%", opacity: 0, pointerEvents: "none" }}
-                  isConnectable={false}
-                />
-              )}
-              {hasTextInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="text"
-                  style={{ top: "65%", opacity: 0, pointerEvents: "none" }}
-                  isConnectable={false}
-                />
-              )}
-            </>
-          );
+          return <>{renderedHandles}</>;
         })()
       ) : (
         // Default handles when no schema

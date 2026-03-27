@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
+import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
@@ -65,6 +65,12 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  // Tell React Flow to recalculate handle positions when schema changes
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, nodeData.inputSchema, updateNodeInternals]);
 
   // Register browse callback for floating header button
   useEffect(() => {
@@ -528,8 +534,8 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
           if (hasImageInput) {
             imageInputs.forEach((input, index) => {
               handles.push({
-                // Always use indexed IDs for schema inputs for consistency
-                id: `image-${index}`,
+                // First image handle keeps id "image" for backward compat with existing edges
+                id: index === 0 ? "image" : `image-${index}`,
                 type: "image",
                 label: input.label,
                 schemaName: input.name,
@@ -553,8 +559,8 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
           if (hasTextInput) {
             textInputs.forEach((input, index) => {
               handles.push({
-                // Always use indexed IDs for schema inputs for consistency
-                id: `text-${index}`,
+                // First text handle keeps id "text" for backward compat with existing edges
+                id: index === 0 ? "text" : `text-${index}`,
                 type: "text",
                 label: input.label,
                 schemaName: input.name,
@@ -621,32 +627,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             );
           });
 
-          // Add hidden backward-compatibility handles for edges using non-indexed IDs
-          // This ensures edges created with "image"/"text" still work when schema uses "image-0"/"text-0"
-          // Note: No data-handletype to avoid being counted in tests - these are purely for edge routing
-          return (
-            <>
-              {renderedHandles}
-              {hasImageInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="image"
-                  style={{ top: "35%", opacity: 0, pointerEvents: "none" }}
-                  isConnectable={false}
-                />
-              )}
-              {hasTextInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="text"
-                  style={{ top: "65%", opacity: 0, pointerEvents: "none" }}
-                  isConnectable={false}
-                />
-              )}
-            </>
-          );
+          return <>{renderedHandles}</>;
         })()
       ) : (
         // Default handles when no schema

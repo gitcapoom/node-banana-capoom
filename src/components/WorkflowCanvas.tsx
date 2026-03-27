@@ -807,9 +807,9 @@ export function WorkflowCanvas() {
             const matchingInputs = nodeData.inputSchema.filter(i => i.type === handleType);
             if (matchingInputs.length > 0) {
               // Find the first unoccupied handle by checking existing edges and batchUsed
-              // Handle IDs use schema name format: "image-{schemaName}" or "text-{schemaName}"
-              for (const input of matchingInputs) {
-                const candidateHandle = `${handleType}-${input.name}`;
+              // Handle IDs: first = bare type ("image"), extras = "image-1", "image-2", etc.
+              for (let i = 0; i < matchingInputs.length; i++) {
+                const candidateHandle = i === 0 ? handleType : `${handleType}-${i}`;
                 const isOccupied = edges.some(
                   (edge) => edge.target === node.id && edge.targetHandle === candidateHandle
                 ) || batchUsed?.has(candidateHandle);
