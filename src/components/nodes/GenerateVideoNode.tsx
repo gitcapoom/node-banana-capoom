@@ -51,7 +51,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   const addNode = useWorkflowStore((state) => state.addNode);
   const nodes = useWorkflowStore((state) => state.nodes);
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { geminiApiKey, replicateApiKey, falApiKey, kieApiKey, muapiApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
+  const { geminiApiKey, replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, muapiApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
@@ -97,12 +97,16 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     if (kieEnabled && kieApiKey) {
       providers.push({ id: "kie", name: "Kie.ai" });
     }
+    // Add WaveSpeed if configured
+    if (wavespeedApiKey) {
+      providers.push({ id: "wavespeed", name: "WaveSpeed" });
+    }
     // Add muapi.ai if configured
     if (muapiApiKey) {
       providers.push({ id: "muapi", name: "muapi.ai" });
     }
     return providers;
-  }, [geminiApiKey, replicateEnabled, replicateApiKey, kieEnabled, kieApiKey, muapiApiKey]);
+  }, [geminiApiKey, replicateEnabled, replicateApiKey, kieEnabled, kieApiKey, wavespeedApiKey, muapiApiKey]);
 
   // Fetch models from external providers when provider changes
   const fetchModels = useCallback(async () => {
@@ -122,6 +126,9 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       }
       if (kieApiKey) {
         headers["X-Kie-Key"] = kieApiKey;
+      }
+      if (wavespeedApiKey) {
+        headers["X-WaveSpeed-Key"] = wavespeedApiKey;
       }
       if (muapiApiKey) {
         headers["X-Muapi-API-Key"] = muapiApiKey;
