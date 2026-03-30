@@ -80,7 +80,13 @@ export async function generateWithMuapi(
     let errorDetail = errorText || `HTTP ${submitResponse.status}`;
     try {
       const errorJson = JSON.parse(errorText);
-      errorDetail = errorJson.error || errorJson.message || errorJson.detail || errorDetail;
+      // Extract error message — handle string, array, or nested object
+      const raw = errorJson.error || errorJson.message || errorJson.detail;
+      if (typeof raw === "string") {
+        errorDetail = raw;
+      } else if (raw) {
+        errorDetail = JSON.stringify(raw);
+      }
     } catch {
       // Keep original text
     }
@@ -123,8 +129,8 @@ export async function generateWithMuapi(
       video?: string;
       audio?: string;
     };
-    error?: string;
-    message?: string;
+    error?: string | unknown;
+    message?: string | unknown;
   }
 
   let resultData: MuapiPollResponse | null = null;
@@ -157,7 +163,12 @@ export async function generateWithMuapi(
         let errorDetail = errorText || `HTTP ${pollResponse.status}`;
         try {
           const errorJson = JSON.parse(errorText);
-          errorDetail = errorJson.error || errorJson.message || errorDetail;
+          const raw = errorJson.error || errorJson.message;
+          if (typeof raw === "string") {
+            errorDetail = raw;
+          } else if (raw) {
+            errorDetail = JSON.stringify(raw);
+          }
         } catch {
           // Keep original
         }
@@ -182,7 +193,8 @@ export async function generateWithMuapi(
       }
 
       if (currentStatus === "failed") {
-        const failureReason = pollData.error || pollData.message || "Generation failed";
+        const rawErr = pollData.error || pollData.message || "Generation failed";
+        const failureReason = typeof rawErr === "string" ? rawErr : JSON.stringify(rawErr);
         console.error(`[API:${requestId}] muapi.ai task failed: ${failureReason}`);
         return { success: false, error: `${input.model.name}: ${failureReason}` };
       }
