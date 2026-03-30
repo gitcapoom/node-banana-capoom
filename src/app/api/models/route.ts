@@ -31,6 +31,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ProviderType } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers";
 import { MUAPI_MODELS } from "@/lib/providers/muapi";
+import { getMuapiModels } from "@/lib/providers/muapiModelFetcher";
 import {
   getCachedModels,
   setCachedModels,
@@ -1096,11 +1097,11 @@ export async function GET(
     anyFromCache = true;
   }
 
-  // Add muapi.ai models if included (hardcoded, no API call needed)
+  // Add muapi.ai models — dynamically fetched from playground with hardcoded fallback
   if (includeMuapi) {
-    let muapiModels = [...MUAPI_MODELS];
+    let muapiModels = await getMuapiModels(MUAPI_MODELS);
     if (searchQuery) {
-      muapiModels = filterModelsBySearch(muapiModels, searchQuery);
+      muapiModels = filterModelsBySearch([...muapiModels], searchQuery);
     }
     allModels.push(...muapiModels);
     providerResults["muapi"] = {
