@@ -1043,6 +1043,114 @@ function getKieSchema(modelId: string): ExtractedSchema {
 }
 
 /**
+ * Get inferred schema for muapi.ai models based on model slug patterns.
+ * muapi.ai has no schema discovery API, so we infer inputs/params from the model ID.
+ */
+function getMuapiSchema(modelId: string): ExtractedSchema {
+  const id = modelId.toLowerCase();
+
+  // Common parameters
+  const aspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1" };
+  const videoAspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["16:9", "9:16", "1:1"], default: "16:9" };
+  const resolution: ModelParameter = { name: "resolution", type: "string", description: "Output resolution", enum: ["480p", "720p", "1080p"], default: "720p" };
+  const duration: ModelParameter = { name: "duration", type: "string", description: "Video duration in seconds", enum: ["5", "10"], default: "5" };
+  const seed: ModelParameter = { name: "seed", type: "integer", description: "Random seed for reproducibility", minimum: 0 };
+
+  // Video-to-video models: need video_url input
+  if (id.includes("v2v") || id.includes("video-to-video") || id.includes("video-edit") ||
+      id.includes("video-face-swap") || id.includes("video-translate") ||
+      id.includes("video-upscaler") || id.includes("video-extend") ||
+      id.includes("video-watermark") || id.includes("motion-control") ||
+      id.includes("video-combiner") || id.includes("clipping") ||
+      id.includes("animate") || id.includes("edit-video") ||
+      id.includes("remix-video") || id.includes("captions") ||
+      id.includes("luma-modify") || id.includes("luma-flash") ||
+      id.includes("runway-aleph") || id.includes("dance-effects")) {
+    return {
+      parameters: [videoAspectRatio, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "video_url", type: "image", required: true, label: "Video" },
+      ],
+    };
+  }
+
+  // Lipsync / avatar models: need image + audio
+  if (id.includes("lipsync") || id.includes("avatar") || id.includes("speech-to-video")) {
+    return {
+      parameters: [seed],
+      inputs: [
+        { name: "image_url", type: "image", required: true, label: "Image" },
+        { name: "audio_url", type: "image", required: true, label: "Audio" },
+      ],
+    };
+  }
+
+  // Image-to-video models: need image_url input
+  if (id.includes("i2v") || id.includes("image-to-video") || id.includes("reference-to-video") ||
+      id.includes("reference-video") || id.includes("start-end-video") ||
+      id.includes("video-effects") || id.includes("vfx") || id.includes("motion-controls")) {
+    return {
+      parameters: [videoAspectRatio, resolution, duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "image_url", type: "image", required: true, label: "Image" },
+      ],
+    };
+  }
+
+  // Text-to-video models
+  if (id.includes("t2v") || id.includes("text-to-video") || id.includes("4k-video")) {
+    return {
+      parameters: [videoAspectRatio, resolution, duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+      ],
+    };
+  }
+
+  // Image-to-image models: need image_url input
+  if (id.includes("i2i") || id.includes("image-to-image") || id.includes("-edit") ||
+      id.includes("face-swap") || id.includes("upscaler") || id.includes("upscale") ||
+      id.includes("background-remover") || id.includes("object-eraser") ||
+      id.includes("skin-enhancer") || id.includes("color-photo") ||
+      id.includes("product-shot") || id.includes("product-photography") ||
+      id.includes("ghibli-style") || id.includes("image-extension") ||
+      id.includes("watermark") || id.includes("pulid") || id.includes("redux") ||
+      id.includes("reframe") || id.includes("character") || id.includes("reference-to-image") ||
+      id.includes("effects") || id.includes("photo-pack") || id.includes("portrait-stylist") ||
+      id.includes("dress-change") || id.includes("omni-reference") || id.includes("style-reference")) {
+    return {
+      parameters: [aspectRatio, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "image_url", type: "image", required: true, label: "Image" },
+      ],
+    };
+  }
+
+  // Audio models
+  if (id.includes("music") || id.includes("audio") || id.includes("speech") ||
+      id.includes("vocals") || id.includes("instrumental") || id.includes("sounds") ||
+      id.includes("voice-clone") || id.includes("lyrics") || id.includes("mashup")) {
+    return {
+      parameters: [seed],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Text" },
+      ],
+    };
+  }
+
+  // Default: text-to-image
+  return {
+    parameters: [aspectRatio, seed],
+    inputs: [
+      { name: "prompt", type: "text", required: true, label: "Prompt" },
+    ],
+  };
+}
+
+/**
  * Get schema for Gemini video models (native Veo via Gemini API)
  * Returns null if the model is not a Gemini video model.
  */
@@ -1321,11 +1429,12 @@ export async function GET(
   const decodedModelId = decodeURIComponent(modelId);
   const provider = request.nextUrl.searchParams.get("provider") as ProviderType | null;
 
-  if (!provider || (provider !== "replicate" && provider !== "fal" && provider !== "kie" && provider !== "wavespeed" && provider !== "gemini")) {
+  const validProviders = ["replicate", "fal", "kie", "wavespeed", "gemini", "muapi"];
+  if (!provider || !validProviders.includes(provider)) {
     return NextResponse.json<SchemaErrorResponse>(
       {
         success: false,
-        error: "Invalid or missing provider. Use ?provider=replicate, ?provider=fal, ?provider=kie, ?provider=wavespeed, or ?provider=gemini",
+        error: `Invalid or missing provider. Use ?provider=${validProviders.join(", ?provider=")}`,
       },
       { status: 400 }
     );
@@ -1371,6 +1480,9 @@ export async function GET(
     } else if (provider === "kie") {
       // Kie.ai uses hardcoded schemas (no schema discovery API)
       result = getKieSchema(decodedModelId);
+    } else if (provider === "muapi") {
+      // muapi.ai uses inferred schemas based on model slug patterns
+      result = getMuapiSchema(decodedModelId);
     } else if (provider === "wavespeed") {
       // WaveSpeed uses dynamic schemas from API, with static fallback
       const apiKey = request.headers.get("X-WaveSpeed-Key") || process.env.WAVESPEED_API_KEY || null;
