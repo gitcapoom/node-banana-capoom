@@ -17,9 +17,9 @@ app.prepare().then(() => {
     await handle(req, res);
   });
 
-  // Increase timeout to 10 minutes for long-running video generation
-  server.requestTimeout = 600000; // 10 minutes
-  server.headersTimeout = 610000; // Slightly longer than requestTimeout
+  // Increase timeout to 25 minutes for long-running video generation (muapi/fal)
+  server.requestTimeout = 1500000; // 25 minutes
+  server.headersTimeout = 1510000; // Slightly longer than requestTimeout
 
   server.listen(port, () => {
     console.log(`> Ready on http://${hostname}:${port} (accessible on LAN via your machine's IP)`);

@@ -146,7 +146,7 @@ export async function generateWithMuapi(
 
   // Poll for completion
   // Status flow: processing → completed | failed
-  const maxWaitTime = 10 * 60 * 1000; // 10 minutes (video can be slow)
+  const maxWaitTime = 20 * 60 * 1000; // 20 minutes (video models can be very slow)
   const pollInterval = 2000; // 2 seconds
   const startTime = Date.now();
   let lastStatus = "";
