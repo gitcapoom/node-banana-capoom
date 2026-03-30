@@ -1043,11 +1043,120 @@ function getKieSchema(modelId: string): ExtractedSchema {
 }
 
 /**
- * Get inferred schema for muapi.ai models based on model slug patterns.
- * muapi.ai has no schema discovery API, so we infer inputs/params from the model ID.
+ * Schema cache for muapi.ai models discovered via API probe
  */
-function getMuapiSchema(modelId: string): ExtractedSchema {
+const muapiProbeCache = new Map<string, { schema: ExtractedSchema; timestamp: number }>();
+const MUAPI_PROBE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Probe muapi.ai API with an empty body to discover required fields from validation errors.
+ * Returns discovered input fields or null if probe fails.
+ */
+async function probeMuapiSchema(modelId: string, apiKey: string): Promise<ModelInput[] | null> {
+  try {
+    const resp = await fetch(`https://api.muapi.ai/api/v1/${modelId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    const text = await resp.text();
+    let data: { detail?: Array<{ type: string; loc: string[]; msg: string; ctx?: Record<string, unknown> }> };
+    try { data = JSON.parse(text); } catch { return null; }
+    if (!data.detail || !Array.isArray(data.detail)) return null;
+
+    const inputs: ModelInput[] = [];
+    const seen = new Set<string>();
+
+    for (const err of data.detail) {
+      if (err.loc?.[1] && !seen.has(err.loc[1])) {
+        const fieldName = err.loc[1];
+        seen.add(fieldName);
+
+        // Skip non-connectable fields (these are parameters, not inputs)
+        if (["aspect_ratio", "resolution", "duration", "quality", "seed", "watermark",
+             "generate_audio", "target_gender", "target_index", "language", "theme",
+             "effect_type", "lora"].includes(fieldName)) continue;
+
+        // Determine type from field name
+        const isImage = fieldName.includes("image") || fieldName.includes("frame") ||
+                        fieldName.includes("photo") || fieldName.includes("face");
+        const isText = fieldName === "prompt" || fieldName === "negative_prompt" || fieldName === "text";
+
+        if (isImage || isText) {
+          inputs.push({
+            name: fieldName,
+            type: isImage ? "image" : "text",
+            required: err.type === "missing",
+            label: fieldName.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          });
+        }
+      }
+    }
+
+    // Also check for video/audio URL fields
+    for (const err of data.detail) {
+      if (err.loc?.[1] && !seen.has(err.loc[1])) {
+        const fieldName = err.loc[1];
+        if (fieldName.includes("video") || fieldName.includes("audio")) {
+          seen.add(fieldName);
+          inputs.push({
+            name: fieldName,
+            type: "image", // treat as image handle for now
+            required: err.type === "missing",
+            label: fieldName.replace(/_url$/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          });
+        }
+      }
+    }
+
+    return inputs.length > 0 ? inputs : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Get schema for muapi.ai models.
+ * First tries API probe (cached 24h), falls back to slug-based inference.
+ */
+async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<ExtractedSchema> {
   const id = modelId.toLowerCase();
+
+  // Check probe cache first
+  const cached = muapiProbeCache.get(id);
+  if (cached && Date.now() - cached.timestamp < MUAPI_PROBE_TTL) {
+    return cached.schema;
+  }
+
+  // Try API probe if we have a key
+  if (apiKey) {
+    const probed = await probeMuapiSchema(modelId, apiKey);
+    if (probed && probed.length > 0) {
+      // Build schema from probed inputs + generic params
+      const isVideo = id.includes("video") || id.includes("i2v") || id.includes("t2v") ||
+                      id.includes("v2v") || id.includes("animate");
+      const params: ModelParameter[] = [
+        { name: "aspect_ratio", type: "string", description: "Output aspect ratio",
+          enum: isVideo ? ["16:9", "9:16", "1:1"] : ["1:1", "4:3", "3:4", "16:9", "9:16"],
+          default: isVideo ? "16:9" : "1:1" },
+        { name: "seed", type: "integer", description: "Random seed", minimum: 0 },
+      ];
+      if (isVideo) {
+        params.push({ name: "duration", type: "integer", description: "Video duration in seconds" });
+        params.push({ name: "resolution", type: "string", description: "Output resolution",
+          enum: ["480p", "720p", "1080p"], default: "720p" });
+      }
+
+      const schema: ExtractedSchema = { parameters: params, inputs: probed };
+      muapiProbeCache.set(id, { schema, timestamp: Date.now() });
+      console.log(`[muapi] Probed schema for ${modelId}: ${probed.map(i => i.name).join(", ")}`);
+      return schema;
+    }
+  }
+
+  // Fallback: infer from slug patterns
 
   // Common parameters
   const aspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1" };
@@ -1510,7 +1619,8 @@ export async function GET(
       result = getKieSchema(decodedModelId);
     } else if (provider === "muapi") {
       // muapi.ai uses inferred schemas based on model slug patterns
-      result = getMuapiSchema(decodedModelId);
+      const muapiKey = request.headers.get("X-Muapi-API-Key") || process.env.MUAPI_API_KEY || null;
+      result = await getMuapiSchema(decodedModelId, muapiKey);
     } else if (provider === "wavespeed") {
       // WaveSpeed uses dynamic schemas from API, with static fallback
       const apiKey = request.headers.get("X-WaveSpeed-Key") || process.env.WAVESPEED_API_KEY || null;
