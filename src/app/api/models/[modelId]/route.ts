@@ -1056,6 +1056,34 @@ function getMuapiSchema(modelId: string): ExtractedSchema {
   const duration: ModelParameter = { name: "duration", type: "string", description: "Video duration in seconds", enum: ["5", "10"], default: "5" };
   const seed: ModelParameter = { name: "seed", type: "integer", description: "Random seed for reproducibility", minimum: 0 };
 
+  // === Model-specific overrides (before generic pattern matching) ===
+
+  // Seedance I2V models: need first_frame + last_frame (not generic image_url)
+  if (id.includes("seedance") && (id.includes("i2v") || id.includes("image-to-video"))) {
+    return {
+      parameters: [videoAspectRatio, duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "first_frame", type: "image", required: true, label: "First Frame" },
+        { name: "last_frame", type: "image", required: false, label: "Last Frame" },
+      ],
+    };
+  }
+
+  // Start-end video models (Vidu etc.): need start_image + end_image
+  if (id.includes("start-end-video")) {
+    return {
+      parameters: [videoAspectRatio, duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "start_image", type: "image", required: true, label: "Start Image" },
+        { name: "end_image", type: "image", required: false, label: "End Image" },
+      ],
+    };
+  }
+
+  // === Generic pattern matching ===
+
   // Video-to-video models: need video_url input
   if (id.includes("v2v") || id.includes("video-to-video") || id.includes("video-edit") ||
       id.includes("video-face-swap") || id.includes("video-translate") ||
