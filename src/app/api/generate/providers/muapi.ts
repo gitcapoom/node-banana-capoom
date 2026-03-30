@@ -50,6 +50,14 @@ export async function generateWithMuapi(
   // Remove undefined prompt (some models don't use it)
   if (!payload.prompt) delete payload.prompt;
 
+  // Coerce numeric string parameters to actual numbers (muapi expects integers for duration, seed, etc.)
+  for (const key of Object.keys(payload)) {
+    const val = payload[key];
+    if (typeof val === "string" && /^\d+$/.test(val)) {
+      payload[key] = parseInt(val, 10);
+    }
+  }
+
   // Apply dynamic inputs (schema-mapped connections)
   if (hasDynamicInputs) {
     for (const [key, value] of Object.entries(input.dynamicInputs!)) {
@@ -58,8 +66,9 @@ export async function generateWithMuapi(
       }
     }
   } else if (input.images && input.images.length > 0) {
-    // Fallback: pass first image as image_url
+    // Fallback: pass first image as image_url (and images_list for models that need it)
     payload.image_url = input.images[0];
+    payload.images_list = input.images;
   }
 
   console.log(`[API:${requestId}] Submitting to muapi.ai: ${modelId} with keys: ${Object.keys(payload).join(", ")}`);
