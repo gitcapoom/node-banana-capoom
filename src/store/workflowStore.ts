@@ -2849,6 +2849,7 @@ export function useProviderApiKeys() {
       falApiKey: state.providerSettings.providers.fal?.apiKey ?? null,
       kieApiKey: state.providerSettings.providers.kie?.apiKey ?? null,
       wavespeedApiKey: state.providerSettings.providers.wavespeed?.apiKey ?? null,
+      muapiApiKey: state.providerSettings.providers.muapi?.apiKey ?? null,
       // Provider enabled states (for conditional UI)
       replicateEnabled: state.providerSettings.providers.replicate?.enabled ?? false,
       kieEnabled: state.providerSettings.providers.kie?.enabled ?? false,

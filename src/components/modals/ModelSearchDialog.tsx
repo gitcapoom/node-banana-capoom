@@ -127,7 +127,7 @@ export function ModelSearchDialog({
     trackModelUsage,
   } = useWorkflowStore();
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey } = useProviderApiKeys();
+  const { replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, muapiApiKey } = useProviderApiKeys();
   const { screenToFlowPosition } = useReactFlow();
 
   // State
@@ -232,6 +232,9 @@ export function ModelSearchDialog({
       }
       if (wavespeedApiKey) {
         headers["X-WaveSpeed-Key"] = wavespeedApiKey;
+      }
+      if (muapiApiKey) {
+        headers["X-Muapi-API-Key"] = muapiApiKey;
       }
 
       const response = await deduplicatedFetch(`/api/models?${params.toString()}`, {
@@ -430,12 +433,13 @@ export function ModelSearchDialog({
     if (replicateApiKey) providers.add("replicate");
     if (kieApiKey) providers.add("kie");
     if (wavespeedApiKey) providers.add("wavespeed");
+    if (muapiApiKey) providers.add("muapi");
     // Server-side keys (from env vars, reported by /api/models)
     for (const p of serverAvailableProviders) {
       providers.add(p as ProviderType);
     }
     return providers;
-  }, [replicateApiKey, kieApiKey, wavespeedApiKey, serverAvailableProviders]);
+  }, [replicateApiKey, kieApiKey, wavespeedApiKey, muapiApiKey, serverAvailableProviders]);
 
   // Reset provider filter if current selection becomes unavailable
   useEffect(() => {
