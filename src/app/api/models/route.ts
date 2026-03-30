@@ -1046,13 +1046,13 @@ export async function GET(
     }
   }
 
-  // Gemini and Kie are always available (with key for Kie), so we don't fail if no external providers
-  if (providersToFetch.length === 0 && !includeGemini && !includeKie) {
+  // Gemini, Kie, and muapi are hardcoded — don't fail if no external API providers
+  if (providersToFetch.length === 0 && !includeGemini && !includeKie && !includeMuapi) {
     return NextResponse.json<ModelsErrorResponse>(
       {
         success: false,
         error:
-          "No providers available. Add REPLICATE_API_KEY, FAL_API_KEY, KIE_API_KEY, or WAVESPEED_API_KEY to .env.local or configure in Settings.",
+          "No providers available. Add REPLICATE_API_KEY, FAL_API_KEY, KIE_API_KEY, WAVESPEED_API_KEY, or MUAPI_API_KEY to .env.local or configure in Settings.",
       },
       { status: 400 }
     );
