@@ -89,6 +89,9 @@ function getModelUrl(provider: ProviderType, modelId: string): string | null {
   if (provider === "worldlabs") {
     return `https://platform.worldlabs.ai`;
   }
+  if (provider === "muapi") {
+    return `https://muapi.ai/playground/${modelId}`;
+  }
   return null;
 }
 
