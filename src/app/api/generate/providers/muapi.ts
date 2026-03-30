@@ -22,7 +22,8 @@ const MUAPI_BASE = "https://api.muapi.ai/api/v1";
 export async function generateWithMuapi(
   requestId: string,
   apiKey: string,
-  input: GenerationInput
+  input: GenerationInput,
+  falApiKey?: string | null
 ): Promise<GenerationOutput> {
   console.log(`[API:${requestId}] muapi.ai generation - Model: ${input.model.id}, Images: ${input.images?.length || 0}, Prompt: ${input.prompt.length} chars`);
 
@@ -73,18 +74,17 @@ export async function generateWithMuapi(
   }
 
   // Upload base64 images to CDN — muapi.ai requires URLs, not data URIs
-  const falKey = null; // fal CDN works without key (rate-limited)
   for (const key of Object.keys(payload)) {
     const val = payload[key];
     if (typeof val === "string" && val.startsWith("data:")) {
       console.log(`[API:${requestId}] Uploading ${key} to CDN...`);
-      payload[key] = await uploadImageToFal(val, falKey);
+      payload[key] = await uploadImageToFal(val, falApiKey || null);
     } else if (Array.isArray(val)) {
       payload[key] = await Promise.all(
         val.map(async (item: unknown) => {
           if (typeof item === "string" && item.startsWith("data:")) {
             console.log(`[API:${requestId}] Uploading ${key}[] item to CDN...`);
-            return uploadImageToFal(item as string, falKey);
+            return uploadImageToFal(item as string, falApiKey || null);
           }
           return item;
         })

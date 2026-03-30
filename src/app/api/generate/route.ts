@@ -456,6 +456,7 @@ export async function POST(request: NextRequest) {
       }
 
       const muapiApiKey = request.headers.get("X-Muapi-API-Key") || process.env.MUAPI_API_KEY;
+      const falApiKeyForUpload = request.headers.get("X-Fal-API-Key") || process.env.FAL_API_KEY || null;
       if (!muapiApiKey) {
         return NextResponse.json<GenerateResponse>(
           { success: false, error: "muapi.ai API key not configured. Add MUAPI_API_KEY to .env.local or configure in Settings." },
@@ -489,7 +490,7 @@ export async function POST(request: NextRequest) {
         dynamicInputs: processedDynamicInputs,
       };
 
-      const result = await generateWithMuapi(requestId, muapiApiKey, genInput);
+      const result = await generateWithMuapi(requestId, muapiApiKey, genInput, falApiKeyForUpload);
 
       if (!result.success) {
         return NextResponse.json<GenerateResponse>(
