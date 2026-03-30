@@ -1054,65 +1054,73 @@ const MUAPI_PROBE_TTL = 24 * 60 * 60 * 1000; // 24 hours
  */
 async function probeMuapiSchema(modelId: string, apiKey: string): Promise<ModelInput[] | null> {
   try {
+    console.log(`[muapi probe] Probing ${modelId}...`);
     const resp = await fetch(`https://api.muapi.ai/api/v1/${modelId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey },
       body: JSON.stringify({}),
-      signal: AbortSignal.timeout(10000),
     });
 
     const text = await resp.text();
-    let data: { detail?: Array<{ type: string; loc: string[]; msg: string; ctx?: Record<string, unknown> }> };
-    try { data = JSON.parse(text); } catch { return null; }
-    if (!data.detail || !Array.isArray(data.detail)) return null;
+    console.log(`[muapi probe] ${modelId} status=${resp.status}, response=${text.substring(0, 500)}`);
+
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { console.log(`[muapi probe] Failed to parse JSON`); return null; }
+
+    // Handle both {"detail": [...]} and direct array formats
+    let errors: Array<{ type: string; loc: string[]; msg: string }>;
+    if (Array.isArray(parsed)) {
+      errors = parsed;
+    } else if (parsed && typeof parsed === "object" && "detail" in parsed && Array.isArray((parsed as Record<string, unknown>).detail)) {
+      errors = (parsed as { detail: Array<{ type: string; loc: string[]; msg: string }> }).detail;
+    } else {
+      console.log(`[muapi probe] Unexpected response format`);
+      return null;
+    }
+
+    console.log(`[muapi probe] Found ${errors.length} validation errors`);
+
+    // Parameter names to skip (not connectable inputs)
+    const paramNames = new Set([
+      "aspect_ratio", "resolution", "duration", "quality", "seed", "watermark",
+      "generate_audio", "target_gender", "target_index", "language", "theme",
+      "effect_type", "lora", "number_of_images", "cfg_scale", "negative_prompt_text",
+    ]);
 
     const inputs: ModelInput[] = [];
     const seen = new Set<string>();
 
-    for (const err of data.detail) {
-      if (err.loc?.[1] && !seen.has(err.loc[1])) {
-        const fieldName = err.loc[1];
-        seen.add(fieldName);
+    for (const err of errors) {
+      const fieldName = err.loc?.[1];
+      if (!fieldName || seen.has(fieldName) || paramNames.has(fieldName)) continue;
+      seen.add(fieldName);
 
-        // Skip non-connectable fields (these are parameters, not inputs)
-        if (["aspect_ratio", "resolution", "duration", "quality", "seed", "watermark",
-             "generate_audio", "target_gender", "target_index", "language", "theme",
-             "effect_type", "lora"].includes(fieldName)) continue;
+      // Classify field type
+      const isImage = fieldName.includes("image") || fieldName.includes("frame") ||
+                      fieldName.includes("photo") || fieldName.includes("face") ||
+                      fieldName.includes("_url") || fieldName.includes("_urls") ||
+                      fieldName === "images_list";
+      const isText = fieldName === "prompt" || fieldName === "negative_prompt" || fieldName === "text";
+      const isVideo = fieldName.includes("video");
+      const isAudio = fieldName.includes("audio");
 
-        // Determine type from field name
-        const isImage = fieldName.includes("image") || fieldName.includes("frame") ||
-                        fieldName.includes("photo") || fieldName.includes("face");
-        const isText = fieldName === "prompt" || fieldName === "negative_prompt" || fieldName === "text";
-
-        if (isImage || isText) {
-          inputs.push({
-            name: fieldName,
-            type: isImage ? "image" : "text",
-            required: err.type === "missing",
-            label: fieldName.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-          });
-        }
+      if (isImage || isText || isVideo || isAudio) {
+        const type = isText ? "text" : "image";
+        inputs.push({
+          name: fieldName,
+          type,
+          required: err.type === "missing",
+          label: fieldName
+            .replace(/_url$/, "").replace(/_urls$/, "")
+            .replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+        });
       }
     }
 
-    // Also check for video/audio URL fields
-    for (const err of data.detail) {
-      if (err.loc?.[1] && !seen.has(err.loc[1])) {
-        const fieldName = err.loc[1];
-        if (fieldName.includes("video") || fieldName.includes("audio")) {
-          seen.add(fieldName);
-          inputs.push({
-            name: fieldName,
-            type: "image", // treat as image handle for now
-            required: err.type === "missing",
-            label: fieldName.replace(/_url$/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-          });
-        }
-      }
-    }
-
+    console.log(`[muapi probe] Extracted inputs: ${inputs.map(i => `${i.name}(${i.type})`).join(", ") || "none"}`);
     return inputs.length > 0 ? inputs : null;
-  } catch {
+  } catch (e) {
+    console.log(`[muapi probe] Error: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
 }
