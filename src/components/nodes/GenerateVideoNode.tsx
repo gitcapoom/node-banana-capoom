@@ -97,8 +97,12 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     if (kieEnabled && kieApiKey) {
       providers.push({ id: "kie", name: "Kie.ai" });
     }
+    // Add muapi.ai if configured
+    if (muapiApiKey) {
+      providers.push({ id: "muapi", name: "muapi.ai" });
+    }
     return providers;
-  }, [geminiApiKey, replicateEnabled, replicateApiKey, kieEnabled, kieApiKey]);
+  }, [geminiApiKey, replicateEnabled, replicateApiKey, kieEnabled, kieApiKey, muapiApiKey]);
 
   // Fetch models from external providers when provider changes
   const fetchModels = useCallback(async () => {
