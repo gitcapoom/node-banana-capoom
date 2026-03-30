@@ -58,7 +58,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
+  const { replicateApiKey, falApiKey, kieApiKey, muapiApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const [isLoadingCarouselImage, setIsLoadingCarouselImage] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
@@ -319,6 +319,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     if (replicateApiKey) headers["X-Replicate-Key"] = replicateApiKey;
     if (falApiKey) headers["X-Fal-Key"] = falApiKey;
     if (kieApiKey) headers["X-Kie-Key"] = kieApiKey;
+    if (muapiApiKey) headers["X-Muapi-API-Key"] = muapiApiKey;
 
     const encodedModelId = encodeURIComponent(modelId);
     deduplicatedFetch(`/api/models/${encodedModelId}?provider=${provider}`, { headers })
