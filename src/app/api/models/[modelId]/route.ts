@@ -1250,6 +1250,13 @@ async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<E
   }
 
   // === Generic pattern matching ===
+  // Note: muapi ignores unknown parameters, so it's safe to include common optional
+  // params broadly. This ensures the UI exposes settings even when the probe can't
+  // discover them (the probe only finds required fields via validation errors).
+
+  // Common optional parameters shared across categories
+  const videoQuality: ModelParameter = { name: "quality", type: "string", description: "Output quality", enum: ["basic", "high"], default: "basic" };
+  const imageResolution: ModelParameter = { name: "resolution", type: "string", description: "Output resolution", enum: ["1k", "2k", "4k"], default: "1k" };
 
   // Video-to-video models: need video_url input
   if (id.includes("v2v") || id.includes("video-to-video") || id.includes("video-edit") ||
@@ -1262,7 +1269,7 @@ async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<E
       id.includes("luma-modify") || id.includes("luma-flash") ||
       id.includes("runway-aleph") || id.includes("dance-effects")) {
     return {
-      parameters: [videoAspectRatio, seed],
+      parameters: [videoAspectRatio, duration, seed],
       inputs: [
         { name: "prompt", type: "text", required: false, label: "Prompt" },
         { name: "video_url", type: "image", required: true, label: "Video" },
@@ -1286,7 +1293,7 @@ async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<E
       id.includes("reference-video") || id.includes("start-end-video") ||
       id.includes("video-effects") || id.includes("vfx") || id.includes("motion-controls")) {
     return {
-      parameters: [videoAspectRatio, resolution, duration, seed],
+      parameters: [videoAspectRatio, resolution, duration, videoQuality, seed],
       inputs: [
         { name: "prompt", type: "text", required: false, label: "Prompt" },
         { name: "image_url", type: "image", required: true, label: "Image" },
@@ -1297,7 +1304,7 @@ async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<E
   // Text-to-video models
   if (id.includes("t2v") || id.includes("text-to-video") || id.includes("4k-video")) {
     return {
-      parameters: [videoAspectRatio, resolution, duration, seed],
+      parameters: [videoAspectRatio, resolution, duration, videoQuality, seed],
       inputs: [
         { name: "prompt", type: "text", required: true, label: "Prompt" },
       ],
@@ -1316,7 +1323,7 @@ async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<E
       id.includes("effects") || id.includes("photo-pack") || id.includes("portrait-stylist") ||
       id.includes("dress-change") || id.includes("omni-reference") || id.includes("style-reference")) {
     return {
-      parameters: [aspectRatio, seed],
+      parameters: [aspectRatio, imageResolution, seed],
       inputs: [
         { name: "prompt", type: "text", required: false, label: "Prompt" },
         { name: "image_url", type: "image", required: true, label: "Image" },
@@ -1338,7 +1345,7 @@ async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<E
 
   // Default: text-to-image
   return {
-    parameters: [aspectRatio, seed],
+    parameters: [aspectRatio, imageResolution, seed],
     inputs: [
       { name: "prompt", type: "text", required: true, label: "Prompt" },
     ],
