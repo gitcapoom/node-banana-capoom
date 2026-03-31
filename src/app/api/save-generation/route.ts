@@ -81,6 +81,8 @@ function computeContentHash(buffer: Buffer): string {
 }
 
 // Helper to find existing file by hash suffix
+// Checks across all common extensions for the same media type to prevent
+// duplicate saves when content-type changes (e.g. same image saved as .png then .jpg)
 async function findExistingFileByHash(
   directoryPath: string,
   hash: string,
@@ -88,10 +90,13 @@ async function findExistingFileByHash(
 ): Promise<string | null> {
   try {
     const files = await fs.readdir(directoryPath);
-    // Look for files ending with this hash before extension
-    const hashSuffix = `_${hash}.${extension}`;
-    const matching = files.find((f) => f.endsWith(hashSuffix));
-    return matching || null;
+    const hashPattern = `_${hash}.`;
+    // First try exact extension match
+    const exactMatch = files.find((f) => f.endsWith(`_${hash}.${extension}`));
+    if (exactMatch) return exactMatch;
+    // Then try any file with the same hash (handles extension mismatches)
+    const anyMatch = files.find((f) => f.includes(hashPattern));
+    return anyMatch || null;
   } catch {
     return null;
   }
