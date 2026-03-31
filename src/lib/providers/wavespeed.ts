@@ -251,19 +251,18 @@ const wavespeedProvider: ProviderInterface = {
         ...input.parameters,
       };
 
-      // Handle image inputs
-      if (input.images && input.images.length > 0) {
-        // WaveSpeed typically expects image_url or image
-        payload.image = input.images[0];
-      }
-
-      // Apply dynamic inputs (schema-mapped connections)
-      if (input.dynamicInputs) {
-        for (const [key, value] of Object.entries(input.dynamicInputs)) {
+      // Apply dynamic inputs first (schema-mapped connections take priority)
+      const hasDynamicInputs = input.dynamicInputs && Object.keys(input.dynamicInputs).length > 0;
+      if (hasDynamicInputs) {
+        for (const [key, value] of Object.entries(input.dynamicInputs!)) {
           if (value !== null && value !== undefined && value !== '') {
             payload[key] = value;
           }
         }
+      } else if (input.images && input.images.length > 0) {
+        // Fallback: legacy image handling
+        payload.image = input.images[0];
+        payload.images = input.images;
       }
 
       // Submit task
