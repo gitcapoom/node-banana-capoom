@@ -1131,44 +1131,46 @@ async function probeMuapiSchema(modelId: string, apiKey: string): Promise<ModelI
 
 /**
  * Get schema for muapi.ai models.
- * First tries API probe (cached 24h), falls back to slug-based inference.
+ * Priority: 1) model-specific overrides, 2) slug-based inference (with probed inputs merged in).
+ * The probe only discovers required inputs — optional parameters come from the slug patterns.
  */
 async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<ExtractedSchema> {
   const id = modelId.toLowerCase();
 
-  // Check probe cache first
-  const cached = muapiProbeCache.get(id);
-  if (cached && Date.now() - cached.timestamp < MUAPI_PROBE_TTL) {
-    return cached.schema;
-  }
+  // Get slug-based schema (model-specific overrides + generic patterns)
+  // This is the primary source — it includes all optional params the probe can't discover.
+  const slugSchema = getMuapiSlugSchema(id);
 
-  // Try API probe if we have a key
+  // Optionally merge probed inputs to discover unusual required fields the slug missed
   if (apiKey) {
-    const probed = await probeMuapiSchema(modelId, apiKey);
-    if (probed && probed.length > 0) {
-      // Build schema from probed inputs + generic params
-      const isVideo = id.includes("video") || id.includes("i2v") || id.includes("t2v") ||
-                      id.includes("v2v") || id.includes("animate");
-      const params: ModelParameter[] = [
-        { name: "aspect_ratio", type: "string", description: "Output aspect ratio",
-          enum: isVideo ? ["16:9", "9:16", "1:1"] : ["1:1", "4:3", "3:4", "16:9", "9:16"],
-          default: isVideo ? "16:9" : "1:1" },
-        { name: "seed", type: "integer", description: "Random seed", minimum: 0 },
-      ];
-      if (isVideo) {
-        params.push({ name: "duration", type: "integer", description: "Video duration in seconds" });
-        params.push({ name: "resolution", type: "string", description: "Output resolution",
-          enum: ["480p", "720p", "1080p"], default: "720p" });
-      }
+    const cached = muapiProbeCache.get(id);
+    let probedInputs: ModelInput[] | null = null;
 
-      const schema: ExtractedSchema = { parameters: params, inputs: probed };
-      muapiProbeCache.set(id, { schema, timestamp: Date.now() });
-      console.log(`[muapi] Probed schema for ${modelId}: ${probed.map(i => i.name).join(", ")}`);
-      return schema;
+    if (cached && Date.now() - cached.timestamp < MUAPI_PROBE_TTL) {
+      probedInputs = cached.schema.inputs;
+    } else {
+      const probed = await probeMuapiSchema(modelId, apiKey);
+      if (probed && probed.length > 0) {
+        probedInputs = probed;
+        muapiProbeCache.set(id, { schema: { parameters: [], inputs: probed }, timestamp: Date.now() });
+      }
+    }
+
+    // Merge: add any probed inputs not already covered by slug schema
+    if (probedInputs && probedInputs.length > 0) {
+      const existingNames = new Set(slugSchema.inputs.map(i => i.name));
+      for (const input of probedInputs) {
+        if (!existingNames.has(input.name)) {
+          slugSchema.inputs.push(input);
+        }
+      }
     }
   }
 
-  // Fallback: infer from slug patterns
+  return slugSchema;
+}
+
+function getMuapiSlugSchema(id: string): ExtractedSchema {
 
   // Common parameters
   const aspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1" };
