@@ -320,7 +320,20 @@ export async function generateWithMuapi(
   }
 
   const outputArrayBuffer = await outputResponse.arrayBuffer();
-  const contentType = outputResponse.headers.get("content-type") || "image/png";
+  const bytes = new Uint8Array(outputArrayBuffer);
+
+  // Detect actual image type from magic bytes (server content-type is often wrong)
+  let contentType = outputResponse.headers.get("content-type") || "";
+  if (bytes[0] === 0xFF && bytes[1] === 0xD8) {
+    contentType = "image/jpeg";
+  } else if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+    contentType = "image/png";
+  } else if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+    contentType = "image/webp";
+  } else if (!contentType || contentType === "application/octet-stream") {
+    contentType = "image/png"; // last resort fallback
+  }
+
   const base64 = Buffer.from(outputArrayBuffer).toString("base64");
   const dataUrl = `data:${contentType};base64,${base64}`;
 
