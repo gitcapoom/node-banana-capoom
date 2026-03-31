@@ -1179,6 +1179,51 @@ async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<E
 
   // === Model-specific overrides (before generic pattern matching) ===
 
+  // Nano Banana 2 Edit: needs images_list (array), supports resolution + aspect_ratio
+  const nb2EditResolution: ModelParameter = { name: "resolution", type: "string", description: "Output resolution", enum: ["1k", "2k", "4k"], default: "1k" };
+  if (id === "nano-banana-2-edit") {
+    return {
+      parameters: [
+        { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["1:1", "4:3", "3:4", "16:9", "9:16", "2:3", "3:2", "1:4", "4:1", "1:8", "8:1"], default: "1:1" },
+        nb2EditResolution,
+        seed,
+      ],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+        { name: "images_list", type: "image", required: true, label: "Image", isArray: true },
+      ],
+    };
+  }
+
+  // Nano Banana Pro Edit: similar to NB2 edit
+  if (id === "nano-banana-pro-edit") {
+    return {
+      parameters: [
+        { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1" },
+        { name: "resolution", type: "string", description: "Output resolution", enum: ["1k", "2k", "4k"], default: "1k" },
+        seed,
+      ],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+        { name: "images_list", type: "image", required: true, label: "Image", isArray: true },
+      ],
+    };
+  }
+
+  // Nano Banana Edit (original): similar structure
+  if (id === "nano-banana-edit") {
+    return {
+      parameters: [
+        { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1" },
+        seed,
+      ],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+        { name: "images_list", type: "image", required: true, label: "Image", isArray: true },
+      ],
+    };
+  }
+
   // Seedance I2V models: need first_frame + last_frame (not generic image_url)
   const seedanceQuality: ModelParameter = { name: "quality", type: "string", description: "Output quality", enum: ["basic", "high"], default: "basic" };
   if (id.includes("seedance") && (id.includes("i2v") || id.includes("image-to-video"))) {
