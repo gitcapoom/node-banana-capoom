@@ -1176,9 +1176,10 @@ async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<E
   // === Model-specific overrides (before generic pattern matching) ===
 
   // Seedance I2V models: need first_frame + last_frame (not generic image_url)
+  const seedanceQuality: ModelParameter = { name: "quality", type: "string", description: "Output quality", enum: ["basic", "high"], default: "basic" };
   if (id.includes("seedance") && (id.includes("i2v") || id.includes("image-to-video"))) {
     return {
-      parameters: [videoAspectRatio, duration, seed],
+      parameters: [videoAspectRatio, duration, seedanceQuality, seed],
       inputs: [
         { name: "prompt", type: "text", required: false, label: "Prompt" },
         { name: "first_frame", type: "image", required: true, label: "First Frame" },

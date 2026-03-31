@@ -270,20 +270,33 @@ export async function generateWithMuapi(
 
   console.log(`[API:${requestId}] Fetching muapi.ai output from: ${outputUrl.substring(0, 80)}...`);
 
-  // For video/audio, return URL directly (large files)
-  if (isVideoModel) {
-    console.log(`[API:${requestId}] SUCCESS - Returning video URL`);
-    return {
-      success: true,
-      outputs: [{ type: "video", data: "", url: outputUrl }],
-    };
-  }
+  // For video/audio, download and return as base64 data URL
+  // (returning raw URLs causes CORS issues and expired-URL failures in the browser)
+  if (isVideoModel || isAudioModel) {
+    const mediaType = isVideoModel ? "video" : "audio";
+    console.log(`[API:${requestId}] Downloading ${mediaType} from muapi.ai...`);
 
-  if (isAudioModel) {
-    console.log(`[API:${requestId}] SUCCESS - Returning audio URL`);
+    const mediaResponse = await fetch(outputUrl);
+    if (!mediaResponse.ok) {
+      return { success: false, error: `Failed to download ${mediaType}: ${mediaResponse.status}` };
+    }
+
+    const MAX_MEDIA_SIZE = 500 * 1024 * 1024; // 500MB
+    const mediaLength = parseInt(mediaResponse.headers.get("content-length") || "0", 10);
+    if (mediaLength > MAX_MEDIA_SIZE) {
+      return { success: false, error: `${mediaType} too large: ${(mediaLength / (1024 * 1024)).toFixed(0)}MB` };
+    }
+
+    const mediaBuffer = await mediaResponse.arrayBuffer();
+    const mediaBase64 = Buffer.from(mediaBuffer).toString("base64");
+    const mediaContentType = mediaResponse.headers.get("content-type") ||
+      (isVideoModel ? "video/mp4" : "audio/mpeg");
+    const dataUrl = `data:${mediaContentType};base64,${mediaBase64}`;
+
+    console.log(`[API:${requestId}] SUCCESS - ${mediaType}: ${(mediaBuffer.byteLength / 1024 / 1024).toFixed(1)}MB`);
     return {
       success: true,
-      outputs: [{ type: "audio", data: "", url: outputUrl }],
+      outputs: [{ type: mediaType, data: dataUrl, url: outputUrl }],
     };
   }
 
