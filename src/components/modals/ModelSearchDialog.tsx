@@ -127,7 +127,7 @@ export function ModelSearchDialog({
     trackModelUsage,
   } = useWorkflowStore();
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey } = useProviderApiKeys();
+  const { replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, muapiApiKey } = useProviderApiKeys();
   const { screenToFlowPosition } = useReactFlow();
 
   // State
@@ -209,7 +209,7 @@ export function ModelSearchDialog({
           capabilityFilter === "image"
             ? "text-to-image,image-to-image"
             : capabilityFilter === "video"
-            ? "text-to-video,image-to-video"
+            ? "text-to-video,image-to-video,video-to-video"
             : capabilityFilter === "3d"
             ? "text-to-3d,image-to-3d"
             : "text-to-audio";
@@ -232,6 +232,9 @@ export function ModelSearchDialog({
       }
       if (wavespeedApiKey) {
         headers["X-WaveSpeed-Key"] = wavespeedApiKey;
+      }
+      if (muapiApiKey) {
+        headers["X-Muapi-API-Key"] = muapiApiKey;
       }
 
       const response = await deduplicatedFetch(`/api/models?${params.toString()}`, {
@@ -430,12 +433,13 @@ export function ModelSearchDialog({
     if (replicateApiKey) providers.add("replicate");
     if (kieApiKey) providers.add("kie");
     if (wavespeedApiKey) providers.add("wavespeed");
+    if (muapiApiKey) providers.add("muapi");
     // Server-side keys (from env vars, reported by /api/models)
     for (const p of serverAvailableProviders) {
       providers.add(p as ProviderType);
     }
     return providers;
-  }, [replicateApiKey, kieApiKey, wavespeedApiKey, serverAvailableProviders]);
+  }, [replicateApiKey, kieApiKey, wavespeedApiKey, muapiApiKey, serverAvailableProviders]);
 
   // Reset provider filter if current selection becomes unavailable
   useEffect(() => {
@@ -461,7 +465,7 @@ export function ModelSearchDialog({
           (cap) => cap === "text-to-image" || cap === "image-to-image"
         );
         const isVideo = matchingModel.capabilities.some(
-          (cap) => cap === "text-to-video" || cap === "image-to-video"
+          (cap) => cap === "text-to-video" || cap === "image-to-video" || cap === "video-to-video"
         );
         const is3D = matchingModel.capabilities.some(
           (cap) => cap === "text-to-3d" || cap === "image-to-3d"
@@ -700,6 +704,19 @@ export function ModelSearchDialog({
                   }`}
                 >
                   <WaveSpeedIcon />
+                </button>
+              )}
+              {availableProviders.has("muapi") && (
+                <button
+                  onClick={() => setProviderFilter("muapi")}
+                  title="muapi.ai"
+                  className={`px-2 py-1.5 text-[10px] font-bold rounded transition-colors ${
+                    providerFilter === "muapi"
+                      ? "bg-cyan-500/20 text-cyan-300"
+                      : "text-neutral-400 hover:text-cyan-300 hover:bg-neutral-700"
+                  }`}
+                >
+                  mu
                 </button>
               )}
             </div>

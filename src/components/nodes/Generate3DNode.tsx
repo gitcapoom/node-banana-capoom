@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
+import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
@@ -40,6 +40,13 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
   const [showOverlay, setShowOverlay] = useState(false);
   const [isAutoCapturing, setIsAutoCapturing] = useState(false);
   const [frameGrabCount, setFrameGrabCount] = useState(0);
+
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  // Tell React Flow to recalculate handle positions when schema changes
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, nodeData.inputSchema, updateNodeInternals]);
 
   // Resolve background image from "image-bg" handle connection
   const backgroundImage = useMemo(() => {
@@ -479,73 +486,71 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
         (() => {
           const imageInputs = nodeData.inputSchema!.filter(i => i.type === "image");
           const textInputs = nodeData.inputSchema!.filter(i => i.type === "text");
+          const videoInputs = nodeData.inputSchema!.filter(i => i.type === "video");
+          const audioInputs = nodeData.inputSchema!.filter(i => i.type === "audio");
 
           const hasImageInput = imageInputs.length > 0;
           const hasTextInput = textInputs.length > 0;
 
+          type HandleType = "image" | "text" | "video" | "audio";
           const handles: Array<{
             id: string;
-            type: "image" | "text";
+            type: HandleType;
             label: string;
             schemaName: string | null;
             description: string | null;
             isPlaceholder: boolean;
           }> = [];
 
-          if (hasImageInput) {
-            imageInputs.forEach((input, index) => {
+          const addHandles = (inputs: typeof imageInputs, handleType: HandleType) => {
+            inputs.forEach((input, index) => {
               handles.push({
-                id: `image-${index}`,
-                type: "image",
+                id: index === 0 ? handleType : `${handleType}-${index}`,
+                type: handleType,
                 label: input.label,
                 schemaName: input.name,
                 description: input.description || null,
                 isPlaceholder: false,
               });
             });
+          };
+
+          if (hasImageInput) {
+            addHandles(imageInputs, "image");
           } else {
             handles.push({
-              id: "image",
-              type: "image",
-              label: "Image",
-              schemaName: null,
-              description: "Not used by this model",
-              isPlaceholder: true,
+              id: "image", type: "image", label: "Image",
+              schemaName: null, description: "Not used by this model", isPlaceholder: true,
             });
           }
+
+          addHandles(videoInputs, "video");
+          addHandles(audioInputs, "audio");
 
           if (hasTextInput) {
-            textInputs.forEach((input, index) => {
-              handles.push({
-                id: `text-${index}`,
-                type: "text",
-                label: input.label,
-                schemaName: input.name,
-                description: input.description || null,
-                isPlaceholder: false,
-              });
-            });
+            addHandles(textInputs, "text");
           } else {
             handles.push({
-              id: "text",
-              type: "text",
-              label: "Prompt",
-              schemaName: null,
-              description: "Not used by this model",
-              isPlaceholder: true,
+              id: "text", type: "text", label: "Prompt",
+              schemaName: null, description: "Not used by this model", isPlaceholder: true,
             });
           }
 
-          const imageHandles = handles.filter(h => h.type === "image");
+          const handleColors: Record<HandleType, string> = {
+            image: "var(--handle-color-image, #3b82f6)",
+            video: "var(--handle-color-video, #0d9488)",
+            audio: "var(--handle-color-audio, #8b5cf6)",
+            text: "var(--handle-color-text, #f59e0b)",
+          };
+          const mediaHandles = handles.filter(h => h.type !== "text");
           const textHandles = handles.filter(h => h.type === "text");
-          const totalSlots = imageHandles.length + textHandles.length + 1;
+          const totalSlots = mediaHandles.length + textHandles.length + 1;
 
           const renderedHandles = handles.map((handle) => {
-            const isImage = handle.type === "image";
-            const typeIndex = isImage
-              ? imageHandles.findIndex(h => h.id === handle.id)
-              : textHandles.findIndex(h => h.id === handle.id);
-            const adjustedIndex = isImage ? typeIndex : imageHandles.length + 1 + typeIndex;
+            const isText = handle.type === "text";
+            const typeGroup = isText ? textHandles : mediaHandles;
+            const typeIndex = typeGroup.findIndex(h => h.id === handle.id);
+            const adjustedIndex = isText ? mediaHandles.length + 1 + typeIndex : typeIndex;
             const topPercent = ((adjustedIndex + 1) / (totalSlots + 1)) * 100;
 
             return (
@@ -568,7 +573,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
                   style={{
                     right: `calc(100% + 8px)`,
                     top: `calc(${topPercent}% - 18px)`,
-                    color: isImage ? "var(--handle-color-image)" : "var(--handle-color-text)",
+                    color: handleColors[handle.type],
                     opacity: handle.isPlaceholder ? 0.3 : 1,
                   }}
                 >
@@ -578,29 +583,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
             );
           });
 
-          return (
-            <>
-              {renderedHandles}
-              {hasImageInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="image"
-                  style={{ top: "35%", opacity: 0, pointerEvents: "none" }}
-                  isConnectable={false}
-                />
-              )}
-              {hasTextInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="text"
-                  style={{ top: "65%", opacity: 0, pointerEvents: "none" }}
-                  isConnectable={false}
-                />
-              )}
-            </>
-          );
+          return <>{renderedHandles}</>;
         })()
       ) : (
         // Default handles when no schema

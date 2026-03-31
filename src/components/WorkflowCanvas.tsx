@@ -564,20 +564,34 @@ export function WorkflowCanvas() {
 
       // Video connections have special rules
       if (sourceType === "video") {
-        // Video source can ONLY connect to:
-        // 1. generateVideo nodes (for video-to-video)
-        // 2. videoStitch nodes (for concatenation)
-        // 3. output nodes (for display)
         const targetNode = nodes.find((n) => n.id === connection.target);
         if (!targetNode) return false;
 
         const targetNodeType = targetNode.type;
+        // Video can connect to video processing nodes, output, router
         if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "videoCompare" || targetNodeType === "easeCurve" || targetNodeType === "videoTrim" || targetNodeType === "videoFrameGrab" || targetNodeType === "output" || targetNodeType === "router") {
-          // For output node, we allow video even though its handle is typed as "image"
-          // because output node can display both images and videos
           return true;
         }
-        // Video cannot connect to other node types
+        // Video can also connect to nanoBanana/generate3d if the model has video-type schema inputs
+        if (targetNodeType === "nanoBanana" || targetNodeType === "generate3d") {
+          const targetData = targetNode.data as { inputSchema?: Array<{ type: string }> };
+          if (targetData.inputSchema?.some(i => i.type === "video")) return true;
+        }
+        return false;
+      }
+
+      // Audio connections: can connect to generate nodes with audio-type schema inputs
+      if (sourceType === "audio") {
+        const targetNode = nodes.find((n) => n.id === connection.target);
+        if (!targetNode) return false;
+
+        const targetNodeType = targetNode.type;
+        if (targetNodeType === "output" || targetNodeType === "router" || targetNodeType === "generateAudio") return true;
+        // Audio can connect to any generate node with audio-type schema inputs
+        if (targetNodeType === "nanoBanana" || targetNodeType === "generateVideo" || targetNodeType === "generate3d") {
+          const targetData = targetNode.data as { inputSchema?: Array<{ type: string }> };
+          if (targetData.inputSchema?.some(i => i.type === "audio")) return true;
+        }
         return false;
       }
 
@@ -589,15 +603,6 @@ export function WorkflowCanvas() {
         // Allow 3d output to connect to output node's 3d handle
         if (sourceType === "3d" && targetNode?.type === "output") return true;
         return sourceType === "3d" && targetType === "3d";
-      }
-
-      // Audio connections: audio handles connect to audio handles, plus output node (or router)
-      if (sourceType === "audio" || targetType === "audio") {
-        if (sourceType === "audio") {
-          const targetNode = nodes.find((n) => n.id === connection.target);
-          if (targetNode?.type === "output" || targetNode?.type === "router") return true;
-        }
-        return sourceType === "audio" && targetType === "audio";
       }
 
       // Standard type matching for image and text
@@ -807,9 +812,9 @@ export function WorkflowCanvas() {
             const matchingInputs = nodeData.inputSchema.filter(i => i.type === handleType);
             if (matchingInputs.length > 0) {
               // Find the first unoccupied handle by checking existing edges and batchUsed
-              // Handle IDs use schema name format: "image-{schemaName}" or "text-{schemaName}"
-              for (const input of matchingInputs) {
-                const candidateHandle = `${handleType}-${input.name}`;
+              // Handle IDs: first = bare type ("image"), extras = "image-1", "image-2", etc.
+              for (let i = 0; i < matchingInputs.length; i++) {
+                const candidateHandle = i === 0 ? handleType : `${handleType}-${i}`;
                 const isOccupied = edges.some(
                   (edge) => edge.target === node.id && edge.targetHandle === candidateHandle
                 ) || batchUsed?.has(candidateHandle);

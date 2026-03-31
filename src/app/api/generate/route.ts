@@ -18,6 +18,7 @@ import { generateWithReplicate } from "./providers/replicate";
 import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFalQueue } from "./providers/fal";
 import { generateWithKie } from "./providers/kie";
 import { generateWithWaveSpeed } from "./providers/wavespeed";
+import { generateWithMuapi } from "./providers/muapi";
 import { calculateGenerationCost } from "@/utils/costCalculator";
 
 // Re-export for backward compatibility (test file imports from route)
@@ -434,6 +435,70 @@ export async function POST(request: NextRequest) {
       }
 
       // Return first output
+      const output = result.outputs?.[0];
+      if (!output?.data && !output?.url) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "No output in generation result" },
+          { status: 500 }
+        );
+      }
+
+      return buildMediaResponse(output);
+    }
+
+    // muapi.ai provider
+    if (provider === "muapi") {
+      if (!selectedModel?.modelId || !selectedModel?.displayName) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "selectedModel with modelId and displayName is required for muapi.ai" },
+          { status: 400 }
+        );
+      }
+
+      const muapiApiKey = request.headers.get("X-Muapi-API-Key") || process.env.MUAPI_API_KEY;
+      const falApiKeyForUpload = request.headers.get("X-Fal-API-Key") || process.env.FAL_API_KEY || null;
+      if (!muapiApiKey) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "muapi.ai API key not configured. Add MUAPI_API_KEY to .env.local or configure in Settings." },
+          { status: 401 }
+        );
+      }
+
+      const processedImages: string[] = images ? [...images] : [];
+
+      let processedDynamicInputs: Record<string, string | string[]> | undefined = undefined;
+      if (dynamicInputs) {
+        processedDynamicInputs = {};
+        for (const key of Object.keys(dynamicInputs)) {
+          const value = dynamicInputs[key];
+          if (value === null || value === undefined || value === '') continue;
+          processedDynamicInputs[key] = value;
+        }
+      }
+
+      const genInput: GenerationInput = {
+        model: {
+          id: selectedModel.modelId,
+          name: selectedModel.displayName,
+          provider: "muapi",
+          capabilities: capabilitiesForMediaType(mediaType),
+          description: null,
+        },
+        prompt: prompt || "",
+        images: processedImages,
+        parameters,
+        dynamicInputs: processedDynamicInputs,
+      };
+
+      const result = await generateWithMuapi(requestId, muapiApiKey, genInput, falApiKeyForUpload);
+
+      if (!result.success) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: result.error || "Generation failed" },
+          { status: 500 }
+        );
+      }
+
       const output = result.outputs?.[0];
       if (!output?.data && !output?.url) {
         return NextResponse.json<GenerateResponse>(

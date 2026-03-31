@@ -56,6 +56,28 @@ const IMAGE_INPUT_PATTERNS = [
   "control_image",
 ];
 
+// Video input property patterns
+const VIDEO_INPUT_PATTERNS = [
+  "video_url",
+  "video_urls",
+  "video",
+  "videos",
+  "video_input",
+  "input_video",
+  "source_video",
+];
+
+// Audio input property patterns
+const AUDIO_INPUT_PATTERNS = [
+  "audio_url",
+  "audio_urls",
+  "audio",
+  "audio_input",
+  "input_audio",
+  "source_audio",
+  "voice_audio",
+];
+
 // Text input properties
 const TEXT_INPUT_NAMES = ["prompt", "negative_prompt"];
 
@@ -193,6 +215,46 @@ function isImageInput(name: string, prop: Record<string, unknown>, schemaCompone
          name.endsWith("_image_url") ||
          name.startsWith("image_") ||
          name.includes("_image_");
+}
+
+/**
+ * Check if property is a video input based on name patterns.
+ * Must be checked BEFORE isImageInput to prevent video URLs from being mislabeled.
+ */
+function isVideoInput(name: string, prop: Record<string, unknown>, schemaComponents?: Record<string, unknown>): boolean {
+  // Must be a string or array type (URLs)
+  const resolved = resolvePropertyType(prop, schemaComponents);
+  const propType = resolved.type;
+  if (propType !== "string" && propType !== "array") return false;
+
+  if (VIDEO_INPUT_PATTERNS.includes(name)) return true;
+
+  // Check description for video-related keywords
+  const description = (prop.description as string || "").toLowerCase();
+  if (description.includes("video url") || description.includes("video file") || description.includes("url of the video")) {
+    return true;
+  }
+
+  return name.endsWith("_video") || name.endsWith("_video_url") || name.startsWith("video_") && !name.includes("_size") && !name.includes("_count");
+}
+
+/**
+ * Check if property is an audio input based on name patterns.
+ * Must be checked BEFORE isImageInput to prevent audio URLs from being mislabeled.
+ */
+function isAudioInput(name: string, prop: Record<string, unknown>, schemaComponents?: Record<string, unknown>): boolean {
+  const resolved = resolvePropertyType(prop, schemaComponents);
+  const propType = resolved.type;
+  if (propType !== "string" && propType !== "array") return false;
+
+  if (AUDIO_INPUT_PATTERNS.includes(name)) return true;
+
+  const description = (prop.description as string || "").toLowerCase();
+  if (description.includes("audio url") || description.includes("audio file") || description.includes("url of the audio")) {
+    return true;
+  }
+
+  return name.endsWith("_audio") || name.endsWith("_audio_url") || name.startsWith("audio_") && !name.includes("_size") && !name.includes("_count");
 }
 
 /**
@@ -569,8 +631,34 @@ function extractParametersFromSchema(
       }
     }
 
-    // Check if this is a connectable input (image or text)
-    // Pass both name AND prop to check schema type, not just name
+    // Check if this is a connectable input (video, audio, image, or text)
+    // Video/audio checks MUST come before image to prevent mislabeling
+    if (isVideoInput(name, prop, schemaComponents)) {
+      const resolvedType = resolvePropertyType(prop, schemaComponents).type;
+      inputs.push({
+        name,
+        type: "video",
+        required: required.includes(name),
+        label: toLabel(name),
+        description: (prop.description || rawProp.description) as string | undefined,
+        isArray: resolvedType === "array",
+      });
+      continue;
+    }
+
+    if (isAudioInput(name, prop, schemaComponents)) {
+      const resolvedType = resolvePropertyType(prop, schemaComponents).type;
+      inputs.push({
+        name,
+        type: "audio",
+        required: required.includes(name),
+        label: toLabel(name),
+        description: (prop.description || rawProp.description) as string | undefined,
+        isArray: resolvedType === "array",
+      });
+      continue;
+    }
+
     if (isImageInput(name, prop, schemaComponents)) {
       const resolvedType = resolvePropertyType(prop, schemaComponents).type;
       inputs.push({
@@ -829,7 +917,7 @@ function getKieSchema(modelId: string): ExtractedSchema {
       inputs: [
         { name: "prompt", type: "text", required: false, label: "Prompt" },
         { name: "input_urls", type: "image", required: true, label: "Image", isArray: true },
-        { name: "video_urls", type: "image", required: true, label: "Video", isArray: true },
+        { name: "video_urls", type: "video", required: true, label: "Video", isArray: true },
       ],
     },
     "kling/v2-5-turbo-text-to-video-pro": {
@@ -885,7 +973,26 @@ function getKieSchema(modelId: string): ExtractedSchema {
       ],
       inputs: [
         { name: "prompt", type: "text", required: false, label: "Prompt" },
-        { name: "video_urls", type: "image", required: true, label: "Video", isArray: true },
+        { name: "video_urls", type: "video", required: true, label: "Video", isArray: true },
+      ],
+    },
+    "runway/aleph-video-to-video": {
+      parameters: [
+        { name: "duration", type: "string", description: "Video duration in seconds", enum: ["5", "10"], default: "5" },
+        { name: "resolution", type: "string", description: "Output resolution", enum: ["720p", "1080p"], default: "720p" },
+      ],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "video_url", type: "video", required: true, label: "Video" },
+      ],
+    },
+    "luma/modify-video": {
+      parameters: [
+        { name: "duration", type: "string", description: "Video duration in seconds", enum: ["5", "10"], default: "5" },
+      ],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+        { name: "video_url", type: "video", required: true, label: "Video" },
       ],
     },
     "topaz/video-upscale": {
@@ -893,7 +1000,7 @@ function getKieSchema(modelId: string): ExtractedSchema {
         { name: "upscale_factor", type: "string", description: "Upscale factor", enum: ["1", "2", "4"], default: "2" },
       ],
       inputs: [
-        { name: "video_url", type: "image", required: true, label: "Video" },
+        { name: "video_url", type: "video", required: true, label: "Video" },
       ],
     },
     "veo3/text-to-video": {
@@ -933,6 +1040,264 @@ function getKieSchema(modelId: string): ExtractedSchema {
   };
 
   return schemas[modelId] || { parameters: [], inputs: [] };
+}
+
+/**
+ * Schema cache for muapi.ai models discovered via API probe
+ */
+const muapiProbeCache = new Map<string, { schema: ExtractedSchema; timestamp: number }>();
+const MUAPI_PROBE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Probe muapi.ai API with an empty body to discover required fields from validation errors.
+ * Returns discovered input fields or null if probe fails.
+ */
+async function probeMuapiSchema(modelId: string, apiKey: string): Promise<ModelInput[] | null> {
+  try {
+    console.log(`[muapi probe] Probing ${modelId}...`);
+    const resp = await fetch(`https://api.muapi.ai/api/v1/${modelId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({}),
+    });
+
+    const text = await resp.text();
+    console.log(`[muapi probe] ${modelId} status=${resp.status}, response=${text.substring(0, 500)}`);
+
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { console.log(`[muapi probe] Failed to parse JSON`); return null; }
+
+    // Handle both {"detail": [...]} and direct array formats
+    let errors: Array<{ type: string; loc: string[]; msg: string }>;
+    if (Array.isArray(parsed)) {
+      errors = parsed;
+    } else if (parsed && typeof parsed === "object" && "detail" in parsed && Array.isArray((parsed as Record<string, unknown>).detail)) {
+      errors = (parsed as { detail: Array<{ type: string; loc: string[]; msg: string }> }).detail;
+    } else {
+      console.log(`[muapi probe] Unexpected response format`);
+      return null;
+    }
+
+    console.log(`[muapi probe] Found ${errors.length} validation errors`);
+
+    // Parameter names to skip (not connectable inputs)
+    const paramNames = new Set([
+      "aspect_ratio", "resolution", "duration", "quality", "seed", "watermark",
+      "generate_audio", "target_gender", "target_index", "language", "theme",
+      "effect_type", "lora", "number_of_images", "cfg_scale", "negative_prompt_text",
+    ]);
+
+    const inputs: ModelInput[] = [];
+    const seen = new Set<string>();
+
+    for (const err of errors) {
+      const fieldName = err.loc?.[1];
+      if (!fieldName || seen.has(fieldName) || paramNames.has(fieldName)) continue;
+      seen.add(fieldName);
+
+      // Classify field type
+      const isImage = fieldName.includes("image") || fieldName.includes("frame") ||
+                      fieldName.includes("photo") || fieldName.includes("face") ||
+                      fieldName.includes("_url") || fieldName.includes("_urls") ||
+                      fieldName === "images_list";
+      const isText = fieldName === "prompt" || fieldName === "negative_prompt" || fieldName === "text";
+      const isVideo = fieldName.includes("video");
+      const isAudio = fieldName.includes("audio");
+
+      if (isImage || isText || isVideo || isAudio) {
+        const type = isText ? "text" : isVideo ? "video" : isAudio ? "audio" : "image";
+        // Detect array fields from field name patterns or pydantic error type
+        const isArrayField = fieldName.endsWith("_list") || fieldName.endsWith("_urls") ||
+                             fieldName === "images_list" || err.type === "list_type";
+        inputs.push({
+          name: fieldName,
+          type,
+          required: err.type === "missing" || err.type === "list_type",
+          label: fieldName
+            .replace(/_url$/, "").replace(/_urls$/, "").replace(/_list$/, "")
+            .replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          ...(isArrayField ? { isArray: true } : {}),
+        });
+      }
+    }
+
+    console.log(`[muapi probe] Extracted inputs: ${inputs.map(i => `${i.name}(${i.type})`).join(", ") || "none"}`);
+    return inputs.length > 0 ? inputs : null;
+  } catch (e) {
+    console.log(`[muapi probe] Error: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
+/**
+ * Get schema for muapi.ai models.
+ * First tries API probe (cached 24h), falls back to slug-based inference.
+ */
+async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<ExtractedSchema> {
+  const id = modelId.toLowerCase();
+
+  // Check probe cache first
+  const cached = muapiProbeCache.get(id);
+  if (cached && Date.now() - cached.timestamp < MUAPI_PROBE_TTL) {
+    return cached.schema;
+  }
+
+  // Try API probe if we have a key
+  if (apiKey) {
+    const probed = await probeMuapiSchema(modelId, apiKey);
+    if (probed && probed.length > 0) {
+      // Build schema from probed inputs + generic params
+      const isVideo = id.includes("video") || id.includes("i2v") || id.includes("t2v") ||
+                      id.includes("v2v") || id.includes("animate");
+      const params: ModelParameter[] = [
+        { name: "aspect_ratio", type: "string", description: "Output aspect ratio",
+          enum: isVideo ? ["16:9", "9:16", "1:1"] : ["1:1", "4:3", "3:4", "16:9", "9:16"],
+          default: isVideo ? "16:9" : "1:1" },
+        { name: "seed", type: "integer", description: "Random seed", minimum: 0 },
+      ];
+      if (isVideo) {
+        params.push({ name: "duration", type: "integer", description: "Video duration in seconds" });
+        params.push({ name: "resolution", type: "string", description: "Output resolution",
+          enum: ["480p", "720p", "1080p"], default: "720p" });
+      }
+
+      const schema: ExtractedSchema = { parameters: params, inputs: probed };
+      muapiProbeCache.set(id, { schema, timestamp: Date.now() });
+      console.log(`[muapi] Probed schema for ${modelId}: ${probed.map(i => i.name).join(", ")}`);
+      return schema;
+    }
+  }
+
+  // Fallback: infer from slug patterns
+
+  // Common parameters
+  const aspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1" };
+  const videoAspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["16:9", "9:16", "1:1"], default: "16:9" };
+  const resolution: ModelParameter = { name: "resolution", type: "string", description: "Output resolution", enum: ["480p", "720p", "1080p"], default: "720p" };
+  const duration: ModelParameter = { name: "duration", type: "string", description: "Video duration in seconds", enum: ["5", "10"], default: "5" };
+  const seed: ModelParameter = { name: "seed", type: "integer", description: "Random seed for reproducibility", minimum: 0 };
+
+  // === Model-specific overrides (before generic pattern matching) ===
+
+  // Seedance I2V models: need first_frame + last_frame (not generic image_url)
+  const seedanceQuality: ModelParameter = { name: "quality", type: "string", description: "Output quality", enum: ["basic", "high"], default: "basic" };
+  if (id.includes("seedance") && (id.includes("i2v") || id.includes("image-to-video"))) {
+    return {
+      parameters: [videoAspectRatio, duration, seedanceQuality, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "first_frame", type: "image", required: true, label: "First Frame" },
+        { name: "last_frame", type: "image", required: false, label: "Last Frame" },
+      ],
+    };
+  }
+
+  // Start-end video models (Vidu etc.): need start_image + end_image
+  if (id.includes("start-end-video")) {
+    return {
+      parameters: [videoAspectRatio, duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "start_image", type: "image", required: true, label: "Start Image" },
+        { name: "end_image", type: "image", required: false, label: "End Image" },
+      ],
+    };
+  }
+
+  // === Generic pattern matching ===
+
+  // Video-to-video models: need video_url input
+  if (id.includes("v2v") || id.includes("video-to-video") || id.includes("video-edit") ||
+      id.includes("video-face-swap") || id.includes("video-translate") ||
+      id.includes("video-upscaler") || id.includes("video-extend") ||
+      id.includes("video-watermark") || id.includes("motion-control") ||
+      id.includes("video-combiner") || id.includes("clipping") ||
+      id.includes("animate") || id.includes("edit-video") ||
+      id.includes("remix-video") || id.includes("captions") ||
+      id.includes("luma-modify") || id.includes("luma-flash") ||
+      id.includes("runway-aleph") || id.includes("dance-effects")) {
+    return {
+      parameters: [videoAspectRatio, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "video_url", type: "image", required: true, label: "Video" },
+      ],
+    };
+  }
+
+  // Lipsync / avatar models: need image + audio
+  if (id.includes("lipsync") || id.includes("avatar") || id.includes("speech-to-video")) {
+    return {
+      parameters: [seed],
+      inputs: [
+        { name: "image_url", type: "image", required: true, label: "Image" },
+        { name: "audio_url", type: "image", required: true, label: "Audio" },
+      ],
+    };
+  }
+
+  // Image-to-video models: need image_url input
+  if (id.includes("i2v") || id.includes("image-to-video") || id.includes("reference-to-video") ||
+      id.includes("reference-video") || id.includes("start-end-video") ||
+      id.includes("video-effects") || id.includes("vfx") || id.includes("motion-controls")) {
+    return {
+      parameters: [videoAspectRatio, resolution, duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "image_url", type: "image", required: true, label: "Image" },
+      ],
+    };
+  }
+
+  // Text-to-video models
+  if (id.includes("t2v") || id.includes("text-to-video") || id.includes("4k-video")) {
+    return {
+      parameters: [videoAspectRatio, resolution, duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+      ],
+    };
+  }
+
+  // Image-to-image models: need image_url input
+  if (id.includes("i2i") || id.includes("image-to-image") || id.includes("-edit") ||
+      id.includes("face-swap") || id.includes("upscaler") || id.includes("upscale") ||
+      id.includes("background-remover") || id.includes("object-eraser") ||
+      id.includes("skin-enhancer") || id.includes("color-photo") ||
+      id.includes("product-shot") || id.includes("product-photography") ||
+      id.includes("ghibli-style") || id.includes("image-extension") ||
+      id.includes("watermark") || id.includes("pulid") || id.includes("redux") ||
+      id.includes("reframe") || id.includes("character") || id.includes("reference-to-image") ||
+      id.includes("effects") || id.includes("photo-pack") || id.includes("portrait-stylist") ||
+      id.includes("dress-change") || id.includes("omni-reference") || id.includes("style-reference")) {
+    return {
+      parameters: [aspectRatio, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "image_url", type: "image", required: true, label: "Image" },
+      ],
+    };
+  }
+
+  // Audio models
+  if (id.includes("music") || id.includes("audio") || id.includes("speech") ||
+      id.includes("vocals") || id.includes("instrumental") || id.includes("sounds") ||
+      id.includes("voice-clone") || id.includes("lyrics") || id.includes("mashup")) {
+    return {
+      parameters: [seed],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Text" },
+      ],
+    };
+  }
+
+  // Default: text-to-image
+  return {
+    parameters: [aspectRatio, seed],
+    inputs: [
+      { name: "prompt", type: "text", required: true, label: "Prompt" },
+    ],
+  };
 }
 
 /**
@@ -1214,11 +1579,12 @@ export async function GET(
   const decodedModelId = decodeURIComponent(modelId);
   const provider = request.nextUrl.searchParams.get("provider") as ProviderType | null;
 
-  if (!provider || (provider !== "replicate" && provider !== "fal" && provider !== "kie" && provider !== "wavespeed" && provider !== "gemini")) {
+  const validProviders = ["replicate", "fal", "kie", "wavespeed", "gemini", "muapi"];
+  if (!provider || !validProviders.includes(provider)) {
     return NextResponse.json<SchemaErrorResponse>(
       {
         success: false,
-        error: "Invalid or missing provider. Use ?provider=replicate, ?provider=fal, ?provider=kie, ?provider=wavespeed, or ?provider=gemini",
+        error: `Invalid or missing provider. Use ?provider=${validProviders.join(", ?provider=")}`,
       },
       { status: 400 }
     );
@@ -1264,6 +1630,10 @@ export async function GET(
     } else if (provider === "kie") {
       // Kie.ai uses hardcoded schemas (no schema discovery API)
       result = getKieSchema(decodedModelId);
+    } else if (provider === "muapi") {
+      // muapi.ai uses inferred schemas based on model slug patterns
+      const muapiKey = request.headers.get("X-Muapi-API-Key") || process.env.MUAPI_API_KEY || null;
+      result = await getMuapiSchema(decodedModelId, muapiKey);
     } else if (provider === "wavespeed") {
       // WaveSpeed uses dynamic schemas from API, with static fallback
       const apiKey = request.headers.get("X-WaveSpeed-Key") || process.env.WAVESPEED_API_KEY || null;

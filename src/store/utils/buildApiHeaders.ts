@@ -19,6 +19,7 @@ const PROVIDER_HEADER_MAP: Record<ProviderType, string> = {
   openai: "X-OpenAI-API-Key",
   anthropic: "X-Anthropic-API-Key",
   worldlabs: "X-WorldLabs-Key",
+  muapi: "X-Muapi-API-Key",
 };
 
 /**

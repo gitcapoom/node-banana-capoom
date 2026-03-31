@@ -30,6 +30,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ProviderType } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers";
+import { MUAPI_MODELS } from "@/lib/providers/muapi";
+import { getMuapiModels } from "@/lib/providers/muapiModelFetcher";
 import {
   getCachedModels,
   setCachedModels,
@@ -262,16 +264,34 @@ const KIE_MODELS: ProviderModel[] = [
     name: "Wan 2.6 V2V",
     description: "Wan 2.6 video-to-video transformation via Kie.ai.",
     provider: "kie",
-    capabilities: ["image-to-video"],
+    capabilities: ["video-to-video"],
     coverImage: undefined,
     pageUrl: "https://kie.ai/wan-2-6",
+  },
+  {
+    id: "runway/aleph-video-to-video",
+    name: "Runway Aleph V2V",
+    description: "Runway Aleph video-to-video generation via Kie.ai.",
+    provider: "kie",
+    capabilities: ["video-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://kie.ai/runway",
+  },
+  {
+    id: "luma/modify-video",
+    name: "Luma Modify Video",
+    description: "Luma video-to-video modification and transformation via Kie.ai.",
+    provider: "kie",
+    capabilities: ["video-to-video"],
+    coverImage: undefined,
+    pageUrl: "https://kie.ai/luma",
   },
   {
     id: "topaz/video-upscale",
     name: "Topaz Video Upscale",
     description: "AI video upscaling. Supports 1x, 2x, and 4x scaling factors.",
     provider: "kie",
-    capabilities: ["image-to-video"],
+    capabilities: ["video-to-video"],
     coverImage: undefined,
     pageUrl: "https://kie.ai/topaz",
   },
@@ -949,6 +969,7 @@ export async function GET(
   const falKey = request.headers.get("X-Fal-Key") || process.env.FAL_API_KEY || null;
   const kieKey = request.headers.get("X-Kie-Key") || process.env.KIE_API_KEY || null;
   const wavespeedKey = request.headers.get("X-WaveSpeed-Key") || process.env.WAVESPEED_API_KEY || null;
+  const muapiKey = request.headers.get("X-Muapi-API-Key") || process.env.MUAPI_API_KEY || null;
 
   // Build list of all available providers (have keys from env or client headers)
   const availableProviders: string[] = ["gemini"]; // Gemini always available
@@ -956,11 +977,13 @@ export async function GET(
   if (replicateKey) availableProviders.push("replicate");
   if (kieKey) availableProviders.push("kie");
   if (wavespeedKey) availableProviders.push("wavespeed");
+  if (muapiKey) availableProviders.push("muapi");
 
   // Determine which providers to fetch from (excluding gemini/kie - handled separately as hardcoded)
   const providersToFetch: ProviderType[] = [];
   let includeGemini = false;
   let includeKie = false;
+  let includeMuapi = false;
 
   if (providerFilter) {
     if (providerFilter === "gemini") {
@@ -994,6 +1017,15 @@ export async function GET(
           { status: 400 }
         );
       }
+    } else if (providerFilter === "muapi") {
+      if (muapiKey) {
+        includeMuapi = true;
+      } else {
+        return NextResponse.json<ModelsErrorResponse>(
+          { success: false, error: "muapi.ai API key required. Add MUAPI_API_KEY to .env.local or configure in Settings." },
+          { status: 400 }
+        );
+      }
     } else if (providerFilter === "replicate" && replicateKey) {
       providersToFetch.push("replicate");
     } else if (providerFilter === "fal" && falKey) {
@@ -1003,6 +1035,7 @@ export async function GET(
     // Include all providers that have keys configured
     includeGemini = true; // Gemini always available
     includeKie = kieKey ? true : false; // Kie only if API key is configured
+    includeMuapi = muapiKey ? true : false; // muapi only if API key is configured
     if (wavespeedKey) {
       providersToFetch.push("wavespeed"); // WaveSpeed if key is configured
     }
@@ -1014,13 +1047,13 @@ export async function GET(
     }
   }
 
-  // Gemini and Kie are always available (with key for Kie), so we don't fail if no external providers
-  if (providersToFetch.length === 0 && !includeGemini && !includeKie) {
+  // Gemini, Kie, and muapi are hardcoded — don't fail if no external API providers
+  if (providersToFetch.length === 0 && !includeGemini && !includeKie && !includeMuapi) {
     return NextResponse.json<ModelsErrorResponse>(
       {
         success: false,
         error:
-          "No providers available. Add REPLICATE_API_KEY, FAL_API_KEY, KIE_API_KEY, or WAVESPEED_API_KEY to .env.local or configure in Settings.",
+          "No providers available. Add REPLICATE_API_KEY, FAL_API_KEY, KIE_API_KEY, WAVESPEED_API_KEY, or MUAPI_API_KEY to .env.local or configure in Settings.",
       },
       { status: 400 }
     );
@@ -1059,7 +1092,22 @@ export async function GET(
     providerResults["kie"] = {
       success: true,
       count: kieModels.length,
-      cached: true, // Hardcoded models are effectively "cached"
+      cached: true,
+    };
+    anyFromCache = true;
+  }
+
+  // Add muapi.ai models — dynamically fetched from playground with hardcoded fallback
+  if (includeMuapi) {
+    let muapiModels = await getMuapiModels(MUAPI_MODELS);
+    if (searchQuery) {
+      muapiModels = filterModelsBySearch([...muapiModels], searchQuery);
+    }
+    allModels.push(...muapiModels);
+    providerResults["muapi"] = {
+      success: true,
+      count: muapiModels.length,
+      cached: true,
     };
     anyFromCache = true;
   }

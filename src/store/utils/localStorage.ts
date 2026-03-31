@@ -51,6 +51,7 @@ export const defaultProviderSettings: ProviderSettings = {
     kie: { id: "kie", name: "Kie.ai", enabled: false, apiKey: null, apiKeyEnvVar: "KIE_API_KEY" },
     wavespeed: { id: "wavespeed", name: "WaveSpeed", enabled: false, apiKey: null, apiKeyEnvVar: "WAVESPEED_API_KEY" },
     worldlabs: { id: "worldlabs", name: "World Labs", enabled: false, apiKey: null, apiKeyEnvVar: "WORLDLABS_API_KEY" },
+    muapi: { id: "muapi", name: "muapi.ai", enabled: false, apiKey: null, apiKeyEnvVar: "MUAPI_API_KEY" },
   }
 };
 

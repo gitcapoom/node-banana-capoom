@@ -58,7 +58,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
+  const { replicateApiKey, falApiKey, kieApiKey, muapiApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const [isLoadingCarouselImage, setIsLoadingCarouselImage] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
@@ -319,6 +319,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     if (replicateApiKey) headers["X-Replicate-Key"] = replicateApiKey;
     if (falApiKey) headers["X-Fal-Key"] = falApiKey;
     if (kieApiKey) headers["X-Kie-Key"] = kieApiKey;
+    if (muapiApiKey) headers["X-Muapi-API-Key"] = muapiApiKey;
 
     const encodedModelId = encodeURIComponent(modelId);
     deduplicatedFetch(`/api/models/${encodedModelId}?provider=${provider}`, { headers })
@@ -678,31 +679,38 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
         (() => {
           const imageInputs = nodeData.inputSchema!.filter(i => i.type === "image");
           const textInputs = nodeData.inputSchema!.filter(i => i.type === "text");
+          const videoInputs = nodeData.inputSchema!.filter(i => i.type === "video");
+          const audioInputs = nodeData.inputSchema!.filter(i => i.type === "audio");
 
           const hasImageInput = imageInputs.length > 0;
           const hasTextInput = textInputs.length > 0;
 
+          type HandleType = "image" | "text" | "video" | "audio";
           const handles: Array<{
             id: string;
-            type: "image" | "text";
+            type: HandleType;
             label: string;
             schemaName: string | null;
             description: string | null;
             isPlaceholder: boolean;
           }> = [];
 
-          if (hasImageInput) {
-            imageInputs.forEach((input, index) => {
+          // Helper to add handles for a given type
+          const addHandles = (inputs: typeof imageInputs, handleType: HandleType) => {
+            inputs.forEach((input, index) => {
               handles.push({
-                // First image handle keeps id "image" for backward compat with existing edges
-                id: index === 0 ? "image" : `image-${index}`,
-                type: "image",
+                id: index === 0 ? handleType : `${handleType}-${index}`,
+                type: handleType,
                 label: input.label,
                 schemaName: input.name,
                 description: input.description || null,
                 isPlaceholder: false,
               });
             });
+          };
+
+          if (hasImageInput) {
+            addHandles(imageInputs, "image");
           } else {
             handles.push({
               id: "image",
@@ -714,18 +722,12 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
             });
           }
 
+          // Add video/audio handles from schema (no placeholder — not all models need these)
+          addHandles(videoInputs, "video");
+          addHandles(audioInputs, "audio");
+
           if (hasTextInput) {
-            textInputs.forEach((input, index) => {
-              handles.push({
-                // First text handle keeps id "text" for backward compat with existing edges
-                id: index === 0 ? "text" : `text-${index}`,
-                type: "text",
-                label: input.label,
-                schemaName: input.name,
-                description: input.description || null,
-                isPlaceholder: false,
-              });
-            });
+            addHandles(textInputs, "text");
           } else {
             handles.push({
               id: "text",
@@ -737,16 +739,22 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
             });
           }
 
-          const imageHandles = handles.filter(h => h.type === "image");
+          // Calculate positions — group order: image, video, audio, gap, text
+          const handleColors: Record<HandleType, string> = {
+            image: "var(--handle-color-image, #3b82f6)",
+            video: "var(--handle-color-video, #0d9488)",
+            audio: "var(--handle-color-audio, #8b5cf6)",
+            text: "var(--handle-color-text, #f59e0b)",
+          };
+          const mediaHandles = handles.filter(h => h.type !== "text");
           const textHandles = handles.filter(h => h.type === "text");
-          const totalSlots = imageHandles.length + textHandles.length + 1; // +1 for gap
+          const totalSlots = mediaHandles.length + textHandles.length + 1; // +1 for gap
 
           const renderedHandles = handles.map((handle) => {
-            const isImage = handle.type === "image";
-            const typeIndex = isImage
-              ? imageHandles.findIndex(h => h.id === handle.id)
-              : textHandles.findIndex(h => h.id === handle.id);
-            const adjustedIndex = isImage ? typeIndex : imageHandles.length + 1 + typeIndex;
+            const isText = handle.type === "text";
+            const typeGroup = isText ? textHandles : mediaHandles;
+            const typeIndex = typeGroup.findIndex(h => h.id === handle.id);
+            const adjustedIndex = isText ? mediaHandles.length + 1 + typeIndex : typeIndex;
             const topPercent = ((adjustedIndex + 1) / (totalSlots + 1)) * 100;
 
             return (
@@ -770,7 +778,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                   style={{
                     right: `calc(100% + 8px)`,
                     top: `calc(${topPercent}% - 18px)`,
-                    color: isImage ? "var(--handle-color-image)" : "var(--handle-color-text)",
+                    color: handleColors[handle.type],
                     opacity: handle.isPlaceholder ? 0.3 : 1,
                     zIndex: 10,
                   }}

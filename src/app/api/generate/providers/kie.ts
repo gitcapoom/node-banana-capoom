@@ -118,6 +118,19 @@ export function getKieModelDefaults(modelId: string): Record<string, unknown> {
         resolution: "1080p",
       };
 
+    // Runway Aleph V2V
+    case "runway/aleph-video-to-video":
+      return {
+        duration: "5",
+        resolution: "720p",
+      };
+
+    // Luma Modify Video
+    case "luma/modify-video":
+      return {
+        duration: "5",
+      };
+
     // Topaz video upscale
     case "topaz/video-upscale":
       return {

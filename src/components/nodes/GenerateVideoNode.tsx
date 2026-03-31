@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
-import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
+import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
@@ -51,7 +51,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   const addNode = useWorkflowStore((state) => state.addNode);
   const nodes = useWorkflowStore((state) => state.nodes);
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { geminiApiKey, replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
+  const { geminiApiKey, replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, muapiApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
@@ -65,6 +65,12 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+  const updateNodeInternals = useUpdateNodeInternals();
+
+  // Tell React Flow to recalculate handle positions when schema changes
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, nodeData.inputSchema, updateNodeInternals]);
 
   // Register browse callback for floating header button
   useEffect(() => {
@@ -91,8 +97,16 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     if (kieEnabled && kieApiKey) {
       providers.push({ id: "kie", name: "Kie.ai" });
     }
+    // Add WaveSpeed if configured
+    if (wavespeedApiKey) {
+      providers.push({ id: "wavespeed", name: "WaveSpeed" });
+    }
+    // Add muapi.ai if configured
+    if (muapiApiKey) {
+      providers.push({ id: "muapi", name: "muapi.ai" });
+    }
     return providers;
-  }, [geminiApiKey, replicateEnabled, replicateApiKey, kieEnabled, kieApiKey]);
+  }, [geminiApiKey, replicateEnabled, replicateApiKey, kieEnabled, kieApiKey, wavespeedApiKey, muapiApiKey]);
 
   // Fetch models from external providers when provider changes
   const fetchModels = useCallback(async () => {
@@ -112,6 +126,12 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       }
       if (kieApiKey) {
         headers["X-Kie-Key"] = kieApiKey;
+      }
+      if (wavespeedApiKey) {
+        headers["X-WaveSpeed-Key"] = wavespeedApiKey;
+      }
+      if (muapiApiKey) {
+        headers["X-Muapi-API-Key"] = muapiApiKey;
       }
       const response = await deduplicatedFetch(`/api/models?provider=${currentProvider}&capabilities=${capabilities}`, { headers });
       if (response.ok) {
@@ -509,36 +529,42 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
         (() => {
           const imageInputs = nodeData.inputSchema!.filter(i => i.type === "image");
           const textInputs = nodeData.inputSchema!.filter(i => i.type === "text");
+          const videoInputs = nodeData.inputSchema!.filter(i => i.type === "video");
+          const audioInputs = nodeData.inputSchema!.filter(i => i.type === "audio");
 
           // Always include at least one image and one text handle for connection stability
           const hasImageInput = imageInputs.length > 0;
           const hasTextInput = textInputs.length > 0;
 
           // Build the handles array: schema inputs + fallback defaults if missing
+          type HandleType = "image" | "text" | "video" | "audio";
           const handles: Array<{
             id: string;
-            type: "image" | "text";
+            type: HandleType;
             label: string;
             schemaName: string | null;
             description: string | null;
             isPlaceholder: boolean;
           }> = [];
 
-          // Add image handles from schema, or a placeholder if none exist
-          if (hasImageInput) {
-            imageInputs.forEach((input, index) => {
+          // Helper to add handles for a given type
+          const addHandles = (inputs: typeof imageInputs, handleType: HandleType) => {
+            inputs.forEach((input, index) => {
               handles.push({
-                // Always use indexed IDs for schema inputs for consistency
-                id: `image-${index}`,
-                type: "image",
+                id: index === 0 ? handleType : `${handleType}-${index}`,
+                type: handleType,
                 label: input.label,
                 schemaName: input.name,
                 description: input.description || null,
                 isPlaceholder: false,
               });
             });
+          };
+
+          // Add image handles from schema, or a placeholder if none exist
+          if (hasImageInput) {
+            addHandles(imageInputs, "image");
           } else {
-            // No image inputs in schema - add placeholder to preserve connections
             handles.push({
               id: "image",
               type: "image",
@@ -549,21 +575,16 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             });
           }
 
+          // Add video handles from schema (no placeholder — not all models need video)
+          addHandles(videoInputs, "video");
+
+          // Add audio handles from schema
+          addHandles(audioInputs, "audio");
+
           // Add text handles from schema, or a placeholder if none exist
           if (hasTextInput) {
-            textInputs.forEach((input, index) => {
-              handles.push({
-                // Always use indexed IDs for schema inputs for consistency
-                id: `text-${index}`,
-                type: "text",
-                label: input.label,
-                schemaName: input.name,
-                description: input.description || null,
-                isPlaceholder: false,
-              });
-            });
+            addHandles(textInputs, "text");
           } else {
-            // No text inputs in schema - add placeholder to preserve connections
             handles.push({
               id: "text",
               type: "text",
@@ -574,18 +595,22 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             });
           }
 
-          // Calculate positions
-          const imageHandles = handles.filter(h => h.type === "image");
+          // Calculate positions — group order: image, video, audio, gap, text
+          const handleColors: Record<HandleType, string> = {
+            image: "var(--handle-color-image, #3b82f6)",
+            video: "var(--handle-color-video, #0d9488)",
+            audio: "var(--handle-color-audio, #8b5cf6)",
+            text: "var(--handle-color-text, #f59e0b)",
+          };
+          const mediaHandles = handles.filter(h => h.type !== "text");
           const textHandles = handles.filter(h => h.type === "text");
-          const totalSlots = imageHandles.length + textHandles.length + 1; // +1 for gap
+          const totalSlots = mediaHandles.length + textHandles.length + 1; // +1 for gap
 
-          const renderedHandles = handles.map((handle, index) => {
-            // Position: images first, then gap, then text
-            const isImage = handle.type === "image";
-            const typeIndex = isImage
-              ? imageHandles.findIndex(h => h.id === handle.id)
-              : textHandles.findIndex(h => h.id === handle.id);
-            const adjustedIndex = isImage ? typeIndex : imageHandles.length + 1 + typeIndex;
+          const renderedHandles = handles.map((handle) => {
+            const isText = handle.type === "text";
+            const typeGroup = isText ? textHandles : mediaHandles;
+            const typeIndex = typeGroup.findIndex(h => h.id === handle.id);
+            const adjustedIndex = isText ? mediaHandles.length + 1 + typeIndex : typeIndex;
             const topPercent = ((adjustedIndex + 1) / (totalSlots + 1)) * 100;
 
             return (
@@ -610,7 +635,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                   style={{
                     right: `calc(100% + 8px)`,
                     top: `calc(${topPercent}% - 18px)`,
-                    color: isImage ? "var(--handle-color-image)" : "var(--handle-color-text)",
+                    color: handleColors[handle.type],
                     opacity: handle.isPlaceholder ? 0.3 : 1,
                     zIndex: 10,
                   }}
@@ -621,32 +646,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             );
           });
 
-          // Add hidden backward-compatibility handles for edges using non-indexed IDs
-          // This ensures edges created with "image"/"text" still work when schema uses "image-0"/"text-0"
-          // Note: No data-handletype to avoid being counted in tests - these are purely for edge routing
-          return (
-            <>
-              {renderedHandles}
-              {hasImageInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="image"
-                  style={{ top: "35%", opacity: 0, pointerEvents: "none" }}
-                  isConnectable={false}
-                />
-              )}
-              {hasTextInput && (
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id="text"
-                  style={{ top: "65%", opacity: 0, pointerEvents: "none" }}
-                  isConnectable={false}
-                />
-              )}
-            </>
-          );
+          return <>{renderedHandles}</>;
         })()
       ) : (
         // Default handles when no schema

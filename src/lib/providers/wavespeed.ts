@@ -147,13 +147,37 @@ const WAVESPEED_MODELS: ProviderModel[] = [
       currency: "USD",
     },
   },
+  {
+    id: "wavespeed-ai/wan-2.2/animate",
+    name: "WAN 2.2 Animate",
+    description: "Character animation & replacement model — replicates movement and expression from reference video",
+    provider: "wavespeed",
+    capabilities: ["video-to-video"],
+    pricing: {
+      type: "per-run",
+      amount: 0.08,
+      currency: "USD",
+    },
+  },
+  {
+    id: "kwaivgi/kling-v2.6-pro/motion-control",
+    name: "Kling 2.6 Pro Motion Control",
+    description: "Transfer movement from reference motion clips while preserving identity and consistency",
+    provider: "wavespeed",
+    capabilities: ["video-to-video"],
+    pricing: {
+      type: "per-run",
+      amount: 0.10,
+      currency: "USD",
+    },
+  },
 ];
 
 /**
  * Infer output type from model capabilities
  */
 function inferOutputType(capabilities: ModelCapability[]): "image" | "video" {
-  if (capabilities.includes("text-to-video") || capabilities.includes("image-to-video")) {
+  if (capabilities.includes("text-to-video") || capabilities.includes("image-to-video") || capabilities.includes("video-to-video")) {
     return "video";
   }
   return "image";
@@ -227,19 +251,18 @@ const wavespeedProvider: ProviderInterface = {
         ...input.parameters,
       };
 
-      // Handle image inputs
-      if (input.images && input.images.length > 0) {
-        // WaveSpeed typically expects image_url or image
-        payload.image = input.images[0];
-      }
-
-      // Apply dynamic inputs (schema-mapped connections)
-      if (input.dynamicInputs) {
-        for (const [key, value] of Object.entries(input.dynamicInputs)) {
+      // Apply dynamic inputs first (schema-mapped connections take priority)
+      const hasDynamicInputs = input.dynamicInputs && Object.keys(input.dynamicInputs).length > 0;
+      if (hasDynamicInputs) {
+        for (const [key, value] of Object.entries(input.dynamicInputs!)) {
           if (value !== null && value !== undefined && value !== '') {
             payload[key] = value;
           }
         }
+      } else if (input.images && input.images.length > 0) {
+        // Fallback: legacy image handling
+        payload.image = input.images[0];
+        payload.images = input.images;
       }
 
       // Submit task

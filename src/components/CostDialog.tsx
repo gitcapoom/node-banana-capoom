@@ -24,6 +24,7 @@ function ProviderIcon({ provider }: { provider: ProviderType }) {
     kie: { bg: "bg-orange-500/20", text: "text-orange-300" },
     wavespeed: { bg: "bg-purple-500/20", text: "text-purple-300" },
     worldlabs: { bg: "bg-cyan-500/20", text: "text-cyan-300" },
+    muapi: { bg: "bg-cyan-500/20", text: "text-cyan-300" },
   };
 
   const labels: Record<ProviderType, string> = {
@@ -35,6 +36,7 @@ function ProviderIcon({ provider }: { provider: ProviderType }) {
     kie: "K",
     wavespeed: "W",
     worldlabs: "WL",
+    muapi: "mu",
   };
 
   const color = colors[provider] || colors.gemini;
@@ -59,6 +61,7 @@ function getProviderDisplayName(provider: ProviderType): string {
     kie: "Kie.ai",
     wavespeed: "WaveSpeed",
     worldlabs: "World Labs",
+    muapi: "muapi.ai",
   };
   return names[provider] || provider;
 }
@@ -85,6 +88,9 @@ function getModelUrl(provider: ProviderType, modelId: string): string | null {
   }
   if (provider === "worldlabs") {
     return `https://platform.worldlabs.ai`;
+  }
+  if (provider === "muapi") {
+    return `https://muapi.ai/playground/${modelId}`;
   }
   return null;
 }
