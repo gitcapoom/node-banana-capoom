@@ -229,17 +229,29 @@ async function generateWithAnthropic(
   if (images && images.length > 0) {
     for (const img of images) {
       const matches = img.match(/^data:(.+?);base64,(.+)$/);
-      if (matches) {
-        content.push({
-          type: "image",
-          source: { type: "base64", media_type: matches[1], data: matches[2] },
-        });
-      } else {
-        content.push({
-          type: "image",
-          source: { type: "base64", media_type: "image/png", data: img },
-        });
+      const base64Data = matches ? matches[2] : img;
+      let mediaType = matches ? matches[1] : "image/png";
+
+      // Detect actual image type from magic bytes (data URL mime is often wrong)
+      try {
+        const firstBytes = Buffer.from(base64Data.substring(0, 16), "base64");
+        if (firstBytes[0] === 0xFF && firstBytes[1] === 0xD8) {
+          mediaType = "image/jpeg";
+        } else if (firstBytes[0] === 0x89 && firstBytes[1] === 0x50 && firstBytes[2] === 0x4E && firstBytes[3] === 0x47) {
+          mediaType = "image/png";
+        } else if (firstBytes[0] === 0x52 && firstBytes[1] === 0x49 && firstBytes[2] === 0x46 && firstBytes[3] === 0x46) {
+          mediaType = "image/webp";
+        } else if (firstBytes[0] === 0x47 && firstBytes[1] === 0x49 && firstBytes[2] === 0x46) {
+          mediaType = "image/gif";
+        }
+      } catch {
+        // Keep declared mediaType on decode failure
       }
+
+      content.push({
+        type: "image",
+        source: { type: "base64", media_type: mediaType, data: base64Data },
+      });
     }
   }
 
