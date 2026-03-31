@@ -1105,14 +1105,18 @@ async function probeMuapiSchema(modelId: string, apiKey: string): Promise<ModelI
       const isAudio = fieldName.includes("audio");
 
       if (isImage || isText || isVideo || isAudio) {
-        const type = isText ? "text" : "image";
+        const type = isText ? "text" : isVideo ? "video" : isAudio ? "audio" : "image";
+        // Detect array fields from field name patterns or pydantic error type
+        const isArrayField = fieldName.endsWith("_list") || fieldName.endsWith("_urls") ||
+                             fieldName === "images_list" || err.type === "list_type";
         inputs.push({
           name: fieldName,
           type,
-          required: err.type === "missing",
+          required: err.type === "missing" || err.type === "list_type",
           label: fieldName
-            .replace(/_url$/, "").replace(/_urls$/, "")
+            .replace(/_url$/, "").replace(/_urls$/, "").replace(/_list$/, "")
             .replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          ...(isArrayField ? { isArray: true } : {}),
         });
       }
     }

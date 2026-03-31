@@ -180,10 +180,12 @@ export function getConnectedInputsPure(
 
   // Get the target node to check for inputSchema
   const targetNode = nodes.find((n) => n.id === nodeId);
-  const inputSchema = (targetNode?.data as { inputSchema?: Array<{ name: string; type: string }> })?.inputSchema;
+  const inputSchema = (targetNode?.data as { inputSchema?: Array<{ name: string; type: string; isArray?: boolean }> })?.inputSchema;
 
   // Build mapping from normalized handle IDs to schema names if schema exists
   const handleToSchemaName: Record<string, string> = {};
+  // Track which schema fields require arrays (isArray: true in schema)
+  const arraySchemaNames = new Set<string>();
   if (inputSchema && inputSchema.length > 0) {
     const imageInputs = inputSchema.filter(i => i.type === "image");
     const textInputs = inputSchema.filter(i => i.type === "text");
@@ -211,6 +213,13 @@ export function getConnectedInputsPure(
     mapHandles(textInputs, "text");
     mapHandles(videoInputs, "video");
     mapHandles(audioInputs, "audio");
+
+    // Collect schema fields that require array values (isArray: true)
+    for (const input of inputSchema) {
+      if ((input as { isArray?: boolean }).isArray) {
+        arraySchemaNames.add(input.name);
+      }
+    }
 
     // Legacy: map "image-mask" to mask schema name for backwards compatibility
     const maskInput = inputSchema.find(i => i.name.includes("mask") && i.type === "image");
@@ -332,7 +341,8 @@ export function getConnectedInputsPure(
             ? [...existing, value]
             : [existing, value];
         } else {
-          dynamicInputs[schemaName] = value;
+          // If schema declares this field as isArray, always wrap in array
+          dynamicInputs[schemaName] = arraySchemaNames.has(schemaName) ? [value] : value;
         }
       }
 

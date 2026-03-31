@@ -92,6 +92,13 @@ export async function generateWithMuapi(
     }
   }
 
+  // Ensure fields that expect arrays are always arrays (e.g. images_list, image_urls, video_urls)
+  for (const key of Object.keys(payload)) {
+    if ((key.endsWith("_list") || key.endsWith("_urls")) && typeof payload[key] === "string") {
+      payload[key] = [payload[key]];
+    }
+  }
+
   console.log(`[API:${requestId}] Submitting to muapi.ai: ${modelId} with keys: ${Object.keys(payload).join(", ")}`);
 
   // Submit task
