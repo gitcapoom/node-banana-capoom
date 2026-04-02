@@ -1172,11 +1172,12 @@ async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<E
 
 function getMuapiSlugSchema(id: string): ExtractedSchema {
 
-  // Common parameters
-  const aspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["1:1", "4:3", "3:4", "16:9", "9:16"], default: "1:1" };
-  const videoAspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["16:9", "9:16", "1:1"], default: "16:9" };
-  const resolution: ModelParameter = { name: "resolution", type: "string", description: "Output resolution", enum: ["480p", "720p", "1080p"], default: "720p" };
-  const duration: ModelParameter = { name: "duration", type: "string", description: "Video duration in seconds", enum: ["5", "10"], default: "5" };
+  // Common parameters — no defaults on generic params to avoid sending values that
+  // specific models reject. The UI shows "Default" and lets each model's API decide.
+  const aspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["1:1", "4:3", "3:4", "16:9", "9:16"] };
+  const videoAspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["16:9", "9:16", "1:1"] };
+  const resolution: ModelParameter = { name: "resolution", type: "string", description: "Output resolution", enum: ["480p", "720p", "1080p"] };
+  const duration: ModelParameter = { name: "duration", type: "string", description: "Video duration in seconds", enum: ["5", "8", "10"] };
   const seed: ModelParameter = { name: "seed", type: "integer", description: "Random seed for reproducibility", minimum: 0 };
 
   // === Model-specific overrides (before generic pattern matching) ===
@@ -1226,6 +1227,50 @@ function getMuapiSlugSchema(id: string): ExtractedSchema {
     };
   }
 
+  // Veo 3.1 models: fixed duration=8, limited aspect ratios, uses images_list for I2V
+  const veo31AspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["16:9", "9:16"], default: "16:9" };
+  const veo3AspectRatio: ModelParameter = { name: "aspect_ratio", type: "string", description: "Output aspect ratio", enum: ["16:9", "9:16", "1:1"], default: "16:9" };
+  const veo31Duration: ModelParameter = { name: "duration", type: "integer", description: "Video duration in seconds (fixed)", enum: ["8"], default: "8" };
+
+  if (id.startsWith("veo3.1") && (id.includes("i2v") || id.includes("image-to-video") || id.includes("reference-to-video"))) {
+    return {
+      parameters: [veo31AspectRatio, veo31Duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "images_list", type: "image", required: true, label: "Image", isArray: true },
+      ],
+    };
+  }
+
+  if (id.startsWith("veo3.1") && (id.includes("t2v") || id.includes("text-to-video") || id.includes("4k-video") || id.includes("extend"))) {
+    return {
+      parameters: [veo31AspectRatio, veo31Duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+      ],
+    };
+  }
+
+  // Veo 3 (non-3.1) models: more flexible duration
+  if (id.startsWith("veo3") && (id.includes("i2v") || id.includes("image-to-video"))) {
+    return {
+      parameters: [veo3AspectRatio, duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: false, label: "Prompt" },
+        { name: "images_list", type: "image", required: true, label: "Image", isArray: true },
+      ],
+    };
+  }
+
+  if (id.startsWith("veo3") && (id.includes("t2v") || id.includes("text-to-video"))) {
+    return {
+      parameters: [veo3AspectRatio, duration, seed],
+      inputs: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+      ],
+    };
+  }
+
   // Seedance I2V models: need first_frame + last_frame (not generic image_url)
   const seedanceQuality: ModelParameter = { name: "quality", type: "string", description: "Output quality", enum: ["basic", "high"], default: "basic" };
   if (id.includes("seedance") && (id.includes("i2v") || id.includes("image-to-video"))) {
@@ -1257,8 +1302,10 @@ function getMuapiSlugSchema(id: string): ExtractedSchema {
   // discover them (the probe only finds required fields via validation errors).
 
   // Common optional parameters shared across categories
-  const videoQuality: ModelParameter = { name: "quality", type: "string", description: "Output quality", enum: ["basic", "high"], default: "basic" };
-  const imageResolution: ModelParameter = { name: "resolution", type: "string", description: "Output resolution", enum: ["1k", "2k", "4k"], default: "1k" };
+  // No defaults — the UI shows "Default" and lets the API use its own default per model.
+  // Setting defaults here caused errors when models only accept specific values (e.g. veo3.1 duration=8 only).
+  const videoQuality: ModelParameter = { name: "quality", type: "string", description: "Output quality", enum: ["basic", "high"] };
+  const imageResolution: ModelParameter = { name: "resolution", type: "string", description: "Output resolution", enum: ["1k", "2k", "4k"] };
 
   // Video-to-video models: need video_url input
   if (id.includes("v2v") || id.includes("video-to-video") || id.includes("video-edit") ||
