@@ -1043,131 +1043,159 @@ function getKieSchema(modelId: string): ExtractedSchema {
 }
 
 /**
- * Schema cache for muapi.ai models discovered via API probe
+ * Cache for muapi.ai OpenAPI spec (fetched once, cached 24h).
+ * This gives us the full schema for every model including all optional parameters.
  */
-const muapiProbeCache = new Map<string, { schema: ExtractedSchema; timestamp: number }>();
-const MUAPI_PROBE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+let muapiOpenApiCache: { spec: Record<string, unknown>; timestamp: number } | null = null;
+const MUAPI_OPENAPI_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
 /**
- * Probe muapi.ai API with an empty body to discover required fields from validation errors.
- * Returns discovered input fields or null if probe fails.
+ * Fetch the muapi.ai OpenAPI spec (cached 24h).
  */
-async function probeMuapiSchema(modelId: string, apiKey: string): Promise<ModelInput[] | null> {
+async function fetchMuapiOpenApiSpec(): Promise<Record<string, unknown> | null> {
+  if (muapiOpenApiCache && Date.now() - muapiOpenApiCache.timestamp < MUAPI_OPENAPI_TTL) {
+    return muapiOpenApiCache.spec;
+  }
   try {
-    console.log(`[muapi probe] Probing ${modelId}...`);
-    const resp = await fetch(`https://api.muapi.ai/api/v1/${modelId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apiKey },
-      body: JSON.stringify({}),
-    });
-
-    const text = await resp.text();
-    console.log(`[muapi probe] ${modelId} status=${resp.status}, response=${text.substring(0, 500)}`);
-
-    let parsed: unknown;
-    try { parsed = JSON.parse(text); } catch { console.log(`[muapi probe] Failed to parse JSON`); return null; }
-
-    // Handle both {"detail": [...]} and direct array formats
-    let errors: Array<{ type: string; loc: string[]; msg: string }>;
-    if (Array.isArray(parsed)) {
-      errors = parsed;
-    } else if (parsed && typeof parsed === "object" && "detail" in parsed && Array.isArray((parsed as Record<string, unknown>).detail)) {
-      errors = (parsed as { detail: Array<{ type: string; loc: string[]; msg: string }> }).detail;
-    } else {
-      console.log(`[muapi probe] Unexpected response format`);
+    console.log(`[muapi openapi] Fetching OpenAPI spec...`);
+    const resp = await fetch("https://api.muapi.ai/openapi.json", { signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) {
+      console.log(`[muapi openapi] Failed: ${resp.status}`);
       return null;
     }
-
-    console.log(`[muapi probe] Found ${errors.length} validation errors`);
-
-    // Parameter names to skip (not connectable inputs)
-    const paramNames = new Set([
-      "aspect_ratio", "resolution", "duration", "quality", "seed", "watermark",
-      "generate_audio", "target_gender", "target_index", "language", "theme",
-      "effect_type", "lora", "number_of_images", "cfg_scale", "negative_prompt_text",
-    ]);
-
-    const inputs: ModelInput[] = [];
-    const seen = new Set<string>();
-
-    for (const err of errors) {
-      const fieldName = err.loc?.[1];
-      if (!fieldName || seen.has(fieldName) || paramNames.has(fieldName)) continue;
-      seen.add(fieldName);
-
-      // Classify field type
-      const isImage = fieldName.includes("image") || fieldName.includes("frame") ||
-                      fieldName.includes("photo") || fieldName.includes("face") ||
-                      fieldName.includes("_url") || fieldName.includes("_urls") ||
-                      fieldName === "images_list";
-      const isText = fieldName === "prompt" || fieldName === "negative_prompt" || fieldName === "text";
-      const isVideo = fieldName.includes("video");
-      const isAudio = fieldName.includes("audio");
-
-      if (isImage || isText || isVideo || isAudio) {
-        const type = isText ? "text" : isVideo ? "video" : isAudio ? "audio" : "image";
-        // Detect array fields from field name patterns or pydantic error type
-        const isArrayField = fieldName.endsWith("_list") || fieldName.endsWith("_urls") ||
-                             fieldName === "images_list" || err.type === "list_type";
-        inputs.push({
-          name: fieldName,
-          type,
-          required: err.type === "missing" || err.type === "list_type",
-          label: fieldName
-            .replace(/_url$/, "").replace(/_urls$/, "").replace(/_list$/, "")
-            .replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-          ...(isArrayField ? { isArray: true } : {}),
-        });
-      }
-    }
-
-    console.log(`[muapi probe] Extracted inputs: ${inputs.map(i => `${i.name}(${i.type})`).join(", ") || "none"}`);
-    return inputs.length > 0 ? inputs : null;
+    const spec = await resp.json() as Record<string, unknown>;
+    muapiOpenApiCache = { spec, timestamp: Date.now() };
+    const paths = Object.keys((spec.paths || {}) as Record<string, unknown>);
+    console.log(`[muapi openapi] Loaded ${paths.length} endpoints`);
+    return spec;
   } catch (e) {
-    console.log(`[muapi probe] Error: ${e instanceof Error ? e.message : String(e)}`);
+    console.log(`[muapi openapi] Error: ${e instanceof Error ? e.message : String(e)}`);
     return null;
   }
 }
 
 /**
- * Get schema for muapi.ai models.
- * Priority: 1) model-specific overrides, 2) slug-based inference (with probed inputs merged in).
- * The probe only discovers required inputs — optional parameters come from the slug patterns.
+ * Extract schema for a specific model from the muapi OpenAPI spec.
+ * Returns parameters + inputs by parsing the request body schema.
  */
-async function getMuapiSchema(modelId: string, apiKey: string | null): Promise<ExtractedSchema> {
-  const id = modelId.toLowerCase();
+function extractMuapiOpenApiSchema(spec: Record<string, unknown>, modelId: string): ExtractedSchema | null {
+  const paths = spec.paths as Record<string, Record<string, unknown>> | undefined;
+  if (!paths) return null;
 
-  // Get slug-based schema (model-specific overrides + generic patterns)
-  // This is the primary source — it includes all optional params the probe can't discover.
-  const slugSchema = getMuapiSlugSchema(id);
+  // Find the path for this model
+  const pathKey = `/api/v1/${modelId}`;
+  const pathDef = paths[pathKey] as Record<string, unknown> | undefined;
+  if (!pathDef) return null;
 
-  // Optionally merge probed inputs to discover unusual required fields the slug missed
-  if (apiKey) {
-    const cached = muapiProbeCache.get(id);
-    let probedInputs: ModelInput[] | null = null;
+  const postDef = pathDef.post as Record<string, unknown> | undefined;
+  if (!postDef) return null;
 
-    if (cached && Date.now() - cached.timestamp < MUAPI_PROBE_TTL) {
-      probedInputs = cached.schema.inputs;
-    } else {
-      const probed = await probeMuapiSchema(modelId, apiKey);
-      if (probed && probed.length > 0) {
-        probedInputs = probed;
-        muapiProbeCache.set(id, { schema: { parameters: [], inputs: probed }, timestamp: Date.now() });
-      }
+  // Get the request body schema ref
+  const requestBody = postDef.requestBody as Record<string, unknown> | undefined;
+  const content = requestBody?.content as Record<string, Record<string, unknown>> | undefined;
+  const jsonSchema = content?.["application/json"]?.schema as Record<string, unknown> | undefined;
+  if (!jsonSchema) return null;
+
+  // Resolve $ref to get actual schema
+  let schema: Record<string, unknown> | null = null;
+  if (jsonSchema.$ref && typeof jsonSchema.$ref === "string") {
+    const refPath = (jsonSchema.$ref as string).replace("#/", "").split("/");
+    let resolved: unknown = spec;
+    for (const part of refPath) {
+      resolved = (resolved as Record<string, unknown>)?.[part];
+    }
+    schema = resolved as Record<string, unknown> | null;
+  } else {
+    schema = jsonSchema;
+  }
+
+  if (!schema?.properties) return null;
+
+  const properties = schema.properties as Record<string, Record<string, unknown>>;
+  const required = (schema.required || []) as string[];
+  const components = spec.components as Record<string, unknown> | undefined;
+
+  // Fields to skip entirely
+  const skipFields = new Set(["webhook_url", "webhook"]);
+
+  // Connectable input field patterns (image/video/audio/text URLs and lists)
+  const isInputField = (name: string, prop: Record<string, unknown>): "image" | "video" | "audio" | "text" | null => {
+    if (name === "prompt" || name === "negative_prompt" || name === "text") return "text";
+    const format = prop.format as string | undefined;
+    const isUrl = format === "uri" || name.endsWith("_url") || name.endsWith("_urls") || name === "images_list";
+    if (!isUrl) return null;
+    if (name.includes("audio")) return "audio";
+    if (name.includes("video")) return "video";
+    return "image"; // image_url, images_list, face_url, etc.
+  };
+
+  const parameters: ModelParameter[] = [];
+  const inputs: ModelInput[] = [];
+
+  for (const [name, prop] of Object.entries(properties)) {
+    if (skipFields.has(name)) continue;
+
+    // Resolve anyOf/oneOf (nullable types)
+    let effectiveProp = prop;
+    const anyOf = prop.anyOf as Array<Record<string, unknown>> | undefined;
+    if (anyOf) {
+      const nonNull = anyOf.find(v => v.type !== "null");
+      if (nonNull) effectiveProp = { ...prop, ...nonNull };
     }
 
-    // Merge: add any probed inputs not already covered by slug schema
-    if (probedInputs && probedInputs.length > 0) {
-      const existingNames = new Set(slugSchema.inputs.map(i => i.name));
-      for (const input of probedInputs) {
-        if (!existingNames.has(input.name)) {
-          slugSchema.inputs.push(input);
-        }
-      }
+    const inputType = isInputField(name, effectiveProp);
+    if (inputType) {
+      const isArray = effectiveProp.type === "array" || name.endsWith("_list") || name.endsWith("_urls");
+      inputs.push({
+        name,
+        type: inputType,
+        required: required.includes(name),
+        label: name.replace(/_url$/, "").replace(/_urls$/, "").replace(/_list$/, "")
+          .replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+        ...(isArray ? { isArray: true } : {}),
+      });
+    } else {
+      // It's a parameter
+      const param: ModelParameter = {
+        name,
+        type: effectiveProp.type === "integer" ? "integer" :
+              effectiveProp.type === "number" ? "number" :
+              effectiveProp.type === "boolean" ? "boolean" : "string",
+        description: (effectiveProp.title || effectiveProp.description || name.replace(/_/g, " ")) as string,
+      };
+      if (effectiveProp.enum) param.enum = effectiveProp.enum as (string | number)[];
+      if (effectiveProp.default !== undefined) param.default = effectiveProp.default;
+      if (effectiveProp.minimum !== undefined) param.minimum = effectiveProp.minimum as number;
+      if (effectiveProp.maximum !== undefined) param.maximum = effectiveProp.maximum as number;
+      parameters.push(param);
     }
   }
 
-  return slugSchema;
+  if (parameters.length === 0 && inputs.length === 0) return null;
+
+  console.log(`[muapi openapi] ${modelId}: ${parameters.length} params (${parameters.map(p => p.name).join(", ")}), ${inputs.length} inputs (${inputs.map(i => i.name).join(", ")})`);
+  return { parameters, inputs };
+}
+
+/**
+ * Get schema for muapi.ai models.
+ * Priority: 1) OpenAPI spec (exact schema with all params), 2) slug-based fallback.
+ */
+async function getMuapiSchema(modelId: string, _apiKey: string | null): Promise<ExtractedSchema> {
+  const id = modelId.toLowerCase();
+
+  // Try OpenAPI spec first — this gives us the exact schema for every model
+  const spec = await fetchMuapiOpenApiSpec();
+  if (spec) {
+    const openApiSchema = extractMuapiOpenApiSchema(spec, id);
+    if (openApiSchema && (openApiSchema.parameters.length > 0 || openApiSchema.inputs.length > 0)) {
+      return openApiSchema;
+    }
+  }
+
+  // Fallback: slug-based inference (model-specific overrides + generic patterns)
+  console.log(`[muapi] No OpenAPI schema for ${id}, using slug fallback`);
+  return getMuapiSlugSchema(id);
 }
 
 function getMuapiSlugSchema(id: string): ExtractedSchema {
