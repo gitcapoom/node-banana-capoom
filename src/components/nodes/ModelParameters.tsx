@@ -422,9 +422,181 @@ function ParameterInputInner({ param, name, value, onChange }: ParameterInputPro
     );
   }
 
-  // Skip array type for now (complex)
+  // Object parameter: render sub-fields in a group
+  if (param.type === "object" && param.properties && param.properties.length > 0) {
+    const objValue = (value && typeof value === "object" && !Array.isArray(value))
+      ? value as Record<string, unknown>
+      : {};
+    return (
+      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1.5">
+        <label className="text-[11px] text-neutral-300 font-medium" title={param.description || undefined}>
+          {displayName}
+        </label>
+        {param.properties.map((subParam) => (
+          <ParameterInput
+            key={subParam.name}
+            param={subParam}
+            name={subParam.name}
+            value={objValue[subParam.name]}
+            onChange={(subName, subVal) => {
+              const updated = { ...objValue, [subName]: subVal };
+              // Remove undefined values
+              for (const k of Object.keys(updated)) {
+                if (updated[k] === undefined) delete updated[k];
+              }
+              handleChange(Object.keys(updated).length > 0 ? updated : undefined);
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // Array of objects (e.g., LoRAs): add/remove item list
+  if (param.type === "array" && param.items?.type === "object" && param.items.properties) {
+    const arrValue = Array.isArray(value) ? value as Record<string, unknown>[] : [];
+    const itemProps = param.items.properties;
+    return (
+      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] text-neutral-300 font-medium" title={param.description || undefined}>
+            {displayName}
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              const newItem: Record<string, unknown> = {};
+              for (const p of itemProps) {
+                if (p.default !== undefined) newItem[p.name] = p.default;
+              }
+              handleChange([...arrValue, newItem]);
+            }}
+            className="nodrag nopan text-[10px] px-1.5 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-300"
+          >
+            + Add
+          </button>
+        </div>
+        {arrValue.map((item, idx) => (
+          <div key={idx} className="flex items-start gap-1 bg-neutral-800/50 rounded p-1.5">
+            <div className="flex-1 space-y-1">
+              {itemProps.map((subParam) => (
+                <ParameterInput
+                  key={subParam.name}
+                  param={subParam}
+                  name={subParam.name}
+                  value={item[subParam.name]}
+                  onChange={(subName, subVal) => {
+                    const updated = [...arrValue];
+                    updated[idx] = { ...updated[idx], [subName]: subVal };
+                    handleChange(updated);
+                  }}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const updated = arrValue.filter((_, i) => i !== idx);
+                handleChange(updated.length > 0 ? updated : undefined);
+              }}
+              className="nodrag nopan text-[10px] px-1 py-0.5 rounded bg-red-900/50 hover:bg-red-800/50 text-red-300 mt-1"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Array of primitives: add/remove simple inputs
+  if (param.type === "array" && param.items) {
+    const arrValue = Array.isArray(value) ? value as unknown[] : [];
+    return (
+      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] text-neutral-400" title={param.description || undefined}>
+            {displayName}
+          </label>
+          <button
+            type="button"
+            onClick={() => handleChange([...arrValue, param.items?.default ?? ""])}
+            className="nodrag nopan text-[10px] px-1.5 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-300"
+          >
+            + Add
+          </button>
+        </div>
+        {arrValue.map((item, idx) => (
+          <div key={idx} className="flex items-center gap-1">
+            <input
+              type={param.items?.type === "number" || param.items?.type === "integer" ? "number" : "text"}
+              value={item !== undefined && item !== null ? String(item) : ""}
+              onChange={(e) => {
+                const updated = [...arrValue];
+                const val = e.target.value;
+                if (param.items?.type === "integer") updated[idx] = parseInt(val, 10) || 0;
+                else if (param.items?.type === "number") updated[idx] = parseFloat(val) || 0;
+                else updated[idx] = val;
+                handleChange(updated);
+              }}
+              className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const updated = arrValue.filter((_, i) => i !== idx);
+                handleChange(updated.length > 0 ? updated : undefined);
+              }}
+              className="nodrag nopan text-[10px] px-1 py-0.5 rounded bg-red-900/50 hover:bg-red-800/50 text-red-300"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Array without items schema — JSON textarea fallback
   if (param.type === "array") {
-    return null;
+    const jsonStr = value ? JSON.stringify(value, null, 2) : "";
+    return (
+      <div className="col-span-full space-y-1">
+        <label className="text-[11px] text-neutral-400" title={param.description || undefined}>
+          {displayName} (JSON)
+        </label>
+        <textarea
+          value={jsonStr}
+          onChange={(e) => {
+            try { handleChange(JSON.parse(e.target.value)); } catch { /* invalid JSON, wait */ }
+          }}
+          rows={3}
+          className="nodrag nopan w-full text-[10px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white font-mono resize-y"
+          placeholder="[]"
+        />
+      </div>
+    );
+  }
+
+  // Object without properties — JSON textarea fallback
+  if (param.type === "object") {
+    const jsonStr = value ? JSON.stringify(value, null, 2) : "";
+    return (
+      <div className="col-span-full space-y-1">
+        <label className="text-[11px] text-neutral-400" title={param.description || undefined}>
+          {displayName} (JSON)
+        </label>
+        <textarea
+          value={jsonStr}
+          onChange={(e) => {
+            try { handleChange(JSON.parse(e.target.value)); } catch { /* invalid JSON, wait */ }
+          }}
+          rows={3}
+          className="nodrag nopan w-full text-[10px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white font-mono resize-y"
+          placeholder="{}"
+        />
+      </div>
+    );
   }
 
   // Default: string input — uses local state, syncs to store on blur

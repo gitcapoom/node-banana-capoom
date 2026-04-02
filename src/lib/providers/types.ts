@@ -26,13 +26,17 @@ export type ModelCapability =
  */
 export interface ModelParameter {
   name: string;
-  type: "string" | "number" | "integer" | "boolean" | "array";
+  type: "string" | "number" | "integer" | "boolean" | "array" | "object";
   description?: string;
   default?: unknown;
   minimum?: number;
   maximum?: number;
   enum?: unknown[];
   required?: boolean;
+  /** For type="object" — describes sub-fields */
+  properties?: ModelParameter[];
+  /** For type="array" — describes shape of each array element */
+  items?: ModelParameter;
 }
 
 /**

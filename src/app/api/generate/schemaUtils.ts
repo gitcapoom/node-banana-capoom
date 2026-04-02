@@ -112,6 +112,9 @@ export function coerceParameterTypes(
         if (!isNaN(parsed)) result[key] = parsed;
       } else if (expectedType === "boolean") {
         result[key] = value === "true";
+      } else if (expectedType === "object" || expectedType === "array") {
+        // Try parsing JSON strings for complex types
+        try { result[key] = JSON.parse(value); } catch { /* keep as-is */ }
       }
     }
   }

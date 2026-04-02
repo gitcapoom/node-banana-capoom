@@ -388,6 +388,8 @@ function convertSchemaProperty(
     type = "boolean";
   } else if (effectiveType === "array") {
     type = "array";
+  } else if (effectiveType === "object") {
+    type = "object";
   }
 
   // Extract enum/default/description from allOf with $ref
@@ -465,6 +467,90 @@ function convertSchemaProperty(
     parameter.enum = prop.enum;
   } else if (enumValues) {
     parameter.enum = enumValues;
+  }
+
+  // Extract sub-properties for object types
+  if (type === "object") {
+    let objProps: Record<string, unknown> | undefined;
+    let objRequired: string[] = [];
+
+    // Direct properties
+    if (prop.properties) {
+      objProps = prop.properties as Record<string, unknown>;
+      objRequired = (prop.required || []) as string[];
+    }
+    // Resolve from $ref
+    if (!objProps && prop.$ref && typeof prop.$ref === "string" && schemaComponents) {
+      const refResolved = resolveRef(prop.$ref as string, schemaComponents);
+      if (refResolved?.properties) {
+        objProps = refResolved.properties as Record<string, unknown>;
+        objRequired = (refResolved.required || []) as string[];
+      }
+    }
+    // Resolve from anyOf/oneOf (pick first object variant)
+    if (!objProps && schemaComponents) {
+      const vars = (prop.anyOf ?? prop.oneOf) as Array<Record<string, unknown>> | undefined;
+      if (vars) {
+        for (const v of vars) {
+          if (v.type === "null") continue;
+          let resolved2 = v;
+          if (v.$ref && typeof v.$ref === "string") {
+            resolved2 = resolveRef(v.$ref as string, schemaComponents) || v;
+          }
+          if (resolved2.properties) {
+            objProps = resolved2.properties as Record<string, unknown>;
+            objRequired = (resolved2.required || []) as string[];
+            break;
+          }
+        }
+      }
+    }
+
+    if (objProps) {
+      parameter.properties = [];
+      for (const [subName, subProp] of Object.entries(objProps)) {
+        if (EXCLUDED_PARAMS.has(subName)) continue;
+        const subParam = convertSchemaProperty(subName, subProp as Record<string, unknown>, objRequired, schemaComponents);
+        if (subParam) parameter.properties.push(subParam);
+      }
+    }
+  }
+
+  // Extract items schema for array types
+  if (type === "array") {
+    let itemsSchema: Record<string, unknown> | undefined;
+
+    // Direct items
+    if (prop.items && typeof prop.items === "object") {
+      itemsSchema = prop.items as Record<string, unknown>;
+    }
+
+    // Resolve $ref on items
+    if (itemsSchema?.$ref && typeof itemsSchema.$ref === "string" && schemaComponents) {
+      const refResolved = resolveRef(itemsSchema.$ref as string, schemaComponents);
+      if (refResolved) itemsSchema = refResolved;
+    }
+
+    if (itemsSchema) {
+      const itemType = (itemsSchema.type as string) || "string";
+
+      if (itemType === "object" && itemsSchema.properties) {
+        // Array of objects (e.g., LoRAs)
+        const subRequired = (itemsSchema.required || []) as string[];
+        const itemProperties: ModelParameter[] = [];
+        for (const [subName, subProp] of Object.entries(itemsSchema.properties as Record<string, unknown>)) {
+          const subParam = convertSchemaProperty(subName, subProp as Record<string, unknown>, subRequired, schemaComponents);
+          if (subParam) itemProperties.push(subParam);
+        }
+        parameter.items = { name: "item", type: "object", properties: itemProperties };
+      } else {
+        // Array of primitives
+        parameter.items = { name: "item", type: itemType as ModelParameter["type"] };
+        if (Array.isArray(itemsSchema.enum)) parameter.items.enum = itemsSchema.enum;
+        if (itemsSchema.minimum !== undefined) parameter.items.minimum = itemsSchema.minimum as number;
+        if (itemsSchema.maximum !== undefined) parameter.items.maximum = itemsSchema.maximum as number;
+      }
+    }
   }
 
   return parameter;
