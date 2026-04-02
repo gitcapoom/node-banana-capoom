@@ -84,16 +84,12 @@ const TEXT_INPUT_NAMES = ["prompt", "negative_prompt"];
 // Properties that start with "image_" but are NOT image inputs
 const IMAGE_PREFIX_EXCLUSIONS = ["image_size"];
 
-// Parameters to filter out (internal/system params)
+// Parameters to filter out (truly internal/system params only)
+// Keep user-facing params like output_format, safety_checker, sync_mode visible
 const EXCLUDED_PARAMS = new Set([
   "webhook",
+  "webhook_url",
   "webhook_events_filter",
-  "sync_mode",
-  "disable_safety_checker",
-  "go_fast",
-  "enable_safety_checker",
-  "output_format",
-  "output_quality",
   "request_id",
 ]);
 
