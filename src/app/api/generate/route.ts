@@ -12,7 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { GenerateRequest, GenerateResponse, ModelType, SelectedModel, ProviderType } from "@/types";
-import { GenerationInput, ModelCapability } from "@/lib/providers/types";
+import { GenerationInput, GenerationOutput, ModelCapability } from "@/lib/providers/types";
 import { generateWithGemini, generateWithGeminiVideo } from "./providers/gemini";
 import { generateWithReplicate } from "./providers/replicate";
 import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFalQueue } from "./providers/fal";
@@ -20,6 +20,8 @@ import { generateWithKie } from "./providers/kie";
 import { generateWithWaveSpeed } from "./providers/wavespeed";
 import { generateWithMuapi } from "./providers/muapi";
 import { calculateGenerationCost } from "@/utils/costCalculator";
+import { compressAllImages } from "./utils/imageCompression";
+import { isImageSizeError } from "./utils/sizeErrorDetection";
 
 // Re-export for backward compatibility (test file imports from route)
 export const clearFalInputMappingCache = _clearFalInputMappingCache;
@@ -73,6 +75,48 @@ function buildMediaResponse(output: { type: string; data: string; url?: string }
     image: output.data,
     contentType: "image",
   });
+}
+
+/**
+ * Retry a generation with compressed images if the first attempt fails with a size error.
+ * The generateFn receives (images, dynamicInputs) so it can be re-called with compressed versions.
+ */
+async function retryWithCompressedImages(
+  requestId: string,
+  images: string[],
+  dynamicInputs: Record<string, string | string[]> | undefined,
+  generateFn: (imgs: string[], dynInputs: Record<string, string | string[]> | undefined) => Promise<GenerationOutput>,
+): Promise<GenerationOutput> {
+  // Check if there are any compressible images (data:image/ URLs)
+  const hasImages = images.some(img => img.startsWith("data:image/"));
+  const hasDynImages = dynamicInputs && Object.values(dynamicInputs).some(v =>
+    typeof v === "string" ? v.startsWith("data:image/") :
+    Array.isArray(v) ? v.some(item => typeof item === "string" && item.startsWith("data:image/")) : false
+  );
+  const canCompress = hasImages || hasDynImages;
+
+  // First attempt — original images
+  let result: GenerationOutput;
+  try {
+    result = await generateFn(images, dynamicInputs);
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (canCompress && isImageSizeError(msg)) {
+      console.log(`[API:${requestId}] Size error (thrown): "${msg.substring(0, 100)}". Compressing images and retrying...`);
+      const compressed = await compressAllImages(images, dynamicInputs);
+      return generateFn(compressed.images, compressed.dynamicInputs);
+    }
+    throw error;
+  }
+
+  // Check returned error
+  if (!result.success && result.error && canCompress && isImageSizeError(result.error)) {
+    console.log(`[API:${requestId}] Size error (returned): "${result.error.substring(0, 100)}". Compressing images and retrying...`);
+    const compressed = await compressAllImages(images, dynamicInputs);
+    return generateFn(compressed.images, compressed.dynamicInputs);
+  }
+
+  return result;
 }
 
 function capabilitiesForMediaType(mediaType?: string): ModelCapability[] {
@@ -189,19 +233,18 @@ export async function POST(request: NextRequest) {
         dynamicInputs: processedDynamicInputs,
       };
 
-      const result = await generateWithReplicate(requestId, replicateApiKey, genInput);
+      const result = await retryWithCompressedImages(
+        requestId, processedImages, processedDynamicInputs,
+        (imgs, dynIn) => generateWithReplicate(requestId, replicateApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
+      );
 
       if (!result.success) {
         return NextResponse.json<GenerateResponse>(
-          {
-            success: false,
-            error: result.error || "Generation failed",
-          },
+          { success: false, error: result.error || "Generation failed" },
           { status: 500 }
         );
       }
 
-      // Return first output
       const output = result.outputs?.[0];
       if (!output?.data && !output?.url) {
         return NextResponse.json<GenerateResponse>(
@@ -264,19 +307,18 @@ export async function POST(request: NextRequest) {
         dynamicInputs: processedDynamicInputs,
       };
 
-      const result = await generateWithFalQueue(requestId, falApiKey, genInput);
+      const result = await retryWithCompressedImages(
+        requestId, processedImages, processedDynamicInputs,
+        (imgs, dynIn) => generateWithFalQueue(requestId, falApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
+      );
 
       if (!result.success) {
         return NextResponse.json<GenerateResponse>(
-          {
-            success: false,
-            error: result.error || "Generation failed",
-          },
+          { success: false, error: result.error || "Generation failed" },
           { status: 500 }
         );
       }
 
-      // Return first output
       const output = result.outputs?.[0];
       if (!output?.data && !output?.url) {
         return NextResponse.json<GenerateResponse>(
@@ -343,19 +385,18 @@ export async function POST(request: NextRequest) {
         dynamicInputs: processedDynamicInputs,
       };
 
-      const result = await generateWithKie(requestId, kieApiKey, genInput);
+      const result = await retryWithCompressedImages(
+        requestId, processedImages, processedDynamicInputs,
+        (imgs, dynIn) => generateWithKie(requestId, kieApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
+      );
 
       if (!result.success) {
         return NextResponse.json<GenerateResponse>(
-          {
-            success: false,
-            error: result.error || "Generation failed",
-          },
+          { success: false, error: result.error || "Generation failed" },
           { status: 500 }
         );
       }
 
-      // Return first output
       const output = result.outputs?.[0];
       if (!output?.data && !output?.url) {
         return NextResponse.json<GenerateResponse>(
@@ -422,19 +463,18 @@ export async function POST(request: NextRequest) {
         dynamicInputs: processedDynamicInputs,
       };
 
-      const result = await generateWithWaveSpeed(requestId, wavespeedApiKey, genInput);
+      const result = await retryWithCompressedImages(
+        requestId, processedImages, processedDynamicInputs,
+        (imgs, dynIn) => generateWithWaveSpeed(requestId, wavespeedApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
+      );
 
       if (!result.success) {
         return NextResponse.json<GenerateResponse>(
-          {
-            success: false,
-            error: result.error || "Generation failed",
-          },
+          { success: false, error: result.error || "Generation failed" },
           { status: 500 }
         );
       }
 
-      // Return first output
       const output = result.outputs?.[0];
       if (!output?.data && !output?.url) {
         return NextResponse.json<GenerateResponse>(
@@ -490,7 +530,10 @@ export async function POST(request: NextRequest) {
         dynamicInputs: processedDynamicInputs,
       };
 
-      const result = await generateWithMuapi(requestId, muapiApiKey, genInput, falApiKeyForUpload);
+      const result = await retryWithCompressedImages(
+        requestId, processedImages, processedDynamicInputs,
+        (imgs, dynIn) => generateWithMuapi(requestId, muapiApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }, falApiKeyForUpload),
+      );
 
       if (!result.success) {
         return NextResponse.json<GenerateResponse>(
@@ -554,13 +597,9 @@ export async function POST(request: NextRequest) {
           : dynamicInputs.negative_prompt;
         if (neg) veoParams.negativePrompt = neg;
       }
-      const result = await generateWithGeminiVideo(
-        requestId,
-        geminiApiKey,
-        selectedModel.modelId,
-        resolvedPrompt || "",
-        images || [],
-        veoParams,
+      const result = await retryWithCompressedImages(
+        requestId, images || [], undefined,
+        (imgs) => generateWithGeminiVideo(requestId, geminiApiKey, selectedModel.modelId, resolvedPrompt || "", imgs, veoParams),
       );
 
       if (!result.success) {
@@ -581,17 +620,18 @@ export async function POST(request: NextRequest) {
       return buildMediaResponse(output);
     }
 
-    return await generateWithGemini(
-      requestId,
-      geminiApiKey,
-      resolvedPrompt,
-      images || [],
-      geminiModel,
-      aspectRatio,
-      resolution,
-      useGoogleSearch,
-      useImageSearch
-    );
+    // Gemini returns NextResponse directly — handle retry manually
+    try {
+      return await generateWithGemini(requestId, geminiApiKey, resolvedPrompt, images || [], geminiModel, aspectRatio, resolution, useGoogleSearch, useImageSearch);
+    } catch (geminiError) {
+      const msg = geminiError instanceof Error ? geminiError.message : String(geminiError);
+      if (isImageSizeError(msg) && images && images.length > 0) {
+        console.log(`[API:${requestId}] Gemini size error: "${msg.substring(0, 100)}". Compressing images and retrying...`);
+        const compressed = await compressAllImages(images, undefined);
+        return await generateWithGemini(requestId, geminiApiKey, resolvedPrompt, compressed.images, geminiModel, aspectRatio, resolution, useGoogleSearch, useImageSearch);
+      }
+      throw geminiError;
+    }
   } catch (error) {
     // Extract error information
     let errorMessage = "Generation failed";
