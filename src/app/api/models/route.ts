@@ -923,13 +923,11 @@ async function fetchFalModels(
   const maxPages = 15;
 
   while (hasMore && pageCount < maxPages) {
-    let url = `${FAL_API_BASE}/models?status=active`;
-    if (searchQuery) {
-      url += `&q=${encodeURIComponent(searchQuery)}`;
-    }
-    if (cursor) {
-      url += `&cursor=${encodeURIComponent(cursor)}`;
-    }
+    const params = new URLSearchParams();
+    if (searchQuery) params.set("q", searchQuery);
+    if (cursor) params.set("cursor", cursor);
+    const qs = params.toString();
+    const url = `${FAL_API_BASE}/models${qs ? `?${qs}` : ""}`;
 
     const response = await fetch(url, { headers });
 

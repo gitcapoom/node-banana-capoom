@@ -233,6 +233,231 @@ function restoreSceneDepthWrite(saved: SavedMeshState[]) {
  * Returns a data URL (PNG) of the depth image, or null if depth data is unavailable.
  * The caller must provide all the pre-initialized depth rendering resources.
  */
+/**
+ * Capture depth as raw ImageData (for video export — no async data URL decoding needed).
+ */
+/** Shared helper: render depth and read float pixels */
+function renderDepthFloat(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.PerspectiveCamera,
+  depthTarget: THREE.WebGLRenderTarget,
+  depthMat: THREE.ShaderMaterial,
+  depthScene: THREE.Scene,
+  depthCam: THREE.OrthographicCamera,
+  depthVisTarget: THREE.WebGLRenderTarget,
+  w: number,
+  h: number
+): Float32Array | null {
+  depthMat.uniforms.cameraNear.value = camera.near;
+  depthMat.uniforms.cameraFar.value = camera.far;
+
+  const savedStates = forceSceneDepthWrite(scene);
+  const NUM_DEPTH_PASSES = 16;
+  const prevAutoClear = renderer.autoClear;
+  renderer.autoClear = false;
+
+  renderer.setRenderTarget(depthTarget);
+  renderer.clear(true, true, true);
+  for (let pass = 0; pass < NUM_DEPTH_PASSES; pass++) {
+    for (const s of savedStates) {
+      const mat = s.mesh.material as THREE.ShaderMaterial;
+      if (mat.uniforms?.time !== undefined) {
+        mat.uniforms.time.value = pass * 0.123;
+      }
+    }
+    renderer.render(scene, camera);
+  }
+  renderer.setRenderTarget(null);
+  renderer.autoClear = prevAutoClear;
+  restoreSceneDepthWrite(savedStates);
+
+  renderer.setRenderTarget(depthVisTarget);
+  renderer.clear(true, true, true);
+  renderer.render(depthScene, depthCam);
+  renderer.setRenderTarget(null);
+
+  const floatPixels = new Float32Array(w * h * 4);
+  const _gl = renderer.getContext() as WebGL2RenderingContext;
+  if (_gl.PIXEL_PACK_BUFFER) _gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, null);
+  renderer.readRenderTargetPixels(depthVisTarget, 0, 0, w, h, floatPixels);
+
+  cleanDepthFloaters(floatPixels, w, h);
+  dilateDepth(floatPixels, w, h);
+
+  return floatPixels;
+}
+
+/** Extract min/max depth from float pixels (for global range scan) */
+export function getDepthMinMax(floatPixels: Float32Array): { min: number; max: number } | null {
+  let minDepth = Infinity;
+  let maxDepth = -Infinity;
+  let hasData = false;
+  for (let i = 0; i < floatPixels.length; i += 4) {
+    const d = floatPixels[i];
+    if (d >= 0) {
+      hasData = true;
+      if (d < minDepth) minDepth = d;
+      if (d > maxDepth) maxDepth = d;
+    }
+  }
+  return hasData ? { min: minDepth, max: maxDepth } : null;
+}
+
+/** Normalize float depth pixels to 8-bit grayscale ImageData using a provided range */
+export function normalizeDepthToImageData(
+  floatPixels: Float32Array,
+  w: number,
+  h: number,
+  minDepth: number,
+  maxDepth: number
+): ImageData {
+  const depthRange = maxDepth - minDepth;
+  const imageData = new ImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    const srcRow = (h - 1 - y) * w * 4;
+    const dstRow = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      const srcIdx = srcRow + x * 4;
+      const dstIdx = dstRow + x * 4;
+      const d = floatPixels[srcIdx];
+      let brightness: number;
+      if (d < 0) {
+        brightness = 0;
+      } else if (depthRange > 0) {
+        brightness = Math.max(0, Math.min(255, Math.round((1 - (d - minDepth) / depthRange) * 255)));
+      } else {
+        brightness = 255;
+      }
+      imageData.data[dstIdx] = brightness;
+      imageData.data[dstIdx + 1] = brightness;
+      imageData.data[dstIdx + 2] = brightness;
+      imageData.data[dstIdx + 3] = 255;
+    }
+  }
+  return imageData;
+}
+
+/**
+ * Capture depth as ImageData with per-frame auto-ranging (for single captures).
+ */
+export function captureDepthImageDataWithTarget(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.PerspectiveCamera,
+  depthTarget: THREE.WebGLRenderTarget,
+  depthMat: THREE.ShaderMaterial,
+  depthScene: THREE.Scene,
+  depthCam: THREE.OrthographicCamera,
+  depthVisTarget: THREE.WebGLRenderTarget,
+  w: number,
+  h: number
+): ImageData | null {
+  const floatPixels = renderDepthFloat(renderer, scene, camera, depthTarget, depthMat, depthScene, depthCam, depthVisTarget, w, h);
+  if (!floatPixels) return null;
+  const range = getDepthMinMax(floatPixels);
+  if (!range) return null;
+  return normalizeDepthToImageData(floatPixels, w, h, range.min, range.max);
+}
+
+/**
+ * Capture depth as raw ImageData (creates its own float target — for single-frame use).
+ */
+export function captureDepthImageData(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.PerspectiveCamera,
+  depthTarget: THREE.WebGLRenderTarget,
+  depthMat: THREE.ShaderMaterial,
+  depthScene: THREE.Scene,
+  depthCam: THREE.OrthographicCamera,
+  w: number,
+  h: number
+): ImageData | null {
+  depthMat.uniforms.cameraNear.value = camera.near;
+  depthMat.uniforms.cameraFar.value = camera.far;
+
+  const savedStates = forceSceneDepthWrite(scene);
+  const NUM_DEPTH_PASSES = 16;
+  const prevAutoClear = renderer.autoClear;
+  renderer.autoClear = false;
+
+  renderer.setRenderTarget(depthTarget);
+  renderer.clear(true, true, true);
+  for (let pass = 0; pass < NUM_DEPTH_PASSES; pass++) {
+    for (const s of savedStates) {
+      const mat = s.mesh.material as THREE.ShaderMaterial;
+      if (mat.uniforms?.time !== undefined) {
+        mat.uniforms.time.value = pass * 0.123;
+      }
+    }
+    renderer.render(scene, camera);
+  }
+  renderer.setRenderTarget(null);
+  renderer.autoClear = prevAutoClear;
+  restoreSceneDepthWrite(savedStates);
+
+  // Float target for depth visualization
+  const depthVisTarget = new THREE.WebGLRenderTarget(w, h, {
+    type: THREE.FloatType,
+    format: THREE.RGBAFormat,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+  renderer.setRenderTarget(depthVisTarget);
+  renderer.render(depthScene, depthCam);
+  renderer.setRenderTarget(null);
+
+  const floatPixels = new Float32Array(w * h * 4);
+  const _gl = renderer.getContext() as WebGL2RenderingContext;
+  if (_gl.PIXEL_PACK_BUFFER) _gl.bindBuffer(_gl.PIXEL_PACK_BUFFER, null);
+  renderer.readRenderTargetPixels(depthVisTarget, 0, 0, w, h, floatPixels);
+  depthVisTarget.dispose();
+
+  cleanDepthFloaters(floatPixels, w, h);
+  dilateDepth(floatPixels, w, h);
+
+  // Find min/max depth
+  let minDepth = Infinity;
+  let maxDepth = -Infinity;
+  let hasDepthData = false;
+  for (let i = 0; i < floatPixels.length; i += 4) {
+    const d = floatPixels[i];
+    if (d >= 0) {
+      hasDepthData = true;
+      if (d < minDepth) minDepth = d;
+      if (d > maxDepth) maxDepth = d;
+    }
+  }
+  if (!hasDepthData) return null;
+
+  // Normalize to 8-bit grayscale ImageData (closer = brighter)
+  const depthRange = maxDepth - minDepth;
+  const imageData = new ImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    const srcRow = (h - 1 - y) * w * 4; // flip vertically
+    const dstRow = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      const srcIdx = srcRow + x * 4;
+      const dstIdx = dstRow + x * 4;
+      const d = floatPixels[srcIdx];
+      let brightness: number;
+      if (d < 0) {
+        brightness = 0;
+      } else if (depthRange > 0) {
+        brightness = Math.round((1 - (d - minDepth) / depthRange) * 255);
+      } else {
+        brightness = 255;
+      }
+      imageData.data[dstIdx] = brightness;
+      imageData.data[dstIdx + 1] = brightness;
+      imageData.data[dstIdx + 2] = brightness;
+      imageData.data[dstIdx + 3] = 255;
+    }
+  }
+  return imageData;
+}
+
 export function captureDepthImage(
   renderer: THREE.WebGLRenderer,
   scene: THREE.Scene,
@@ -292,6 +517,8 @@ export function captureDepthImage(
 
   // Read float pixels (R = linearized depth, background = -1)
   const floatPixels = new Float32Array(canvasW * canvasH * 4);
+  const _gl3 = renderer.getContext() as WebGL2RenderingContext;
+  if (_gl3.PIXEL_PACK_BUFFER) _gl3.bindBuffer(_gl3.PIXEL_PACK_BUFFER, null);
   renderer.readRenderTargetPixels(depthVisTarget, 0, 0, canvasW, canvasH, floatPixels);
   depthVisTarget.dispose();
 
@@ -390,6 +617,9 @@ export default function StandaloneViewerPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<{ frame: number; total: number } | null>(null);
 
+  // Viewer container size (for responsive framing overlay)
+  const [viewerSize, setViewerSize] = useState({ w: 1280, h: 720 });
+
   // Transform state (applied to splat mesh)
   const [showTransform, setShowTransform] = useState(false);
   const defaultTransform = { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
@@ -452,6 +682,21 @@ export default function StandaloneViewerPage() {
     }
   }, [navMode]);
 
+  // Always-on-top: re-focus viewer popup when it loses focus
+  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
+  useEffect(() => {
+    if (!window.opener || !alwaysOnTop) return;
+    let refocusTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleBlurRefocus = () => {
+      refocusTimer = setTimeout(() => { window.focus(); }, 200);
+    };
+    window.addEventListener("blur", handleBlurRefocus);
+    return () => {
+      window.removeEventListener("blur", handleBlurRefocus);
+      if (refocusTimer) clearTimeout(refocusTimer);
+    };
+  }, [alwaysOnTop]);
+
   // Keep animation refs in sync with state
   useEffect(() => { cameraPathRef.current = cameraPath; }, [cameraPath]);
   useEffect(() => { currentFrameRef.current = currentFrame; }, [currentFrame]);
@@ -463,6 +708,7 @@ export default function StandaloneViewerPage() {
   const focalLength = LENS_FOCAL_LENGTHS[lensIndex];
   const aspectRatio = ASPECT_RATIO_PRESETS[aspectIndex];
   const vFov = calculateCameraFOV(sensor.widthMm, focalLength, aspectRatio.ratio);
+  const selectedAspectRef = useRef(aspectRatio.ratio);
 
   // ─── Parse URL params on mount ──────────────────────────────────
 
@@ -517,10 +763,10 @@ export default function StandaloneViewerPage() {
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    // Camera
+    // Camera — use selected aspect ratio (not window aspect) so FOV stays fixed on resize
     const camera = new THREE.PerspectiveCamera(
       vFov,
-      container.clientWidth / container.clientHeight,
+      aspectRatio.ratio,
       0.01,
       1000
     );
@@ -740,23 +986,52 @@ export default function StandaloneViewerPage() {
         controls.update();
       }
 
+      // Render with viewport/scissor to maintain square pixels
+      // The camera aspect is locked to the selected ratio; we render into
+      // a centered viewport that matches that ratio inside the window.
+      const canvasW = renderer.domElement.clientWidth;
+      const canvasH = renderer.domElement.clientHeight;
+      const selAspect = selectedAspectRef.current;
+      let vpW: number, vpH: number;
+      if (canvasW / canvasH > selAspect) {
+        vpH = canvasH;
+        vpW = Math.round(canvasH * selAspect);
+      } else {
+        vpW = canvasW;
+        vpH = Math.round(canvasW / selAspect);
+      }
+      const vpX = Math.round((canvasW - vpW) / 2);
+      const vpY = Math.round((canvasH - vpH) / 2);
+
+      // Clear full canvas to black, then render scene in the active viewport
+      renderer.setScissorTest(false);
+      renderer.setClearColor(0x000000, 1);
+      renderer.clear();
+      renderer.setViewport(vpX, vpY, vpW, vpH);
+      renderer.setScissor(vpX, vpY, vpW, vpH);
+      renderer.setScissorTest(true);
       renderer.render(scene, camera);
+      renderer.setScissorTest(false);
+      // Reset viewport for any subsequent readPixels / UI
+      renderer.setViewport(0, 0, canvasW, canvasH);
     }
     animate(0);
 
-    // Resize handler
+    // Resize handler — only resize the renderer, NOT the camera aspect
+    // Camera aspect is locked to the selected aspect ratio so FOV stays fixed
     const handleResize = () => {
       const w = container.clientWidth;
       const h = container.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      setViewerSize({ w, h });
 
       // Resize depth render target to match
       const pixelRatio = Math.min(window.devicePixelRatio, 2);
       depthTarget.setSize(w * pixelRatio, h * pixelRatio);
     };
     window.addEventListener("resize", handleResize);
+    // Set initial size
+    setViewerSize({ w: container.clientWidth, h: container.clientHeight });
 
     return () => {
       cancelAnimationFrame(animationIdRef.current);
@@ -889,10 +1164,12 @@ export default function StandaloneViewerPage() {
   // ─── Update camera FOV when settings change ────────────────────
 
   useEffect(() => {
+    selectedAspectRef.current = aspectRatio.ratio;
     if (!cameraRef.current) return;
     cameraRef.current.fov = vFov;
+    cameraRef.current.aspect = aspectRatio.ratio;
     cameraRef.current.updateProjectionMatrix();
-  }, [vFov]);
+  }, [vFov, aspectRatio.ratio]);
 
   // ─── Apply transform to splat mesh ─────────────────────────────
 
@@ -1114,41 +1391,54 @@ export default function StandaloneViewerPage() {
 
   // ─── Depth capture helper for video export ──────────────────────
 
+  // Reusable float render target for depth visualization during export
+  const depthVisExportTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
+
   const captureDepthFrameForExport = useCallback(
     (
       renderer: THREE.WebGLRenderer,
       scene: THREE.Scene,
       camera: THREE.PerspectiveCamera,
       w: number,
-      h: number
-    ): ImageData | null => {
+      h: number,
+      globalRange?: { min: number; max: number }
+    ): { imageData: ImageData | null; min: number; max: number } | null => {
       const depthTarget = depthRenderTargetRef.current;
       const depthMat = depthMaterialRef.current;
       const dScene = depthSceneRef.current;
       const depthCam = depthCameraRef.current;
       if (!depthTarget || !depthMat || !dScene || !depthCam) return null;
 
-      // Resize depth target to match export resolution
       depthTarget.setSize(w, h);
 
-      const dataUrl = captureDepthImage(
+      if (!depthVisExportTargetRef.current ||
+          depthVisExportTargetRef.current.width !== w ||
+          depthVisExportTargetRef.current.height !== h) {
+        depthVisExportTargetRef.current?.dispose();
+        depthVisExportTargetRef.current = new THREE.WebGLRenderTarget(w, h, {
+          type: THREE.FloatType,
+          format: THREE.RGBAFormat,
+          minFilter: THREE.NearestFilter,
+          magFilter: THREE.NearestFilter,
+        });
+      }
+
+      const floatPixels = renderDepthFloat(
         renderer, scene, camera,
         depthTarget, depthMat, dScene, depthCam,
-        w, h, 0, 0, w, h
+        depthVisExportTargetRef.current,
+        w, h
       );
-      if (!dataUrl) return null;
+      if (!floatPixels) return null;
 
-      // Convert data URL to ImageData
-      const img = new Image();
-      img.src = dataUrl;
-      // Since toDataURL is synchronous from canvas, we can draw immediately
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = w;
-      tempCanvas.height = h;
-      const ctx = tempCanvas.getContext("2d");
-      if (!ctx) return null;
-      ctx.drawImage(img, 0, 0);
-      return ctx.getImageData(0, 0, w, h);
+      const range = getDepthMinMax(floatPixels);
+      if (!range) return null;
+
+      // If global range provided, normalize with it; otherwise use per-frame range
+      const normRange = globalRange || range;
+      const imageData = normalizeDepthToImageData(floatPixels, w, h, normRange.min, normRange.max);
+
+      return { imageData, min: range.min, max: range.max };
     },
     []
   );
@@ -1173,6 +1463,14 @@ export default function StandaloneViewerPage() {
           durationFrames: settings.durationFrames,
         };
 
+        // Map codec preset to bitrate
+        const codecBitrates: Record<string, number> = {
+          "h264": 20_000_000,
+          "h264-hq": 50_000_000,
+          "h264-max": 100_000_000,
+        };
+        const bitrate = codecBitrates[settings.codec] || 20_000_000;
+
         const result = await exportVideo({
           renderer,
           scene,
@@ -1180,6 +1478,7 @@ export default function StandaloneViewerPage() {
           path: exportPath,
           mode: settings.mode,
           resolution: settings.resolution,
+          bitrate,
           captureDepthFrame:
             settings.mode === "depth" || settings.mode === "both"
               ? captureDepthFrameForExport
@@ -1494,43 +1793,68 @@ export default function StandaloneViewerPage() {
       {/* Three.js canvas container */}
       <div ref={containerRef} className="absolute inset-0" />
 
-      {/* Framing overlay — letterbox/pillarbox bars for selected aspect ratio */}
+      {/* Framing overlay — shows semi-transparent mask outside the selected aspect ratio */}
       {splatLoaded && (() => {
-        const viewW = containerRef.current?.clientWidth ?? 16;
-        const viewH = containerRef.current?.clientHeight ?? 9;
-        const viewportAspect = viewW / viewH;
-        const selectedAspect = aspectRatio.ratio;
-        if (Math.abs(viewportAspect - selectedAspect) < 0.01) return null;
+        const viewW = viewerSize.w;
+        const viewH = viewerSize.h;
+        if (viewW <= 0 || viewH <= 0) return null;
 
-        if (selectedAspect > viewportAspect) {
-          // Letterbox: bars on top and bottom
-          const activeH = viewW / selectedAspect;
-          const barH = Math.max(0, (viewH - activeH) / 2);
-          return (
-            <>
-              <div className="absolute left-0 right-0 top-0 pointer-events-none z-[4]" style={{ height: barH, background: "rgba(0,0,0,0.55)" }}>
-                <div className="absolute bottom-0 left-0 right-0 h-px bg-neutral-500/40" />
-              </div>
-              <div className="absolute left-0 right-0 bottom-0 pointer-events-none z-[4]" style={{ height: barH, background: "rgba(0,0,0,0.55)" }}>
-                <div className="absolute top-0 left-0 right-0 h-px bg-neutral-500/40" />
-              </div>
-            </>
-          );
+        const selectedAspect = aspectRatio.ratio;
+        // Fit the target aspect ratio centered inside the viewport
+        let activeW: number, activeH: number;
+        if (viewW / viewH > selectedAspect) {
+          // Viewport is wider than target — constrained by height
+          activeH = viewH;
+          activeW = viewH * selectedAspect;
         } else {
-          // Pillarbox: bars on left and right
-          const activeW = viewH * selectedAspect;
-          const barW = Math.max(0, (viewW - activeW) / 2);
-          return (
-            <>
-              <div className="absolute top-0 bottom-0 left-0 pointer-events-none z-[4]" style={{ width: barW, background: "rgba(0,0,0,0.55)" }}>
-                <div className="absolute right-0 top-0 bottom-0 w-px bg-neutral-500/40" />
-              </div>
-              <div className="absolute top-0 bottom-0 right-0 pointer-events-none z-[4]" style={{ width: barW, background: "rgba(0,0,0,0.55)" }}>
-                <div className="absolute left-0 top-0 bottom-0 w-px bg-neutral-500/40" />
-              </div>
-            </>
-          );
+          // Viewport is taller than target — constrained by width
+          activeW = viewW;
+          activeH = viewW / selectedAspect;
         }
+
+        const barLeft = Math.max(0, (viewW - activeW) / 2);
+        const barRight = barLeft;
+        const barTop = Math.max(0, (viewH - activeH) / 2);
+        const barBottom = barTop;
+
+        // Skip if the bars are negligible
+        if (barLeft < 1 && barTop < 1) return null;
+
+        // Use a single overlay with clip-path to cut out the active area
+        const insetLeft = barLeft;
+        const insetTop = barTop;
+        const insetRight = viewW - barRight;
+        const insetBottom = viewH - barBottom;
+
+        return (
+          <div className="absolute inset-0 pointer-events-none z-[4]">
+            {/* Semi-transparent mask using clip-path (polygon with hole) */}
+            <div
+              className="absolute inset-0"
+              style={{
+                background: "rgba(0,0,0,0.55)",
+                clipPath: `polygon(
+                  0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%,
+                  ${insetLeft}px ${insetTop}px,
+                  ${insetLeft}px ${insetBottom}px,
+                  ${insetRight}px ${insetBottom}px,
+                  ${insetRight}px ${insetTop}px,
+                  ${insetLeft}px ${insetTop}px
+                )`,
+              }}
+            />
+            {/* Border around active area */}
+            <div
+              className="absolute border border-neutral-500/40"
+              style={{
+                left: barLeft,
+                top: barTop,
+                width: activeW,
+                height: activeH,
+              }}
+            />
+          </div>
+        );
       })()}
 
       {/* Loading overlay */}
@@ -1568,11 +1892,30 @@ export default function StandaloneViewerPage() {
       {/* Top bar — world info */}
       <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/60 to-transparent p-4 pointer-events-none z-5">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-white text-sm font-medium">{worldName}</h1>
-            <p className="text-neutral-400 text-[10px]">
-              {sensor.name} · {focalLength}mm · {aspectRatio.name} · {vFov.toFixed(1)}° vFOV
-            </p>
+          <div className="flex items-center gap-2">
+            {window.opener && (
+              <button
+                onClick={() => setAlwaysOnTop((v) => !v)}
+                className={`pointer-events-auto p-1 rounded transition-colors ${
+                  alwaysOnTop ? "text-indigo-400 hover:text-indigo-300" : "text-neutral-500 hover:text-neutral-300"
+                }`}
+                title={alwaysOnTop ? "Unpin window (always on top)" : "Pin window (always on top)"}
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  {alwaysOnTop ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 2l0 4m-3 1l6 0l-1 7l-1.5 1.5L12 22l-.5-6.5L10 14l-1-7z" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 2l0 4m-3 1l6 0l-1 7l-1.5 1.5L12 22l-.5-6.5L10 14l-1-7z" opacity={0.4} />
+                  )}
+                </svg>
+              </button>
+            )}
+            <div>
+              <h1 className="text-white text-sm font-medium">{worldName}</h1>
+              <p className="text-neutral-400 text-[10px]">
+                {sensor.name} · {focalLength}mm · {aspectRatio.name} · {vFov.toFixed(1)}° vFOV
+              </p>
+            </div>
           </div>
           {loading && (
             <div className="flex items-center gap-2">

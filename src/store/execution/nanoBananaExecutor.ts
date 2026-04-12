@@ -94,6 +94,18 @@ export async function executeNanoBanana(
   const sanitizedDynamicInputs = { ...dynamicInputs };
   delete sanitizedDynamicInputs.prompt;
 
+  // Process {image:N} placeholders — replaces with description markers for providers
+  // that support inline image references, or logs the mapping for debugging
+  if (promptText && images.length > 0) {
+    promptText = promptText.replace(/\{image:(\d+)\}/g, (match, numStr) => {
+      const idx = parseInt(numStr, 10) - 1; // 1-indexed → 0-indexed
+      if (idx >= 0 && idx < images.length) {
+        return `[image ${numStr}]`; // Provider-neutral marker
+      }
+      return match; // Leave out-of-range placeholders as-is
+    });
+  }
+
   const requestPayload = {
     images,
     prompt: promptText,

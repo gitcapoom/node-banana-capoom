@@ -7,21 +7,40 @@ import { useProviderApiKeys } from "@/store/workflowStore";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 
 // localStorage cache for model schemas (persists across dev server restarts)
+// Bump SCHEMA_CACHE_VERSION when schema extraction logic changes to auto-invalidate
 const SCHEMA_CACHE_KEY = "node-banana-schema-cache";
+const SCHEMA_CACHE_VERSION = 2; // v2: union type support, ge/le constraints, primitive preference in anyOf
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {
   parameters: ModelParameter[];
   inputs: ModelInputDef[];
   timestamp: number;
+  version?: number;
 }
+
+// On load, purge ALL entries with outdated or missing version
+try {
+  const _raw = localStorage.getItem(SCHEMA_CACHE_KEY);
+  if (_raw) {
+    const _cache = JSON.parse(_raw);
+    let _changed = false;
+    for (const k of Object.keys(_cache)) {
+      if (_cache[k].version !== SCHEMA_CACHE_VERSION) {
+        delete _cache[k];
+        _changed = true;
+      }
+    }
+    if (_changed) localStorage.setItem(SCHEMA_CACHE_KEY, JSON.stringify(_cache));
+  }
+} catch { /* ignore */ }
 
 function getCachedSchema(modelId: string, provider: string): SchemaCacheEntry | null {
   try {
     const cache = JSON.parse(localStorage.getItem(SCHEMA_CACHE_KEY) || "{}");
     const key = `${provider}:${modelId}`;
     const entry = cache[key];
-    if (entry && Date.now() - entry.timestamp < SCHEMA_CACHE_TTL) {
+    if (entry && Date.now() - entry.timestamp < SCHEMA_CACHE_TTL && entry.version === SCHEMA_CACHE_VERSION) {
       return entry;
     }
   } catch {
@@ -33,7 +52,7 @@ function getCachedSchema(modelId: string, provider: string): SchemaCacheEntry | 
 function setCachedSchema(modelId: string, provider: string, parameters: ModelParameter[], inputs: ModelInputDef[]) {
   try {
     const cache = JSON.parse(localStorage.getItem(SCHEMA_CACHE_KEY) || "{}");
-    cache[`${provider}:${modelId}`] = { parameters, inputs, timestamp: Date.now() };
+    cache[`${provider}:${modelId}`] = { parameters, inputs, timestamp: Date.now(), version: SCHEMA_CACHE_VERSION };
     localStorage.setItem(SCHEMA_CACHE_KEY, JSON.stringify(cache));
   } catch {
     // Ignore cache errors
@@ -389,14 +408,18 @@ function ParameterInputInner({ param, name, value, onChange }: ParameterInputPro
             )}
           </label>
           <input
-            type="number"
+            type={param.type === "integer" ? "number" : "text"}
+            inputMode={param.type === "integer" ? "numeric" : "decimal"}
             value={localValue}
-            min={param.minimum}
-            max={param.maximum}
-            step={param.type === "integer" ? 1 : 0.1}
+            min={param.type === "integer" ? param.minimum : undefined}
+            max={param.type === "integer" ? param.maximum : undefined}
+            step={param.type === "integer" ? 1 : undefined}
             onFocus={() => { isFocusedRef.current = true; }}
             onChange={(e) => {
-              setLocalValue(e.target.value);
+              const raw = e.target.value;
+              // For float fields, allow digits, dot, minus, and empty
+              if (param.type !== "integer" && raw !== "" && !/^-?\d*\.?\d*$/.test(raw)) return;
+              setLocalValue(raw);
             }}
             onBlur={() => {
               isFocusedRef.current = false;
@@ -417,6 +440,74 @@ function ParameterInputInner({ param, name, value, onChange }: ParameterInputPro
         </div>
         {validationError && (
           <span className="text-[9px] text-red-400">{validationError}</span>
+        )}
+      </div>
+    );
+  }
+
+  // Object parameter with enum+properties union (e.g., image_size: preset OR custom width/height)
+  if (param.type === "object" && param.properties && param.properties.length > 0 && param.enum && param.enum.length > 0) {
+    const isPresetMode = typeof value === "string" || value === undefined || value === null;
+    const objValue = (value && typeof value === "object" && !Array.isArray(value))
+      ? value as Record<string, unknown>
+      : {};
+    return (
+      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] text-neutral-300 font-medium" title={param.description || undefined}>
+            {displayName}
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              if (isPresetMode) {
+                // Switch to custom: set default sub-field values
+                const custom: Record<string, unknown> = {};
+                for (const p of param.properties!) {
+                  if (p.default !== undefined) custom[p.name] = p.default;
+                }
+                handleChange(Object.keys(custom).length > 0 ? custom : {});
+              } else {
+                // Switch to preset: use first enum value or undefined
+                handleChange(undefined);
+              }
+            }}
+            className="nodrag nopan text-[9px] px-1.5 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-400"
+          >
+            {isPresetMode ? "Custom" : "Preset"}
+          </button>
+        </div>
+        {isPresetMode ? (
+          <select
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => handleChange(e.target.value || undefined)}
+            className="nodrag nopan w-full text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white focus:outline-none focus:ring-1 focus:ring-neutral-600 appearance-none cursor-pointer"
+          >
+            <option value="">Default</option>
+            {param.enum.map((opt) => (
+              <option key={String(opt)} value={String(opt)}>
+                {String(opt)}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="space-y-1">
+            {param.properties!.map((subParam) => (
+              <ParameterInput
+                key={subParam.name}
+                param={subParam}
+                name={subParam.name}
+                value={objValue[subParam.name]}
+                onChange={(subName, subVal) => {
+                  const updated = { ...objValue, [subName]: subVal };
+                  for (const k of Object.keys(updated)) {
+                    if (updated[k] === undefined) delete updated[k];
+                  }
+                  handleChange(Object.keys(updated).length > 0 ? updated : undefined);
+                }}
+              />
+            ))}
+          </div>
         )}
       </div>
     );

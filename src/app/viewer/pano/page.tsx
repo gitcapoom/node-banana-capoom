@@ -93,6 +93,20 @@ export default function PanoViewerPage() {
     if (nid) setNodeId(nid);
   }, []);
 
+  // Always-on-top: re-focus viewer popup when it loses focus
+  useEffect(() => {
+    if (!window.opener) return;
+    let refocusTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleBlurRefocus = () => {
+      refocusTimer = setTimeout(() => { window.focus(); }, 150);
+    };
+    window.addEventListener("blur", handleBlurRefocus);
+    return () => {
+      window.removeEventListener("blur", handleBlurRefocus);
+      if (refocusTimer) clearTimeout(refocusTimer);
+    };
+  }, []);
+
   // ─── Initialize Three.js scene ──────────────────────────────
   useEffect(() => {
     if (initRef.current || !containerRef.current) return;

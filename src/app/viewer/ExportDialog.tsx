@@ -7,11 +7,14 @@ import type { CameraPath } from "./cameraAnimation";
 
 export type ExportMode = "rgb" | "depth" | "both";
 
+export type CodecPreset = "h264" | "h264-hq" | "h264-max";
+
 export interface ExportSettings {
   mode: ExportMode;
   resolution: { width: number; height: number };
   fps: number;
   durationFrames: number;
+  codec: CodecPreset;
   includeColmap: boolean;
 }
 
@@ -35,6 +38,12 @@ const RESOLUTION_PRESETS = [
 
 const FPS_OPTIONS = [12, 24, 30, 60];
 
+const CODEC_PRESETS: { key: CodecPreset; label: string; description: string }[] = [
+  { key: "h264", label: "H.264", description: "20 Mbps — fast, good quality" },
+  { key: "h264-hq", label: "H.264 HQ", description: "50 Mbps — high quality" },
+  { key: "h264-max", label: "H.264 Max", description: "100 Mbps — maximum quality" },
+];
+
 // ─── Component ──────────────────────────────────────────────────
 
 export default function ExportDialog({
@@ -48,6 +57,7 @@ export default function ExportDialog({
   const [resIndex, setResIndex] = useState(1); // default Full HD
   const [fps, setFps] = useState(path.fps);
   const [durationFrames, setDurationFrames] = useState(path.durationFrames);
+  const [codec, setCodec] = useState<CodecPreset>("h264");
   const [includeColmap, setIncludeColmap] = useState(true);
 
   const resolution = RESOLUTION_PRESETS[resIndex];
@@ -59,9 +69,10 @@ export default function ExportDialog({
       resolution: { width: resolution.width, height: resolution.height },
       fps,
       durationFrames,
+      codec,
       includeColmap,
     });
-  }, [mode, resolution, fps, durationFrames, includeColmap, onExport]);
+  }, [mode, resolution, fps, durationFrames, codec, includeColmap, onExport]);
 
   const progressPct =
     exportProgress && exportProgress.total > 0
@@ -167,6 +178,28 @@ export default function ExportDialog({
             disabled={isExporting}
             className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-2 py-1.5 border border-neutral-700 focus:border-indigo-500 focus:outline-none disabled:opacity-50"
           />
+        </div>
+
+        {/* Codec / Quality */}
+        <div className="mb-3">
+          <label className="text-[10px] text-neutral-500 block mb-1.5">Quality</label>
+          <div className="flex gap-1.5">
+            {CODEC_PRESETS.map((c) => (
+              <button
+                key={c.key}
+                onClick={() => setCodec(c.key)}
+                disabled={isExporting}
+                title={c.description}
+                className={`flex-1 text-[11px] py-1.5 rounded transition-colors ${
+                  codec === c.key
+                    ? "bg-indigo-600 text-white"
+                    : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                } disabled:opacity-50`}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* COLMAP checkbox */}

@@ -129,10 +129,10 @@ export async function GET(
   try {
     // Build URL - fetch all active models, filter client-side
     // Note: fal.ai API only accepts single category param, so we fetch all and filter
-    let url = `${FAL_API_BASE}/models?status=active`;
+    let url = `${FAL_API_BASE}/models`;
 
     if (searchQuery) {
-      url += `&q=${encodeURIComponent(searchQuery)}`;
+      url += `?q=${encodeURIComponent(searchQuery)}`;
     }
 
     // Build headers with optional auth
