@@ -644,6 +644,7 @@ async function fetchReplicateModels(apiKey: string): Promise<ProviderModel[]> {
       headers: {
         Authorization: `Bearer ${apiKey}`,
       },
+      signal: AbortSignal.timeout(15000), // 15s timeout per page
     });
 
     if (!response.ok) {
@@ -828,6 +829,7 @@ async function fetchWaveSpeedModels(apiKey: string): Promise<ProviderModel[]> {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(15000),
   });
 
   if (!response.ok) {
@@ -929,7 +931,7 @@ async function fetchFalModels(
     const qs = params.toString();
     const url = `${FAL_API_BASE}/models${qs ? `?${qs}` : ""}`;
 
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
 
     if (!response.ok) {
       throw new Error(`fal.ai API error: ${response.status}`);
@@ -1188,16 +1190,16 @@ export async function GET(
     };
   }
 
-  // Check if we got any models
+  // If all providers failed, return partial success with errors instead of 500
   if (allModels.length === 0 && errors.length === providersToFetch.length) {
-    // All providers failed
-    return NextResponse.json<ModelsErrorResponse>(
-      {
-        success: false,
-        error: `All providers failed: ${errors.join("; ")}`,
-      },
-      { status: 500 }
-    );
+    return NextResponse.json<ModelsSuccessResponse>({
+      success: true,
+      models: [],
+      cached: false,
+      providers: providerResults,
+      availableProviders,
+      errors,
+    });
   }
 
   // Filter by capabilities if specified
