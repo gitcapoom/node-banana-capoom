@@ -57,6 +57,9 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
+  const connectedImageCount = useWorkflowStore((state) =>
+    state.edges.filter(e => e.target === id && (e.targetHandle === "image" || e.targetHandle?.startsWith("image-"))).length
+  );
   // Use stable selector for API keys to prevent unnecessary re-fetches
   const { replicateApiKey, falApiKey, kieApiKey, muapiApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const [isLoadingCarouselImage, setIsLoadingCarouselImage] = useState(false);
@@ -811,7 +814,9 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
               zIndex: 10,
             }}
           >
-            Image
+            Image{connectedImageCount > 1 && (
+              <span className="ml-0.5 text-[8px] text-emerald-400"> ×{connectedImageCount}</span>
+            )}
           </div>
           <Handle
             type="target"

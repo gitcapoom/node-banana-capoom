@@ -371,7 +371,7 @@ export async function generateWithFalQueue(
   }
 
   // Submit to queue
-  console.log(`[API:${requestId}] Submitting to fal.ai queue with inputs: ${Object.keys(requestBody).join(", ")}`);
+  console.log(`[API:${requestId}] Submitting to fal.ai queue with inputs: ${Object.keys(requestBody).join(", ")}`, JSON.stringify(requestBody, null, 2).slice(0, 1000));
   const submitResponse = await fetch(`https://queue.fal.run/${modelId}`, {
     method: "POST",
     headers,
@@ -498,10 +498,11 @@ export async function generateWithFalQueue(
       );
 
       if (!resultResponse.ok) {
-        console.error(`[API:${requestId}] Failed to fetch result: ${resultResponse.status}`);
+        const errBody = await resultResponse.text().catch(() => "");
+        console.error(`[API:${requestId}] Failed to fetch result: ${resultResponse.status}`, errBody);
         return {
           success: false,
-          error: `Failed to fetch result: ${resultResponse.status}`,
+          error: `Failed to fetch result: ${resultResponse.status}${errBody ? ` - ${errBody.slice(0, 200)}` : ""}`,
         };
       }
 

@@ -7,21 +7,40 @@ import { useProviderApiKeys } from "@/store/workflowStore";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 
 // localStorage cache for model schemas (persists across dev server restarts)
+// Bump SCHEMA_CACHE_VERSION when schema extraction logic changes to auto-invalidate
 const SCHEMA_CACHE_KEY = "node-banana-schema-cache";
+const SCHEMA_CACHE_VERSION = 2; // v2: union type support, ge/le constraints, primitive preference in anyOf
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {
   parameters: ModelParameter[];
   inputs: ModelInputDef[];
   timestamp: number;
+  version?: number;
 }
+
+// On load, purge ALL entries with outdated or missing version
+try {
+  const _raw = localStorage.getItem(SCHEMA_CACHE_KEY);
+  if (_raw) {
+    const _cache = JSON.parse(_raw);
+    let _changed = false;
+    for (const k of Object.keys(_cache)) {
+      if (_cache[k].version !== SCHEMA_CACHE_VERSION) {
+        delete _cache[k];
+        _changed = true;
+      }
+    }
+    if (_changed) localStorage.setItem(SCHEMA_CACHE_KEY, JSON.stringify(_cache));
+  }
+} catch { /* ignore */ }
 
 function getCachedSchema(modelId: string, provider: string): SchemaCacheEntry | null {
   try {
     const cache = JSON.parse(localStorage.getItem(SCHEMA_CACHE_KEY) || "{}");
     const key = `${provider}:${modelId}`;
     const entry = cache[key];
-    if (entry && Date.now() - entry.timestamp < SCHEMA_CACHE_TTL) {
+    if (entry && Date.now() - entry.timestamp < SCHEMA_CACHE_TTL && entry.version === SCHEMA_CACHE_VERSION) {
       return entry;
     }
   } catch {
@@ -33,7 +52,7 @@ function getCachedSchema(modelId: string, provider: string): SchemaCacheEntry | 
 function setCachedSchema(modelId: string, provider: string, parameters: ModelParameter[], inputs: ModelInputDef[]) {
   try {
     const cache = JSON.parse(localStorage.getItem(SCHEMA_CACHE_KEY) || "{}");
-    cache[`${provider}:${modelId}`] = { parameters, inputs, timestamp: Date.now() };
+    cache[`${provider}:${modelId}`] = { parameters, inputs, timestamp: Date.now(), version: SCHEMA_CACHE_VERSION };
     localStorage.setItem(SCHEMA_CACHE_KEY, JSON.stringify(cache));
   } catch {
     // Ignore cache errors
@@ -389,14 +408,18 @@ function ParameterInputInner({ param, name, value, onChange }: ParameterInputPro
             )}
           </label>
           <input
-            type="number"
+            type={param.type === "integer" ? "number" : "text"}
+            inputMode={param.type === "integer" ? "numeric" : "decimal"}
             value={localValue}
-            min={param.minimum}
-            max={param.maximum}
-            step={param.type === "integer" ? 1 : 0.1}
+            min={param.type === "integer" ? param.minimum : undefined}
+            max={param.type === "integer" ? param.maximum : undefined}
+            step={param.type === "integer" ? 1 : undefined}
             onFocus={() => { isFocusedRef.current = true; }}
             onChange={(e) => {
-              setLocalValue(e.target.value);
+              const raw = e.target.value;
+              // For float fields, allow digits, dot, minus, and empty
+              if (param.type !== "integer" && raw !== "" && !/^-?\d*\.?\d*$/.test(raw)) return;
+              setLocalValue(raw);
             }}
             onBlur={() => {
               isFocusedRef.current = false;
@@ -422,9 +445,249 @@ function ParameterInputInner({ param, name, value, onChange }: ParameterInputPro
     );
   }
 
-  // Skip array type for now (complex)
+  // Object parameter with enum+properties union (e.g., image_size: preset OR custom width/height)
+  if (param.type === "object" && param.properties && param.properties.length > 0 && param.enum && param.enum.length > 0) {
+    const isPresetMode = typeof value === "string" || value === undefined || value === null;
+    const objValue = (value && typeof value === "object" && !Array.isArray(value))
+      ? value as Record<string, unknown>
+      : {};
+    return (
+      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] text-neutral-300 font-medium" title={param.description || undefined}>
+            {displayName}
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              if (isPresetMode) {
+                // Switch to custom: set default sub-field values
+                const custom: Record<string, unknown> = {};
+                for (const p of param.properties!) {
+                  if (p.default !== undefined) custom[p.name] = p.default;
+                }
+                handleChange(Object.keys(custom).length > 0 ? custom : {});
+              } else {
+                // Switch to preset: use first enum value or undefined
+                handleChange(undefined);
+              }
+            }}
+            className="nodrag nopan text-[9px] px-1.5 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-400"
+          >
+            {isPresetMode ? "Custom" : "Preset"}
+          </button>
+        </div>
+        {isPresetMode ? (
+          <select
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => handleChange(e.target.value || undefined)}
+            className="nodrag nopan w-full text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white focus:outline-none focus:ring-1 focus:ring-neutral-600 appearance-none cursor-pointer"
+          >
+            <option value="">Default</option>
+            {param.enum.map((opt) => (
+              <option key={String(opt)} value={String(opt)}>
+                {String(opt)}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="space-y-1">
+            {param.properties!.map((subParam) => (
+              <ParameterInput
+                key={subParam.name}
+                param={subParam}
+                name={subParam.name}
+                value={objValue[subParam.name]}
+                onChange={(subName, subVal) => {
+                  const updated = { ...objValue, [subName]: subVal };
+                  for (const k of Object.keys(updated)) {
+                    if (updated[k] === undefined) delete updated[k];
+                  }
+                  handleChange(Object.keys(updated).length > 0 ? updated : undefined);
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Object parameter: render sub-fields in a group
+  if (param.type === "object" && param.properties && param.properties.length > 0) {
+    const objValue = (value && typeof value === "object" && !Array.isArray(value))
+      ? value as Record<string, unknown>
+      : {};
+    return (
+      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1.5">
+        <label className="text-[11px] text-neutral-300 font-medium" title={param.description || undefined}>
+          {displayName}
+        </label>
+        {param.properties.map((subParam) => (
+          <ParameterInput
+            key={subParam.name}
+            param={subParam}
+            name={subParam.name}
+            value={objValue[subParam.name]}
+            onChange={(subName, subVal) => {
+              const updated = { ...objValue, [subName]: subVal };
+              // Remove undefined values
+              for (const k of Object.keys(updated)) {
+                if (updated[k] === undefined) delete updated[k];
+              }
+              handleChange(Object.keys(updated).length > 0 ? updated : undefined);
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  // Array of objects (e.g., LoRAs): add/remove item list
+  if (param.type === "array" && param.items?.type === "object" && param.items.properties) {
+    const arrValue = Array.isArray(value) ? value as Record<string, unknown>[] : [];
+    const itemProps = param.items.properties;
+    return (
+      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] text-neutral-300 font-medium" title={param.description || undefined}>
+            {displayName}
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              const newItem: Record<string, unknown> = {};
+              for (const p of itemProps) {
+                if (p.default !== undefined) newItem[p.name] = p.default;
+              }
+              handleChange([...arrValue, newItem]);
+            }}
+            className="nodrag nopan text-[10px] px-1.5 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-300"
+          >
+            + Add
+          </button>
+        </div>
+        {arrValue.map((item, idx) => (
+          <div key={idx} className="flex items-start gap-1 bg-neutral-800/50 rounded p-1.5">
+            <div className="flex-1 space-y-1">
+              {itemProps.map((subParam) => (
+                <ParameterInput
+                  key={subParam.name}
+                  param={subParam}
+                  name={subParam.name}
+                  value={item[subParam.name]}
+                  onChange={(subName, subVal) => {
+                    const updated = [...arrValue];
+                    updated[idx] = { ...updated[idx], [subName]: subVal };
+                    handleChange(updated);
+                  }}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const updated = arrValue.filter((_, i) => i !== idx);
+                handleChange(updated.length > 0 ? updated : undefined);
+              }}
+              className="nodrag nopan text-[10px] px-1 py-0.5 rounded bg-red-900/50 hover:bg-red-800/50 text-red-300 mt-1"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Array of primitives: add/remove simple inputs
+  if (param.type === "array" && param.items) {
+    const arrValue = Array.isArray(value) ? value as unknown[] : [];
+    return (
+      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] text-neutral-400" title={param.description || undefined}>
+            {displayName}
+          </label>
+          <button
+            type="button"
+            onClick={() => handleChange([...arrValue, param.items?.default ?? ""])}
+            className="nodrag nopan text-[10px] px-1.5 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-300"
+          >
+            + Add
+          </button>
+        </div>
+        {arrValue.map((item, idx) => (
+          <div key={idx} className="flex items-center gap-1">
+            <input
+              type={param.items?.type === "number" || param.items?.type === "integer" ? "number" : "text"}
+              value={item !== undefined && item !== null ? String(item) : ""}
+              onChange={(e) => {
+                const updated = [...arrValue];
+                const val = e.target.value;
+                if (param.items?.type === "integer") updated[idx] = parseInt(val, 10) || 0;
+                else if (param.items?.type === "number") updated[idx] = parseFloat(val) || 0;
+                else updated[idx] = val;
+                handleChange(updated);
+              }}
+              className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const updated = arrValue.filter((_, i) => i !== idx);
+                handleChange(updated.length > 0 ? updated : undefined);
+              }}
+              className="nodrag nopan text-[10px] px-1 py-0.5 rounded bg-red-900/50 hover:bg-red-800/50 text-red-300"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Array without items schema — JSON textarea fallback
   if (param.type === "array") {
-    return null;
+    const jsonStr = value ? JSON.stringify(value, null, 2) : "";
+    return (
+      <div className="col-span-full space-y-1">
+        <label className="text-[11px] text-neutral-400" title={param.description || undefined}>
+          {displayName} (JSON)
+        </label>
+        <textarea
+          value={jsonStr}
+          onChange={(e) => {
+            try { handleChange(JSON.parse(e.target.value)); } catch { /* invalid JSON, wait */ }
+          }}
+          rows={3}
+          className="nodrag nopan w-full text-[10px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white font-mono resize-y"
+          placeholder="[]"
+        />
+      </div>
+    );
+  }
+
+  // Object without properties — JSON textarea fallback
+  if (param.type === "object") {
+    const jsonStr = value ? JSON.stringify(value, null, 2) : "";
+    return (
+      <div className="col-span-full space-y-1">
+        <label className="text-[11px] text-neutral-400" title={param.description || undefined}>
+          {displayName} (JSON)
+        </label>
+        <textarea
+          value={jsonStr}
+          onChange={(e) => {
+            try { handleChange(JSON.parse(e.target.value)); } catch { /* invalid JSON, wait */ }
+          }}
+          rows={3}
+          className="nodrag nopan w-full text-[10px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white font-mono resize-y"
+          placeholder="{}"
+        />
+      </div>
+    );
   }
 
   // Default: string input — uses local state, syncs to store on blur

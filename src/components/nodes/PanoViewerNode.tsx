@@ -175,7 +175,7 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
     }
 
     const viewerUrl = `/viewer/pano?${params.toString()}`;
-    const w = window.open(viewerUrl, `pano-viewer-${id}`, "width=1280,height=720");
+    const w = window.open(viewerUrl, `pano-viewer-${id}`, "width=1280,height=720,alwaysOnTop=yes");
     viewerWindowRef.current = w;
     updateNodeData(id, { viewerOpen: true });
   }, [id, nodeData.panoUrl, incomingImage, updateNodeData]);

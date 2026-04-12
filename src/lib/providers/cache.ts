@@ -1,21 +1,23 @@
 /**
  * Model Caching Utility
  *
- * Simple in-memory cache for model lists from providers.
- * Reduces API calls to external providers by caching results with TTL.
+ * Two-tier cache for model lists from providers:
+ * 1. In-memory Map (fast, lost on restart)
+ * 2. File-based JSON cache (persists across restarts, 24h TTL)
  *
  * Features:
- * - 1-hour default TTL
+ * - 24-hour default TTL
  * - Per-provider cache keys
- * - Optional search query in cache key
+ * - File persistence in .cache/models/
+ * - Optional search query in cache key (search keys are NOT file-cached)
  * - Manual invalidation support
  * - WaveSpeed schema caching (raw API schemas by model ID)
- *
- * Note: Cache is cleared on server restart (no persistence).
  */
 
 import { ProviderModel } from "./types";
 import { ProviderType } from "@/types";
+import * as fs from "fs";
+import * as path from "path";
 
 /**
  * Cache entry with data and timestamp
@@ -37,9 +39,63 @@ export interface WaveSpeedApiSchema {
 }
 
 /**
- * Default cache TTL: 1 hour
+ * Default cache TTL: 24 hours
  */
-const DEFAULT_TTL = 60 * 60 * 1000;
+const DEFAULT_TTL = 24 * 60 * 60 * 1000;
+
+/**
+ * File-based cache directory
+ */
+const FILE_CACHE_DIR = path.join(process.cwd(), ".cache", "models");
+
+/**
+ * Sanitize cache key for use as a filename
+ */
+function keyToFilename(key: string): string {
+  return key.replace(/[^a-zA-Z0-9_-]/g, "_") + ".json";
+}
+
+/**
+ * Check if a key should be file-cached (only full model lists, not searches)
+ */
+function isFileCacheable(key: string): boolean {
+  return !key.includes(":search:");
+}
+
+/**
+ * Read models from file cache
+ */
+function getFileCachedModels(key: string, ttl: number): ProviderModel[] | null {
+  if (!isFileCacheable(key)) return null;
+  try {
+    const filePath = path.join(FILE_CACHE_DIR, keyToFilename(key));
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const entry = JSON.parse(raw) as { models: ProviderModel[]; timestamp: number };
+    if (Date.now() - entry.timestamp > ttl) {
+      // Expired — remove file
+      try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+      return null;
+    }
+    return entry.models;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write models to file cache (sync for simplicity — runs server-side)
+ */
+function setFileCachedModels(key: string, models: ProviderModel[]): void {
+  if (!isFileCacheable(key)) return;
+  try {
+    fs.mkdirSync(FILE_CACHE_DIR, { recursive: true });
+    const filePath = path.join(FILE_CACHE_DIR, keyToFilename(key));
+    fs.writeFileSync(filePath, JSON.stringify({ models, timestamp: Date.now() }));
+  } catch (err) {
+    console.warn("[cache] Failed to write file cache:", err);
+  }
+}
 
 /**
  * In-memory cache storage for models
@@ -63,20 +119,24 @@ export function getCachedModels(
   key: string,
   ttl: number = DEFAULT_TTL
 ): ProviderModel[] | null {
+  // Tier 1: In-memory cache
   const entry = cache.get(key);
-
-  if (!entry) {
-    return null;
-  }
-
-  const now = Date.now();
-  if (now - entry.timestamp > ttl) {
-    // Cache expired, remove entry
+  if (entry) {
+    if (Date.now() - entry.timestamp <= ttl) {
+      return entry.data;
+    }
     cache.delete(key);
-    return null;
   }
 
-  return entry.data;
+  // Tier 2: File-based cache (survives server restarts)
+  const fileModels = getFileCachedModels(key, ttl);
+  if (fileModels) {
+    // Promote to in-memory cache for faster subsequent reads
+    cache.set(key, { data: fileModels, timestamp: Date.now() });
+    return fileModels;
+  }
+
+  return null;
 }
 
 /**
@@ -90,6 +150,8 @@ export function setCachedModels(key: string, models: ProviderModel[]): void {
     data: models,
     timestamp: Date.now(),
   });
+  // Persist to file for survival across server restarts
+  setFileCachedModels(key, models);
 }
 
 /**
@@ -100,8 +162,25 @@ export function setCachedModels(key: string, models: ProviderModel[]): void {
 export function invalidateCache(key?: string): void {
   if (key) {
     cache.delete(key);
+    // Also remove file cache
+    if (isFileCacheable(key)) {
+      try {
+        const filePath = path.join(FILE_CACHE_DIR, keyToFilename(key));
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      } catch { /* ignore */ }
+    }
   } else {
     cache.clear();
+    // Clear all file caches
+    try {
+      if (fs.existsSync(FILE_CACHE_DIR)) {
+        for (const f of fs.readdirSync(FILE_CACHE_DIR)) {
+          if (f.endsWith(".json")) {
+            try { fs.unlinkSync(path.join(FILE_CACHE_DIR, f)); } catch { /* ignore */ }
+          }
+        }
+      }
+    } catch { /* ignore */ }
   }
 }
 

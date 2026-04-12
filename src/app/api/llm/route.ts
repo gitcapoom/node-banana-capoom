@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { LLMGenerateRequest, LLMGenerateResponse, LLMModelType } from "@/types";
 import { logger } from "@/utils/logger";
+import { compressImage } from "@/app/api/generate/utils/imageCompression";
 
 export const maxDuration = 60; // 1 minute timeout
 
@@ -227,7 +228,17 @@ async function generateWithAnthropic(
   const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
 
   if (images && images.length > 0) {
-    for (const img of images) {
+    const ANTHROPIC_IMAGE_LIMIT = 5 * 1024 * 1024; // 5 MB
+
+    for (let img of images) {
+      // Proactively compress images that exceed Anthropic's 5MB limit
+      const rawMatch = img.match(/^data:(.+?);base64,(.+)$/);
+      const rawSize = rawMatch ? Math.ceil(rawMatch[2].length * 3 / 4) : 0;
+      if (rawSize > ANTHROPIC_IMAGE_LIMIT) {
+        console.log(`[LLM] Image ${(rawSize / 1024 / 1024).toFixed(1)}MB exceeds 5MB limit, compressing...`);
+        img = await compressImage(img);
+      }
+
       const matches = img.match(/^data:(.+?);base64,(.+)$/);
       const base64Data = matches ? matches[2] : img;
       let mediaType = matches ? matches[1] : "image/png";

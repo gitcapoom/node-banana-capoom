@@ -330,6 +330,91 @@ interface ClipboardData {
   edges: WorkflowEdge[];
 }
 
+// Snapshot for undo/redo history
+interface WorkflowSnapshot {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  groups: Record<string, NodeGroup>;
+  edgeStyle: EdgeStyle;
+}
+
+const UNDO_STACK_MAX = 15;
+const UNDO_DEBOUNCE_MS = 500;
+
+/** Fields to KEEP in undo snapshots — only small, user-editable data */
+const UNDO_KEEP_FIELDS = new Set([
+  // Core identity
+  "type", "label", "comment",
+  // Model selection
+  "model", "selectedModel", "provider",
+  // Prompts (usually <5KB)
+  "inputPrompt", "negativePrompt", "prompt",
+  // Settings (small values)
+  "aspectRatio", "resolution", "parameters", "parametersExpanded",
+  "useGoogleSearch", "useImageSearch", "quality",
+  // Status (for display, tiny)
+  "status", "error",
+  // Selection indices (numbers)
+  "selectedHistoryIndex", "selectedVideoHistoryIndex", "selectedModel3dHistoryIndex", "selectedAudioHistoryIndex",
+  // Node-specific small fields
+  "text", "filename", "spzUrl", "worldId", "worldName", "url",
+  "switches", "rules", "evaluationPaused", "matchMode",
+  "inputType", "viewerOpen", "viewerWindowOpen",
+  "sensorIndex", "lensIndex", "aspectIndex",
+  "duration", "seed",
+]);
+
+/** Create a minimal snapshot of a node — only positions + small data fields */
+function snapshotNode(node: WorkflowNode): WorkflowNode {
+  const d = node.data as Record<string, unknown>;
+  const minimal: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(d)) {
+    if (UNDO_KEEP_FIELDS.has(k)) {
+      minimal[k] = v;
+    }
+  }
+  return {
+    id: node.id,
+    type: node.type,
+    position: { ...node.position },
+    data: minimal as WorkflowNodeData,
+    ...(node.style ? { style: { ...node.style } } : {}),
+    ...(node.groupId !== undefined ? { groupId: node.groupId } : {}),
+  } as WorkflowNode;
+}
+
+/**
+ * Cache of full node data for recently deleted nodes.
+ * When a node is removed, its complete data is saved here so undo can restore it fully.
+ * Bounded: only holds nodes deleted since the oldest undo stack entry.
+ */
+const deletedNodesCache = new Map<string, WorkflowNode>();
+
+/** Merge snapshot back with current live nodes. Snapshot fields overwrite,
+ *  all other fields (images, history, etc.) are kept from current state. */
+function mergeSnapshotWithLive(snapshotNodes: WorkflowNode[], currentNodes: WorkflowNode[]): WorkflowNode[] {
+  const currentMap = new Map(currentNodes.map(n => [n.id, n]));
+  return snapshotNodes.map(sNode => {
+    const cNode = currentMap.get(sNode.id) || deletedNodesCache.get(sNode.id);
+    if (!cNode) {
+      // Node not in current state or cache — restore with only snapshot data
+      return sNode;
+    }
+    // Start with current node (has all live data: images, history, etc.)
+    // Overwrite with snapshot fields (position, settings, prompts)
+    return {
+      ...cNode,
+      position: sNode.position,
+      style: sNode.style ?? cNode.style,
+      groupId: (sNode as WorkflowNode & { groupId?: string }).groupId,
+      data: {
+        ...(cNode.data as Record<string, unknown>),
+        ...(sNode.data as Record<string, unknown>),
+      } as WorkflowNodeData,
+    } as WorkflowNode;
+  });
+}
+
 interface WorkflowStore {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
@@ -356,6 +441,7 @@ interface WorkflowStore {
   // Copy/Paste operations
   copySelectedNodes: () => void;
   pasteNodes: (offset?: XYPosition) => void;
+  pasteNodesWithInputs: (offset?: XYPosition) => void;
   clearClipboard: () => void;
 
   // Group operations
@@ -492,6 +578,18 @@ interface WorkflowStore {
   revertToSnapshot: () => void;
   clearSnapshot: () => void;
   incrementManualChangeCount: () => void;
+
+  // Undo/Redo state
+  undoStack: WorkflowSnapshot[];
+  redoStack: WorkflowSnapshot[];
+  _lastSnapshotTime: number;
+
+  // Undo/Redo actions
+  pushUndoSnapshot: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
   applyEditOperations: (operations: EditOperation[]) => { applied: number; skipped: string[] };
 
   // Canvas navigation settings state
@@ -631,6 +729,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   previousWorkflowSnapshot: null,
   manualChangeCount: 0,
 
+  // Undo/Redo initial state
+  undoStack: [],
+  redoStack: [],
+  _lastSnapshotTime: 0,
+
   // Canvas navigation settings initial state
   canvasNavigationSettings: getCanvasNavigationSettings(),
 
@@ -668,6 +771,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   addNode: (type: NodeType, position: XYPosition, initialData?: Partial<WorkflowNodeData>) => {
+    get().pushUndoSnapshot();
     const id = `${type}-${++nodeIdCounter}`;
 
     const { width, height } = defaultNodeDimensions[type];
@@ -697,6 +801,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => {
+    // Only snapshot for user-initiated data changes, not generation outputs/status
+    const skipUndoKeys = new Set(["status", "error", "outputImage", "outputImageRef", "outputVideo", "outputVideoRef", "output3dUrl", "outputAudio", "imageHistory", "videoHistory", "model3dHistory", "audioHistory", "selectedHistoryIndex", "thumbnailImage", "viewerOpen", "viewerWindowOpen", "isProcessing"]);
+    const isUserChange = Object.keys(data).some(k => !skipUndoKeys.has(k));
+    if (isUserChange) get().pushUndoSnapshot();
     const node = get().nodes.find((n) => n.id === nodeId);
     set((state) => ({
       nodes: state.nodes.map((node) =>
@@ -716,6 +824,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   removeNode: (nodeId: string) => {
+    // Cache full node data before deletion so undo can restore it
+    const nodeToDelete = get().nodes.find(n => n.id === nodeId);
+    if (nodeToDelete) deletedNodesCache.set(nodeId, nodeToDelete);
+    get().pushUndoSnapshot();
     set((state) => ({
       nodes: state.nodes.filter((node) => node.id !== nodeId),
       edges: state.edges.filter(
@@ -734,6 +846,17 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // Track manual changes only for remove operations (not position/selection/dimensions)
     const hasRemoveChange = changes.some((c) => c.type === "remove");
 
+    // Cache full data of nodes being deleted (for undo restore)
+    if (hasRemoveChange) {
+      const removeIds = new Set(changes.filter(c => c.type === "remove").map(c => c.id));
+      for (const node of get().nodes) {
+        if (removeIds.has(node.id)) deletedNodesCache.set(node.id, node);
+      }
+    }
+
+    // Snapshot for meaningful changes (position moves, removes)
+    if (hasMeaningfulChange) get().pushUndoSnapshot();
+
     set((state) => ({
       nodes: applyNodeChanges(changes, state.nodes),
       ...(hasMeaningfulChange ? { hasUnsavedChanges: true } : {}),
@@ -747,6 +870,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   onEdgesChange: (changes: EdgeChange<WorkflowEdge>[]) => {
     // Only mark as unsaved for meaningful changes (not selection changes)
     const hasMeaningfulChange = changes.some((c) => c.type !== "select");
+    if (hasMeaningfulChange) get().pushUndoSnapshot();
     // Track manual changes only for remove operations (not selection)
     const hasRemoveChange = changes.some((c) => c.type === "remove");
     const hasAddOrRemove = changes.some((c) => c.type === "add" || c.type === "remove");
@@ -777,6 +901,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   onConnect: (connection: Connection, edgeDataOverrides?: Record<string, unknown>) => {
+    get().pushUndoSnapshot();
     set((state) => {
       const baseData = buildConnectionEdgeData(connection, state.nodes, state.edges);
       const newEdge = {
@@ -795,6 +920,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   addEdgeWithType: (connection: Connection, edgeType: string, edgeDataOverrides?: Record<string, unknown>) => {
+    get().pushUndoSnapshot();
     set((state) => {
       const baseData = buildConnectionEdgeData(connection, state.nodes, state.edges);
       const newEdge = {
@@ -811,6 +937,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   removeEdge: (edgeId: string) => {
+    get().pushUndoSnapshot();
     const removedEdge = get().edges.find((e) => e.id === edgeId);
     set((state) => ({
       edges: state.edges.filter((edge) => edge.id !== edgeId),
@@ -821,6 +948,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   toggleEdgePause: (edgeId: string) => {
+    get().pushUndoSnapshot();
     set((state) => ({
       edges: state.edges.map((edge) =>
         edge.id === edgeId
@@ -852,6 +980,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   pasteNodes: (offset: XYPosition = { x: 50, y: 50 }) => {
+    get().pushUndoSnapshot();
     const { clipboard, nodes, edges } = get();
 
     if (!clipboard || clipboard.nodes.length === 0) return;
@@ -926,12 +1055,99 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     });
   },
 
+  pasteNodesWithInputs: (offset: XYPosition = { x: 50, y: 50 }) => {
+    get().pushUndoSnapshot();
+    const { clipboard, nodes, edges } = get();
+
+    if (!clipboard || clipboard.nodes.length === 0) return;
+
+    // Create ID mapping: old → new
+    const idMapping = new Map<string, string>();
+    clipboard.nodes.forEach((node) => {
+      const newId = `${node.type}-${++nodeIdCounter}`;
+      idMapping.set(node.id, newId);
+    });
+
+    const clipboardNodeIds = new Set(clipboard.nodes.map(n => n.id));
+
+    // Create new nodes with updated IDs and offset positions
+    const newNodes: WorkflowNode[] = clipboard.nodes.map((node) => {
+      const defaults = defaultNodeDimensions[node.type as NodeType] || { width: 300, height: 280 };
+      const clonedData = JSON.parse(JSON.stringify(node.data));
+      const cleanedData = stripGenerationOutputs(node.type as string, clonedData);
+
+      return {
+        ...node,
+        id: idMapping.get(node.id)!,
+        position: {
+          x: node.position.x + offset.x,
+          y: node.position.y + offset.y,
+        },
+        selected: true,
+        style: { width: node.style?.width ?? defaults.width, height: defaults.height },
+        width: undefined,
+        height: undefined,
+        measured: undefined,
+        data: cleanedData,
+      };
+    });
+
+    // Internal edges (between pasted nodes) — remap both source and target
+    const internalEdges: WorkflowEdge[] = clipboard.edges.map((edge) => ({
+      ...edge,
+      id: `edge-${idMapping.get(edge.source)}-${idMapping.get(edge.target)}-${edge.sourceHandle || "default"}-${edge.targetHandle || "default"}`,
+      source: idMapping.get(edge.source)!,
+      target: idMapping.get(edge.target)!,
+    }));
+
+    // Input edges — edges from EXTERNAL source nodes INTO the copied nodes.
+    // Keep the original source, remap the target to the new node ID.
+    const inputEdges: WorkflowEdge[] = [];
+    for (const edge of edges) {
+      if (clipboardNodeIds.has(edge.target) && !clipboardNodeIds.has(edge.source)) {
+        const newTargetId = idMapping.get(edge.target);
+        if (newTargetId) {
+          inputEdges.push({
+            ...edge,
+            id: `edge-${edge.source}-${newTargetId}-${edge.sourceHandle || "default"}-${edge.targetHandle || "default"}`,
+            target: newTargetId,
+          });
+        }
+      }
+    }
+
+    // Deselect existing nodes
+    const updatedNodes = nodes.map((node) => ({
+      ...node,
+      selected: false,
+    }));
+
+    set({
+      nodes: [...updatedNodes, ...newNodes] as WorkflowNode[],
+      edges: [...edges, ...internalEdges, ...inputEdges],
+      hasUnsavedChanges: true,
+    });
+
+    // Fix selection race condition
+    const newNodeIdSet = new Set(newNodes.map(n => n.id));
+    requestAnimationFrame(() => {
+      const currentNodes = get().nodes;
+      const selectionChanges: NodeChange<WorkflowNode>[] = currentNodes.map(n => ({
+        type: 'select' as const,
+        id: n.id,
+        selected: newNodeIdSet.has(n.id),
+      }));
+      get().onNodesChange(selectionChanges);
+    });
+  },
+
   clearClipboard: () => {
     set({ clipboard: null });
   },
 
   // Group operations
   createGroup: (nodeIds: string[]) => {
+    get().pushUndoSnapshot();
     const { nodes, groups } = get();
 
     if (nodeIds.length === 0) return "";
@@ -999,6 +1215,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   deleteGroup: (groupId: string) => {
+    get().pushUndoSnapshot();
     set((state) => {
       const { [groupId]: _, ...remainingGroups } = state.groups;
       return {
@@ -1012,6 +1229,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   addNodesToGroup: (nodeIds: string[], groupId: string) => {
+    get().pushUndoSnapshot();
     set((state) => ({
       nodes: state.nodes.map((node) =>
         nodeIds.includes(node.id) ? { ...node, groupId } : node
@@ -1021,6 +1239,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   removeNodesFromGroup: (nodeIds: string[]) => {
+    get().pushUndoSnapshot();
     set((state) => ({
       nodes: state.nodes.map((node) =>
         nodeIds.includes(node.id) ? { ...node, groupId: undefined } : node
@@ -1030,6 +1249,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   updateGroup: (groupId: string, updates: Partial<NodeGroup>) => {
+    get().pushUndoSnapshot();
     set((state) => ({
       groups: {
         ...state.groups,
@@ -1830,6 +2050,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   loadWorkflow: async (workflow: WorkflowFile, workflowPath?: string, options?: { preserveSnapshot?: boolean }) => {
+    // Free old workflow data before loading new one to reduce peak memory
+    deletedNodesCache.clear();
+    pendingImageSyncs.clear();
+    set({ nodes: [], edges: [], undoStack: [], redoStack: [], groups: {} });
+
     // Update nodeIdCounter to avoid ID collisions
     const maxNodeId = workflow.nodes.reduce((max, node) => {
       const match = node.id.match(/-(\d+)$/);
@@ -2011,9 +2236,14 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       useExternalImageStorage: savedConfig?.useExternalImageStorage ?? true,
       // Reset viewed comments when loading new workflow
       viewedCommentNodeIds: new Set<string>(),
+      // Clear undo/redo stacks for fresh workflow
+      undoStack: [],
+      redoStack: [],
+      _lastSnapshotTime: Date.now() + 3000, // Suppress snapshots for 3s after load
       // Dismiss welcome modal after loading a workflow
       showQuickstart: false,
     });
+    deletedNodesCache.clear();
 
     // Post-load: restore 3D models in GLB viewers with stale blob URLs
     // Blob URLs (blob:http://...) are ephemeral and become invalid after page reload.
@@ -2290,7 +2520,13 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       viewedCommentNodeIds: new Set<string>(),
       // Reset dimmed nodes
       dimmedNodeIds: new Set<string>(),
+      // Clear undo/redo stacks
+      undoStack: [],
+      redoStack: [],
+      _lastSnapshotTime: 0,
     });
+    deletedNodesCache.clear();
+    pendingImageSyncs.clear();
     get().clearSnapshot();
   },
 
@@ -2791,6 +3027,105 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       set({ manualChangeCount: newCount });
     }
   },
+
+  // ─── Undo/Redo ─────────────────────────────────────────────────
+
+  pushUndoSnapshot: () => {
+    const now = Date.now();
+    const state = get();
+    // Debounce: skip if too recent (e.g., rapid node dragging)
+    if (now - state._lastSnapshotTime < UNDO_DEBOUNCE_MS) return;
+    // Don't snapshot during execution
+    if (state.isRunning) return;
+
+    try {
+      // Create minimal snapshot — only positions + small user-editable fields
+      const minimalNodes = state.nodes.map(snapshotNode);
+      const snapshot: WorkflowSnapshot = {
+        nodes: JSON.parse(JSON.stringify(minimalNodes)),
+        edges: JSON.parse(JSON.stringify(state.edges)),
+        groups: JSON.parse(JSON.stringify(state.groups)),
+        edgeStyle: state.edgeStyle,
+      };
+
+      const stack = [...state.undoStack, snapshot];
+      if (stack.length > UNDO_STACK_MAX) stack.shift();
+
+      set({
+        undoStack: stack,
+        redoStack: [],
+        _lastSnapshotTime: now,
+      });
+    } catch (e) {
+      // If serialization fails (e.g., too large), silently skip this snapshot
+      console.warn("[undo] Snapshot skipped — serialization failed:", e);
+    }
+  },
+
+  undo: () => {
+    const state = get();
+    if (state.undoStack.length === 0) return;
+    if (state.isRunning) return;
+
+    // Save current state to redo stack (minimal)
+    const lightNodes = state.nodes.map(snapshotNode);
+    const current: WorkflowSnapshot = {
+      nodes: JSON.parse(JSON.stringify(lightNodes)),
+      edges: JSON.parse(JSON.stringify(state.edges)),
+      groups: JSON.parse(JSON.stringify(state.groups)),
+      edgeStyle: state.edgeStyle,
+    };
+
+    const newUndoStack = [...state.undoStack];
+    const restored = newUndoStack.pop()!;
+
+    // Merge back large data from current nodes
+    const mergedNodes = mergeSnapshotWithLive(restored.nodes, state.nodes);
+
+    set({
+      nodes: mergedNodes,
+      edges: restored.edges,
+      groups: restored.groups,
+      edgeStyle: restored.edgeStyle,
+      undoStack: newUndoStack,
+      redoStack: [...state.redoStack, current],
+      hasUnsavedChanges: true,
+      _lastSnapshotTime: Date.now(),
+    });
+  },
+
+  redo: () => {
+    const state = get();
+    if (state.redoStack.length === 0) return;
+    if (state.isRunning) return;
+
+    const lightNodes = state.nodes.map(snapshotNode);
+    const current: WorkflowSnapshot = {
+      nodes: JSON.parse(JSON.stringify(lightNodes)),
+      edges: JSON.parse(JSON.stringify(state.edges)),
+      groups: JSON.parse(JSON.stringify(state.groups)),
+      edgeStyle: state.edgeStyle,
+    };
+
+    const newRedoStack = [...state.redoStack];
+    const restored = newRedoStack.pop()!;
+
+    const mergedNodes = mergeSnapshotWithLive(restored.nodes, state.nodes);
+
+    set({
+      nodes: mergedNodes,
+      edges: restored.edges,
+      groups: restored.groups,
+      edgeStyle: restored.edgeStyle,
+      undoStack: [...state.undoStack, current],
+      redoStack: newRedoStack,
+      hasUnsavedChanges: true,
+      _lastSnapshotTime: Date.now(),
+    });
+  },
+
+  canUndo: () => get().undoStack.length > 0,
+  canRedo: () => get().redoStack.length > 0,
 
   applyEditOperations: (operations) => {
     const state = get();

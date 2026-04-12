@@ -161,7 +161,7 @@ const falProvider: ProviderInterface = {
     try {
       // Fetch all active models, filter client-side
       // Note: fal.ai API only accepts single category param, so we fetch all and filter
-      const url = `${FAL_API_BASE}/models?status=active`;
+      const url = `${FAL_API_BASE}/models`;
       const response = await fetch(url, {
         headers: buildHeaders(apiKey),
       });
@@ -186,7 +186,7 @@ const falProvider: ProviderInterface = {
     try {
       // Search with query, filter client-side
       // Note: fal.ai API only accepts single category param, so we fetch all and filter
-      const url = `${FAL_API_BASE}/models?q=${encodeURIComponent(query)}&status=active`;
+      const url = `${FAL_API_BASE}/models?q=${encodeURIComponent(query)}`;
       const response = await fetch(url, {
         headers: buildHeaders(apiKey),
       });

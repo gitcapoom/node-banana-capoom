@@ -15,6 +15,7 @@ import {
   Node,
   OnSelectionChangeParams,
   ViewportPortal,
+  reconnectEdge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -306,6 +307,8 @@ const findScrollableAncestor = (target: HTMLElement, deltaX: number, deltaY: num
 
 /** Shared ref so child components (BaseNode) can check panning state without re-rendering */
 export const isPanningRef = { current: false };
+// Track last mouse screen position for paste-at-cursor
+const lastMouseScreenPos = { x: 0, y: 0 };
 
 export function WorkflowCanvas() {
   const { nodes, edges, groups, isModalOpen, showQuickstart, navigationTarget, canvasNavigationSettings, dimmedNodeIds } =
@@ -339,6 +342,8 @@ export function WorkflowCanvas() {
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const clearWorkflow = useWorkflowStore((state) => state.clearWorkflow);
   const setHoveredNodeId = useWorkflowStore((state) => state.setHoveredNodeId);
+  const undo = useWorkflowStore((state) => state.undo);
+  const redo = useWorkflowStore((state) => state.redo);
   const openAnnotationModal = useAnnotationStore((state) => state.openModal);
   const { screenToFlowPosition, getViewport, zoomIn, zoomOut, setViewport, setCenter } = useReactFlow();
   const { show: showToast } = useToast();
@@ -769,6 +774,52 @@ export function WorkflowCanvas() {
       }
     },
     [onConnect, nodes, edges]
+  );
+
+  // Handle edge reconnection — when one edge is moved, also move ALL sibling
+  // edges from the same handle. This lets you reconnect an entire pin at once.
+  const handleReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      if (!isValidConnection(newConnection)) return;
+
+      const store = useWorkflowStore.getState();
+      store.pushUndoSnapshot();
+
+      // Determine which end was moved by comparing old vs new
+      const sourceChanged = oldEdge.source !== newConnection.source || oldEdge.sourceHandle !== newConnection.sourceHandle;
+      const targetChanged = oldEdge.target !== newConnection.target || oldEdge.targetHandle !== newConnection.targetHandle;
+
+      // Find sibling edges on the same old handle
+      const siblings = store.edges.filter(e => {
+        if (e.id === oldEdge.id) return false;
+        if (sourceChanged) {
+          return e.source === oldEdge.source && e.sourceHandle === oldEdge.sourceHandle;
+        }
+        if (targetChanged) {
+          return e.target === oldEdge.target && e.targetHandle === oldEdge.targetHandle;
+        }
+        return false;
+      });
+
+      // Reconnect the dragged edge
+      let newEdges = reconnectEdge(oldEdge, newConnection, store.edges);
+
+      // Reconnect siblings to the same new endpoint
+      for (const sibling of siblings) {
+        const sibConn: Connection = {
+          source: sourceChanged ? newConnection.source : sibling.source,
+          sourceHandle: sourceChanged ? newConnection.sourceHandle : sibling.sourceHandle,
+          target: targetChanged ? newConnection.target : sibling.target,
+          targetHandle: targetChanged ? newConnection.targetHandle : sibling.targetHandle,
+        };
+        if (isValidConnection(sibConn)) {
+          newEdges = reconnectEdge(sibling, sibConn, newEdges);
+        }
+      }
+
+      useWorkflowStore.setState({ edges: newEdges, hasUnsavedChanges: true });
+    },
+    [isValidConnection]
   );
 
   // Handle connection dropped on empty space or on a node
@@ -1382,6 +1433,7 @@ export function WorkflowCanvas() {
   // Get copy/paste functions and clipboard from store
   const copySelectedNodes = useWorkflowStore((state) => state.copySelectedNodes);
   const pasteNodes = useWorkflowStore((state) => state.pasteNodes);
+  const pasteNodesWithInputs = useWorkflowStore((state) => state.pasteNodesWithInputs);
   const clearClipboard = useWorkflowStore((state) => state.clearClipboard);
   const clipboard = useWorkflowStore((state) => state.clipboard);
 
@@ -1474,6 +1526,20 @@ export function WorkflowCanvas() {
     if (event.key === "?" && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
       setShortcutsDialogOpen(true);
+      return;
+    }
+
+    // Handle undo (Ctrl/Cmd + Z)
+    if ((event.ctrlKey || event.metaKey) && event.key === "z" && !event.shiftKey) {
+      event.preventDefault();
+      undo();
+      return;
+    }
+
+    // Handle redo (Ctrl/Cmd + Y or Ctrl/Cmd + Shift + Z)
+    if ((event.ctrlKey || event.metaKey) && (event.key === "y" || (event.shiftKey && event.key === "Z"))) {
+      event.preventDefault();
+      redo();
       return;
     }
 
@@ -1581,13 +1647,38 @@ export function WorkflowCanvas() {
         }
       }
 
+      // Helper: calculate paste offset to place nodes at mouse cursor
+      const getPasteOffsetAtMouse = () => {
+        if (!clipboard || clipboard.nodes.length === 0) return { x: 50, y: 50 };
+        const flowPos = screenToFlowPosition({ x: lastMouseScreenPos.x, y: lastMouseScreenPos.y });
+        // Center the pasted group at mouse: use the bounding box center of clipboard nodes
+        const minX = Math.min(...clipboard.nodes.map(n => n.position.x));
+        const minY = Math.min(...clipboard.nodes.map(n => n.position.y));
+        const maxX = Math.max(...clipboard.nodes.map(n => n.position.x + ((n.style?.width as number) || 200)));
+        const maxY = Math.max(...clipboard.nodes.map(n => n.position.y + ((n.style?.height as number) || 150)));
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        return { x: flowPos.x - centerX, y: flowPos.y - centerY };
+      };
+
+      // Handle paste with input connections (Ctrl/Cmd + Shift + V)
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === "V") {
+        event.preventDefault();
+        if (clipboard && clipboard.nodes.length > 0) {
+          pasteNodesWithInputs(getPasteOffsetAtMouse());
+          clearClipboard();
+          return;
+        }
+        return;
+      }
+
       // Handle paste (Ctrl/Cmd + V)
       if ((event.ctrlKey || event.metaKey) && event.key === "v") {
         event.preventDefault();
 
         // If we have nodes in the internal clipboard, prioritize pasting those
         if (clipboard && clipboard.nodes.length > 0) {
-          pasteNodes();
+          pasteNodes(getPasteOffsetAtMouse());
           clearClipboard(); // Clear so next paste uses system clipboard
           return;
         }
@@ -1751,11 +1842,19 @@ export function WorkflowCanvas() {
           ]);
         });
       }
-  }, [nodes, onNodesChange, copySelectedNodes, pasteNodes, clearClipboard, clipboard, getViewport, addNode, updateNodeData, executeWorkflow, setShortcutsDialogOpen]);
+  }, [nodes, onNodesChange, copySelectedNodes, pasteNodes, pasteNodesWithInputs, clearClipboard, clipboard, getViewport, addNode, updateNodeData, executeWorkflow, setShortcutsDialogOpen, undo, redo]);
 
   useEffect(() => {
+    const trackMouse = (e: MouseEvent) => {
+      lastMouseScreenPos.x = e.clientX;
+      lastMouseScreenPos.y = e.clientY;
+    };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("mousemove", trackMouse);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("mousemove", trackMouse);
+    };
   }, [handleKeyDown]);
 
 
@@ -2131,6 +2230,8 @@ export function WorkflowCanvas() {
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}
         onConnectEnd={handleConnectEnd}
+        onReconnect={handleReconnect}
+        edgesReconnectable={!isModalOpen}
         onMoveStart={() => { isPanningRef.current = true; setHoveredNodeId(null); }}
         onMoveEnd={() => { isPanningRef.current = false; }}
         onNodeDragStop={handleNodeDragStop}

@@ -170,7 +170,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     });
 
     const viewerUrl = `/viewer?${params.toString()}`;
-    const w = window.open(viewerUrl, `spz-viewer-${id}`, "width=1280,height=720");
+    const w = window.open(viewerUrl, `spz-viewer-${id}`, "width=1280,height=720,alwaysOnTop=yes");
     viewerWindowRef.current = w;
     updateNodeData(id, { viewerOpen: true });
   }, [id, nodeData.spzUrl, nodeData.filename, updateNodeData]);

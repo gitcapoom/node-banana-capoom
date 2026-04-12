@@ -136,7 +136,7 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
     });
 
     const viewerUrl = `/viewer?${params.toString()}`;
-    const w = window.open(viewerUrl, `worldlabs-viewer-${nodeData.worldId}`, "width=1280,height=720");
+    const w = window.open(viewerUrl, `worldlabs-viewer-${nodeData.worldId}`, "width=1280,height=720,alwaysOnTop=yes");
     viewerWindowRef.current = w;
     updateNodeData(id, { viewerWindowOpen: true });
   }, [id, nodeData.worldId, nodeData.worldName, nodeData.spzUrls, updateNodeData]);

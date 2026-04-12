@@ -107,6 +107,20 @@ export default function ViewerPage({
     }
   }, [navMode]);
 
+  // Always-on-top: re-focus viewer popup when it loses focus
+  useEffect(() => {
+    if (!window.opener) return;
+    let refocusTimer: ReturnType<typeof setTimeout> | null = null;
+    const handleBlurRefocus = () => {
+      refocusTimer = setTimeout(() => { window.focus(); }, 150);
+    };
+    window.addEventListener("blur", handleBlurRefocus);
+    return () => {
+      window.removeEventListener("blur", handleBlurRefocus);
+      if (refocusTimer) clearTimeout(refocusTimer);
+    };
+  }, []);
+
   // Read world name from URL params
   const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const worldName = searchParams?.get("name") || "Untitled World";

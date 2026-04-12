@@ -13,14 +13,16 @@ export interface VideoExportOptions {
   mode: "rgb" | "depth" | "both";
   resolution: { width: number; height: number };
   bitrate?: number;
-  /** Function that renders a depth frame and returns ImageData. Provided by page.tsx. */
+  /** Renders a depth frame. If globalRange is provided, normalizes using that range.
+   *  If globalRange is null, returns {min, max} for scanning (ImageData will be null). */
   captureDepthFrame?: (
     renderer: THREE.WebGLRenderer,
     scene: THREE.Scene,
     camera: THREE.PerspectiveCamera,
     width: number,
-    height: number
-  ) => ImageData | null;
+    height: number,
+    globalRange?: { min: number; max: number }
+  ) => { imageData: ImageData | null; min: number; max: number } | null;
   onProgress?: (frame: number, totalFrames: number) => void;
 }
 
@@ -31,7 +33,7 @@ export interface VideoExportResult {
 
 // ─── Constants ──────────────────────────────────────────────────
 
-const DEFAULT_BITRATE = 20_000_000; // 20 Mbps for high quality H264
+const DEFAULT_BITRATE = 20_000_000; // 20 Mbps
 
 // ─── Capability check ───────────────────────────────────────────
 
@@ -44,27 +46,102 @@ function hasWebCodecs(): boolean {
 export async function exportVideo(
   opts: VideoExportOptions
 ): Promise<VideoExportResult> {
-  if (hasWebCodecs()) {
-    return exportVideoWebCodecs(opts);
+  const webcodecs = hasWebCodecs();
+  console.log(`[VideoExport] WebCodecs available: ${webcodecs}`);
+  if (webcodecs) {
+    try {
+      return await exportVideoWebCodecs(opts);
+    } catch (e) {
+      console.warn("[VideoExport] WebCodecs failed, falling back to MediaRecorder:", e);
+    }
   }
   return exportVideoMediaRecorder(opts);
 }
 
-// ─── WebCodecs-based export (mediabunny) ────────────────────────
+// ─── WebCodecs + mp4-muxer export ──────────────────────────────
+
+/**
+ * Encode a sequence of ImageData frames into an MP4 blob using raw
+ * WebCodecs VideoEncoder + mp4-muxer. This gives us full, exact control
+ * over timestamps — no mediabunny wall-clock timing issues.
+ */
+async function encodeFramesToMp4(
+  frames: ImageData[],
+  width: number,
+  height: number,
+  fps: number,
+  bitrate: number
+): Promise<Blob> {
+  const { Muxer, ArrayBufferTarget } = await import("mp4-muxer");
+
+  console.log(`[VideoExport] encodeFramesToMp4: ${frames.length} frames, ${width}x${height}, ${fps}fps, ${bitrate}bps`);
+  const frameDurationUs = Math.round(1_000_000 / fps);
+
+  const target = new ArrayBufferTarget();
+  const muxer = new Muxer({
+    target,
+    video: {
+      codec: "avc",
+      width,
+      height,
+    },
+    fastStart: "in-memory",
+  });
+
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => {
+      muxer.addVideoChunk(chunk, meta);
+    },
+    error: (e) => {
+      console.error("[VideoExport] Encoder error:", e);
+    },
+  });
+
+  encoder.configure({
+    codec: "avc1.640028", // H.264 High Level 4.0
+    width,
+    height,
+    bitrate,
+    framerate: fps,
+    latencyMode: "quality",
+    avc: { format: "avc" },
+  });
+
+  // Canvas for converting ImageData → VideoFrame
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d")!;
+
+  for (let i = 0; i < frames.length; i++) {
+    ctx.putImageData(frames[i], 0, 0);
+
+    const timestampUs = i * frameDurationUs;
+    const vf = new VideoFrame(canvas, {
+      timestamp: timestampUs,
+      duration: frameDurationUs,
+    });
+
+    const keyFrame = i % (fps * 2) === 0; // keyframe every 2 seconds
+    encoder.encode(vf, { keyFrame });
+    vf.close();
+
+    // Yield occasionally to avoid blocking
+    if (i % 10 === 0) {
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+
+  await encoder.flush();
+  encoder.close();
+  muxer.finalize();
+
+  return new Blob([target.buffer], { type: "video/mp4" });
+}
 
 async function exportVideoWebCodecs(
   opts: VideoExportOptions
 ): Promise<VideoExportResult> {
-  const {
-    Output,
-    VideoSample,
-    VideoSampleSource,
-    BufferTarget,
-    Mp4OutputFormat,
-  } = await import("mediabunny");
-  const { createAvcEncodingConfig, AVC_LEVEL_4_0, AVC_LEVEL_5_1 } = await import("@/lib/video-encoding");
-  const { BASELINE_PIXEL_LIMIT } = await import("@/lib/video-probing");
-
   const {
     renderer, scene, camera, path, mode, resolution,
     bitrate = DEFAULT_BITRATE, captureDepthFrame, onProgress,
@@ -79,10 +156,6 @@ async function exportVideoWebCodecs(
     throw new Error("Need at least 2 keyframes and > 0 frames to export video");
   }
 
-  const codecProfile =
-    width * height > BASELINE_PIXEL_LIMIT ? AVC_LEVEL_5_1 : AVC_LEVEL_4_0;
-  const resolvedBitrate = Math.max(1, Math.floor(bitrate));
-
   const renderTarget = new THREE.WebGLRenderTarget(width, height, {
     format: THREE.RGBAFormat,
     type: THREE.UnsignedByteType,
@@ -95,49 +168,44 @@ async function exportVideoWebCodecs(
   const origSize = renderer.getSize(new THREE.Vector2());
 
   const result: VideoExportResult = {};
+  const pixelBuf = new Uint8Array(width * height * 4);
+
+  const needRgb = mode === "rgb" || mode === "both";
+  const needDepth = (mode === "depth" || mode === "both") && !!captureDepthFrame;
 
   try {
-    let rgbSource: InstanceType<typeof VideoSampleSource> | null = null;
-    let rgbOutput: InstanceType<typeof Output> | null = null;
-    let rgbBuffer: InstanceType<typeof BufferTarget> | null = null;
+    // ── Depth scan pass: find global min/max depth range ──────
+    let globalDepthRange: { min: number; max: number } | null = null;
+    if (needDepth && captureDepthFrame) {
+      let globalMin = Infinity;
+      let globalMax = -Infinity;
+      for (let frame = 0; frame < totalFrames; frame++) {
+        const evaluated = evaluateCameraPath(path, frame);
+        if (!evaluated) continue;
+        camera.position.copy(evaluated.position);
+        camera.quaternion.copy(evaluated.quaternion);
+        camera.fov = evaluated.fov;
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
 
-    if (mode === "rgb" || mode === "both") {
-      rgbSource = new VideoSampleSource(
-        createAvcEncodingConfig(resolvedBitrate, width, height, codecProfile, fps)
-      );
-      rgbBuffer = new BufferTarget();
-      rgbOutput = new Output({
-        format: new Mp4OutputFormat({ fastStart: "in-memory" }),
-        target: rgbBuffer,
-      });
-      rgbOutput.addVideoTrack(rgbSource, { frameRate: fps });
-      await rgbOutput.start();
+        const result = captureDepthFrame(renderer, scene, camera, width, height);
+        if (result) {
+          if (result.min < globalMin) globalMin = result.min;
+          if (result.max > globalMax) globalMax = result.max;
+        }
+        onProgress?.(frame + 1, totalFrames * (needRgb ? 3 : 2));
+        if (frame % 3 === 0) await new Promise((r) => setTimeout(r, 0));
+      }
+      if (globalMin < Infinity) {
+        globalDepthRange = { min: globalMin, max: globalMax };
+      }
     }
 
-    let depthSource: InstanceType<typeof VideoSampleSource> | null = null;
-    let depthOutput: InstanceType<typeof Output> | null = null;
-    let depthBuffer: InstanceType<typeof BufferTarget> | null = null;
-
-    if ((mode === "depth" || mode === "both") && captureDepthFrame) {
-      depthSource = new VideoSampleSource(
-        createAvcEncodingConfig(resolvedBitrate, width, height, codecProfile, fps)
-      );
-      depthBuffer = new BufferTarget();
-      depthOutput = new Output({
-        format: new Mp4OutputFormat({ fastStart: "in-memory" }),
-        target: depthBuffer,
-      });
-      depthOutput.addVideoTrack(depthSource, { frameRate: fps });
-      await depthOutput.start();
-    }
-
-    const pixelBuf = new Uint8Array(width * height * 4);
-    const frameInterval = 1 / fps;
-
-    const offscreen = document.createElement("canvas");
-    offscreen.width = width;
-    offscreen.height = height;
-    const offCtx = offscreen.getContext("2d")!;
+    // ── Render pass: capture all frames ─────────────────────────
+    const rgbFrames: ImageData[] = [];
+    const depthFrames: ImageData[] = [];
+    const progressOffset = needDepth ? totalFrames : 0;
+    const progressTotal = totalFrames * (needDepth ? (needRgb ? 3 : 2) : 1);
 
     for (let frame = 0; frame < totalFrames; frame++) {
       const evaluated = evaluateCameraPath(path, frame);
@@ -149,50 +217,35 @@ async function exportVideoWebCodecs(
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
 
-      const timestampUs = Math.round(frame * frameInterval * 1_000_000);
-
-      if (rgbSource) {
+      if (needRgb) {
         renderer.setRenderTarget(renderTarget);
         renderer.render(scene, camera);
         renderer.setRenderTarget(null);
+        safeReadPixels(renderer, renderTarget, 0, 0, width, height, pixelBuf);
 
-        renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, pixelBuf);
-
-        const imageData = offCtx.createImageData(width, height);
+        const imageData = new ImageData(width, height);
         flipVerticallyInto(pixelBuf, imageData.data, width, height);
-        offCtx.putImageData(imageData, 0, 0);
-
-        const sample = new VideoSample(offscreen, { timestamp: timestampUs });
-        await rgbSource.add(sample);
-        sample.close();
+        rgbFrames.push(imageData);
       }
 
-      if (depthSource && captureDepthFrame) {
-        const depthImageData = captureDepthFrame(renderer, scene, camera, width, height);
-        if (depthImageData) {
-          offCtx.putImageData(depthImageData, 0, 0);
-          const depthSample = new VideoSample(offscreen, { timestamp: timestampUs });
-          await depthSource.add(depthSample);
-          depthSample.close();
-        }
+      if (needDepth && captureDepthFrame && globalDepthRange) {
+        const result = captureDepthFrame(renderer, scene, camera, width, height, globalDepthRange);
+        depthFrames.push(result?.imageData ?? new ImageData(width, height));
       }
 
-      onProgress?.(frame + 1, totalFrames);
-    }
+      onProgress?.(progressOffset + frame + 1, progressTotal);
 
-    if (rgbSource) await rgbSource.close();
-    if (rgbOutput) {
-      await rgbOutput.finalize();
-      if (rgbBuffer?.buffer) {
-        result.rgb = new Blob([rgbBuffer.buffer], { type: "video/mp4" });
+      if (frame % 3 === 0) {
+        await new Promise((r) => setTimeout(r, 0));
       }
     }
-    if (depthSource) await depthSource.close();
-    if (depthOutput) {
-      await depthOutput.finalize();
-      if (depthBuffer?.buffer) {
-        result.depth = new Blob([depthBuffer.buffer], { type: "video/mp4" });
-      }
+
+    // ── Pass 2: Encode to MP4 ──────────────────────────────────
+    if (needRgb && rgbFrames.length > 0) {
+      result.rgb = await encodeFramesToMp4(rgbFrames, width, height, fps, bitrate);
+    }
+    if (needDepth && depthFrames.length > 0) {
+      result.depth = await encodeFramesToMp4(depthFrames, width, height, fps, bitrate);
     }
   } finally {
     camera.position.copy(origPos);
@@ -210,10 +263,6 @@ async function exportVideoWebCodecs(
 
 // ─── MediaRecorder fallback ─────────────────────────────────────
 
-/**
- * Fallback for browsers without WebCodecs (e.g. Firefox).
- * Renders frames to a canvas, uses captureStream + MediaRecorder to encode WebM.
- */
 async function exportVideoMediaRecorder(
   opts: VideoExportOptions
 ): Promise<VideoExportResult> {
@@ -246,7 +295,6 @@ async function exportVideoMediaRecorder(
   const pixelBuf = new Uint8Array(width * height * 4);
   const frameIntervalMs = 1000 / fps;
 
-  // Create canvases for recording
   const rgbCanvas = document.createElement("canvas");
   rgbCanvas.width = width;
   rgbCanvas.height = height;
@@ -257,22 +305,15 @@ async function exportVideoMediaRecorder(
   depthCanvas.height = height;
   const depthCtx = depthCanvas.getContext("2d")!;
 
-  // Pick a supported MIME type
   const mimeType = pickRecorderMime();
 
   try {
-    // Set up recorders
     let rgbRecorder: MediaRecorder | null = null;
     let rgbChunks: Blob[] = [];
     if (mode === "rgb" || mode === "both") {
-      const stream = rgbCanvas.captureStream(0); // 0 = manual frame capture
-      rgbRecorder = new MediaRecorder(stream, {
-        mimeType,
-        videoBitsPerSecond: bitrate,
-      });
-      rgbRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) rgbChunks.push(e.data);
-      };
+      const stream = rgbCanvas.captureStream(0);
+      rgbRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate });
+      rgbRecorder.ondataavailable = (e) => { if (e.data.size > 0) rgbChunks.push(e.data); };
       rgbRecorder.start();
     }
 
@@ -280,18 +321,13 @@ async function exportVideoMediaRecorder(
     let depthChunks: Blob[] = [];
     if ((mode === "depth" || mode === "both") && captureDepthFrame) {
       const stream = depthCanvas.captureStream(0);
-      depthRecorder = new MediaRecorder(stream, {
-        mimeType,
-        videoBitsPerSecond: bitrate,
-      });
-      depthRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) depthChunks.push(e.data);
-      };
+      depthRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate });
+      depthRecorder.ondataavailable = (e) => { if (e.data.size > 0) depthChunks.push(e.data); };
       depthRecorder.start();
     }
 
-    // Frame loop
     for (let frame = 0; frame < totalFrames; frame++) {
+      const frameStart = performance.now();
       const evaluated = evaluateCameraPath(path, frame);
       if (!evaluated) continue;
 
@@ -301,27 +337,22 @@ async function exportVideoMediaRecorder(
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
 
-      // RGB frame
       if (rgbRecorder) {
         renderer.setRenderTarget(renderTarget);
         renderer.render(scene, camera);
         renderer.setRenderTarget(null);
-
-        renderer.readRenderTargetPixels(renderTarget, 0, 0, width, height, pixelBuf);
+        safeReadPixels(renderer, renderTarget, 0, 0, width, height, pixelBuf);
         const imageData = rgbCtx.createImageData(width, height);
         flipVerticallyInto(pixelBuf, imageData.data, width, height);
         rgbCtx.putImageData(imageData, 0, 0);
-
-        // Request a frame from the captureStream
         const rgbTrack = rgbRecorder.stream.getVideoTracks()[0] as MediaStreamVideoTrack & { requestFrame?: () => void };
         rgbTrack.requestFrame?.();
       }
 
-      // Depth frame
       if (depthRecorder && captureDepthFrame) {
-        const depthImageData = captureDepthFrame(renderer, scene, camera, width, height);
-        if (depthImageData) {
-          depthCtx.putImageData(depthImageData, 0, 0);
+        const depthResult = captureDepthFrame(renderer, scene, camera, width, height);
+        if (depthResult?.imageData) {
+          depthCtx.putImageData(depthResult.imageData, 0, 0);
           const depthTrack = depthRecorder.stream.getVideoTracks()[0] as MediaStreamVideoTrack & { requestFrame?: () => void };
           depthTrack.requestFrame?.();
         }
@@ -329,19 +360,16 @@ async function exportVideoMediaRecorder(
 
       onProgress?.(frame + 1, totalFrames);
 
-      // Yield to the browser to keep UI responsive
-      if (frame % 5 === 0) {
+      const elapsed = performance.now() - frameStart;
+      if (elapsed < frameIntervalMs) {
+        await new Promise((r) => setTimeout(r, frameIntervalMs - elapsed));
+      } else if (frame % 5 === 0) {
         await new Promise((r) => setTimeout(r, 0));
       }
     }
 
-    // Stop recorders and wait for data
-    if (rgbRecorder) {
-      result.rgb = await stopRecorder(rgbRecorder, rgbChunks, mimeType);
-    }
-    if (depthRecorder) {
-      result.depth = await stopRecorder(depthRecorder, depthChunks, mimeType);
-    }
+    if (rgbRecorder) result.rgb = await stopRecorder(rgbRecorder, rgbChunks, mimeType);
+    if (depthRecorder) result.depth = await stopRecorder(depthRecorder, depthChunks, mimeType);
   } finally {
     camera.position.copy(origPos);
     camera.quaternion.copy(origQuat);
@@ -358,15 +386,12 @@ async function exportVideoMediaRecorder(
 
 function stopRecorder(recorder: MediaRecorder, chunks: Blob[], mimeType: string): Promise<Blob> {
   return new Promise((resolve) => {
-    recorder.onstop = () => {
-      resolve(new Blob(chunks, { type: mimeType }));
-    };
+    recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
     recorder.stop();
   });
 }
 
 function pickRecorderMime(): string {
-  // Prefer H264 MP4, then high-quality VP9 WebM
   const candidates = [
     "video/mp4;codecs=avc1.42E01E",
     "video/mp4;codecs=avc1",
@@ -382,6 +407,18 @@ function pickRecorderMime(): string {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────
+
+/** Unbind any PIXEL_PACK_BUFFER that the splat renderer may have bound, then read pixels */
+function safeReadPixels(
+  renderer: THREE.WebGLRenderer,
+  target: THREE.WebGLRenderTarget,
+  x: number, y: number, w: number, h: number,
+  buf: Uint8Array | Float32Array
+) {
+  const gl = renderer.getContext() as WebGL2RenderingContext;
+  if (gl.PIXEL_PACK_BUFFER) gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  renderer.readRenderTargetPixels(target, x, y, w, h, buf);
+}
 
 /** Copy pixel buffer into ImageData with vertical flip (WebGL bottom-up → top-down) */
 function flipVerticallyInto(
