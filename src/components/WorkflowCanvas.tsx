@@ -808,9 +808,9 @@ export function WorkflowCanvas() {
       for (const sibling of siblings) {
         const sibConn: Connection = {
           source: sourceChanged ? newConnection.source : sibling.source,
-          sourceHandle: sourceChanged ? newConnection.sourceHandle : sibling.sourceHandle,
+          sourceHandle: (sourceChanged ? newConnection.sourceHandle : sibling.sourceHandle) ?? null,
           target: targetChanged ? newConnection.target : sibling.target,
-          targetHandle: targetChanged ? newConnection.targetHandle : sibling.targetHandle,
+          targetHandle: (targetChanged ? newConnection.targetHandle : sibling.targetHandle) ?? null,
         };
         if (isValidConnection(sibConn)) {
           newEdges = reconnectEdge(sibling, sibConn, newEdges);
