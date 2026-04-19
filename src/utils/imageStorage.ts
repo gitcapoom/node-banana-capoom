@@ -872,6 +872,41 @@ async function hydrateNodeImages(
       break;
     }
 
+    case "videoInput": {
+      const d = data as import("@/types").VideoInputNodeData;
+      let videoFile = d.videoFile;
+      let thumbnailImage = d.thumbnailImage;
+
+      if (d.videoFileRef && !d.videoFile) {
+        videoFile = await loadImageById(d.videoFileRef, workflowPath, loadedImages, "inputs");
+      }
+      if (d.thumbnailImageRef && !d.thumbnailImage) {
+        thumbnailImage = await loadImageById(d.thumbnailImageRef, workflowPath, loadedImages, "inputs");
+      }
+
+      newData = {
+        ...d,
+        videoFile,
+        thumbnailImage,
+      };
+      break;
+    }
+
+    case "audioInput": {
+      const d = data as import("@/types").AudioInputNodeData;
+      let audioFile = d.audioFile;
+
+      if (d.audioFileRef && !d.audioFile) {
+        audioFile = await loadImageById(d.audioFileRef, workflowPath, loadedImages, "inputs");
+      }
+
+      newData = {
+        ...d,
+        audioFile,
+      };
+      break;
+    }
+
     default:
       newData = data;
   }
