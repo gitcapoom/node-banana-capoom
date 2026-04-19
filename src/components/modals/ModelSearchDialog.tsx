@@ -289,7 +289,7 @@ export function ModelSearchDialog({
       // Clear localStorage model cache
       localStorage.removeItem(MODELS_CACHE_KEY);
       // Clear localStorage schema cache (keep in sync with SCHEMA_CACHE_KEY in ModelParameters.tsx)
-      localStorage.removeItem("node-banana-schema-cache-v3");
+      localStorage.removeItem("node-banana-schema-cache");
       // Clear in-memory deduplicatedFetch cache
       clearFetchCache();
       // Re-fetch with cache bypass
