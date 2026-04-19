@@ -242,17 +242,44 @@ export function getConnectedInputsPure(
         const routerInputs = getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);
         // Determine which type this edge carries based on the source handle
         const edgeType = edge.sourceHandle; // Will be "image", "text", "video", "audio", "3d", or "easeCurve"
+        const routerTargetHandle = edge.targetHandle;
+        const schemaName = routerTargetHandle ? handleToSchemaName[routerTargetHandle] : undefined;
+
+        // Helper to route router values to both generic arrays AND schema-named dynamicInputs
+        const routeRouterValues = (values: unknown[]) => {
+          if (schemaName && values.length > 0) {
+            // Route to dynamicInputs under schema field name
+            const existing = dynamicInputs[schemaName];
+            if (existing !== undefined) {
+              const existingArr = Array.isArray(existing) ? existing : [existing];
+              dynamicInputs[schemaName] = [...existingArr, ...values as string[]];
+            } else {
+              dynamicInputs[schemaName] = arraySchemaNames.has(schemaName)
+                ? (values as string[])
+                : (values.length === 1 ? (values[0] as string) : (values as string[]));
+            }
+          }
+        };
 
         if (edgeType === "image" || (!edgeType && isImageHandle(edge.sourceHandle))) {
           images.push(...routerInputs.images);
+          routeRouterValues(routerInputs.images);
         } else if (edgeType === "text" || (!edgeType && isTextHandle(edge.sourceHandle))) {
-          if (routerInputs.text) text = routerInputs.text;
+          if (routerInputs.text) {
+            text = routerInputs.text;
+            if (schemaName) dynamicInputs[schemaName] = routerInputs.text;
+          }
         } else if (edgeType === "video") {
           videos.push(...routerInputs.videos);
+          routeRouterValues(routerInputs.videos);
         } else if (edgeType === "audio") {
           audio.push(...routerInputs.audio);
+          routeRouterValues(routerInputs.audio);
         } else if (edgeType === "3d") {
-          if (routerInputs.model3d) model3d = routerInputs.model3d;
+          if (routerInputs.model3d) {
+            model3d = routerInputs.model3d;
+            if (schemaName) dynamicInputs[schemaName] = routerInputs.model3d;
+          }
         } else if (edgeType === "easeCurve") {
           // EaseCurve passthrough
           if (routerInputs.easeCurve) easeCurve = routerInputs.easeCurve;
@@ -274,17 +301,42 @@ export function getConnectedInputsPure(
         // Enabled switch: recursively get upstream data (same pattern as router)
         const switchInputs = getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);
         const edgeType = switchData.inputType;
+        const switchTargetHandle = edge.targetHandle;
+        const switchSchemaName = switchTargetHandle ? handleToSchemaName[switchTargetHandle] : undefined;
+
+        const routeSwitchValues = (values: unknown[]) => {
+          if (switchSchemaName && values.length > 0) {
+            const existing = dynamicInputs[switchSchemaName];
+            if (existing !== undefined) {
+              const existingArr = Array.isArray(existing) ? existing : [existing];
+              dynamicInputs[switchSchemaName] = [...existingArr, ...values as string[]];
+            } else {
+              dynamicInputs[switchSchemaName] = arraySchemaNames.has(switchSchemaName)
+                ? (values as string[])
+                : (values.length === 1 ? (values[0] as string) : (values as string[]));
+            }
+          }
+        };
 
         if (edgeType === "image") {
           images.push(...switchInputs.images);
+          routeSwitchValues(switchInputs.images);
         } else if (edgeType === "text") {
-          if (switchInputs.text) text = switchInputs.text;
+          if (switchInputs.text) {
+            text = switchInputs.text;
+            if (switchSchemaName) dynamicInputs[switchSchemaName] = switchInputs.text;
+          }
         } else if (edgeType === "video") {
           videos.push(...switchInputs.videos);
+          routeSwitchValues(switchInputs.videos);
         } else if (edgeType === "audio") {
           audio.push(...switchInputs.audio);
+          routeSwitchValues(switchInputs.audio);
         } else if (edgeType === "3d") {
-          if (switchInputs.model3d) model3d = switchInputs.model3d;
+          if (switchInputs.model3d) {
+            model3d = switchInputs.model3d;
+            if (switchSchemaName) dynamicInputs[switchSchemaName] = switchInputs.model3d;
+          }
         } else if (edgeType === "easeCurve") {
           if (switchInputs.easeCurve) easeCurve = switchInputs.easeCurve;
         }
