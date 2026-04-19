@@ -1124,10 +1124,15 @@ export async function GET(
     anyFromCache = true;
   }
 
-  // Fetch from each provider (replicate, fal, wavespeed)
-  for (const provider of providersToFetch) {
-    // For Replicate and WaveSpeed, always use base cache key since we filter client-side
-    // For fal.ai, include search in cache key since their API supports search
+  // Hard timeout per provider (prevents 10+ minute hangs when APIs are slow)
+  const withTimeout = <T>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+    Promise.race([
+      p,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms))
+    ]);
+
+  // Fetch all providers in parallel (was sequential — caused 10+ min hangs)
+  const providerPromises = providersToFetch.map(async (provider) => {
     const cacheKey =
       provider === "replicate" || provider === "wavespeed"
         ? getCacheKey(provider)
@@ -1141,65 +1146,55 @@ export async function GET(
       if (cached) {
         models = cached;
         fromCache = true;
-        anyFromCache = true;
-
-        // For Replicate and WaveSpeed, apply client-side search filtering on cached models
         if ((provider === "replicate" || provider === "wavespeed") && searchQuery) {
           models = filterModelsBySearch(models, searchQuery);
         }
       }
     }
 
-    // Fetch from API if cache miss
     if (!models) {
-      allFromCache = false;
       try {
         if (provider === "replicate") {
-          // Fetch all models (no search param - we filter client-side)
-          const allReplicateModels = await fetchReplicateModels(replicateKey!);
-          // Cache the full list
+          const allReplicateModels = await withTimeout(fetchReplicateModels(replicateKey!), 60000, "replicate");
           setCachedModels(cacheKey, allReplicateModels);
-          // Apply search filter if needed
-          models = searchQuery
-            ? filterModelsBySearch(allReplicateModels, searchQuery)
-            : allReplicateModels;
+          models = searchQuery ? filterModelsBySearch(allReplicateModels, searchQuery) : allReplicateModels;
         } else if (provider === "fal") {
-          models = await fetchFalModels(falKey, searchQuery);
-          // Cache the results (fal.ai handles search server-side)
+          models = await withTimeout(fetchFalModels(falKey, searchQuery), 60000, "fal");
           setCachedModels(cacheKey, models);
         } else if (provider === "wavespeed") {
-          // Fetch all models from WaveSpeed API
-          const allWaveSpeedModels = await fetchWaveSpeedModels(wavespeedKey!);
-          // Cache the full list
+          const allWaveSpeedModels = await withTimeout(fetchWaveSpeedModels(wavespeedKey!), 60000, "wavespeed");
           setCachedModels(cacheKey, allWaveSpeedModels);
-          // Apply search filter if needed (client-side filtering like Replicate)
-          models = searchQuery
-            ? filterModelsBySearch(allWaveSpeedModels, searchQuery)
-            : allWaveSpeedModels;
+          models = searchQuery ? filterModelsBySearch(allWaveSpeedModels, searchQuery) : allWaveSpeedModels;
         } else {
           models = [];
         }
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown error";
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
         console.error(`[Models] ${provider}: ${errorMessage}`);
-        errors.push(`${provider}: ${errorMessage}`);
-        providerResults[provider] = {
-          success: false,
-          count: 0,
-          error: errorMessage,
-        };
-        continue;
+        return { provider, models: null as ProviderModel[] | null, fromCache: false, error: errorMessage };
       }
     }
 
-    // Add to results
-    allModels.push(...models);
-    providerResults[provider] = {
-      success: true,
-      count: models.length,
-      cached: fromCache,
-    };
+    return { provider, models, fromCache, error: null as string | null };
+  });
+
+  const providerResultsArr = await Promise.all(providerPromises);
+
+  // Aggregate results
+  for (const { provider, models, fromCache, error } of providerResultsArr) {
+    if (fromCache) anyFromCache = true;
+    if (!fromCache) allFromCache = false;
+
+    if (error) {
+      errors.push(`${provider}: ${error}`);
+      providerResults[provider] = { success: false, count: 0, error } as typeof providerResults[string];
+      continue;
+    }
+
+    if (models) {
+      allModels.push(...models);
+      providerResults[provider] = { success: true, count: models.length, cached: fromCache };
+    }
   }
 
   // If all providers failed, return partial success with errors instead of 500
