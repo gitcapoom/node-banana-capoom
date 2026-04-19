@@ -892,21 +892,6 @@ async function hydrateNodeImages(
       break;
     }
 
-    case "audioInput": {
-      const d = data as import("@/types").AudioInputNodeData;
-      let audioFile = d.audioFile;
-
-      if (d.audioFileRef && !d.audioFile) {
-        audioFile = await loadImageById(d.audioFileRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = {
-        ...d,
-        audioFile,
-      };
-      break;
-    }
-
     default:
       newData = data;
   }
