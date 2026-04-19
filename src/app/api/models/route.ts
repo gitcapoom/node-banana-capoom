@@ -50,11 +50,17 @@ const RELEVANT_CATEGORIES = [
   "image-to-image",
   "text-to-video",
   "image-to-video",
+  "video-to-video",
+  "audio-to-video",
+  "video-to-audio",
   "text-to-3d",
   "image-to-3d",
+  "3d-to-3d",
   "text-to-speech",
+  "text-to-audio",
   "text-to-music",
   "text-to-sound-effects",
+  "audio-to-audio",
 ];
 
 // Kie.ai models (hardcoded - no discovery API available)
@@ -878,6 +884,12 @@ const FAL_AUDIO_CATEGORIES: Record<string, ModelCapability> = {
   "text-to-speech": "text-to-audio",
   "text-to-music": "text-to-audio",
   "text-to-sound-effects": "text-to-audio",
+  "audio-to-audio": "text-to-audio",
+  // Map video categories with audio as side-channel to video capabilities
+  "audio-to-video": "image-to-video",
+  "video-to-audio": "video-to-video",
+  // Map 3d-to-3d to image-to-3d since we don't have a specific cap
+  "3d-to-3d": "image-to-3d",
 };
 
 function mapFalCategory(category: string): ModelCapability | null {

@@ -37,6 +37,16 @@ const RELEVANT_CATEGORIES = [
   "text-to-video",
   "image-to-video",
   "video-to-video",
+  "audio-to-video",
+  "video-to-audio",
+  "text-to-3d",
+  "image-to-3d",
+  "3d-to-3d",
+  "text-to-speech",
+  "text-to-audio",
+  "text-to-music",
+  "text-to-sound-effects",
+  "audio-to-audio",
 ];
 
 /**
