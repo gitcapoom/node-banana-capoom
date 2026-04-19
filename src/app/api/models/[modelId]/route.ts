@@ -152,6 +152,14 @@ function isImageInput(name: string, prop: Record<string, unknown>, schemaCompone
     return false;
   }
 
+  // Enum properties (dropdowns) are never media inputs
+  if (Array.isArray(prop.enum) && prop.enum.length > 0) return false;
+  const variants = (prop.anyOf ?? prop.oneOf) as Array<Record<string, unknown>> | undefined;
+  if (variants?.some(v => Array.isArray(v.enum) && v.enum.length > 0)) return false;
+
+  // Enum/config suffixes (image_type, image_mode, image_format) are not inputs
+  if (/_(type|mode|quality|format|codec|preset|style|method|strategy)$/.test(name)) return false;
+
   // For arrays, check if items are strings (or unspecified - be lenient)
   if (propType === "array") {
     const items = prop.items as Record<string, unknown> | undefined;
@@ -223,6 +231,12 @@ function isVideoInput(name: string, prop: Record<string, unknown>, schemaCompone
   const propType = resolved.type;
   if (propType !== "string" && propType !== "array") return false;
 
+  // Enum properties (dropdowns) are never media inputs
+  if (Array.isArray(prop.enum) && prop.enum.length > 0) return false;
+  // Check for enum in anyOf/oneOf variants
+  const variants = (prop.anyOf ?? prop.oneOf) as Array<Record<string, unknown>> | undefined;
+  if (variants?.some(v => Array.isArray(v.enum) && v.enum.length > 0)) return false;
+
   if (VIDEO_INPUT_PATTERNS.includes(name)) return true;
 
   // Check description for video-related keywords
@@ -231,7 +245,11 @@ function isVideoInput(name: string, prop: Record<string, unknown>, schemaCompone
     return true;
   }
 
-  return name.endsWith("_video") || name.endsWith("_video_url") || name.startsWith("video_") && !name.includes("_size") && !name.includes("_count");
+  // Name-based fallback — exclude common enum/config suffixes
+  const isNonInputSuffix = /_(type|mode|quality|format|codec|preset|size|count|length|duration|width|height)$/.test(name);
+  if (isNonInputSuffix) return false;
+
+  return name.endsWith("_video") || name.endsWith("_video_url") || (name.startsWith("video_") && !name.includes("_size") && !name.includes("_count"));
 }
 
 /**
@@ -243,6 +261,11 @@ function isAudioInput(name: string, prop: Record<string, unknown>, schemaCompone
   const propType = resolved.type;
   if (propType !== "string" && propType !== "array") return false;
 
+  // Enum properties (dropdowns) are never media inputs
+  if (Array.isArray(prop.enum) && prop.enum.length > 0) return false;
+  const variants = (prop.anyOf ?? prop.oneOf) as Array<Record<string, unknown>> | undefined;
+  if (variants?.some(v => Array.isArray(v.enum) && v.enum.length > 0)) return false;
+
   if (AUDIO_INPUT_PATTERNS.includes(name)) return true;
 
   const description = (prop.description as string || "").toLowerCase();
@@ -250,7 +273,10 @@ function isAudioInput(name: string, prop: Record<string, unknown>, schemaCompone
     return true;
   }
 
-  return name.endsWith("_audio") || name.endsWith("_audio_url") || name.startsWith("audio_") && !name.includes("_size") && !name.includes("_count");
+  const isNonInputSuffix = /_(type|mode|quality|format|codec|preset|size|count|length|duration|bitrate|rate|channels)$/.test(name);
+  if (isNonInputSuffix) return false;
+
+  return name.endsWith("_audio") || name.endsWith("_audio_url") || (name.startsWith("audio_") && !name.includes("_size") && !name.includes("_count"));
 }
 
 /**
