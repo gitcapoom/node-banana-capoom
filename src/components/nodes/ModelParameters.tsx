@@ -9,7 +9,7 @@ import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 // localStorage cache for model schemas (persists across dev server restarts)
 // Bump SCHEMA_CACHE_VERSION when schema extraction logic changes to auto-invalidate
 const SCHEMA_CACHE_KEY = "node-banana-schema-cache";
-const SCHEMA_CACHE_VERSION = 3; // v3: exclude enum params from media input pins
+const SCHEMA_CACHE_VERSION = 4; // v4: fix end_image_url / nullable anyOf detection
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {
