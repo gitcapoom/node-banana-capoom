@@ -115,11 +115,12 @@ function ModelParametersInner({
       if (cached) {
         setSchema(cached.parameters);
         onInputsLoaded?.(cached.inputs);
-        return;
+        // Also re-fetch in background to check for server-side updates
+        // (but don't block UI on the result)
+      } else {
+        setIsLoading(true);
+        setError(null);
       }
-
-      setIsLoading(true);
-      setError(null);
 
       try {
         const headers: HeadersInit = {};
