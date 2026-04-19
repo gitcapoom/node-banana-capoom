@@ -105,6 +105,17 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
     }
   }, [id, nodeData.videoFile, nodeData.thumbnailImage, updateNodeData]);
 
+  // Auto-hydrate videoFile from ref on mount (for workflows loaded without hydration,
+  // or legacy workflows saved with refs but missing inline data)
+  useEffect(() => {
+    if (!nodeData.videoFile && nodeData.videoFileRef && saveDirectoryPath) {
+      loadMediaById(nodeData.videoFileRef, saveDirectoryPath, "inputs").then((video) => {
+        if (video) updateNodeData(id, { videoFile: video });
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeData.videoFileRef, saveDirectoryPath]);
+
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
