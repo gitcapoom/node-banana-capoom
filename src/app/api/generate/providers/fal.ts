@@ -631,18 +631,43 @@ export async function generateWithFalQueue(
       }
 
       const mediaBase64 = Buffer.from(mediaArrayBuffer).toString("base64");
-      console.log(`[API:${requestId}] SUCCESS - Returning ${isVideo ? "video" : "image"}`);
 
-      return {
-        success: true,
-        outputs: [
-          {
-            type: isVideo ? "video" : "image",
-            data: `data:${contentType};base64,${mediaBase64}`,
-            url: mediaUrl,
-          },
-        ],
+      // Build the first output (always present)
+      const firstOutput = {
+        type: (isVideo ? "video" : "image") as "video" | "image",
+        data: `data:${contentType};base64,${mediaBase64}`,
+        url: mediaUrl,
       };
+
+      // If this is an image response AND the API returned multiple images, fetch them all
+      const outputs: Array<{ type: "video" | "image" | "audio" | "3d"; data: string; url?: string }> = [firstOutput];
+      if (!isVideo && !isAudioModel && Array.isArray(result.images) && result.images.length > 1) {
+        console.log(`[API:${requestId}] Model returned ${result.images.length} images, fetching all...`);
+        // Fetch remaining images in parallel (skip index 0 — already fetched)
+        const additional = await Promise.all(
+          (result.images as Array<{ url: string }>).slice(1).map(async (img) => {
+            try {
+              const check = validateMediaUrl(img.url);
+              if (!check.valid) return null;
+              const resp = await fetch(img.url);
+              if (!resp.ok) return null;
+              const ct = resp.headers.get("content-type") || "image/png";
+              const buf = await resp.arrayBuffer();
+              const b64 = Buffer.from(buf).toString("base64");
+              return { type: "image" as const, data: `data:${ct};base64,${b64}`, url: img.url };
+            } catch (e) {
+              console.warn(`[API:${requestId}] Failed to fetch additional image:`, e);
+              return null;
+            }
+          })
+        );
+        for (const out of additional) {
+          if (out) outputs.push(out);
+        }
+      }
+
+      console.log(`[API:${requestId}] SUCCESS - Returning ${outputs.length} ${isVideo ? "video" : "image"}${outputs.length > 1 ? "s" : ""}`);
+      return { success: true, outputs };
     }
 
     if (status === "FAILED") {

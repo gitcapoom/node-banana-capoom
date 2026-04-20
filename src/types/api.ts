@@ -23,6 +23,8 @@ export interface GenerateRequest {
 export interface GenerateResponse {
   success: boolean;
   image?: string;
+  /** Multiple images returned (e.g., num_images > 1). First image is in `image` for back-compat. */
+  images?: string[];
   video?: string;
   videoUrl?: string; // For large videos, return URL directly
   audio?: string; // Base64 audio data
