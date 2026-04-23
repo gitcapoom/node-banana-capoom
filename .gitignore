@@ -40,6 +40,9 @@ renders/
 # logs
 logs/*.json
 
+# schema warmer cache
+.cache/
+
 # .claude
 .claude/
 
