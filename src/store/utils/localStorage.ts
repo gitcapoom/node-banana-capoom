@@ -55,6 +55,38 @@ export const defaultProviderSettings: ProviderSettings = {
   }
 };
 
+/**
+ * Safely write to localStorage. If quota is exceeded, evict large caches and retry.
+ * Large caches (models/schemas) are the most likely culprits when quota fills up.
+ */
+function safeSetItem(key: string, value: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === "QuotaExceededError" || err.code === 22)) {
+      // Evict large caches that are safe to regenerate from the server
+      const evictable = [
+        "node-banana-models-cache",
+        "node-banana-schema-cache",
+      ];
+      for (const k of evictable) {
+        try { localStorage.removeItem(k); } catch { /* ignore */ }
+      }
+      // Retry once
+      try {
+        localStorage.setItem(key, value);
+        return true;
+      } catch {
+        console.warn(`[localStorage] Failed to save ${key} even after cache eviction`);
+        return false;
+      }
+    }
+    throw err;
+  }
+}
+
 // Workflow configs helpers
 export const loadSaveConfigs = (): Record<string, WorkflowSaveConfig> => {
   if (typeof window === "undefined") return {};
@@ -66,7 +98,7 @@ export const saveSaveConfig = (config: WorkflowSaveConfig): void => {
   if (typeof window === "undefined") return;
   const configs = loadSaveConfigs();
   configs[config.workflowId] = config;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
+  safeSetItem(STORAGE_KEY, JSON.stringify(configs));
 };
 
 // Cost data helpers
@@ -94,7 +126,7 @@ export const saveWorkflowCostData = (data: WorkflowCostData): void => {
     }
   }
   allCosts[data.workflowId] = data;
-  localStorage.setItem(COST_DATA_STORAGE_KEY, JSON.stringify(allCosts));
+  safeSetItem(COST_DATA_STORAGE_KEY, JSON.stringify(allCosts));
 };
 
 // GenerateImage defaults helpers
@@ -117,7 +149,7 @@ export const saveGenerateImageDefaults = (settings: Partial<GenerateImageDefault
   if (typeof window === "undefined") return;
   const current = loadGenerateImageDefaults();
   const updated = { ...current, ...settings };
-  localStorage.setItem(GENERATE_IMAGE_DEFAULTS_KEY, JSON.stringify(updated));
+  safeSetItem(GENERATE_IMAGE_DEFAULTS_KEY, JSON.stringify(updated));
 };
 
 // Provider settings helpers
@@ -143,7 +175,7 @@ export const getProviderSettings = (): ProviderSettings => {
 
 export const saveProviderSettings = (settings: ProviderSettings): void => {
   if (typeof window === "undefined") return;
-  localStorage.setItem(PROVIDER_SETTINGS_KEY, JSON.stringify(settings));
+  safeSetItem(PROVIDER_SETTINGS_KEY, JSON.stringify(settings));
 };
 
 // Recent models helpers
@@ -161,8 +193,7 @@ export const getRecentModels = (): RecentModel[] => {
 };
 
 export const saveRecentModels = (models: RecentModel[]): void => {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(RECENT_MODELS_KEY, JSON.stringify(models));
+  safeSetItem(RECENT_MODELS_KEY, JSON.stringify(models));
 };
 
 // Node defaults helpers
@@ -181,7 +212,7 @@ export const loadNodeDefaults = (): NodeDefaultsConfig => {
 
 export const saveNodeDefaults = (config: NodeDefaultsConfig): void => {
   if (typeof window === "undefined") return;
-  localStorage.setItem(NODE_DEFAULTS_KEY, JSON.stringify(config));
+  safeSetItem(NODE_DEFAULTS_KEY, JSON.stringify(config));
 };
 
 export const getGenerateImageDefaults = (): GenerateImageNodeDefaults | undefined => {
@@ -215,7 +246,7 @@ export const getCanvasNavigationSettings = (): CanvasNavigationSettings => {
 
 export const saveCanvasNavigationSettings = (settings: CanvasNavigationSettings): void => {
   if (typeof window === "undefined") return;
-  localStorage.setItem(CANVAS_NAVIGATION_KEY, JSON.stringify(settings));
+  safeSetItem(CANVAS_NAVIGATION_KEY, JSON.stringify(settings));
 };
 
 // Workflow ID generator
