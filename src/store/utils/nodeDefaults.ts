@@ -32,6 +32,7 @@ import {
   PanoEditorNodeData,
   MaskPainterNodeData,
   VideoInputNodeData,
+  ImageCropNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -76,6 +77,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   panoEditor: { width: 300, height: 300 },
   maskPainter: { width: 260, height: 300 },
   videoInput: { width: 320, height: 300 },
+  imageCrop: { width: 300, height: 280 },
 };
 
 /**
@@ -444,5 +446,12 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         duration: null,
         format: null,
       } as VideoInputNodeData;
+    case "imageCrop":
+      return {
+        sourceImage: null,
+        cropRegion: null,
+        aspectLock: "free",
+        outputImage: null,
+      } as ImageCropNodeData;
   }
 };

@@ -43,6 +43,7 @@ const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: str
       { type: "annotation", label: "Annotate" },
       { type: "panoEditor", label: "Pano Edit" },
       { type: "maskPainter", label: "Mask Paint" },
+      { type: "imageCrop", label: "Image Crop" },
       { type: "splitGrid", label: "Split Grid" },
       { type: "videoStitch", label: "Video Stitch" },
       { type: "videoTrim", label: "Video Trim" },

@@ -55,6 +55,7 @@ import {
   SwitchNode,
   ConditionalSwitchNode,
   VideoInputNode,
+  ImageCropNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -78,6 +79,7 @@ import { EditOperation } from "@/lib/chat/editOperations";
 import { stripBinaryData } from "@/lib/chat/contextBuilder";
 import { PromptEditorModal } from "./modals/PromptEditorModal";
 import { AnnotationModal } from "./AnnotationModal";
+import { ImageCropModal } from "./ImageCropModal";
 import { browseRegistry } from "@/utils/browseRegistry";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { SplitGridSettingsModal } from "./SplitGridSettingsModal";
@@ -117,6 +119,7 @@ const nodeTypes: NodeTypes = {
   panoEditor: PanoEditorNode,
   maskPainter: MaskPainterNode,
   videoInput: VideoInputNode,
+  imageCrop: ImageCropNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -432,6 +435,7 @@ export function WorkflowCanvas() {
     maskPainter: 'Mask Painter',
     videoInput: 'Video Input',
     glbViewer: '3D Viewer',
+    imageCrop: 'Image Crop',
   };
 
   // Helper to get node title (used for FloatingNodeHeader)
@@ -2503,6 +2507,9 @@ export function WorkflowCanvas() {
 
       {/* AnnotationModal is globally managed by annotationStore */}
       <AnnotationModal />
+
+      {/* ImageCropModal is globally managed by imageCropStore */}
+      <ImageCropModal />
     </div>
   );
 }

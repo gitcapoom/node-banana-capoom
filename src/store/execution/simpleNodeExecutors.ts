@@ -17,10 +17,12 @@ import type {
   OutputNodeData,
   OutputGalleryNodeData,
   WorkflowNode,
+  ImageCropNodeData,
 } from "@/types";
 import type { NodeExecutionContext } from "./types";
 import { parseTextToArray } from "@/utils/arrayParser";
 import { parseVarTags } from "@/utils/parseVarTags";
+import { cropImageToDataUrl } from "@/utils/cropImage";
 
 /**
  * Annotation node: receives upstream image as source, passes through if no annotations.
@@ -458,6 +460,52 @@ export async function executeMaskPainter(ctx: NodeExecutionContext): Promise<voi
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Mask Painter node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
+ * Image Crop node: receives upstream image and applies the persisted crop region.
+ * If no region is defined, passes the image through unchanged.
+ * Crop region uses relative (0-1) coordinates so it adapts to any input resolution.
+ */
+export async function executeImageCrop(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const incoming = images[0] || null;
+    const nodeData = node.data as ImageCropNodeData;
+
+    if (!incoming) {
+      // No input — clear output
+      if (nodeData.outputImage !== null) {
+        updateNodeData(node.id, { outputImage: null, sourceImage: null });
+      }
+      return;
+    }
+
+    // Update sourceImage if changed
+    if (incoming !== nodeData.sourceImage) {
+      updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
+    }
+
+    // No crop region → passthrough
+    if (!nodeData.cropRegion) {
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      return;
+    }
+
+    // Apply the crop
+    try {
+      const cropped = await cropImageToDataUrl(incoming, nodeData.cropRegion);
+      updateNodeData(node.id, { outputImage: cropped, outputImageRef: undefined });
+    } catch (err) {
+      console.error(`[Workflow] Image Crop failed:`, err);
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Image Crop node ${node.id} failed:`, message);
     updateNodeData(node.id, { error: message });
   }
 }

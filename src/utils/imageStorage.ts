@@ -481,6 +481,31 @@ async function externalizeNodeImages(
       break;
     }
 
+    case "imageCrop": {
+      const d = data as import("@/types").ImageCropNodeData;
+      let sourceImageRef = d.sourceImageRef;
+      let outputImageRef = d.outputImageRef;
+      let sourceImage = d.sourceImage;
+      let outputImage = d.outputImage;
+
+      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
+        sourceImage = null;
+      } else if (isBase64DataUrl(d.sourceImage)) {
+        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
+        sourceImage = null;
+      }
+
+      if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
+        outputImage = null;
+      } else if (isBase64DataUrl(d.outputImage)) {
+        outputImageRef = await saveImageAndGetId(d.outputImage!, workflowPath, savedImageIds, "inputs");
+        outputImage = null;
+      }
+
+      newData = { ...d, sourceImage, sourceImageRef, outputImage, outputImageRef };
+      break;
+    }
+
     default:
       newData = data;
   }
@@ -888,6 +913,26 @@ async function hydrateNodeImages(
         ...d,
         videoFile,
         thumbnailImage,
+      };
+      break;
+    }
+
+    case "imageCrop": {
+      const d = data as import("@/types").ImageCropNodeData;
+      let sourceImage = d.sourceImage;
+      let outputImage = d.outputImage;
+
+      if (d.sourceImageRef && !d.sourceImage) {
+        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
+      }
+      if (d.outputImageRef && !d.outputImage) {
+        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "inputs");
+      }
+
+      newData = {
+        ...d,
+        sourceImage,
+        outputImage,
       };
       break;
     }
