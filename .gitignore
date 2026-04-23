@@ -43,6 +43,9 @@ logs/*.json
 # schema warmer cache
 .cache/
 
+# model outputs (never commit binary generation results)
+generations/
+
 # .claude
 .claude/
 
