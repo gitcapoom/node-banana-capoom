@@ -56,7 +56,8 @@ export type NodeType =
   | "panoViewer"
   | "panoEditor"
   | "maskPainter"
-  | "videoInput";
+  | "videoInput"
+  | "imageCrop";
 
 /**
  * Node execution status
@@ -94,6 +95,22 @@ export interface VideoInputNodeData extends BaseNodeData {
   filename: string | null;       // Original filename for display
   duration: number | null;       // Duration in seconds
   format: string | null;         // MIME type (video/mp4, video/webm, etc.)
+}
+
+/**
+ * Image Crop node - crops an input image using a persisted relative region.
+ * The crop region is stored in relative coordinates (0-1) so it auto-applies
+ * to any new input image regardless of resolution.
+ */
+export type ImageCropAspectLock = "free" | "1:1" | "16:9" | "9:16" | "4:3" | "3:4";
+export interface ImageCropNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  /** Crop region in relative coordinates (0-1 range) */
+  cropRegion: { x: number; y: number; width: number; height: number } | null;
+  aspectLock: ImageCropAspectLock;
+  outputImage: string | null;
+  outputImageRef?: string;
 }
 
 /**
@@ -655,7 +672,8 @@ export type WorkflowNodeData =
   | PanoViewerNodeData
   | PanoEditorNodeData
   | MaskPainterNodeData
-  | VideoInputNodeData;
+  | VideoInputNodeData
+  | ImageCropNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)

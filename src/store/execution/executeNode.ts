@@ -19,6 +19,7 @@ import {
   executeVideoCompare,
   executeGlbViewer,
   executeSpzViewer,
+  executeImageCrop,
 } from "./simpleNodeExecutors";
 import { executeNanoBanana } from "./nanoBananaExecutor";
 import { executeGenerateVideo } from "./generateVideoExecutor";
@@ -134,6 +135,9 @@ export async function executeNode(
       break;
     case "videoFrameGrab":
       await executeVideoFrameGrab(ctx);
+      break;
+    case "imageCrop":
+      await executeImageCrop(ctx);
       break;
   }
 }

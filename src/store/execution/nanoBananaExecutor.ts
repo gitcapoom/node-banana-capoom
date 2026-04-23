@@ -167,21 +167,17 @@ export async function executeNanoBanana(
 
     if (result.success && result.image) {
       const timestamp = Date.now();
-      const imageId = `${timestamp}`;
+      // Collect all returned images (multi-image generation support)
+      const allImages: string[] = Array.isArray(result.images) && result.images.length > 1
+        ? result.images
+        : [result.image];
 
-      // Save to global history
-      addToGlobalHistory({
-        image: result.image,
-        timestamp,
-        prompt: promptText,
-        aspectRatio: nodeData.aspectRatio,
-        model: nodeData.model,
-      });
-
-      // Add to node's carousel history (with full settings snapshot for recall)
-      const newHistoryItem = {
-        id: imageId,
-        timestamp,
+      // Build a history item per image (newest first within this generation batch)
+      // Use indexed IDs so each image gets a unique entry
+      const newHistoryItems = allImages.map((img, idx) => ({
+        id: allImages.length > 1 ? `${timestamp}-${idx}` : `${timestamp}`,
+        image: img,
+        timestamp: timestamp + idx, // offset by idx to keep stable sort order
         prompt: promptText,
         aspectRatio: nodeData.aspectRatio,
         model: nodeData.model,
@@ -190,18 +186,35 @@ export async function executeNanoBanana(
         parameters: nodeData.parameters ? { ...nodeData.parameters } : undefined,
         useGoogleSearch: nodeData.useGoogleSearch,
         useImageSearch: nodeData.useImageSearch,
-      };
-      const updatedHistory = [newHistoryItem, ...(nodeData.imageHistory || [])].slice(0, 50);
+      }));
+
+      // Save ALL images to global history
+      for (const item of newHistoryItems) {
+        addToGlobalHistory({
+          image: item.image,
+          timestamp: item.timestamp,
+          prompt: promptText,
+          aspectRatio: nodeData.aspectRatio,
+          model: nodeData.model,
+        });
+      }
+
+      // Add all new items to the node's carousel history (newest first)
+      // Strip `image` field from history entries since it's only used here for saving;
+      // the carousel loads images from disk by ID.
+      const carouselEntries = newHistoryItems.map(({ image: _img, ...rest }) => rest);
+      const reversedEntries = [...carouselEntries].reverse(); // so item 0 appears first
+      const updatedHistory = [...reversedEntries, ...(nodeData.imageHistory || [])].slice(0, 50);
 
       updateNodeData(node.id, {
-        outputImage: result.image,
+        outputImage: result.image, // Show first image as the active output
         status: "complete",
         error: null,
         imageHistory: updatedHistory,
         selectedHistoryIndex: 0,
       });
 
-      // Push new image to connected downstream outputGallery nodes (atomic append)
+      // Push all new images to connected downstream outputGallery nodes
       const edges = getEdges();
       const nodes = getNodes();
       edges
@@ -209,7 +222,9 @@ export async function executeNanoBanana(
         .forEach((e) => {
           const target = nodes.find((n) => n.id === e.target);
           if (target?.type === "outputGallery") {
-            appendOutputGalleryImage(target.id, result.image);
+            for (const img of allImages) {
+              appendOutputGalleryImage(target.id, img);
+            }
           }
         });
 
@@ -219,38 +234,41 @@ export async function executeNanoBanana(
         updateNodeData(node.id, { lastGenerationCost: result.cost });
       }
 
-      // Auto-save to generations folder if configured
+      // Auto-save ALL images to generations folder if configured
       if (generationsPath) {
-        const savePromise = fetch("/api/save-generation", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            directoryPath: generationsPath,
-            image: result.image,
-            prompt: promptText,
-            imageId,
-          }),
-        })
-          .then((res) => res.json())
-          .then((saveResult) => {
-            if (saveResult.success && saveResult.imageId && saveResult.imageId !== imageId) {
-              const currentNode = getNodes().find((n) => n.id === node.id);
-              if (currentNode) {
-                const currentData = currentNode.data as NanoBananaNodeData;
-                const histCopy = [...(currentData.imageHistory || [])];
-                const entryIndex = histCopy.findIndex((h) => h.id === imageId);
-                if (entryIndex !== -1) {
-                  histCopy[entryIndex] = { ...histCopy[entryIndex], id: saveResult.imageId };
-                  updateNodeData(node.id, { imageHistory: histCopy });
+        for (const item of newHistoryItems) {
+          const savedItemId = item.id;
+          const savePromise = fetch("/api/save-generation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              directoryPath: generationsPath,
+              image: item.image,
+              prompt: promptText,
+              imageId: savedItemId,
+            }),
+          })
+            .then((res) => res.json())
+            .then((saveResult) => {
+              if (saveResult.success && saveResult.imageId && saveResult.imageId !== savedItemId) {
+                const currentNode = getNodes().find((n) => n.id === node.id);
+                if (currentNode) {
+                  const currentData = currentNode.data as NanoBananaNodeData;
+                  const histCopy = [...(currentData.imageHistory || [])];
+                  const entryIndex = histCopy.findIndex((h) => h.id === savedItemId);
+                  if (entryIndex !== -1) {
+                    histCopy[entryIndex] = { ...histCopy[entryIndex], id: saveResult.imageId };
+                    updateNodeData(node.id, { imageHistory: histCopy });
+                  }
                 }
               }
-            }
-          })
-          .catch((err) => {
-            console.error("Failed to save generation:", err);
-          });
+            })
+            .catch((err) => {
+              console.error("Failed to save generation:", err);
+            });
 
-        trackSaveGeneration(imageId, savePromise);
+          trackSaveGeneration(savedItemId, savePromise);
+        }
       }
     } else {
       updateNodeData(node.id, {

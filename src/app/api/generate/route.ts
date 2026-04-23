@@ -41,7 +41,10 @@ interface MultiProviderGenerateRequest extends GenerateRequest {
 }
 
 
-function buildMediaResponse(output: { type: string; data: string; url?: string }): NextResponse {
+function buildMediaResponse(
+  output: { type: string; data: string; url?: string },
+  allOutputs?: Array<{ type: string; data: string; url?: string }>
+): NextResponse {
   if (output.type === "3d") {
     return NextResponse.json<GenerateResponse>({
       success: true,
@@ -70,9 +73,13 @@ function buildMediaResponse(output: { type: string; data: string; url?: string }
     });
   }
 
+  // Image: support multiple images (e.g., num_images > 1)
+  const imageOutputs = (allOutputs || [output]).filter(o => o.type === "image" && o.data);
+  const imagesArr = imageOutputs.map(o => o.data);
   return NextResponse.json<GenerateResponse>({
     success: true,
-    image: output.data,
+    image: output.data, // First image for back-compat
+    images: imagesArr.length > 1 ? imagesArr : undefined,
     contentType: "image",
   });
 }
@@ -253,7 +260,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      return buildMediaResponse(output);
+      return buildMediaResponse(output, result.outputs);
     }
 
     if (provider === "fal") {
@@ -327,7 +334,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      return buildMediaResponse(output);
+      return buildMediaResponse(output, result.outputs);
     }
 
     if (provider === "kie") {
@@ -405,7 +412,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      return buildMediaResponse(output);
+      return buildMediaResponse(output, result.outputs);
     }
 
     if (provider === "wavespeed") {
@@ -483,7 +490,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      return buildMediaResponse(output);
+      return buildMediaResponse(output, result.outputs);
     }
 
     // muapi.ai provider
@@ -550,7 +557,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      return buildMediaResponse(output);
+      return buildMediaResponse(output, result.outputs);
     }
 
     // Default: Use Gemini
@@ -617,7 +624,7 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      return buildMediaResponse(output);
+      return buildMediaResponse(output, result.outputs);
     }
 
     // Gemini returns NextResponse directly — handle retry manually

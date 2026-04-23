@@ -337,16 +337,39 @@ export async function generateWithReplicate(
     };
   }
 
-  console.log(`[API:${requestId}] SUCCESS - Returning ${isVideo ? "video" : "image"}`);
-
-  return {
-    success: true,
-    outputs: [
-      {
-        type: isVideo ? "video" : "image",
-        data: `data:${contentType};base64,${mediaBase64}`,
-        url: mediaUrl,
-      },
-    ],
+  // Build first output
+  const firstOutput = {
+    type: (isVideo ? "video" : "image") as "video" | "image",
+    data: `data:${contentType};base64,${mediaBase64}`,
+    url: mediaUrl,
   };
+  const outputs: Array<{ type: "video" | "image" | "audio" | "3d"; data: string; url?: string }> = [firstOutput];
+
+  // If the model returned multiple images, fetch all of them
+  if (!isVideo && outputUrls.length > 1) {
+    console.log(`[API:${requestId}] Model returned ${outputUrls.length} images, fetching all...`);
+    const additional = await Promise.all(
+      outputUrls.slice(1).map(async (url) => {
+        try {
+          const check = validateMediaUrl(url);
+          if (!check.valid) return null;
+          const resp = await fetch(url);
+          if (!resp.ok) return null;
+          const ct = resp.headers.get("content-type") || "image/png";
+          const buf = await resp.arrayBuffer();
+          const b64 = Buffer.from(buf).toString("base64");
+          return { type: "image" as const, data: `data:${ct};base64,${b64}`, url };
+        } catch (e) {
+          console.warn(`[API:${requestId}] Failed to fetch additional image:`, e);
+          return null;
+        }
+      })
+    );
+    for (const out of additional) {
+      if (out) outputs.push(out);
+    }
+  }
+
+  console.log(`[API:${requestId}] SUCCESS - Returning ${outputs.length} ${isVideo ? "video" : "image"}${outputs.length > 1 ? "s" : ""}`);
+  return { success: true, outputs };
 }
