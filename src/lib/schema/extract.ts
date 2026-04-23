@@ -104,6 +104,57 @@ function priorityRank(name: string): number {
 }
 
 /**
+ * Walk into object (or nullable-object) properties looking for fields that
+ * would classify as connectable inputs (image/video/audio/text urls).
+ *
+ * Provider wrappers like fal's `ImageFillInput { fill_image_url }` or
+ * `ControlNetUnionInput { control_image_url }` need their inner URL fields
+ * hoisted to the top level so the user can wire an image output into them.
+ * The hoisted input's `name` uses a dotted path (`fill_image.fill_image_url`)
+ * — the provider's payload builder deep-sets into the request body.
+ *
+ * Returns the set of hoisted sub-names so the caller can strip them from the
+ * parent object parameter's sub-properties (avoid double-display).
+ *
+ * Depth-capped at 2 since real provider schemas never nest deeper.
+ */
+function hoistNestedInputs(
+  prop: NormalizedProperty,
+  parentPath: string,
+  inputs: ModelInput[],
+  depth: number
+): Set<string> {
+  const hoisted = new Set<string>();
+  if (depth > 2) return hoisted;
+
+  const objectVariants: NormalizedProperty[] = [];
+  if (prop.type === "object" && prop.properties) {
+    objectVariants.push(prop);
+  } else if (prop.type === "union" && prop.unionVariants) {
+    for (const v of prop.unionVariants) {
+      if (v.type === "object" && v.properties) objectVariants.push(v);
+    }
+  }
+
+  for (const obj of objectVariants) {
+    if (!obj.properties) continue;
+    for (const [subName, subProp] of Object.entries(obj.properties)) {
+      const subDecision = classifyInput(subProp);
+      if (subDecision?.kind) {
+        const dottedName: string = `${parentPath}.${subName}`;
+        inputs.push({
+          ...propertyToInput(subProp, subDecision.kind, subProp.required ?? false),
+          name: dottedName,
+        });
+        hoisted.add(subName);
+      }
+    }
+  }
+
+  return hoisted;
+}
+
+/**
  * Extract inputs and parameters from a NormalizedSchema.
  *
  * @returns ExtractedResult — .parameters (for node body), .inputs (for pins), .health (observability)
@@ -121,6 +172,25 @@ export function extractFromNormalized(schema: NormalizedSchema): ExtractedResult
 
     if (inputDecision && inputDecision.kind) {
       inputs.push(propertyToInput(prop, inputDecision.kind, isRequired));
+      continue;
+    }
+
+    // Inspect object (or nullable-object) properties for nested input URLs.
+    // fal frequently wraps inputs in single-field objects (ImageFillInput,
+    // ControlNetUnionInput, IPAdapter). Hoist those sub-URLs to top-level
+    // inputs with dotted names so the UI shows them as pins.
+    const hoistedSubNames = hoistNestedInputs(prop, name, inputs, 0);
+    if (hoistedSubNames.size > 0) {
+      // Build a parameter that excludes the hoisted sub-fields (so users
+      // don't also see them as form fields). If ALL sub-fields were hoisted
+      // and the wrapper has nothing else, skip the parameter entirely.
+      const param = propertyToParameter(prop);
+      if (param.properties) {
+        param.properties = param.properties.filter((p) => !hoistedSubNames.has(p.name));
+      }
+      if (param.properties && param.properties.length > 0) {
+        parameters.push(param);
+      }
       continue;
     }
 
