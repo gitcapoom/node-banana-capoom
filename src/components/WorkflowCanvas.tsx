@@ -1644,6 +1644,7 @@ export function WorkflowCanvas() {
             panoEditor: { width: 300, height: 300 },
             maskPainter: { width: 260, height: 300 },
             videoInput: { width: 320, height: 300 },
+            imageCrop: { width: 300, height: 280 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });

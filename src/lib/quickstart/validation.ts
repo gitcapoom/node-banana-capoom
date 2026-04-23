@@ -82,6 +82,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   panoViewer: { width: 300, height: 280 },
   panoEditor: { width: 300, height: 300 },
   maskPainter: { width: 260, height: 300 },
+  imageCrop: { width: 300, height: 280 },
 };
 
 /**
