@@ -1,19 +1,21 @@
 /**
  * fal.ai playground scraper.
  *
- * fal's playground pages (https://fal.ai/models/{endpoint_id}/api) are Next.js
- * server-rendered and embed a `__NEXT_DATA__` script that contains the full
- * OpenAPI spec used by the playground UI. That spec is a superset of the
- * public `expand=openapi-3.0` response in practice — it sometimes includes
- * preset object shapes (e.g. `image_size` with enum + object) the API version
- * omits.
+ * fal.ai's playground pages (https://fal.ai/models/{endpoint_id}) are rendered
+ * with React Server Components and stream data via `self.__next_f.push(...)`
+ * script blocks. Each chunk is a JSON string that, among other things,
+ * carries the initialInput / schema objects the UI uses to render its form.
  *
  * Strategy:
  *   1. Fetch the HTML page
- *   2. Look for the `__NEXT_DATA__` JSON blob
- *   3. Walk it looking for the OpenAPI paths/components
- *   4. Extract all property names under Input/request body
- *   5. Fall back to simple regex over the rendered HTML for field labels
+ *   2. Quick-reject pages that are obviously errors (no `__next_f.push`, or
+ *      contain `__next_error__` / 404 markers)
+ *   3. Extract every `self.__next_f.push([1, "..."])` payload, JSON-decode it
+ *      (they're escaped strings), and walk the tree for schema-like objects
+ *   4. Harvest property names ONLY from objects that look like OpenAPI
+ *      request schemas (`properties: { key: { type | $ref | enum | anyOf } }`)
+ *      — we never scrape loose `name=` attributes or meta tags, because those
+ *      drag in `<meta name="viewport">`, `<meta name="robots">`, etc.
  */
 
 import type { PlaygroundScrapeResult } from "./types";
@@ -22,17 +24,17 @@ const FAL_TIMEOUT_MS = 20_000;
 const UA = "Mozilla/5.0 (compatible; NodeBananaSchemaWarmer/1.0; +https://github.com/)";
 
 function makeUrl(modelId: string): string {
-  // Canonical playground URL. fal accepts both /models/{id}/api and /models/{id}.
-  return `https://fal.ai/models/${encodeURI(modelId)}/api`;
+  // Canonical playground URL; no /api suffix (that's a 404).
+  return `https://fal.ai/models/${modelId.split("/").map(encodeURIComponent).join("/")}`;
 }
 
 /**
  * Recursively walk an object looking for property bags that look like
  * OpenAPI request schemas — objects with `properties: { ... }` whose values
- * have a `type` or `$ref` field. Returns all property keys found.
+ * have a `type` or `$ref` field. Adds all such property keys to `acc`.
  */
 function harvestSchemaPropertyNames(obj: unknown, acc: Set<string>, depth = 0): void {
-  if (depth > 12 || !obj || typeof obj !== "object") return;
+  if (depth > 16 || !obj || typeof obj !== "object") return;
 
   if (Array.isArray(obj)) {
     for (const item of obj) harvestSchemaPropertyNames(item, acc, depth + 1);
@@ -43,11 +45,20 @@ function harvestSchemaPropertyNames(obj: unknown, acc: Set<string>, depth = 0): 
   const maybeProps = record.properties;
   if (maybeProps && typeof maybeProps === "object" && !Array.isArray(maybeProps)) {
     for (const [key, val] of Object.entries(maybeProps as Record<string, unknown>)) {
+      // Only accept schema-shaped values. Anything else (React metadata,
+      // page props, etc.) is ignored.
       if (val && typeof val === "object") {
         const v = val as Record<string, unknown>;
-        // Looks like a schema definition
-        if ("type" in v || "$ref" in v || "enum" in v || "anyOf" in v || "oneOf" in v) {
-          acc.add(key);
+        if (
+          "type" in v ||
+          "$ref" in v ||
+          "enum" in v ||
+          "anyOf" in v ||
+          "oneOf" in v ||
+          "allOf" in v
+        ) {
+          // Key itself must look like an OpenAPI property name.
+          if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) acc.add(key);
         }
       }
     }
@@ -59,32 +70,51 @@ function harvestSchemaPropertyNames(obj: unknown, acc: Set<string>, depth = 0): 
 }
 
 /**
- * Extract parameter names from the HTML of a fal.ai playground page.
- * Returns a sorted, deduplicated list.
+ * Decode every `self.__next_f.push([1, "..."])` payload from the HTML,
+ * JSON-parse the embedded string, and harvest schema property names from it.
+ *
+ * Returns the combined sorted set of names.
  */
 export function extractFalFields(html: string): string[] {
+  // Error-page heuristic: fal's RSC error page has no content chunks.
+  if (html.includes("__next_error__")) return [];
+
   const fields = new Set<string>();
 
-  // 1. Try __NEXT_DATA__ script
-  const nextDataMatch = html.match(
-    /<script\s+id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i
-  );
-  if (nextDataMatch) {
+  const pushRe = /self\.__next_f\.push\(\[1,\s*"((?:\\"|[^"])*)"\]\)/g;
+  let m: RegExpExecArray | null;
+  let chunks = 0;
+  while ((m = pushRe.exec(html)) !== null) {
+    chunks++;
+    const escaped = m[1];
+    let decoded: string;
     try {
-      const data = JSON.parse(nextDataMatch[1]);
-      harvestSchemaPropertyNames(data, fields);
+      // The payload is a JSON-encoded string (already escaped). Wrap in quotes
+      // and parse once to resolve \n / \" / \\.
+      decoded = JSON.parse(`"${escaped}"`);
     } catch {
-      // fall through
+      continue;
+    }
+    // Each chunk may contain multiple embedded JSON fragments. Scan for them.
+    const jsonRe = /(\{[\s\S]*?"properties"[\s\S]*?\})/g;
+    let j: RegExpExecArray | null;
+    while ((j = jsonRe.exec(decoded)) !== null) {
+      const candidate = j[1];
+      // Try to parse progressively larger slices until we get a valid object.
+      for (let len = candidate.length; len > 50; len -= 50) {
+        try {
+          const parsed = JSON.parse(candidate.slice(0, len));
+          harvestSchemaPropertyNames(parsed, fields);
+          break;
+        } catch {
+          // try smaller
+        }
+      }
     }
   }
 
-  // 2. Regex fallback: fal's playground renders labels like
-  //    <label for="image_size">Image Size</label>
-  //    <input name="prompt"
-  const labelMatches = html.matchAll(/<label[^>]*for=["']([a-z_][a-z0-9_]*)["']/gi);
-  for (const m of labelMatches) fields.add(m[1]);
-  const nameMatches = html.matchAll(/\sname=["']([a-z_][a-z0-9_]*)["']/gi);
-  for (const m of nameMatches) fields.add(m[1]);
+  // If we never saw any `__next_f.push`, the page wasn't what we expected.
+  if (chunks === 0) return [];
 
   return [...fields].sort();
 }

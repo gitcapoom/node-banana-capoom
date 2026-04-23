@@ -18,6 +18,36 @@ import type { ModelParameter } from "@/lib/providers/types";
 import { EXCLUDED_PARAMS } from "./constants";
 
 /**
+ * Names we NEVER want added to a model schema even if a playground scraper
+ * surfaces them — they're HTML <meta>/OpenGraph/Twitter Card / framework
+ * artifacts, not form fields.
+ */
+const HTML_METADATA_NAMES = new Set<string>([
+  "description",
+  "keywords",
+  "author",
+  "viewport",
+  "robots",
+  "generator",
+  "referrer",
+  "theme_color",
+  "color_scheme",
+  "apple_mobile_web_app_title",
+  "apple_mobile_web_app_capable",
+  "apple_mobile_web_app_status_bar_style",
+  "format_detection",
+  "msapplication_tilecolor",
+  "msapplication_config",
+  "og_title", "og_description", "og_image", "og_url", "og_type", "og_site_name",
+  "twitter_title", "twitter_description", "twitter_image", "twitter_card", "twitter_site", "twitter_creator",
+  "fb_app_id",
+  "copy_code", "copy", "code",
+  "csrf_token", "csrf", "_token",
+  "charset", "title", "lang", "dir", "id", "class",
+  "submit", "button", "cancel", "close", "save", "edit", "delete",
+]);
+
+/**
  * Convert CamelCase / kebab-case / space-separated into snake_case for
  * matching against OpenAPI property names (which are usually snake_case).
  */
@@ -86,6 +116,8 @@ export function mergePlaygroundFields(
 
     const snake = toSnakeCase(field);
     if (known.has(field) || known.has(snake)) continue;
+    // Defense-in-depth: reject HTML-metadata field names outright.
+    if (HTML_METADATA_NAMES.has(snake) || HTML_METADATA_NAMES.has(field)) continue;
 
     newParameters.push({
       name: snake,
