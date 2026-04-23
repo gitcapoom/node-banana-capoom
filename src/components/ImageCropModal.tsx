@@ -185,16 +185,24 @@ export function ImageCropModal() {
     // Apply scale to width/height then reset scale (Konva Transformer convention)
     const sx = node.scaleX();
     const sy = node.scaleY();
-    const w = Math.max(1, node.width() * sx);
-    const h = Math.max(1, node.height() * sy);
+    let w = Math.max(5, node.width() * sx);
+    let h = Math.max(5, node.height() * sy);
     node.scaleX(1);
     node.scaleY(1);
+
+    // Clamp size to image bounds first (relative to current x/y)
+    let x = node.x();
+    let y = node.y();
+    // Ensure w/h don't extend beyond image
+    if (x < 0) { w = w + x; x = 0; }
+    if (y < 0) { h = h + y; y = 0; }
+    if (x + w > image.width) w = image.width - x;
+    if (y + h > image.height) h = image.height - y;
+    w = Math.max(5, w);
+    h = Math.max(5, h);
+
     node.width(w);
     node.height(h);
-
-    // Clamp to image bounds
-    const x = Math.max(0, Math.min(image.width - w, node.x()));
-    const y = Math.max(0, Math.min(image.height - h, node.y()));
     node.x(x);
     node.y(y);
 
@@ -323,10 +331,12 @@ export function ImageCropModal() {
                   y={cropBox.y}
                   width={cropBox.width}
                   height={cropBox.height}
-                  stroke="#fff"
-                  strokeWidth={2 / scale}
+                  stroke="transparent"
+                  strokeWidth={0}
+                  fill="transparent"
                   draggable
                   onDragEnd={handleRectDragEnd}
+                  onTransform={handleRectTransform}
                   onTransformEnd={handleRectTransform}
                 />
               )}
@@ -341,18 +351,16 @@ export function ImageCropModal() {
                   "middle-left", "middle-right",
                   "bottom-left", "bottom-center", "bottom-right",
                 ]}
-                anchorFill="#fff"
+                anchorSize={12}
+                anchorFill="#ffffff"
                 anchorStroke="#0ea5e9"
-                anchorStrokeWidth={1}
-                borderEnabled={false}
+                anchorStrokeWidth={2}
+                borderStroke="#0ea5e9"
+                borderStrokeWidth={1}
                 boundBoxFunc={(oldBox, newBox) => {
-                  if (!image) return oldBox;
-                  // Clamp to image bounds
-                  const minSize = 10;
+                  const minSize = 5;
+                  // Only reject if completely invalid (below min size)
                   if (newBox.width < minSize || newBox.height < minSize) return oldBox;
-                  if (newBox.x < 0 || newBox.y < 0) return oldBox;
-                  if (newBox.x + newBox.width > image.width) return oldBox;
-                  if (newBox.y + newBox.height > image.height) return oldBox;
                   return newBox;
                 }}
               />
