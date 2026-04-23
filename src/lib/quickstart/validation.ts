@@ -529,6 +529,13 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         blurRadius: 0,
         invertMask: false,
       };
+    case "imageCrop":
+      return {
+        sourceImage: null,
+        cropRegion: null,
+        aspectLock: "free",
+        outputImage: null,
+      };
   }
 }
 
