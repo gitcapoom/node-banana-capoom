@@ -453,10 +453,11 @@ describe("/api/models route", () => {
       expect(data.errors).toContain("replicate: Replicate API error: 401");
     });
 
-    it("GET: should return 500 when all requested providers fail", async () => {
+    it("GET: should return 200 with empty models + errors when all requested providers fail", async () => {
+      // Behavior change: when providers fail (e.g. Replicate 522), we now
+      // return 200 with `errors` + empty models rather than 500 so the UI
+      // can still show partial results instead of crashing.
       process.env.FAL_API_KEY = "test-fal-key";
-      // Filter to only fal provider (exclude gemini which is always available)
-      // When fal fails and it's the only provider requested, should get 500
       mockFetch.mockImplementation((url: string) => {
         if (url.includes("fal.ai")) {
           return Promise.resolve({ ok: false, status: 503 });
@@ -464,14 +465,14 @@ describe("/api/models route", () => {
         return Promise.reject(new Error("Unknown URL"));
       });
 
-      // Request only fal provider so gemini is not included
       const request = createMockGetRequest({ provider: "fal" });
       const response = await GET(request);
       const data = await response.json();
 
-      expect(response.status).toBe(500);
-      expect(data.success).toBe(false);
-      expect(data.error).toContain("All providers failed");
+      expect(response.status).toBe(200);
+      expect(data.success).toBe(true);
+      expect(data.models).toEqual([]);
+      expect(data.errors).toEqual(expect.arrayContaining([expect.stringContaining("fal")]));
     });
   });
 

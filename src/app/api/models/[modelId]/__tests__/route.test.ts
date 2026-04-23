@@ -798,7 +798,9 @@ describe("/api/models/[modelId] schema endpoint", () => {
       expect(data.error).toContain("Replicate API key required");
     });
 
-    it("should handle API errors gracefully", async () => {
+    it("should return 404 when upstream reports the model schema is unavailable", async () => {
+      // Behavior change: the new pipeline surfaces upstream "not found" as
+      // an honest 404 instead of conflating it with a 500 server error.
       mockFetch.mockResolvedValueOnce({
         ok: false,
         status: 404,
@@ -809,7 +811,7 @@ describe("/api/models/[modelId] schema endpoint", () => {
       const response = await GET(request, { params: Promise.resolve({ modelId }) });
       const data = await response.json();
 
-      expect(response.status).toBe(500);
+      expect(response.status).toBe(404);
       expect(data.success).toBe(false);
     });
   });

@@ -300,31 +300,55 @@ export async function generateWithFalQueue(
     return value;
   };
 
+  // Deep-set a possibly-dotted key into a target object. E.g. "fill_image.fill_image_url"
+  // ensures the request body has `{ fill_image: { fill_image_url: <value> } }`.
+  const setAtPath = (target: Record<string, unknown>, dottedKey: string, value: unknown): void => {
+    if (!dottedKey.includes(".")) {
+      target[dottedKey] = value;
+      return;
+    }
+    const segments = dottedKey.split(".");
+    let cursor = target;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const seg = segments[i];
+      const existing = cursor[seg];
+      if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+        cursor[seg] = {};
+      }
+      cursor = cursor[seg] as Record<string, unknown>;
+    }
+    cursor[segments[segments.length - 1]] = value;
+  };
+
   if (hasDynamicInputs) {
     // Apply coerced parameters first, then dynamic inputs override
     Object.assign(requestBody, coerceParameterTypes(input.parameters, parameterTypes));
-    const filteredInputs: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(input.dynamicInputs!)) {
-      if (value !== null && value !== undefined && value !== '') {
-        let processedValue: unknown = value;
-        // Upload base64 images to CDN
-        if (typeof value === "string" || Array.isArray(value)) {
-          processedValue = await uploadImage(value);
-        }
-        // Wrap in array if schema expects array but we have a single value
-        if (schemaArrayParams.has(key) && !Array.isArray(processedValue)) {
-          filteredInputs[key] = [processedValue];
-        } else if (!schemaArrayParams.has(key) && Array.isArray(processedValue)) {
-          // Unwrap array to single value if schema expects a string (e.g. image_url)
-          if (processedValue.length > 0) {
-            filteredInputs[key] = processedValue[0];
-          }
-        } else {
-          filteredInputs[key] = processedValue;
-        }
+      if (value === null || value === undefined || value === '') continue;
+      let processedValue: unknown = value;
+      // Upload base64 images to CDN
+      if (typeof value === "string" || Array.isArray(value)) {
+        processedValue = await uploadImage(value);
       }
+
+      if (key.includes(".")) {
+        // Dotted / nested field (e.g. "fill_image.fill_image_url"). The client
+        // already shaped the value correctly based on ModelInput.isArray —
+        // trust it and deep-set into the request body.
+        setAtPath(requestBody, key, processedValue);
+        continue;
+      }
+
+      // Top-level field: reshape according to the model's declared schema.
+      if (schemaArrayParams.has(key) && !Array.isArray(processedValue)) {
+        processedValue = [processedValue];
+      } else if (!schemaArrayParams.has(key) && Array.isArray(processedValue)) {
+        // Unwrap array to single value if schema expects a string (e.g. image_url)
+        if (processedValue.length > 0) processedValue = processedValue[0];
+        else continue;
+      }
+      requestBody[key] = processedValue;
     }
-    Object.assign(requestBody, filteredInputs);
 
     // Ensure prompt is included even when using dynamic inputs.
     // nanoBananaExecutor removes prompt from dynamicInputs to avoid duplication,

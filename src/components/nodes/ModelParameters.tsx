@@ -9,7 +9,7 @@ import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 // localStorage cache for model schemas (persists across dev server restarts)
 // Bump SCHEMA_CACHE_VERSION when schema extraction logic changes to auto-invalidate
 const SCHEMA_CACHE_KEY = "node-banana-schema-cache";
-const SCHEMA_CACHE_VERSION = 4; // v4: fix end_image_url / nullable anyOf detection
+const SCHEMA_CACHE_VERSION = 7; // v7: hoist nested wrapper image URLs (fill_image_url etc.) as input pins
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {
@@ -316,6 +316,78 @@ function ParameterInputInner({ param, name, value, onChange }: ParameterInputPro
     }
   }, [value]);
 
+  // Union: enum (presets) + properties (custom object). Must go BEFORE the
+  // plain-enum check below, otherwise image_size-style parameters render as
+  // a bare dropdown and never expose their width/height editor.
+  if (
+    param.type === "object" &&
+    param.properties && param.properties.length > 0 &&
+    param.enum && param.enum.length > 0
+  ) {
+    const isPresetMode = typeof value === "string" || value === undefined || value === null;
+    const objValue = (value && typeof value === "object" && !Array.isArray(value))
+      ? value as Record<string, unknown>
+      : {};
+    return (
+      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[11px] text-neutral-300 font-medium" title={param.description || undefined}>
+            {displayName}
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              if (isPresetMode) {
+                const custom: Record<string, unknown> = {};
+                for (const p of param.properties!) {
+                  if (p.default !== undefined) custom[p.name] = p.default;
+                }
+                handleChange(Object.keys(custom).length > 0 ? custom : {});
+              } else {
+                handleChange(undefined);
+              }
+            }}
+            className="nodrag nopan text-[9px] px-1.5 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-400"
+          >
+            {isPresetMode ? "Custom" : "Preset"}
+          </button>
+        </div>
+        {isPresetMode ? (
+          <select
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => handleChange(e.target.value || undefined)}
+            className="nodrag nopan w-full text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white focus:outline-none focus:ring-1 focus:ring-neutral-600 appearance-none cursor-pointer"
+          >
+            <option value="">Default</option>
+            {param.enum.map((opt) => (
+              <option key={String(opt)} value={String(opt)}>
+                {String(opt)}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <div className="space-y-1">
+            {param.properties!.map((subParam) => (
+              <ParameterInput
+                key={subParam.name}
+                param={subParam}
+                name={subParam.name}
+                value={objValue[subParam.name]}
+                onChange={(subName, subVal) => {
+                  const updated = { ...objValue, [subName]: subVal };
+                  for (const k of Object.keys(updated)) {
+                    if (updated[k] === undefined) delete updated[k];
+                  }
+                  handleChange(Object.keys(updated).length > 0 ? updated : undefined);
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // Determine input type and render accordingly
   if (param.enum && param.enum.length > 0) {
     // Enum: render as select
@@ -446,73 +518,10 @@ function ParameterInputInner({ param, name, value, onChange }: ParameterInputPro
     );
   }
 
-  // Object parameter with enum+properties union (e.g., image_size: preset OR custom width/height)
-  if (param.type === "object" && param.properties && param.properties.length > 0 && param.enum && param.enum.length > 0) {
-    const isPresetMode = typeof value === "string" || value === undefined || value === null;
-    const objValue = (value && typeof value === "object" && !Array.isArray(value))
-      ? value as Record<string, unknown>
-      : {};
-    return (
-      <div className="col-span-full border-l-2 border-neutral-700 pl-2 space-y-1.5">
-        <div className="flex items-center justify-between">
-          <label className="text-[11px] text-neutral-300 font-medium" title={param.description || undefined}>
-            {displayName}
-          </label>
-          <button
-            type="button"
-            onClick={() => {
-              if (isPresetMode) {
-                // Switch to custom: set default sub-field values
-                const custom: Record<string, unknown> = {};
-                for (const p of param.properties!) {
-                  if (p.default !== undefined) custom[p.name] = p.default;
-                }
-                handleChange(Object.keys(custom).length > 0 ? custom : {});
-              } else {
-                // Switch to preset: use first enum value or undefined
-                handleChange(undefined);
-              }
-            }}
-            className="nodrag nopan text-[9px] px-1.5 py-0.5 rounded bg-neutral-700 hover:bg-neutral-600 text-neutral-400"
-          >
-            {isPresetMode ? "Custom" : "Preset"}
-          </button>
-        </div>
-        {isPresetMode ? (
-          <select
-            value={typeof value === "string" ? value : ""}
-            onChange={(e) => handleChange(e.target.value || undefined)}
-            className="nodrag nopan w-full text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] text-white focus:outline-none focus:ring-1 focus:ring-neutral-600 appearance-none cursor-pointer"
-          >
-            <option value="">Default</option>
-            {param.enum.map((opt) => (
-              <option key={String(opt)} value={String(opt)}>
-                {String(opt)}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <div className="space-y-1">
-            {param.properties!.map((subParam) => (
-              <ParameterInput
-                key={subParam.name}
-                param={subParam}
-                name={subParam.name}
-                value={objValue[subParam.name]}
-                onChange={(subName, subVal) => {
-                  const updated = { ...objValue, [subName]: subVal };
-                  for (const k of Object.keys(updated)) {
-                    if (updated[k] === undefined) delete updated[k];
-                  }
-                  handleChange(Object.keys(updated).length > 0 ? updated : undefined);
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
+  // NOTE: the preset-OR-custom union renderer is handled earlier in this
+  // function (before the plain-enum check) — see the "Union: enum (presets)
+  // + properties" block. Falling through here means we have a plain object
+  // parameter without an enum preset.
 
   // Object parameter: render sub-fields in a group
   if (param.type === "object" && param.properties && param.properties.length > 0) {

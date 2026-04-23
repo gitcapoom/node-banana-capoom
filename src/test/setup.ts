@@ -1,6 +1,17 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import os from "node:os";
+import path from "node:path";
+
+// Isolate schema disk cache per test process so tests don't contaminate the
+// real .cache/schemas directory or each other across reruns.
+if (!process.env.SCHEMA_CACHE_ROOT) {
+  process.env.SCHEMA_CACHE_ROOT = path.join(
+    os.tmpdir(),
+    `schemas-test-${process.pid}-${Date.now()}`
+  );
+}
 
 // Mock ResizeObserver for React Flow tests
 class ResizeObserverMock {
