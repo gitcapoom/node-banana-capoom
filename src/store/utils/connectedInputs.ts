@@ -78,7 +78,11 @@ export function getSourceOutput(
 ): { type: "image" | "text" | "video" | "audio" | "3d"; value: string | null } {
   const sourceHandleId = sourceHandle;
   if (sourceNode.type === "imageInput") {
-    return { type: "image", value: (sourceNode.data as ImageInputNodeData).image };
+    const d = sourceNode.data as ImageInputNodeData;
+    // If a mirror toggle is active we pre-computed outputImage; return it.
+    // Otherwise fall back to the raw image.
+    const flipActive = !!d.flipHorizontal || !!d.flipVertical;
+    return { type: "image", value: (flipActive && d.outputImage) ? d.outputImage : d.image };
   } else if (sourceNode.type === "audioInput") {
     return { type: "audio", value: (sourceNode.data as AudioInputNodeData).audioFile };
   } else if (sourceNode.type === "annotation") {

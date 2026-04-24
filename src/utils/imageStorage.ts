@@ -106,15 +106,33 @@ async function externalizeNodeImages(
   switch (node.type) {
     case "imageInput": {
       const d = data as import("@/types").ImageInputNodeData;
+      let image = d.image;
+      let imageRef = d.imageRef;
+      let outputImage = d.outputImage ?? null;
+      let outputImageRef = d.outputImageRef;
+
       // Skip if already has a valid imageRef (prevents duplicates on re-save after hydration)
       if (d.imageRef && isBase64DataUrl(d.image)) {
-        newData = { ...d, image: null };
+        image = null;
       } else if (isBase64DataUrl(d.image)) {
-        const imageId = await saveImageAndGetId(d.image, workflowPath, savedImageIds, "inputs");
-        newData = { ...d, image: null, imageRef: imageId };
-      } else {
-        newData = d;
+        imageRef = await saveImageAndGetId(d.image, workflowPath, savedImageIds, "inputs");
+        image = null;
       }
+
+      // outputImage is a pre-rendered mirror — only persist if a flip is
+      // active (otherwise it's redundant).
+      const flipActive = !!d.flipHorizontal || !!d.flipVertical;
+      if (!flipActive) {
+        outputImage = null;
+        outputImageRef = undefined;
+      } else if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
+        outputImage = null;
+      } else if (isBase64DataUrl(d.outputImage)) {
+        outputImageRef = await saveImageAndGetId(d.outputImage!, workflowPath, savedImageIds, "inputs");
+        outputImage = null;
+      }
+
+      newData = { ...d, image, imageRef, outputImage, outputImageRef };
       break;
     }
 
@@ -667,15 +685,17 @@ async function hydrateNodeImages(
   switch (node.type) {
     case "imageInput": {
       const d = data as import("@/types").ImageInputNodeData;
+      let image = d.image;
+      let outputImage = d.outputImage ?? null;
+
       if (d.imageRef && !d.image) {
-        const image = await loadImageById(d.imageRef, workflowPath, loadedImages, "inputs");
-        newData = {
-          ...d,
-          image,
-        };
-      } else {
-        newData = d;
+        image = await loadImageById(d.imageRef, workflowPath, loadedImages, "inputs");
       }
+      if (d.outputImageRef && !d.outputImage) {
+        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "inputs");
+      }
+
+      newData = { ...d, image, outputImage };
       break;
     }
 

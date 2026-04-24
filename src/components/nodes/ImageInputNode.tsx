@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
@@ -8,6 +8,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { ImageInputNodeData } from "@/types";
 import { MediaOverlay } from "../MediaOverlay";
 import { deriveAutoTitle } from "@/utils/nodeTitleFromFilename";
+import { mirrorImage } from "@/utils/mirrorImage";
 
 type ImageInputNodeType = Node<ImageInputNodeData, "imageInput">;
 
@@ -87,8 +88,66 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
       imageRef: undefined,
       filename: null,
       dimensions: null,
+      outputImage: null,
+      outputImageRef: undefined,
     });
   }, [id, updateNodeData]);
+
+  const toggleFlipH = useCallback(() => {
+    updateNodeData(id, { flipHorizontal: !nodeData.flipHorizontal });
+  }, [id, nodeData.flipHorizontal, updateNodeData]);
+
+  const toggleFlipV = useCallback(() => {
+    updateNodeData(id, { flipVertical: !nodeData.flipVertical });
+  }, [id, nodeData.flipVertical, updateNodeData]);
+
+  // Re-render the mirrored outputImage whenever source or flip toggles change.
+  // Stored on the node so `getSourceOutput` can return it synchronously.
+  const lastFlipApplied = useRef<string>("");
+  useEffect(() => {
+    const src = nodeData.image;
+    const h = !!nodeData.flipHorizontal;
+    const v = !!nodeData.flipVertical;
+
+    if (!src) {
+      if (nodeData.outputImage !== null && nodeData.outputImage !== undefined) {
+        updateNodeData(id, { outputImage: null });
+      }
+      lastFlipApplied.current = "";
+      return;
+    }
+
+    if (!h && !v) {
+      // No flip — clear the rendered copy (downstream will use `image`)
+      if (nodeData.outputImage) {
+        updateNodeData(id, { outputImage: null });
+      }
+      lastFlipApplied.current = `passthrough:${src.length}`;
+      return;
+    }
+
+    const fingerprint = `${src.length}|${h ? "H" : ""}${v ? "V" : ""}`;
+    if (lastFlipApplied.current === fingerprint) return;
+    lastFlipApplied.current = fingerprint;
+
+    let cancelled = false;
+    mirrorImage(src, h, v)
+      .then((flipped) => {
+        if (!cancelled) updateNodeData(id, { outputImage: flipped, outputImageRef: undefined });
+      })
+      .catch((err) => {
+        console.error("ImageInputNode: mirror failed", err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, nodeData.image, nodeData.flipHorizontal, nodeData.flipVertical, nodeData.outputImage, updateNodeData]);
+
+  const displayImage =
+    (nodeData.flipHorizontal || nodeData.flipVertical) && nodeData.outputImage
+      ? nodeData.outputImage
+      : nodeData.image;
 
   // No-op handlers for overlay (single image, no carousel)
   const noop = useCallback(() => {}, []);
@@ -122,11 +181,46 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
       {nodeData.image ? (
         <div className="relative group w-full h-full">
           <img
-            src={nodeData.image}
+            src={displayImage || nodeData.image}
             alt={nodeData.filename || "Uploaded image"}
             className="w-full h-full object-contain cursor-pointer"
             onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}
           />
+          {/* Mirror toggles — bottom-left, fade in on hover */}
+          <div className="absolute bottom-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity nodrag">
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleFlipH(); }}
+              aria-label="Flip horizontal"
+              title="Flip horizontally"
+              className={`w-6 h-6 rounded text-white text-xs flex items-center justify-center transition-colors ${
+                nodeData.flipHorizontal
+                  ? "bg-blue-600/90 hover:bg-blue-500"
+                  : "bg-black/60 hover:bg-black/80"
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v18" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7l-5 5 5 5" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7l5 5-5 5" />
+              </svg>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); toggleFlipV(); }}
+              aria-label="Flip vertical"
+              title="Flip vertically"
+              className={`w-6 h-6 rounded text-white text-xs flex items-center justify-center transition-colors ${
+                nodeData.flipVertical
+                  ? "bg-blue-600/90 hover:bg-blue-500"
+                  : "bg-black/60 hover:bg-black/80"
+              }`}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h18" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 8l5-5 5 5" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 16l5 5 5-5" />
+              </svg>
+            </button>
+          </div>
           <button
             onClick={handleRemove}
             aria-label="Remove image"
@@ -137,7 +231,7 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
             </svg>
           </button>
           {/* Double-click hint */}
-          <div className="absolute bottom-0 left-0 right-0 text-center py-1 bg-neutral-900/40">
+          <div className="absolute bottom-0 left-0 right-0 text-center py-1 bg-neutral-900/40 pointer-events-none">
             <span className="text-[10px] text-white/30">double click to view</span>
           </div>
         </div>
@@ -174,7 +268,7 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
 
     {showOverlay && nodeData.image && (
       <MediaOverlay
-        content={nodeData.image}
+        content={displayImage || nodeData.image}
         mediaType="image"
         currentIndex={0}
         totalCount={1}
