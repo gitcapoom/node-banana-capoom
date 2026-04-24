@@ -5,7 +5,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type WheelEvent as ReactWheelEvent,
 } from "react";
@@ -15,11 +14,11 @@ const MAX_SCALE = 50;
 
 /**
  * How panning interacts with the child content.
- *   - "free":       left-drag anywhere pans. Use when the content has no
- *                   draggable elements of its own (single image / video).
- *   - "alt-modifier": left-drag pans only when Alt (or Space) is held down.
- *                   Use when the content has its own drag interactions (e.g.
- *                   react-compare-slider's divider).
+ *   - "free":         pointerdown-drag anywhere pans. Use when the content
+ *                     has no drag interactions of its own.
+ *   - "alt-modifier": pan only when Alt (or Space) is held down, or when
+ *                     using middle-mouse button. Use when the content has
+ *                     its own drag (e.g. react-compare-slider's divider).
  */
 export type ZoomPanMode = "free" | "alt-modifier";
 
@@ -34,6 +33,10 @@ interface ZoomPanViewProps {
 /**
  * Generic wheel-zoom / drag-pan wrapper. Zoom is cursor-centered and
  * unconstrained (up to 50×, down to 0.1×). Press "0" to reset.
+ *
+ * Uses native pointerdown listeners in capture phase so pan intercepts
+ * happen BEFORE descendants receive the event — necessary when children
+ * (like react-compare-slider) attach their own pointerdown handlers.
  */
 export function ZoomPanView({ children, panMode = "free", className, hint }: ZoomPanViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -43,11 +46,17 @@ export function ZoomPanView({ children, panMode = "free", className, hint }: Zoo
   const [altHeld, setAltHeld] = useState(false);
   const lastMouseRef = useRef({ x: 0, y: 0 });
 
-  // Track alt/space key for alt-modifier pan mode.
+  // --- Keyboard state (Alt/Space + "0" reset) ---
   useEffect(() => {
-    if (panMode !== "alt-modifier") return;
     const down = (e: KeyboardEvent) => {
-      if (e.key === "Alt" || e.key === " ") setAltHeld(true);
+      if (panMode === "alt-modifier" && (e.key === "Alt" || e.key === " ")) {
+        setAltHeld(true);
+        if (e.key === " ") e.preventDefault(); // avoid page scroll
+      }
+      if (e.key === "0" && !e.ctrlKey && !e.metaKey) {
+        setScale(1);
+        setPan({ x: 0, y: 0 });
+      }
     };
     const up = (e: KeyboardEvent) => {
       if (e.key === "Alt" || e.key === " ") setAltHeld(false);
@@ -60,32 +69,19 @@ export function ZoomPanView({ children, panMode = "free", className, hint }: Zoo
     };
   }, [panMode]);
 
-  // Reset on "0" key
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "0" && !e.ctrlKey && !e.metaKey) {
-        setScale(1);
-        setPan({ x: 0, y: 0 });
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
+  // --- Wheel zoom (cursor-centered) ---
   const handleWheel = useCallback(
     (e: ReactWheelEvent<HTMLDivElement>) => {
       e.preventDefault();
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
 
-      // Cursor position relative to container center
       const cx = e.clientX - rect.left - rect.width / 2;
       const cy = e.clientY - rect.top - rect.height / 2;
 
       const zoomFactor = Math.exp(-e.deltaY * 0.0015);
       setScale((prevScale) => {
         const nextScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, prevScale * zoomFactor));
-        // Adjust pan so the point under the cursor stays fixed.
         const ratio = nextScale / prevScale;
         setPan((prevPan) => ({
           x: cx - (cx - prevPan.x) * ratio,
@@ -97,43 +93,60 @@ export function ZoomPanView({ children, panMode = "free", className, hint }: Zoo
     []
   );
 
-  const canStartPan = useCallback(
-    (e: ReactMouseEvent<HTMLDivElement>): boolean => {
-      if (e.button !== 0 && e.button !== 1) return false; // left or middle
-      if (panMode === "alt-modifier") {
+  // --- Pan: capture-phase pointerdown so we beat descendants ---
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    // Use refs to read latest mode/altHeld without re-binding the listener.
+    const panModeRef = panMode;
+    const altHeldRefValue = altHeld;
+
+    const canStartPan = (e: PointerEvent): boolean => {
+      // Only primary or middle mouse button.
+      if (e.button !== 0 && e.button !== 1) return false;
+      if (panModeRef === "alt-modifier") {
         if (e.button === 1) return true;
-        return e.altKey || altHeld;
+        return e.altKey || altHeldRefValue;
       }
       return true;
-    },
-    [panMode, altHeld]
-  );
+    };
 
-  const handleMouseDown = useCallback(
-    (e: ReactMouseEvent<HTMLDivElement>) => {
+    const onDown = (e: PointerEvent) => {
       if (!canStartPan(e)) return;
+      // Stop the slider / any descendant from seeing this event.
       e.preventDefault();
       e.stopPropagation();
+      e.stopImmediatePropagation();
       setIsDragging(true);
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
-    },
-    [canStartPan]
-  );
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+    };
 
-  const handleMouseMove = useCallback(
-    (e: ReactMouseEvent<HTMLDivElement>) => {
-      if (!isDragging) return;
+    // Capture phase fires BEFORE any descendant's bubble-phase listener.
+    el.addEventListener("pointerdown", onDown, { capture: true });
+    return () => el.removeEventListener("pointerdown", onDown, { capture: true });
+  }, [panMode, altHeld]);
+
+  // --- Track drag globally so cursor leaving the container doesn't break drag ---
+  useEffect(() => {
+    if (!isDragging) return;
+    const onMove = (e: PointerEvent) => {
       const dx = e.clientX - lastMouseRef.current.x;
       const dy = e.clientY - lastMouseRef.current.y;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
       setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
-    },
-    [isDragging]
-  );
-
-  const handleMouseUp = useCallback(() => {
-    setIsDragging(false);
-  }, []);
+    };
+    const onUp = () => setIsDragging(false);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [isDragging]);
 
   const reset = useCallback(() => {
     setScale(1);
@@ -157,11 +170,7 @@ export function ZoomPanView({ children, panMode = "free", className, hint }: Zoo
       ref={containerRef}
       className={className}
       onWheel={handleWheel}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      style={{ cursor, overflow: "hidden", position: "relative", userSelect: "none" }}
+      style={{ cursor, overflow: "hidden", position: "relative", userSelect: "none", touchAction: "none" }}
     >
       <div
         style={{
@@ -177,9 +186,9 @@ export function ZoomPanView({ children, panMode = "free", className, hint }: Zoo
 
       {/* Reset + zoom level badge */}
       <div
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur rounded-full px-3 py-1 text-[11px] text-white/80 pointer-events-auto"
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/60 backdrop-blur rounded-full px-3 py-1 text-[11px] text-white/80"
         onClick={(e) => e.stopPropagation()}
-        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
       >
         <span className="tabular-nums">{Math.round(scale * 100)}%</span>
         <span className="text-white/30">|</span>
