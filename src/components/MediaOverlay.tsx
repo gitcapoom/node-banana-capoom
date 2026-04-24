@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ThreeModelViewer } from "@/components/ThreeModelViewer";
+import { ZoomPanView } from "@/components/ZoomPanView";
 import {
   SENSOR_PRESETS,
   LENS_FOCAL_LENGTHS,
@@ -228,21 +229,35 @@ export function MediaOverlay({
         ) : content ? (
           <>
             {mediaType === "image" && (
-              <img
-                src={content}
-                alt="Full view"
-                className="max-w-[90vw] max-h-[80vh] object-contain rounded-lg"
-                draggable={false}
-              />
+              <ZoomPanView
+                className="w-[90vw] h-[80vh] rounded-lg"
+                panMode="free"
+              >
+                <div className="w-full h-full flex items-center justify-center">
+                  <img
+                    src={content}
+                    alt="Full view"
+                    className="max-w-full max-h-full object-contain"
+                    draggable={false}
+                  />
+                </div>
+              </ZoomPanView>
             )}
             {mediaType === "video" && videoBlobUrl && (
-              <video
-                ref={videoRef}
-                src={videoBlobUrl}
-                controls
-                autoPlay
-                className="max-w-[90vw] max-h-[80vh] rounded-lg"
-              />
+              <ZoomPanView
+                className="w-[90vw] h-[80vh] rounded-lg"
+                panMode="alt-modifier"
+              >
+                <div className="w-full h-full flex items-center justify-center">
+                  <video
+                    ref={videoRef}
+                    src={videoBlobUrl}
+                    controls
+                    autoPlay
+                    className="max-w-full max-h-full"
+                  />
+                </div>
+              </ZoomPanView>
             )}
             {mediaType === "audio" && (
               <div className="bg-neutral-800 rounded-lg p-8 min-w-[400px]">
