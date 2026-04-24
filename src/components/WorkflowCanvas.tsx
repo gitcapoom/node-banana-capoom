@@ -360,6 +360,44 @@ export function WorkflowCanvas() {
   const [expandingNode, setExpandingNode] = useState<{ id: string; type: string } | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
+  // Track selection order so multi-node → single-pin connections assign images
+  // in the order the user clicked them, not the order they happen to appear in
+  // the workflow's nodes array.
+  const selectionOrderRef = useRef<string[]>([]);
+  const handleNodesChange = useCallback<typeof onNodesChange>(
+    (changes) => {
+      for (const c of changes) {
+        if (c.type === "select") {
+          if (c.selected) {
+            if (!selectionOrderRef.current.includes(c.id)) {
+              selectionOrderRef.current.push(c.id);
+            }
+          } else {
+            const idx = selectionOrderRef.current.indexOf(c.id);
+            if (idx >= 0) selectionOrderRef.current.splice(idx, 1);
+          }
+        } else if (c.type === "remove") {
+          const idx = selectionOrderRef.current.indexOf(c.id);
+          if (idx >= 0) selectionOrderRef.current.splice(idx, 1);
+        }
+      }
+      onNodesChange(changes);
+    },
+    [onNodesChange]
+  );
+
+  // Order selected nodes by selection recency (earliest click first).
+  // Nodes in the selection that are missing from the order ref (shouldn't
+  // happen but defensive) fall back to the end, keeping their node-array order.
+  const sortBySelectionOrder = useCallback((selected: typeof nodes): typeof nodes => {
+    const order = selectionOrderRef.current;
+    const rank = (id: string) => {
+      const i = order.indexOf(id);
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    return [...selected].sort((a, b) => rank(a.id) - rank(b.id));
+  }, []);
+
   // Detect if canvas is empty for showing quickstart
   const isCanvasEmpty = nodes.length === 0;
 
@@ -692,8 +730,11 @@ export function WorkflowCanvas() {
         return conn;
       };
 
-      // Get all selected nodes
-      const selectedNodes = nodes.filter((node) => node.selected);
+      // Get all selected nodes, ordered by when the user selected them (not
+      // the order they appear in the nodes array). This way when multiple
+      // inputs are connected to the same pin in one gesture, images get
+      // assigned in click order.
+      const selectedNodes = sortBySelectionOrder(nodes.filter((node) => node.selected));
       const sourceNode = nodes.find((node) => node.id === connection.source);
 
       // If the source node is selected and there are multiple selected nodes,
@@ -1348,8 +1389,10 @@ export function WorkflowCanvas() {
         }
       }
 
-      // Get all selected nodes to connect them all to the new node
-      const selectedNodes = nodes.filter((node) => node.selected);
+      // Get all selected nodes to connect them all to the new node — ordered
+      // by click order (selection recency), so images/videos land on
+      // sub-handles in the order the user selected them.
+      const selectedNodes = sortBySelectionOrder(nodes.filter((node) => node.selected));
       const sourceNode = nodes.find((node) => node.id === sourceNodeId);
 
       // If the source node is selected and there are multiple selected nodes,
@@ -2231,7 +2274,7 @@ export function WorkflowCanvas() {
       <ReactFlow
         nodes={allNodes}
         edges={edges}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}
         onConnectEnd={handleConnectEnd}
