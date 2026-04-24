@@ -363,27 +363,66 @@ export function WorkflowCanvas() {
   // Track selection order so multi-node → single-pin connections assign images
   // in the order the user clicked them, not the order they happen to appear in
   // the workflow's nodes array.
+  //
+  // Two input paths:
+  //   - Shift-click: each click emits its own `select: true` change → we
+  //     append in click order.
+  //   - Rubber-band: React Flow commits all nodes-in-rectangle as a single
+  //     batch with multiple `select: true` changes. The batch order is
+  //     effectively the workflow's node-array order (arbitrary from the
+  //     user's point of view). For that case we sort the newly-selected
+  //     nodes by visual position — reading order (top row first, then
+  //     left-to-right within a row) — before appending.
   const selectionOrderRef = useRef<string[]>([]);
   const handleNodesChange = useCallback<typeof onNodesChange>(
     (changes) => {
-      for (const c of changes) {
-        if (c.type === "select") {
-          if (c.selected) {
-            if (!selectionOrderRef.current.includes(c.id)) {
-              selectionOrderRef.current.push(c.id);
-            }
-          } else {
-            const idx = selectionOrderRef.current.indexOf(c.id);
-            if (idx >= 0) selectionOrderRef.current.splice(idx, 1);
+      const selectChanges = changes.filter(
+        (c): c is Extract<typeof c, { type: "select" }> => c.type === "select"
+      );
+      const newlySelected = selectChanges.filter((c) => c.selected);
+
+      // Is this a rubber-band batch? Heuristic: more than one `select: true`
+      // in the same onNodesChange call.
+      if (newlySelected.length > 1) {
+        const positions = new Map<string, { x: number; y: number }>();
+        for (const n of nodes) positions.set(n.id, n.position);
+        const rowTolerance = 40; // px — nodes within this Y are "same row"
+        const sorted = [...newlySelected].sort((a, b) => {
+          const pa = positions.get(a.id);
+          const pb = positions.get(b.id);
+          if (!pa || !pb) return 0;
+          if (Math.abs(pa.y - pb.y) > rowTolerance) return pa.y - pb.y;
+          return pa.x - pb.x;
+        });
+        for (const c of sorted) {
+          if (!selectionOrderRef.current.includes(c.id)) {
+            selectionOrderRef.current.push(c.id);
           }
-        } else if (c.type === "remove") {
+        }
+      } else if (newlySelected.length === 1) {
+        const c = newlySelected[0];
+        if (!selectionOrderRef.current.includes(c.id)) {
+          selectionOrderRef.current.push(c.id);
+        }
+      }
+
+      // Remove deselections and deletions from the order list.
+      for (const c of selectChanges) {
+        if (!c.selected) {
           const idx = selectionOrderRef.current.indexOf(c.id);
           if (idx >= 0) selectionOrderRef.current.splice(idx, 1);
         }
       }
+      for (const c of changes) {
+        if (c.type === "remove") {
+          const idx = selectionOrderRef.current.indexOf(c.id);
+          if (idx >= 0) selectionOrderRef.current.splice(idx, 1);
+        }
+      }
+
       onNodesChange(changes);
     },
-    [onNodesChange]
+    [onNodesChange, nodes]
   );
 
   // Order selected nodes by selection recency (earliest click first).
