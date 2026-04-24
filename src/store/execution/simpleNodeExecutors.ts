@@ -18,11 +18,13 @@ import type {
   OutputGalleryNodeData,
   WorkflowNode,
   ImageCropNodeData,
+  MirrorNodeData,
 } from "@/types";
 import type { NodeExecutionContext } from "./types";
 import { parseTextToArray } from "@/utils/arrayParser";
 import { parseVarTags } from "@/utils/parseVarTags";
 import { cropImageToDataUrl } from "@/utils/cropImage";
+import { mirrorImage } from "@/utils/mirrorImage";
 
 /**
  * Annotation node: receives upstream image as source, passes through if no annotations.
@@ -506,6 +508,50 @@ export async function executeImageCrop(ctx: NodeExecutionContext): Promise<void>
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Image Crop node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
+ * Execute a Mirror node: flip the incoming image horizontally, vertically,
+ * or both, depending on the node's toggle state. Passthrough if neither
+ * toggle is on.
+ */
+export async function executeMirror(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const incoming = images[0] || null;
+    const nodeData = node.data as MirrorNodeData;
+
+    if (!incoming) {
+      if (nodeData.outputImage !== null) {
+        updateNodeData(node.id, { outputImage: null, sourceImage: null });
+      }
+      return;
+    }
+
+    if (incoming !== nodeData.sourceImage) {
+      updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
+    }
+
+    const h = !!nodeData.flipHorizontal;
+    const v = !!nodeData.flipVertical;
+    if (!h && !v) {
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      return;
+    }
+
+    try {
+      const flipped = await mirrorImage(incoming, h, v);
+      updateNodeData(node.id, { outputImage: flipped, outputImageRef: undefined });
+    } catch (err) {
+      console.error(`[Workflow] Mirror failed:`, err);
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Mirror node ${node.id} failed:`, message);
     updateNodeData(node.id, { error: message });
   }
 }

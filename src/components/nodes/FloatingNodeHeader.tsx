@@ -39,6 +39,7 @@ const NODE_HEADER_COLORS: Record<string, string> = {
   videoFrameGrab: "#f59e0b",    // amber-500
   imageCompare: "#b45309",      // amber-700
   videoCompare: "#92400e",      // amber-800
+  mirror: "#ca8a04",            // yellow-600
   panoCrop: "#fb923c",          // orange-400
 
   // Route — cyan zone

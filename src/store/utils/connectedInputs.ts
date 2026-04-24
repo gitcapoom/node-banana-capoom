@@ -156,6 +156,9 @@ export function getSourceOutput(
   } else if (sourceNode.type === "imageCrop") {
     const icData = sourceNode.data as ImageCropNodeData;
     return { type: "image", value: icData.outputImage || icData.sourceImage || null };
+  } else if (sourceNode.type === "mirror") {
+    const mData = sourceNode.data as import("@/types").MirrorNodeData;
+    return { type: "image", value: mData.outputImage || mData.sourceImage || null };
   }
   return { type: "image", value: null };
 }

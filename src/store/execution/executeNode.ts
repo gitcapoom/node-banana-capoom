@@ -20,6 +20,7 @@ import {
   executeGlbViewer,
   executeSpzViewer,
   executeImageCrop,
+  executeMirror,
 } from "./simpleNodeExecutors";
 import { executeNanoBanana } from "./nanoBananaExecutor";
 import { executeGenerateVideo } from "./generateVideoExecutor";
@@ -138,6 +139,9 @@ export async function executeNode(
       break;
     case "imageCrop":
       await executeImageCrop(ctx);
+      break;
+    case "mirror":
+      await executeMirror(ctx);
       break;
   }
 }

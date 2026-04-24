@@ -56,6 +56,7 @@ import {
   ConditionalSwitchNode,
   VideoInputNode,
   ImageCropNode,
+  MirrorNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -121,6 +122,7 @@ const nodeTypes: NodeTypes = {
   maskPainter: MaskPainterNode,
   videoInput: VideoInputNode,
   imageCrop: ImageCropNode,
+  mirror: MirrorNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -225,6 +227,10 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image"], outputs: ["image"] };
     case "videoInput":
       return { inputs: ["video"], outputs: ["video"] };
+    case "imageCrop":
+      return { inputs: ["image"], outputs: ["image"] };
+    case "mirror":
+      return { inputs: ["image"], outputs: ["image"] };
     default:
       return { inputs: [], outputs: [] };
   }
@@ -514,6 +520,7 @@ export function WorkflowCanvas() {
     videoInput: 'Video Input',
     glbViewer: '3D Viewer',
     imageCrop: 'Image Crop',
+    mirror: 'Mirror',
   };
 
   // Helper to get node title (used for FloatingNodeHeader)
@@ -1728,6 +1735,7 @@ export function WorkflowCanvas() {
             maskPainter: { width: 260, height: 300 },
             videoInput: { width: 320, height: 300 },
             imageCrop: { width: 300, height: 280 },
+            mirror: { width: 300, height: 300 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });

@@ -57,7 +57,8 @@ export type NodeType =
   | "panoEditor"
   | "maskPainter"
   | "videoInput"
-  | "imageCrop";
+  | "imageCrop"
+  | "mirror";
 
 /**
  * Node execution status
@@ -109,6 +110,19 @@ export interface ImageCropNodeData extends BaseNodeData {
   /** Crop region in relative coordinates (0-1 range) */
   cropRegion: { x: number; y: number; width: number; height: number } | null;
   aspectLock: ImageCropAspectLock;
+  outputImage: string | null;
+  outputImageRef?: string;
+}
+
+/**
+ * Mirror node - flip an input image horizontally, vertically, or both.
+ * Operation is applied whenever sourceImage or the flip toggles change.
+ */
+export interface MirrorNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  flipHorizontal: boolean;
+  flipVertical: boolean;
   outputImage: string | null;
   outputImageRef?: string;
 }
@@ -673,7 +687,8 @@ export type WorkflowNodeData =
   | PanoEditorNodeData
   | MaskPainterNodeData
   | VideoInputNodeData
-  | ImageCropNodeData;
+  | ImageCropNodeData
+  | MirrorNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)
