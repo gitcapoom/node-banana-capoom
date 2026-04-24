@@ -9,6 +9,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { OutputNodeData } from "@/types";
 
 import { FileSaveDialog } from "../FileSaveDialog";
+import { ZoomPanView } from "../ZoomPanView";
 import { extractUpstreamWorkflow } from "@/utils/upstreamExtractor";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 
@@ -29,6 +30,16 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const edgeStyle = useWorkflowStore((state) => state.edgeStyle);
   const [showLightbox, setShowLightbox] = useState(false);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+
+  // Esc closes the lightbox.
+  useEffect(() => {
+    if (!showLightbox) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowLightbox(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showLightbox]);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const previousEdgeCountRef = useRef<number | null>(null);
 
@@ -457,27 +468,34 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         document.body
       )}
 
-      {/* Lightbox Modal (images only) — also portaled */}
+      {/* Lightbox Modal (images only) — also portaled. Uses ZoomPanView so
+          the user can wheel-zoom and drag-pan to inspect details freely. */}
       {showLightbox && contentSrc && !isAudio && !isModel3d && !isVideo && typeof document !== "undefined" && createPortal(
         <div
-          className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-8"
-          onClick={() => setShowLightbox(false)}
+          className="fixed inset-0 bg-black/90 z-[100]"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowLightbox(false);
+          }}
         >
-          <div className="relative max-w-full max-h-full">
-            <img
-              src={contentSrc}
-              alt="Output full size"
-              className="max-w-full max-h-[90vh] object-contain rounded"
-            />
-            <button
-              onClick={() => setShowLightbox(false)}
-              className="absolute top-4 right-4 w-8 h-8 bg-white/10 hover:bg-white/20 rounded text-white text-sm transition-colors flex items-center justify-center"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
+          <button
+            onClick={() => setShowLightbox(false)}
+            className="absolute top-4 right-4 z-10 w-9 h-9 bg-white/10 hover:bg-white/20 rounded-full text-white flex items-center justify-center transition-colors"
+            title="Close (Esc)"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+          <ZoomPanView className="w-full h-full" panMode="free">
+            <div className="w-full h-full flex items-center justify-center">
+              <img
+                src={contentSrc}
+                alt="Output full size"
+                className="max-w-full max-h-full object-contain"
+                draggable={false}
+              />
+            </div>
+          </ZoomPanView>
         </div>,
         document.body
       )}
