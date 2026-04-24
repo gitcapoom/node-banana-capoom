@@ -10,6 +10,7 @@ import { MediaOverlay } from "../MediaOverlay";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 import { captureVideoThumbnail } from "@/utils/mediaCapture";
 import { saveMediaImmediately, loadMediaById } from "@/utils/mediaStorage";
+import { deriveAutoTitle } from "@/utils/nodeTitleFromFilename";
 
 type VideoInputNodeType = Node<VideoInputNodeData, "videoInput">;
 
@@ -79,6 +80,12 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
           }
         }
 
+        const customTitle = deriveAutoTitle(
+          file.name,
+          nodeData.filename,
+          (nodeData as VideoInputNodeData & { customTitle?: string }).customTitle
+        );
+
         updateNodeData(id, {
           videoFile: base64,
           videoFileRef,
@@ -87,11 +94,12 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
           filename: file.name,
           format: file.type,
           duration,
+          ...(customTitle !== undefined ? { customTitle } : {}),
         });
       };
       reader.readAsDataURL(file);
     },
-    [id, updateNodeData, saveDirectoryPath]
+    [id, updateNodeData, saveDirectoryPath, nodeData]
   );
 
   // Generate thumbnail if videoFile exists but thumbnailImage is missing (e.g. loaded from save)

@@ -7,6 +7,7 @@ import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { ImageInputNodeData } from "@/types";
 import { MediaOverlay } from "../MediaOverlay";
+import { deriveAutoTitle } from "@/utils/nodeTitleFromFilename";
 
 type ImageInputNodeType = Node<ImageInputNodeData, "imageInput">;
 
@@ -37,18 +38,24 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
         const base64 = event.target?.result as string;
         const img = new Image();
         img.onload = () => {
+          const customTitle = deriveAutoTitle(
+            file.name,
+            nodeData.filename,
+            (nodeData as ImageInputNodeData & { customTitle?: string }).customTitle
+          );
           updateNodeData(id, {
             image: base64,
             imageRef: undefined,
             filename: file.name,
             dimensions: { width: img.width, height: img.height },
+            ...(customTitle !== undefined ? { customTitle } : {}),
           });
         };
         img.src = base64;
       };
       reader.readAsDataURL(file);
     },
-    [id, updateNodeData]
+    [id, updateNodeData, nodeData]
   );
 
   const handleDrop = useCallback(

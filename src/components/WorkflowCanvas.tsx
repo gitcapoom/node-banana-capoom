@@ -72,6 +72,7 @@ import { FloatingNodeHeader } from "./nodes/FloatingNodeHeader";
 import { ControlPanel } from "./nodes/ControlPanel";
 import { detectAndSplitGrid } from "@/utils/gridSplitter";
 import { logger } from "@/utils/logger";
+import { stripExtension } from "@/utils/nodeTitleFromFilename";
 import { WelcomeModal } from "./quickstart";
 import { ProjectSetupModal } from "./ProjectSetupModal";
 import { ChatPanel } from "./ChatPanel";
@@ -2142,6 +2143,7 @@ export function WorkflowCanvas() {
               x: position.x + index * 340,
               y: position.y,
             });
+            const customTitle = stripExtension(file.name);
             const tempVideo = document.createElement("video");
             tempVideo.preload = "metadata";
             tempVideo.onloadedmetadata = () => {
@@ -2150,6 +2152,7 @@ export function WorkflowCanvas() {
                 filename: file.name,
                 format: file.type,
                 duration: tempVideo.duration,
+                customTitle,
               });
             };
             tempVideo.onerror = () => {
@@ -2157,6 +2160,7 @@ export function WorkflowCanvas() {
                 videoFile: dataUrl,
                 filename: file.name,
                 format: file.type,
+                customTitle,
               });
             };
             tempVideo.src = dataUrl;
@@ -2222,6 +2226,7 @@ export function WorkflowCanvas() {
               image: dataUrl,
               filename: file.name,
               dimensions: { width: img.width, height: img.height },
+              customTitle: stripExtension(file.name),
             });
           };
           img.src = dataUrl;
