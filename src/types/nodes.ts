@@ -73,6 +73,16 @@ export interface ImageInputNodeData extends BaseNodeData {
   imageRef?: string; // External image reference for storage optimization
   filename: string | null;
   dimensions: { width: number; height: number } | null;
+  /** When true, the output image is flipped horizontally before downstream use. */
+  flipHorizontal?: boolean;
+  /** When true, the output image is flipped vertically before downstream use. */
+  flipVertical?: boolean;
+  /**
+   * Pre-rendered mirrored copy of `image` when a flip is active. Stored so
+   * getSourceOutput can return it synchronously without needing a canvas op.
+   */
+  outputImage?: string | null;
+  outputImageRef?: string;
 }
 
 /**
