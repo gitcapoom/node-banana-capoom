@@ -44,6 +44,8 @@ const VALID_NODE_TYPES: NodeType[] = [
   "panoViewer",
   "panoEditor",
   "maskPainter",
+  "imageCrop",
+  "mirror",
 ];
 
 const VALID_HANDLE_TYPES = ["image", "text", "audio", "video", "easeCurve", "3d", "reference"];
@@ -83,6 +85,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   panoEditor: { width: 300, height: 300 },
   maskPainter: { width: 260, height: 300 },
   imageCrop: { width: 300, height: 280 },
+  mirror: { width: 300, height: 300 },
 };
 
 /**
@@ -534,6 +537,13 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         sourceImage: null,
         cropRegion: null,
         aspectLock: "free",
+        outputImage: null,
+      };
+    case "mirror":
+      return {
+        sourceImage: null,
+        flipHorizontal: false,
+        flipVertical: false,
         outputImage: null,
       };
   }

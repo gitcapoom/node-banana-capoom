@@ -33,6 +33,7 @@ import {
   MaskPainterNodeData,
   VideoInputNodeData,
   ImageCropNodeData,
+  MirrorNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -78,6 +79,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   maskPainter: { width: 260, height: 300 },
   videoInput: { width: 320, height: 300 },
   imageCrop: { width: 300, height: 280 },
+  mirror: { width: 300, height: 300 },
 };
 
 /**
@@ -453,5 +455,12 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         aspectLock: "free",
         outputImage: null,
       } as ImageCropNodeData;
+    case "mirror":
+      return {
+        sourceImage: null,
+        flipHorizontal: false,
+        flipVertical: false,
+        outputImage: null,
+      } as MirrorNodeData;
   }
 };
