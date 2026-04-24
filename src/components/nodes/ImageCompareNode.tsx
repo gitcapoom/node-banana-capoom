@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback, useState, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import {
   ReactCompareSlider,
@@ -9,6 +10,7 @@ import {
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { ImageCompareNodeData } from "@/types";
+import { ZoomPanView } from "../ZoomPanView";
 
 type ImageCompareNodeType = Node<ImageCompareNodeData, "imageCompare">;
 
@@ -84,7 +86,19 @@ export function ImageCompareNode({
   const imageA = displayImages[0] || nodeData.imageA || null;
   const imageB = displayImages[1] || nodeData.imageB || null;
 
+  // Full-screen overlay
+  const [showOverlay, setShowOverlay] = useState(false);
+  useEffect(() => {
+    if (!showOverlay) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowOverlay(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showOverlay]);
+
   return (
+    <>
     <BaseNode
       id={id}
       selected={selected}
@@ -159,7 +173,14 @@ export function ImageCompareNode({
 
       {/* Comparison view or placeholder */}
       {imageA && imageB ? (
-        <div className="flex-1 relative nodrag nopan nowheel">
+        <div
+          className="flex-1 relative nodrag nopan nowheel"
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            setShowOverlay(true);
+          }}
+          title="Double-click to view fullscreen"
+        >
           {compareMode === "slide" && (
             <>
               <ReactCompareSlider
@@ -259,5 +280,114 @@ export function ImageCompareNode({
         </div>
       )}
     </BaseNode>
+
+    {showOverlay && imageA && imageB && typeof document !== "undefined" && createPortal(
+      <div
+        className="fixed inset-0 z-[200] bg-black/90 flex flex-col"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setShowOverlay(false);
+        }}
+      >
+        {/* Top bar */}
+        <div className="flex items-center justify-between px-4 py-3 bg-black/40">
+          <div className="flex gap-1 nodrag">
+            {MODE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setMode(opt.value)}
+                className={`text-xs font-medium py-1 px-3 rounded transition-colors ${
+                  compareMode === opt.value
+                    ? "bg-blue-600 text-white"
+                    : "bg-white/10 text-white/70 hover:bg-white/20"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+            {compareMode !== "slide" && (
+              <div className="flex items-center gap-2 ml-4">
+                <span className="text-[11px] text-white/60">Opacity</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={blendOpacity}
+                  onChange={(e) => setOpacity(parseFloat(e.target.value))}
+                  className="w-32 h-1 accent-blue-500 cursor-pointer"
+                />
+                <span className="text-[11px] text-white/60 w-8 tabular-nums">
+                  {Math.round(blendOpacity * 100)}%
+                </span>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => setShowOverlay(false)}
+            className="w-9 h-9 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors"
+            title="Close (Esc)"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Comparison canvas with zoom/pan */}
+        <ZoomPanView
+          className="flex-1 w-full"
+          panMode={compareMode === "slide" ? "alt-modifier" : "free"}
+        >
+          <div className="w-full h-full flex items-center justify-center">
+            {compareMode === "slide" && (
+              <ReactCompareSlider
+                itemOne={
+                  <ReactCompareSliderImage
+                    src={imageA}
+                    alt="Image A"
+                    style={{ objectFit: "contain" }}
+                  />
+                }
+                itemTwo={
+                  <ReactCompareSliderImage
+                    src={imageB}
+                    alt="Image B"
+                    style={{ objectFit: "contain" }}
+                  />
+                }
+                portrait={false}
+                style={{ width: "100%", height: "100%" }}
+              />
+            )}
+            {compareMode === "blend" && (
+              <div className="relative w-full h-full">
+                <img src={imageA} alt="Image A" className="w-full h-full object-contain" draggable={false} />
+                <img
+                  src={imageB}
+                  alt="Image B"
+                  className="absolute inset-0 w-full h-full object-contain"
+                  style={{ opacity: blendOpacity }}
+                  draggable={false}
+                />
+              </div>
+            )}
+            {compareMode === "difference" && (
+              <div className="relative w-full h-full">
+                <img src={imageA} alt="Image A" className="w-full h-full object-contain" draggable={false} />
+                <img
+                  src={imageB}
+                  alt="Image B"
+                  className="absolute inset-0 w-full h-full object-contain"
+                  style={{ opacity: blendOpacity, mixBlendMode: "difference" }}
+                  draggable={false}
+                />
+              </div>
+            )}
+          </div>
+        </ZoomPanView>
+      </div>,
+      document.body
+    )}
+    </>
   );
 }
