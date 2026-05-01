@@ -31,4 +31,5 @@ export { MaskPainterNode } from "./MaskPainterNode";
 export { VideoInputNode } from "./VideoInputNode";
 export { ImageCropNode } from "./ImageCropNode";
 export { MirrorNode } from "./MirrorNode";
+export { CubemapEquirectNode } from "./CubemapEquirectNode";
 export { GroupNode } from "./GroupNode";

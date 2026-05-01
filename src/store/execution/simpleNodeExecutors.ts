@@ -19,12 +19,14 @@ import type {
   WorkflowNode,
   ImageCropNodeData,
   MirrorNodeData,
+  CubemapEquirectNodeData,
 } from "@/types";
 import type { NodeExecutionContext } from "./types";
 import { parseTextToArray } from "@/utils/arrayParser";
 import { parseVarTags } from "@/utils/parseVarTags";
 import { cropImageToDataUrl } from "@/utils/cropImage";
 import { mirrorImage } from "@/utils/mirrorImage";
+import { applyCubemapEquirect } from "@/utils/cubemapEquirect";
 
 /**
  * Annotation node: receives upstream image as source, passes through if no annotations.
@@ -552,6 +554,43 @@ export async function executeMirror(ctx: NodeExecutionContext): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Mirror node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
+ * Cubemap ⇄ Equirectangular conversion executor.
+ *   - cubeToEquirect: input is a 4×3 cube cross, output is 2:1 equirect.
+ *   - equirectToCube: input is 2:1 equirect, output is 4×3 cube cross.
+ */
+export async function executeCubemapEquirect(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const incoming = images[0] || null;
+    const nodeData = node.data as CubemapEquirectNodeData;
+
+    if (!incoming) {
+      if (nodeData.outputImage !== null) {
+        updateNodeData(node.id, { outputImage: null, sourceImage: null });
+      }
+      return;
+    }
+
+    if (incoming !== nodeData.sourceImage) {
+      updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
+    }
+
+    try {
+      const output = await applyCubemapEquirect(incoming, nodeData.mode, nodeData.outputSize);
+      updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
+    } catch (err) {
+      console.error(`[Workflow] Cubemap/Equirect conversion failed:`, err);
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Cubemap/Equirect node ${node.id} failed:`, message);
     updateNodeData(node.id, { error: message });
   }
 }

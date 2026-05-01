@@ -163,6 +163,9 @@ export function getSourceOutput(
   } else if (sourceNode.type === "mirror") {
     const mData = sourceNode.data as import("@/types").MirrorNodeData;
     return { type: "image", value: mData.outputImage || mData.sourceImage || null };
+  } else if (sourceNode.type === "cubemapEquirect") {
+    const ceData = sourceNode.data as import("@/types").CubemapEquirectNodeData;
+    return { type: "image", value: ceData.outputImage || ceData.sourceImage || null };
   }
   return { type: "image", value: null };
 }

@@ -58,7 +58,8 @@ export type NodeType =
   | "maskPainter"
   | "videoInput"
   | "imageCrop"
-  | "mirror";
+  | "mirror"
+  | "cubemapEquirect";
 
 /**
  * Node execution status
@@ -133,6 +134,25 @@ export interface MirrorNodeData extends BaseNodeData {
   sourceImageRef?: string;
   flipHorizontal: boolean;
   flipVertical: boolean;
+  outputImage: string | null;
+  outputImageRef?: string;
+}
+
+/**
+ * Cubemap ⇄ Equirectangular conversion node.
+ *
+ * mode = "cubeToEquirect": input is a 4×3 cubemap cross, output is a 2:1
+ *   equirectangular pano of width `outputSize`.
+ * mode = "equirectToCube": input is a 2:1 equirect, output is a cubemap
+ *   cross of (4 × outputSize) × (3 × outputSize).
+ */
+export type CubemapEquirectMode = "cubeToEquirect" | "equirectToCube";
+export interface CubemapEquirectNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  mode: CubemapEquirectMode;
+  /** Equirect width (cube→pano) or face size (pano→cube). */
+  outputSize: number;
   outputImage: string | null;
   outputImageRef?: string;
 }
@@ -698,7 +718,8 @@ export type WorkflowNodeData =
   | MaskPainterNodeData
   | VideoInputNodeData
   | ImageCropNodeData
-  | MirrorNodeData;
+  | MirrorNodeData
+  | CubemapEquirectNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)

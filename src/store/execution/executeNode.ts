@@ -21,6 +21,7 @@ import {
   executeSpzViewer,
   executeImageCrop,
   executeMirror,
+  executeCubemapEquirect,
 } from "./simpleNodeExecutors";
 import { executeNanoBanana } from "./nanoBananaExecutor";
 import { executeGenerateVideo } from "./generateVideoExecutor";
@@ -142,6 +143,9 @@ export async function executeNode(
       break;
     case "mirror":
       await executeMirror(ctx);
+      break;
+    case "cubemapEquirect":
+      await executeCubemapEquirect(ctx);
       break;
   }
 }

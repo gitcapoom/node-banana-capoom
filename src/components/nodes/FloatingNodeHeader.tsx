@@ -40,6 +40,7 @@ const NODE_HEADER_COLORS: Record<string, string> = {
   imageCompare: "#b45309",      // amber-700
   videoCompare: "#92400e",      // amber-800
   mirror: "#ca8a04",            // yellow-600
+  cubemapEquirect: "#a16207",   // yellow-700
   panoCrop: "#fb923c",          // orange-400
 
   // Route — cyan zone
