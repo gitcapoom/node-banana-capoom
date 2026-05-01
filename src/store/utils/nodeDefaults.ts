@@ -34,6 +34,7 @@ import {
   VideoInputNodeData,
   ImageCropNodeData,
   MirrorNodeData,
+  CubemapEquirectNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -80,6 +81,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   videoInput: { width: 320, height: 300 },
   imageCrop: { width: 300, height: 280 },
   mirror: { width: 300, height: 300 },
+  cubemapEquirect: { width: 320, height: 320 },
 };
 
 /**
@@ -462,5 +464,12 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         flipVertical: false,
         outputImage: null,
       } as MirrorNodeData;
+    case "cubemapEquirect":
+      return {
+        sourceImage: null,
+        mode: "cubeToEquirect",
+        outputSize: 2048,
+        outputImage: null,
+      } as CubemapEquirectNodeData;
   }
 };

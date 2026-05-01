@@ -46,6 +46,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "maskPainter",
   "imageCrop",
   "mirror",
+  "cubemapEquirect",
 ];
 
 const VALID_HANDLE_TYPES = ["image", "text", "audio", "video", "easeCurve", "3d", "reference"];
@@ -86,6 +87,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   maskPainter: { width: 260, height: 300 },
   imageCrop: { width: 300, height: 280 },
   mirror: { width: 300, height: 300 },
+  cubemapEquirect: { width: 320, height: 320 },
 };
 
 /**
@@ -544,6 +546,13 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         sourceImage: null,
         flipHorizontal: false,
         flipVertical: false,
+        outputImage: null,
+      };
+    case "cubemapEquirect":
+      return {
+        sourceImage: null,
+        mode: "cubeToEquirect",
+        outputSize: 2048,
         outputImage: null,
       };
   }
