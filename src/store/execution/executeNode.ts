@@ -22,6 +22,7 @@ import {
   executeImageCrop,
   executeMirror,
   executeCubemapEquirect,
+  executeCubemapFaces,
 } from "./simpleNodeExecutors";
 import { executeNanoBanana } from "./nanoBananaExecutor";
 import { executeGenerateVideo } from "./generateVideoExecutor";
@@ -146,6 +147,9 @@ export async function executeNode(
       break;
     case "cubemapEquirect":
       await executeCubemapEquirect(ctx);
+      break;
+    case "cubemapFaces":
+      await executeCubemapFaces(ctx);
       break;
   }
 }

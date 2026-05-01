@@ -275,3 +275,91 @@ export async function applyCubemapEquirect(
   if (mode === "cubeToEquirect") return cubemapToEquirect(src, outputSize);
   return equirectToCubemap(src, outputSize);
 }
+
+// ─── Cubemap ⇄ six independent faces ─────────────────────────────────
+
+export type CubeFace = "up" | "right" | "front" | "left" | "back" | "down";
+export const CUBE_FACES: readonly CubeFace[] = [
+  "up",
+  "right",
+  "front",
+  "left",
+  "back",
+  "down",
+] as const;
+export type FaceImageSet = Partial<Record<CubeFace, string | null>>;
+
+/**
+ * Split a cubemap-cross image into six face images, each `outputSize` square.
+ * Returns a map keyed by face name.
+ */
+export async function splitCubemap(
+  src: string,
+  outputSize: number
+): Promise<Record<CubeFace, string>> {
+  const img = await loadImage(src);
+  const inputFace = Math.min(Math.floor(img.width / 4), Math.floor(img.height / 3));
+  if (inputFace <= 0) throw new Error("Source must be a 4:3 cubemap-cross");
+
+  const out = Math.max(1, Math.floor(outputSize));
+  const result = {} as Record<CubeFace, string>;
+
+  for (const face of CUBE_FACES) {
+    const [col, row] = CROSS_POS[face];
+    const canvas = document.createElement("canvas");
+    canvas.width = out;
+    canvas.height = out;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not acquire 2D context");
+    // drawImage handles resampling — simpler and sharper than manual pixel loops.
+    ctx.drawImage(
+      img,
+      col * inputFace,
+      row * inputFace,
+      inputFace,
+      inputFace,
+      0,
+      0,
+      out,
+      out
+    );
+    result[face] = canvas.toDataURL("image/png");
+  }
+
+  return result;
+}
+
+/**
+ * Combine up to six face images into a cubemap-cross of (4·fs) × (3·fs).
+ * Missing faces leave their cell black. Each face is resampled to fs × fs
+ * regardless of its source resolution, so mixed-resolution inputs are OK.
+ */
+export async function combineCubemap(
+  faces: FaceImageSet,
+  outputFaceSize: number
+): Promise<string> {
+  const fs = Math.max(1, Math.floor(outputFaceSize));
+  const canvas = document.createElement("canvas");
+  canvas.width = fs * 4;
+  canvas.height = fs * 3;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not acquire 2D context");
+
+  // Black background so missing faces stay opaque-black.
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (const face of CUBE_FACES) {
+    const src = faces[face];
+    if (!src) continue;
+    try {
+      const img = await loadImage(src);
+      const [col, row] = CROSS_POS[face];
+      ctx.drawImage(img, col * fs, row * fs, fs, fs);
+    } catch (err) {
+      console.warn(`combineCubemap: skipping ${face} face — load failed`, err);
+    }
+  }
+
+  return canvas.toDataURL("image/png");
+}

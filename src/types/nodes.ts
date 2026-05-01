@@ -59,7 +59,8 @@ export type NodeType =
   | "videoInput"
   | "imageCrop"
   | "mirror"
-  | "cubemapEquirect";
+  | "cubemapEquirect"
+  | "cubemapFaces";
 
 /**
  * Node execution status
@@ -155,6 +156,39 @@ export interface CubemapEquirectNodeData extends BaseNodeData {
   outputSize: number;
   outputImage: string | null;
   outputImageRef?: string;
+}
+
+/**
+ * Cubemap ⇄ 6 individual face images.
+ *
+ * mode = "split": one image input (a 4×3 cross), six image outputs (the
+ *   six faces, each `outputSize` square).
+ * mode = "combine": six image inputs (one per face), one image output (a
+ *   cubemap cross with face size `outputSize`).
+ */
+export type CubemapFacesMode = "split" | "combine";
+export interface CubemapFacesNodeData extends BaseNodeData {
+  mode: CubemapFacesMode;
+  /** Face size (pixels per face) for outputs. Default 1024. */
+  outputSize: number;
+  // Split-mode state
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  outputUp: string | null;
+  outputUpRef?: string;
+  outputDown: string | null;
+  outputDownRef?: string;
+  outputLeft: string | null;
+  outputLeftRef?: string;
+  outputRight: string | null;
+  outputRightRef?: string;
+  outputFront: string | null;
+  outputFrontRef?: string;
+  outputBack: string | null;
+  outputBackRef?: string;
+  // Combine-mode state
+  outputCross: string | null;
+  outputCrossRef?: string;
 }
 
 /**
@@ -719,7 +753,8 @@ export type WorkflowNodeData =
   | VideoInputNodeData
   | ImageCropNodeData
   | MirrorNodeData
-  | CubemapEquirectNodeData;
+  | CubemapEquirectNodeData
+  | CubemapFacesNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)

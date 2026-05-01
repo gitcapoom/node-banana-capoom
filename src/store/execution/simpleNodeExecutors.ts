@@ -20,13 +20,15 @@ import type {
   ImageCropNodeData,
   MirrorNodeData,
   CubemapEquirectNodeData,
+  CubemapFacesNodeData,
 } from "@/types";
 import type { NodeExecutionContext } from "./types";
 import { parseTextToArray } from "@/utils/arrayParser";
 import { parseVarTags } from "@/utils/parseVarTags";
 import { cropImageToDataUrl } from "@/utils/cropImage";
 import { mirrorImage } from "@/utils/mirrorImage";
-import { applyCubemapEquirect } from "@/utils/cubemapEquirect";
+import { applyCubemapEquirect, splitCubemap, combineCubemap, CUBE_FACES, type CubeFace } from "@/utils/cubemapEquirect";
+import { getSourceOutput } from "@/store/utils/connectedInputs";
 
 /**
  * Annotation node: receives upstream image as source, passes through if no annotations.
@@ -591,6 +593,101 @@ export async function executeCubemapEquirect(ctx: NodeExecutionContext): Promise
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Cubemap/Equirect node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
+ * Cubemap ⇄ 6 faces executor.
+ *   - split  : 1 cross input → 6 face outputs
+ *   - combine: 6 face inputs (by edge.targetHandle = up/down/left/right/front/back)
+ *              → 1 cross output
+ */
+export async function executeCubemapFaces(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getNodes, getEdges, updateNodeData } = ctx;
+  try {
+    const nodeData = node.data as CubemapFacesNodeData;
+    const allNodes = getNodes();
+    const edges = getEdges();
+
+    if (nodeData.mode === "split") {
+      // Pull the upstream cross via the central helper.
+      let cross: string | null = null;
+      for (const edge of edges) {
+        if (edge.target !== node.id) continue;
+        if (edge.targetHandle !== "image" && edge.targetHandle != null) continue;
+        const src = allNodes.find((n) => n.id === edge.source);
+        if (!src) continue;
+        const out = getSourceOutput(
+          src,
+          edge.sourceHandle,
+          edge.data as Record<string, unknown> | undefined
+        );
+        if (out.type === "image" && out.value) {
+          cross = out.value;
+          break;
+        }
+      }
+
+      if (!cross) {
+        updateNodeData(node.id, {
+          sourceImage: null,
+          outputUp: null, outputDown: null, outputLeft: null,
+          outputRight: null, outputFront: null, outputBack: null,
+        });
+        return;
+      }
+
+      if (cross !== nodeData.sourceImage) {
+        updateNodeData(node.id, { sourceImage: cross, sourceImageRef: undefined });
+      }
+
+      try {
+        const faces = await splitCubemap(cross, nodeData.outputSize);
+        updateNodeData(node.id, {
+          outputUp: faces.up,         outputUpRef: undefined,
+          outputDown: faces.down,     outputDownRef: undefined,
+          outputLeft: faces.left,     outputLeftRef: undefined,
+          outputRight: faces.right,   outputRightRef: undefined,
+          outputFront: faces.front,   outputFrontRef: undefined,
+          outputBack: faces.back,     outputBackRef: undefined,
+        });
+      } catch (err) {
+        console.error(`[Workflow] Cubemap split failed:`, err);
+      }
+      return;
+    }
+
+    // Combine mode: read up to six face inputs by edge.targetHandle.
+    const faces: Partial<Record<CubeFace, string>> = {};
+    for (const edge of edges) {
+      if (edge.target !== node.id) continue;
+      const handle = edge.targetHandle as CubeFace | null;
+      if (!handle || !CUBE_FACES.includes(handle)) continue;
+      const src = allNodes.find((n) => n.id === edge.source);
+      if (!src) continue;
+      const out = getSourceOutput(
+        src,
+        edge.sourceHandle,
+        edge.data as Record<string, unknown> | undefined
+      );
+      if (out.type === "image" && out.value) faces[handle] = out.value;
+    }
+
+    if (Object.values(faces).every((v) => !v)) {
+      updateNodeData(node.id, { outputCross: null });
+      return;
+    }
+
+    try {
+      const cross = await combineCubemap(faces, nodeData.outputSize);
+      updateNodeData(node.id, { outputCross: cross, outputCrossRef: undefined });
+    } catch (err) {
+      console.error(`[Workflow] Cubemap combine failed:`, err);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Cubemap Faces node ${node.id} failed:`, message);
     updateNodeData(node.id, { error: message });
   }
 }

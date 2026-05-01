@@ -574,6 +574,37 @@ async function externalizeNodeImages(
       break;
     }
 
+    case "cubemapFaces": {
+      const d = data as import("@/types").CubemapFacesNodeData;
+      const next: Record<string, unknown> = { ...d };
+
+      const externalize = async (
+        rawKey: keyof import("@/types").CubemapFacesNodeData,
+        refKey: keyof import("@/types").CubemapFacesNodeData
+      ) => {
+        const raw = d[rawKey] as string | null | undefined;
+        const existingRef = d[refKey] as string | undefined;
+        if (existingRef && isBase64DataUrl(raw)) {
+          next[rawKey] = null;
+        } else if (isBase64DataUrl(raw)) {
+          next[refKey] = await saveImageAndGetId(raw!, workflowPath, savedImageIds, "inputs");
+          next[rawKey] = null;
+        }
+      };
+
+      await externalize("sourceImage", "sourceImageRef");
+      await externalize("outputUp", "outputUpRef");
+      await externalize("outputDown", "outputDownRef");
+      await externalize("outputLeft", "outputLeftRef");
+      await externalize("outputRight", "outputRightRef");
+      await externalize("outputFront", "outputFrontRef");
+      await externalize("outputBack", "outputBackRef");
+      await externalize("outputCross", "outputCrossRef");
+
+      newData = next as import("@/types").CubemapFacesNodeData;
+      break;
+    }
+
     default:
       newData = data;
   }
@@ -1044,6 +1075,34 @@ async function hydrateNodeImages(
         sourceImage,
         outputImage,
       };
+      break;
+    }
+
+    case "cubemapFaces": {
+      const d = data as import("@/types").CubemapFacesNodeData;
+      const next: Record<string, unknown> = { ...d };
+
+      const hydrate = async (
+        rawKey: keyof import("@/types").CubemapFacesNodeData,
+        refKey: keyof import("@/types").CubemapFacesNodeData
+      ) => {
+        const raw = d[rawKey] as string | null | undefined;
+        const ref = d[refKey] as string | undefined;
+        if (ref && !raw) {
+          next[rawKey] = await loadImageById(ref, workflowPath, loadedImages, "inputs");
+        }
+      };
+
+      await hydrate("sourceImage", "sourceImageRef");
+      await hydrate("outputUp", "outputUpRef");
+      await hydrate("outputDown", "outputDownRef");
+      await hydrate("outputLeft", "outputLeftRef");
+      await hydrate("outputRight", "outputRightRef");
+      await hydrate("outputFront", "outputFrontRef");
+      await hydrate("outputBack", "outputBackRef");
+      await hydrate("outputCross", "outputCrossRef");
+
+      newData = next as import("@/types").CubemapFacesNodeData;
       break;
     }
 

@@ -58,6 +58,7 @@ import {
   ImageCropNode,
   MirrorNode,
   CubemapEquirectNode,
+  CubemapFacesNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -125,6 +126,7 @@ const nodeTypes: NodeTypes = {
   imageCrop: ImageCropNode,
   mirror: MirrorNode,
   cubemapEquirect: CubemapEquirectNode,
+  cubemapFaces: CubemapFacesNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -235,6 +237,13 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image"], outputs: ["image"] };
     case "cubemapEquirect":
       return { inputs: ["image"], outputs: ["image"] };
+    case "cubemapFaces":
+      // Handles flip per mode at runtime. Listing all inputs/outputs here so
+      // batch-connect validation accepts edges in either mode.
+      return {
+        inputs: ["image", "up", "down", "left", "right", "front", "back"],
+        outputs: ["image", "up", "down", "left", "right", "front", "back"],
+      };
     default:
       return { inputs: [], outputs: [] };
   }
@@ -526,6 +535,7 @@ export function WorkflowCanvas() {
     imageCrop: 'Image Crop',
     mirror: 'Mirror',
     cubemapEquirect: 'Cube ⇄ Pano',
+    cubemapFaces: 'Cube ⇄ Faces',
   };
 
   // Helper to get node title (used for FloatingNodeHeader)
@@ -1742,6 +1752,7 @@ export function WorkflowCanvas() {
             imageCrop: { width: 300, height: 280 },
             mirror: { width: 300, height: 300 },
             cubemapEquirect: { width: 320, height: 320 },
+            cubemapFaces: { width: 340, height: 360 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });

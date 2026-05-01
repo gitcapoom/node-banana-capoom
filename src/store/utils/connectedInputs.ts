@@ -166,6 +166,23 @@ export function getSourceOutput(
   } else if (sourceNode.type === "cubemapEquirect") {
     const ceData = sourceNode.data as import("@/types").CubemapEquirectNodeData;
     return { type: "image", value: ceData.outputImage || ceData.sourceImage || null };
+  } else if (sourceNode.type === "cubemapFaces") {
+    const cfData = sourceNode.data as import("@/types").CubemapFacesNodeData;
+    if (cfData.mode === "split") {
+      // Six output handles, one per face — switch on sourceHandle.
+      const map: Record<string, string | null | undefined> = {
+        up: cfData.outputUp,
+        down: cfData.outputDown,
+        left: cfData.outputLeft,
+        right: cfData.outputRight,
+        front: cfData.outputFront,
+        back: cfData.outputBack,
+      };
+      const value = (sourceHandleId && map[sourceHandleId]) || null;
+      return { type: "image", value };
+    }
+    // Combine mode: single "image" output → the assembled cross.
+    return { type: "image", value: cfData.outputCross || null };
   }
   return { type: "image", value: null };
 }
