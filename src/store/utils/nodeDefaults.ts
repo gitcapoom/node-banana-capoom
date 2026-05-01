@@ -36,6 +36,7 @@ import {
   MirrorNodeData,
   CubemapEquirectNodeData,
   CubemapFacesNodeData,
+  ColorGradeNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -84,6 +85,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   mirror: { width: 300, height: 300 },
   cubemapEquirect: { width: 320, height: 320 },
   cubemapFaces: { width: 340, height: 360 },
+  colorGrade: { width: 340, height: 460 },
 };
 
 /**
@@ -486,5 +488,17 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         outputBack: null,
         outputCross: null,
       } as CubemapFacesNodeData;
+    case "colorGrade":
+      return {
+        sourceImage: null,
+        blackpoint: 0,
+        whitepoint: 1,
+        lift: 0,
+        gain: 1,
+        multiply: 1,
+        offset: 0,
+        gamma: 1,
+        outputImage: null,
+      } as ColorGradeNodeData;
   }
 };

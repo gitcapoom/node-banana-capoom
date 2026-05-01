@@ -23,6 +23,7 @@ import {
   executeMirror,
   executeCubemapEquirect,
   executeCubemapFaces,
+  executeColorGrade,
 } from "./simpleNodeExecutors";
 import { executeNanoBanana } from "./nanoBananaExecutor";
 import { executeGenerateVideo } from "./generateVideoExecutor";
@@ -150,6 +151,9 @@ export async function executeNode(
       break;
     case "cubemapFaces":
       await executeCubemapFaces(ctx);
+      break;
+    case "colorGrade":
+      await executeColorGrade(ctx);
       break;
   }
 }

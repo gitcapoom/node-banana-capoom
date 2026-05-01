@@ -166,6 +166,9 @@ export function getSourceOutput(
   } else if (sourceNode.type === "cubemapEquirect") {
     const ceData = sourceNode.data as import("@/types").CubemapEquirectNodeData;
     return { type: "image", value: ceData.outputImage || ceData.sourceImage || null };
+  } else if (sourceNode.type === "colorGrade") {
+    const cgData = sourceNode.data as import("@/types").ColorGradeNodeData;
+    return { type: "image", value: cgData.outputImage || cgData.sourceImage || null };
   } else if (sourceNode.type === "cubemapFaces") {
     const cfData = sourceNode.data as import("@/types").CubemapFacesNodeData;
     if (cfData.mode === "split") {
