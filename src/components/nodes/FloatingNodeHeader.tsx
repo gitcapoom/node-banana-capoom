@@ -42,6 +42,7 @@ const NODE_HEADER_COLORS: Record<string, string> = {
   mirror: "#ca8a04",            // yellow-600
   cubemapEquirect: "#a16207",   // yellow-700
   cubemapFaces: "#854d0e",      // yellow-800
+  colorGrade: "#9a3412",        // orange-800
   panoCrop: "#fb923c",          // orange-400
 
   // Route — cyan zone

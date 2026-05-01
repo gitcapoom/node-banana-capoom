@@ -48,6 +48,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "mirror",
   "cubemapEquirect",
   "cubemapFaces",
+  "colorGrade",
 ];
 
 const VALID_HANDLE_TYPES = ["image", "text", "audio", "video", "easeCurve", "3d", "reference"];
@@ -90,6 +91,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   mirror: { width: 300, height: 300 },
   cubemapEquirect: { width: 320, height: 320 },
   cubemapFaces: { width: 340, height: 360 },
+  colorGrade: { width: 340, height: 460 },
 };
 
 /**
@@ -569,6 +571,18 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         outputFront: null,
         outputBack: null,
         outputCross: null,
+      };
+    case "colorGrade":
+      return {
+        sourceImage: null,
+        blackpoint: 0,
+        whitepoint: 1,
+        lift: 0,
+        gain: 1,
+        multiply: 1,
+        offset: 0,
+        gamma: 1,
+        outputImage: null,
       };
   }
 }

@@ -60,7 +60,8 @@ export type NodeType =
   | "imageCrop"
   | "mirror"
   | "cubemapEquirect"
-  | "cubemapFaces";
+  | "cubemapFaces"
+  | "colorGrade";
 
 /**
  * Node execution status
@@ -154,6 +155,25 @@ export interface CubemapEquirectNodeData extends BaseNodeData {
   mode: CubemapEquirectMode;
   /** Equirect width (cube→pano) or face size (pano→cube). */
   outputSize: number;
+  outputImage: string | null;
+  outputImageRef?: string;
+}
+
+/**
+ * Color Grade node — Nuke-style Grade with master sliders.
+ * Identity grade (no-op): blackpoint=0, whitepoint=1, lift=0, gain=1,
+ * multiply=1, offset=0, gamma=1.
+ */
+export interface ColorGradeNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  blackpoint: number;
+  whitepoint: number;
+  lift: number;
+  gain: number;
+  multiply: number;
+  offset: number;
+  gamma: number;
   outputImage: string | null;
   outputImageRef?: string;
 }
@@ -754,7 +774,8 @@ export type WorkflowNodeData =
   | ImageCropNodeData
   | MirrorNodeData
   | CubemapEquirectNodeData
-  | CubemapFacesNodeData;
+  | CubemapFacesNodeData
+  | ColorGradeNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)

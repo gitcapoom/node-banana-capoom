@@ -21,6 +21,7 @@ import type {
   MirrorNodeData,
   CubemapEquirectNodeData,
   CubemapFacesNodeData,
+  ColorGradeNodeData,
 } from "@/types";
 import type { NodeExecutionContext } from "./types";
 import { parseTextToArray } from "@/utils/arrayParser";
@@ -28,6 +29,7 @@ import { parseVarTags } from "@/utils/parseVarTags";
 import { cropImageToDataUrl } from "@/utils/cropImage";
 import { mirrorImage } from "@/utils/mirrorImage";
 import { applyCubemapEquirect, splitCubemap, combineCubemap, CUBE_FACES, type CubeFace } from "@/utils/cubemapEquirect";
+import { applyGrade } from "@/utils/colorGrade";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 
 /**
@@ -688,6 +690,50 @@ export async function executeCubemapFaces(ctx: NodeExecutionContext): Promise<vo
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Cubemap Faces node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
+ * Color Grade executor — applies the Nuke-style Grade formula to the
+ * incoming image using the node's stored slider parameters.
+ */
+export async function executeColorGrade(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const incoming = images[0] || null;
+    const nodeData = node.data as ColorGradeNodeData;
+
+    if (!incoming) {
+      if (nodeData.outputImage !== null) {
+        updateNodeData(node.id, { outputImage: null, sourceImage: null });
+      }
+      return;
+    }
+
+    if (incoming !== nodeData.sourceImage) {
+      updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
+    }
+
+    try {
+      const output = await applyGrade(incoming, {
+        blackpoint: nodeData.blackpoint,
+        whitepoint: nodeData.whitepoint,
+        lift: nodeData.lift,
+        gain: nodeData.gain,
+        multiply: nodeData.multiply,
+        offset: nodeData.offset,
+        gamma: nodeData.gamma,
+      });
+      updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
+    } catch (err) {
+      console.error(`[Workflow] Color Grade failed:`, err);
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Color Grade node ${node.id} failed:`, message);
     updateNodeData(node.id, { error: message });
   }
 }

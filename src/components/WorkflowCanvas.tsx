@@ -59,6 +59,7 @@ import {
   MirrorNode,
   CubemapEquirectNode,
   CubemapFacesNode,
+  ColorGradeNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -127,6 +128,7 @@ const nodeTypes: NodeTypes = {
   mirror: MirrorNode,
   cubemapEquirect: CubemapEquirectNode,
   cubemapFaces: CubemapFacesNode,
+  colorGrade: ColorGradeNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -244,6 +246,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
         inputs: ["image", "up", "down", "left", "right", "front", "back"],
         outputs: ["image", "up", "down", "left", "right", "front", "back"],
       };
+    case "colorGrade":
+      return { inputs: ["image"], outputs: ["image"] };
     default:
       return { inputs: [], outputs: [] };
   }
@@ -536,6 +540,7 @@ export function WorkflowCanvas() {
     mirror: 'Mirror',
     cubemapEquirect: 'Cube ⇄ Pano',
     cubemapFaces: 'Cube ⇄ Faces',
+    colorGrade: 'Color Grade',
   };
 
   // Helper to get node title (used for FloatingNodeHeader)
@@ -1753,6 +1758,7 @@ export function WorkflowCanvas() {
             mirror: { width: 300, height: 300 },
             cubemapEquirect: { width: 320, height: 320 },
             cubemapFaces: { width: 340, height: 360 },
+            colorGrade: { width: 340, height: 460 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });

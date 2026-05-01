@@ -33,4 +33,5 @@ export { ImageCropNode } from "./ImageCropNode";
 export { MirrorNode } from "./MirrorNode";
 export { CubemapEquirectNode } from "./CubemapEquirectNode";
 export { CubemapFacesNode } from "./CubemapFacesNode";
+export { ColorGradeNode } from "./ColorGradeNode";
 export { GroupNode } from "./GroupNode";
