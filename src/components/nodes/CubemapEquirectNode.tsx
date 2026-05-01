@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { applyCubemapEquirect } from "@/utils/cubemapEquirect";
 import type { CubemapEquirectMode, CubemapEquirectNodeData } from "@/types";
 
@@ -16,23 +17,31 @@ const SIZE_OPTIONS = [256, 512, 1024, 2048, 4096] as const;
 export function CubemapEquirectNode({ id, data, selected }: NodeProps<CubemapEquirectNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
-  const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
-  const edges = useWorkflowStore((state) => state.edges);
+
+  // Subscribe to the live upstream image through a store selector so this
+  // node re-renders when the upstream's outputImage changes — `edges` alone
+  // doesn't catch that case, since data changes don't mutate the edge list.
+  const incomingImage = useWorkflowStore((state) => {
+    const ins = getConnectedInputsPure(id, state.nodes, state.edges, undefined, state.dimmedNodeIds);
+    return ins.images[0] || null;
+  });
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const lastApplied = useRef<string>("");
+  // Tracks the last (src, mode, size) we kicked off a convert for. Used to
+  // skip redundant work AND to know when a settled promise is still relevant.
+  const lastFingerprintRef = useRef<string>("");
 
-  // 1) Reactively pull the upstream image into sourceImage.
+  // 1) Mirror the upstream image into sourceImage.
   useEffect(() => {
-    const inputs = getConnectedInputs(id);
-    const incoming = inputs.images[0] || null;
-    if (incoming !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: incoming });
+    if (incomingImage !== nodeData.sourceImage) {
+      updateNodeData(id, { sourceImage: incomingImage });
     }
-  }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
+  }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
 
   // 2) Re-run the conversion whenever source / mode / outputSize change.
+  // NOTE: deliberately NOT including nodeData.outputImage in deps — writing
+  // the converted output back would cancel the very effect that produced it.
   useEffect(() => {
     const src = nodeData.sourceImage;
     const mode = nodeData.mode;
@@ -40,38 +49,35 @@ export function CubemapEquirectNode({ id, data, selected }: NodeProps<CubemapEqu
 
     if (!src) {
       if (nodeData.outputImage) updateNodeData(id, { outputImage: null });
-      lastApplied.current = "";
+      lastFingerprintRef.current = "";
       setError(null);
+      setBusy(false);
       return;
     }
 
     const fingerprint = `${src.length}|${mode}|${size}`;
-    if (lastApplied.current === fingerprint) return;
-    lastApplied.current = fingerprint;
+    if (lastFingerprintRef.current === fingerprint) return;
+    lastFingerprintRef.current = fingerprint;
 
-    let cancelled = false;
     setBusy(true);
     setError(null);
     applyCubemapEquirect(src, mode, size)
       .then((output) => {
-        if (cancelled) return;
+        // Only commit if no newer convert has been kicked off in the meantime.
+        if (lastFingerprintRef.current !== fingerprint) return;
         updateNodeData(id, { outputImage: output, outputImageRef: undefined });
+        setBusy(false);
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (lastFingerprintRef.current !== fingerprint) return;
         const msg = err instanceof Error ? err.message : String(err);
         console.error("CubemapEquirectNode: conversion failed", err);
         setError(msg);
         updateNodeData(id, { outputImage: src });
-      })
-      .finally(() => {
-        if (!cancelled) setBusy(false);
+        setBusy(false);
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [id, nodeData.sourceImage, nodeData.mode, nodeData.outputSize, nodeData.outputImage, updateNodeData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, nodeData.sourceImage, nodeData.mode, nodeData.outputSize, updateNodeData]);
 
   const setMode = useCallback(
     (mode: CubemapEquirectMode) => {
