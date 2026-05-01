@@ -35,6 +35,7 @@ import {
   ImageCropNodeData,
   MirrorNodeData,
   CubemapEquirectNodeData,
+  CubemapFacesNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -82,6 +83,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   imageCrop: { width: 300, height: 280 },
   mirror: { width: 300, height: 300 },
   cubemapEquirect: { width: 320, height: 320 },
+  cubemapFaces: { width: 340, height: 360 },
 };
 
 /**
@@ -471,5 +473,18 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         outputSize: 2048,
         outputImage: null,
       } as CubemapEquirectNodeData;
+    case "cubemapFaces":
+      return {
+        mode: "split",
+        outputSize: 1024,
+        sourceImage: null,
+        outputUp: null,
+        outputDown: null,
+        outputLeft: null,
+        outputRight: null,
+        outputFront: null,
+        outputBack: null,
+        outputCross: null,
+      } as CubemapFacesNodeData;
   }
 };
