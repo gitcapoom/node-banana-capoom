@@ -4,6 +4,7 @@ import { useMemo, useCallback, useRef, useEffect, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { VideoCompareNodeData } from "@/types";
 
 type VideoCompareNodeType = Node<VideoCompareNodeData, "videoCompare">;
@@ -47,46 +48,40 @@ export function VideoCompareNode({
     [id, updateNodeData]
   );
 
-  // Collect videos from connected nodes
-  const displayVideos = useMemo(() => {
-    const connectedVideos: string[] = [];
+  // Resolve A and B by edge.targetHandle through the central getSourceOutput
+  // helper, so every video-producing source type works automatically. Falls
+  // back to dropping legacy/ambiguous edges into B if no explicit "video-1"
+  // handle is connected.
+  const [videoA, videoB] = useMemo<[string | null, string | null]>(() => {
+    let a: string | null = null;
+    let b: string | null = null;
+    const ambiguous: string[] = [];
 
-    const sortedEdges = edges
-      .filter((edge) => edge.target === id)
-      .sort((a, b) => {
-        const aTime = (a.data?.createdAt as number) || 0;
-        const bTime = (b.data?.createdAt as number) || 0;
-        return aTime - bTime;
-      });
-
-    sortedEdges.forEach((edge) => {
+    for (const edge of edges) {
+      if (edge.target !== id) continue;
       const sourceNode = nodes.find((n) => n.id === edge.source);
-      if (!sourceNode) return;
+      if (!sourceNode) continue;
+      const out = getSourceOutput(
+        sourceNode,
+        edge.sourceHandle,
+        edge.data as Record<string, unknown> | undefined
+      );
+      if (out.type !== "video" || !out.value) continue;
 
-      let video: string | null = null;
-
-      if (sourceNode.type === "videoInput") {
-        video = (sourceNode.data as any).videoFile;
-      } else if (sourceNode.type === "generateVideo") {
-        video = (sourceNode.data as any).outputVideo;
-      } else if (sourceNode.type === "videoStitch") {
-        video = (sourceNode.data as any).outputVideo;
-      } else if (sourceNode.type === "easeCurve") {
-        video = (sourceNode.data as any).outputVideo;
-      } else if (sourceNode.type === "videoTrim") {
-        video = (sourceNode.data as any).outputVideo;
+      if (edge.targetHandle === "video-1") {
+        b = out.value;
+      } else if (edge.targetHandle === "video") {
+        if (!a) a = out.value;
+        else ambiguous.push(out.value);
+      } else {
+        ambiguous.push(out.value);
       }
+    }
 
-      if (video) {
-        connectedVideos.push(video);
-      }
-    });
+    if (!b && ambiguous.length > 0) b = ambiguous[0];
 
-    return connectedVideos;
-  }, [edges, nodes, id]);
-
-  const videoA = displayVideos[0] || nodeData.videoA || null;
-  const videoB = displayVideos[1] || nodeData.videoB || null;
+    return [a || nodeData.videoA || null, b || nodeData.videoB || null];
+  }, [edges, nodes, id, nodeData.videoA, nodeData.videoB]);
 
   // Synchronized playback: both videos play together, restart together when both finish
   useEffect(() => {

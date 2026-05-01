@@ -9,6 +9,7 @@ import {
 } from "react-compare-slider";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { ImageCompareNodeData } from "@/types";
 import { ZoomPanView } from "../ZoomPanView";
 
@@ -47,44 +48,41 @@ export function ImageCompareNode({
     [id, updateNodeData]
   );
 
-  // Collect images in real-time from connected nodes (same pattern as OutputGalleryNode)
-  const displayImages = useMemo(() => {
-    const connectedImages: string[] = [];
+  // Resolve A and B by edge.targetHandle through the central getSourceOutput
+  // helper, so every image-producing source type (imageInput, mirror, crop,
+  // cubemapEquirect, generators, router passthrough, …) works automatically.
+  // Falls back to dropping legacy/ambiguous edges into B if no explicit
+  // "image-1" handle is connected.
+  const [imageA, imageB] = useMemo<[string | null, string | null]>(() => {
+    let a: string | null = null;
+    let b: string | null = null;
+    const ambiguous: string[] = [];
 
-    // Get edges connected to this node, sorted by creation time for stable ordering
-    const sortedEdges = edges
-      .filter((edge) => edge.target === id)
-      .sort((a, b) => {
-        const aTime = (a.data?.createdAt as number) || 0;
-        const bTime = (b.data?.createdAt as number) || 0;
-        return aTime - bTime;
-      });
-
-    sortedEdges.forEach((edge) => {
+    for (const edge of edges) {
+      if (edge.target !== id) continue;
       const sourceNode = nodes.find((n) => n.id === edge.source);
-      if (!sourceNode) return;
+      if (!sourceNode) continue;
+      const out = getSourceOutput(
+        sourceNode,
+        edge.sourceHandle,
+        edge.data as Record<string, unknown> | undefined
+      );
+      if (out.type !== "image" || !out.value) continue;
 
-      let image: string | null = null;
-
-      // Extract image from different node types
-      if (sourceNode.type === "imageInput") {
-        image = (sourceNode.data as any).image;
-      } else if (sourceNode.type === "annotation") {
-        image = (sourceNode.data as any).outputImage;
-      } else if (sourceNode.type === "nanoBanana") {
-        image = (sourceNode.data as any).outputImage;
+      if (edge.targetHandle === "image-1") {
+        b = out.value;
+      } else if (edge.targetHandle === "image") {
+        if (!a) a = out.value;
+        else ambiguous.push(out.value);
+      } else {
+        ambiguous.push(out.value);
       }
+    }
 
-      if (image) {
-        connectedImages.push(image);
-      }
-    });
+    if (!b && ambiguous.length > 0) b = ambiguous[0];
 
-    return connectedImages;
-  }, [edges, nodes, id]);
-
-  const imageA = displayImages[0] || nodeData.imageA || null;
-  const imageB = displayImages[1] || nodeData.imageB || null;
+    return [a || nodeData.imageA || null, b || nodeData.imageB || null];
+  }, [edges, nodes, id, nodeData.imageA, nodeData.imageB]);
 
   // Full-screen overlay
   const [showOverlay, setShowOverlay] = useState(false);
