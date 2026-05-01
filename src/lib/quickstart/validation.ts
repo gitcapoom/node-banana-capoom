@@ -575,13 +575,13 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
     case "colorGrade":
       return {
         sourceImage: null,
-        blackpoint: 0,
-        whitepoint: 1,
-        lift: 0,
-        gain: 1,
-        multiply: 1,
-        offset: 0,
-        gamma: 1,
+        blackpoint: { r: 0, g: 0, b: 0 },
+        whitepoint: { r: 1, g: 1, b: 1 },
+        lift:       { r: 0, g: 0, b: 0 },
+        gain:       { r: 1, g: 1, b: 1 },
+        multiply:   { r: 1, g: 1, b: 1 },
+        offset:     { r: 0, g: 0, b: 0 },
+        gamma:      { r: 1, g: 1, b: 1 },
         outputImage: null,
       };
   }
