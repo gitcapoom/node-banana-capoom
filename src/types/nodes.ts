@@ -160,20 +160,31 @@ export interface CubemapEquirectNodeData extends BaseNodeData {
 }
 
 /**
- * Color Grade node — Nuke-style Grade with master sliders.
- * Identity grade (no-op): blackpoint=0, whitepoint=1, lift=0, gain=1,
- * multiply=1, offset=0, gamma=1.
+ * Color Grade node — Nuke-style Grade with per-channel controls.
+ *
+ * Each parameter is stored as a 3-channel value. When r === g === b the
+ * UI shows a single master slider; users can split the row to tune R/G/B
+ * independently and use the colour picker to assign all three at once.
+ *
+ * Numbers (instead of {r,g,b}) are accepted on load for backward compat
+ * with workflows saved before per-channel was added — coerceChannel()
+ * normalises them at runtime.
  */
+export interface GradeChannelValue {
+  r: number;
+  g: number;
+  b: number;
+}
 export interface ColorGradeNodeData extends BaseNodeData {
   sourceImage: string | null;
   sourceImageRef?: string;
-  blackpoint: number;
-  whitepoint: number;
-  lift: number;
-  gain: number;
-  multiply: number;
-  offset: number;
-  gamma: number;
+  blackpoint: GradeChannelValue | number;
+  whitepoint: GradeChannelValue | number;
+  lift: GradeChannelValue | number;
+  gain: GradeChannelValue | number;
+  multiply: GradeChannelValue | number;
+  offset: GradeChannelValue | number;
+  gamma: GradeChannelValue | number;
   outputImage: string | null;
   outputImageRef?: string;
 }

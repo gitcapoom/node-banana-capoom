@@ -29,7 +29,7 @@ import { parseVarTags } from "@/utils/parseVarTags";
 import { cropImageToDataUrl } from "@/utils/cropImage";
 import { mirrorImage } from "@/utils/mirrorImage";
 import { applyCubemapEquirect, splitCubemap, combineCubemap, CUBE_FACES, type CubeFace } from "@/utils/cubemapEquirect";
-import { applyGrade } from "@/utils/colorGrade";
+import { applyGrade, coerceChannel } from "@/utils/colorGrade";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 
 /**
@@ -718,13 +718,13 @@ export async function executeColorGrade(ctx: NodeExecutionContext): Promise<void
 
     try {
       const output = await applyGrade(incoming, {
-        blackpoint: nodeData.blackpoint,
-        whitepoint: nodeData.whitepoint,
-        lift: nodeData.lift,
-        gain: nodeData.gain,
-        multiply: nodeData.multiply,
-        offset: nodeData.offset,
-        gamma: nodeData.gamma,
+        blackpoint: coerceChannel(nodeData.blackpoint, 0),
+        whitepoint: coerceChannel(nodeData.whitepoint, 1),
+        lift:       coerceChannel(nodeData.lift, 0),
+        gain:       coerceChannel(nodeData.gain, 1),
+        multiply:   coerceChannel(nodeData.multiply, 1),
+        offset:     coerceChannel(nodeData.offset, 0),
+        gamma:      coerceChannel(nodeData.gamma, 1),
       });
       updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
     } catch (err) {
