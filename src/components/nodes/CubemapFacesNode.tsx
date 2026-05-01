@@ -64,13 +64,20 @@ export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesN
     updateNodeInternals(id);
   }, [id, nodeData.mode, updateNodeInternals]);
 
-  // ─── SPLIT mode: pull upstream cross via store selector ─────────────
-  const incomingCross = useWorkflowStore((state) => {
+  // Subscribe to edges + nodes; derive the actual values via useMemo so the
+  // selectors return primitive references (or stable arrays Zustand can
+  // compare with Object.is) instead of fresh objects every call. Returning a
+  // fresh object directly from useWorkflowStore would loop forever.
+  const edges = useWorkflowStore((state) => state.edges);
+  const nodes = useWorkflowStore((state) => state.nodes);
+
+  // ─── SPLIT mode: pull upstream cross ─────────────────────────────────
+  const incomingCross = useMemo<string | null>(() => {
     if (nodeData.mode !== "split") return null;
-    for (const edge of state.edges) {
+    for (const edge of edges) {
       if (edge.target !== id) continue;
       if (edge.targetHandle !== "image" && edge.targetHandle != null) continue;
-      const src = state.nodes.find((n) => n.id === edge.source);
+      const src = nodes.find((n) => n.id === edge.source);
       if (!src) continue;
       const out = getSourceOutput(
         src,
@@ -80,21 +87,19 @@ export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesN
       if (out.type === "image" && out.value) return out.value;
     }
     return null;
-  });
+  }, [edges, nodes, id, nodeData.mode]);
 
   // ─── COMBINE mode: pull six face inputs by targetHandle ─────────────
-  const incomingFaces = useWorkflowStore((state) => {
-    if (nodeData.mode !== "combine") {
-      return null as Record<CubeFace, string | null> | null;
-    }
+  const incomingFaces = useMemo<Record<CubeFace, string | null> | null>(() => {
+    if (nodeData.mode !== "combine") return null;
     const result: Record<CubeFace, string | null> = {
       up: null, down: null, left: null, right: null, front: null, back: null,
     };
-    for (const edge of state.edges) {
+    for (const edge of edges) {
       if (edge.target !== id) continue;
       const handle = edge.targetHandle as CubeFace | null;
       if (!handle || !CUBE_FACES.includes(handle as CubeFace)) continue;
-      const src = state.nodes.find((n) => n.id === edge.source);
+      const src = nodes.find((n) => n.id === edge.source);
       if (!src) continue;
       const out = getSourceOutput(
         src,
@@ -104,7 +109,7 @@ export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesN
       if (out.type === "image" && out.value) result[handle as CubeFace] = out.value;
     }
     return result;
-  });
+  }, [edges, nodes, id, nodeData.mode]);
 
   // ─── SPLIT effect: re-derive 6 face outputs whenever input/size changes ─
   const lastSplitFp = useRef<string>("");
