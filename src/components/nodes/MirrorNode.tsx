@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { mirrorImage } from "@/utils/mirrorImage";
 import type { MirrorNodeData } from "@/types";
 
@@ -12,23 +13,29 @@ type MirrorNodeType = Node<MirrorNodeData, "mirror">;
 export function MirrorNode({ id, data, selected }: NodeProps<MirrorNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
-  const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
-  const edges = useWorkflowStore((state) => state.edges);
 
-  // Guard against re-running the same mirror op (skips redundant canvas work
-  // on every render).
-  const lastApplied = useRef<string>("");
+  // Subscribe to the live upstream image via a store selector — re-renders
+  // when the upstream's outputImage changes (which doesn't mutate `edges`).
+  const incomingImage = useWorkflowStore((state) => {
+    const ins = getConnectedInputsPure(id, state.nodes, state.edges, undefined, state.dimmedNodeIds);
+    return ins.images[0] || null;
+  });
 
-  // 1) Reactively pull upstream image onto sourceImage
+  // Tracks the last (src, flips) we kicked off a mirror op for. Also acts
+  // as the "is this settled promise still relevant" check so writing back
+  // outputImage doesn't cancel ourselves through dep changes.
+  const lastFingerprintRef = useRef<string>("");
+
+  // 1) Mirror upstream image into sourceImage.
   useEffect(() => {
-    const inputs = getConnectedInputs(id);
-    const incoming = inputs.images[0] || null;
-    if (incoming !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: incoming });
+    if (incomingImage !== nodeData.sourceImage) {
+      updateNodeData(id, { sourceImage: incomingImage });
     }
-  }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
+  }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
 
-  // 2) Auto-apply whenever source or flip toggles change
+  // 2) Auto-apply whenever source or flip toggles change.
+  // Deliberately does NOT depend on nodeData.outputImage — writing back
+  // would otherwise tear down the in-flight mirror op via dep change.
   useEffect(() => {
     const src = nodeData.sourceImage;
     const h = !!nodeData.flipHorizontal;
@@ -36,34 +43,32 @@ export function MirrorNode({ id, data, selected }: NodeProps<MirrorNodeType>) {
 
     if (!src) {
       if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null });
-      lastApplied.current = "";
+      lastFingerprintRef.current = "";
       return;
     }
 
     if (!h && !v) {
       if (nodeData.outputImage !== src) updateNodeData(id, { outputImage: src });
-      lastApplied.current = `passthrough:${src.length}`;
+      lastFingerprintRef.current = `passthrough:${src.length}`;
       return;
     }
 
     const fingerprint = `${src.length}|${h ? "H" : ""}${v ? "V" : ""}`;
-    if (lastApplied.current === fingerprint) return;
-    lastApplied.current = fingerprint;
+    if (lastFingerprintRef.current === fingerprint) return;
+    lastFingerprintRef.current = fingerprint;
 
-    let cancelled = false;
     mirrorImage(src, h, v)
       .then((flipped) => {
-        if (!cancelled) updateNodeData(id, { outputImage: flipped, outputImageRef: undefined });
+        if (lastFingerprintRef.current !== fingerprint) return;
+        updateNodeData(id, { outputImage: flipped, outputImageRef: undefined });
       })
       .catch((err) => {
         console.error("MirrorNode: mirror failed", err);
-        if (!cancelled) updateNodeData(id, { outputImage: src });
+        if (lastFingerprintRef.current !== fingerprint) return;
+        updateNodeData(id, { outputImage: src });
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [id, nodeData.sourceImage, nodeData.flipHorizontal, nodeData.flipVertical, nodeData.outputImage, updateNodeData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, nodeData.sourceImage, nodeData.flipHorizontal, nodeData.flipVertical, updateNodeData]);
 
   const toggleH = useCallback(() => {
     updateNodeData(id, { flipHorizontal: !nodeData.flipHorizontal });

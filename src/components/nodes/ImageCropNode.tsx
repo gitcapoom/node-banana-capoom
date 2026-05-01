@@ -5,6 +5,7 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useImageCropStore } from "@/store/imageCropStore";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { cropImageToDataUrl } from "@/utils/cropImage";
 import type { ImageCropNodeData } from "@/types";
 
@@ -14,57 +15,62 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
   const nodeData = data;
   const openModal = useImageCropStore((state) => state.openModal);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
-  const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
-  const edges = useWorkflowStore((state) => state.edges);
 
-  // Track the last applied (sourceImage + region) so we don't re-crop redundantly
-  const lastApplied = useRef<string>("");
+  // Subscribe to live upstream output via a store selector so this node
+  // re-renders when the upstream's outputImage changes — `edges` alone
+  // doesn't catch that case.
+  const incomingImage = useWorkflowStore((state) => {
+    const ins = getConnectedInputsPure(id, state.nodes, state.edges, undefined, state.dimmedNodeIds);
+    return ins.images[0] || null;
+  });
 
-  // 1) Reactively update sourceImage when an edge is connected
+  // Track the last applied (sourceImage + region) so we don't re-crop redundantly.
+  // Also doubles as a "is this settled promise still relevant" check.
+  const lastFingerprintRef = useRef<string>("");
+
+  // 1) Mirror upstream image into sourceImage.
   useEffect(() => {
-    const inputs = getConnectedInputs(id);
-    const incoming = inputs.images[0] || null;
-    if (incoming !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: incoming });
+    if (incomingImage !== nodeData.sourceImage) {
+      updateNodeData(id, { sourceImage: incomingImage });
     }
-  }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
+  }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
 
-  // 2) Auto-apply crop whenever sourceImage or cropRegion changes
+  // 2) Auto-apply crop whenever sourceImage or cropRegion changes.
+  // Deliberately does NOT depend on nodeData.outputImage — writing it back
+  // would otherwise tear down the in-flight crop via dep change.
   useEffect(() => {
     const src = nodeData.sourceImage;
     const region = nodeData.cropRegion;
 
     if (!src) {
       if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null });
-      lastApplied.current = "";
+      lastFingerprintRef.current = "";
       return;
     }
 
     // No region → passthrough
     if (!region) {
       if (nodeData.outputImage !== src) updateNodeData(id, { outputImage: src });
-      lastApplied.current = `passthrough:${src.length}`;
+      lastFingerprintRef.current = `passthrough:${src.length}`;
       return;
     }
 
     const fingerprint = `${src.length}|${region.x}|${region.y}|${region.width}|${region.height}`;
-    if (lastApplied.current === fingerprint) return;
-    lastApplied.current = fingerprint;
+    if (lastFingerprintRef.current === fingerprint) return;
+    lastFingerprintRef.current = fingerprint;
 
-    let cancelled = false;
     cropImageToDataUrl(src, region)
       .then((cropped) => {
-        if (!cancelled) updateNodeData(id, { outputImage: cropped });
+        if (lastFingerprintRef.current !== fingerprint) return;
+        updateNodeData(id, { outputImage: cropped });
       })
       .catch((err) => {
         console.error("ImageCropNode: crop failed", err);
-        if (!cancelled) updateNodeData(id, { outputImage: src });
+        if (lastFingerprintRef.current !== fingerprint) return;
+        updateNodeData(id, { outputImage: src });
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [id, nodeData.sourceImage, nodeData.cropRegion, nodeData.outputImage, updateNodeData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, nodeData.sourceImage, nodeData.cropRegion, updateNodeData]);
 
   const handleEdit = useCallback(() => {
     if (!nodeData.sourceImage) {
