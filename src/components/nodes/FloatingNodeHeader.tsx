@@ -43,6 +43,7 @@ const NODE_HEADER_COLORS: Record<string, string> = {
   cubemapEquirect: "#a16207",   // yellow-700
   cubemapFaces: "#854d0e",      // yellow-800
   colorGrade: "#9a3412",        // orange-800
+  panoShift: "#fb923c",         // orange-400 (pano family)
   panoCrop: "#fb923c",          // orange-400
 
   // Route — cyan zone

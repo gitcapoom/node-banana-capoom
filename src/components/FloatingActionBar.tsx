@@ -47,6 +47,7 @@ const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: str
       { type: "mirror", label: "Mirror" },
       { type: "cubemapEquirect", label: "Cube ⇄ Pano" },
       { type: "cubemapFaces", label: "Cube ⇄ Faces" },
+      { type: "panoShift", label: "Pano Shift" },
       { type: "colorGrade", label: "Color Grade" },
       { type: "splitGrid", label: "Split Grid" },
       { type: "videoStitch", label: "Video Stitch" },

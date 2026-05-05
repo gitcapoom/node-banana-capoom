@@ -61,7 +61,8 @@ export type NodeType =
   | "mirror"
   | "cubemapEquirect"
   | "cubemapFaces"
-  | "colorGrade";
+  | "colorGrade"
+  | "panoShift";
 
 /**
  * Node execution status
@@ -185,6 +186,19 @@ export interface ColorGradeNodeData extends BaseNodeData {
   multiply: GradeChannelValue | number;
   offset: GradeChannelValue | number;
   gamma: GradeChannelValue | number;
+  outputImage: string | null;
+  outputImageRef?: string;
+}
+
+/**
+ * Pano Shift node — horizontal pixel shift with seam wrap-around.
+ * Primarily for re-aligning equirectangular panoramas; works on any image.
+ */
+export interface PanoShiftNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  /** Pixels to shift right (positive) or left (negative). */
+  shiftX: number;
   outputImage: string | null;
   outputImageRef?: string;
 }
@@ -786,7 +800,8 @@ export type WorkflowNodeData =
   | MirrorNodeData
   | CubemapEquirectNodeData
   | CubemapFacesNodeData
-  | ColorGradeNodeData;
+  | ColorGradeNodeData
+  | PanoShiftNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)
