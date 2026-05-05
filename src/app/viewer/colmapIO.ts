@@ -206,15 +206,44 @@ export async function importColmap(
 
 // ─── Parsing helpers ────────────────────────────────────────────
 
+/**
+ * The COLMAP camera models we recognise. Other models (FULL_OPENCV,
+ * OPENCV_FISHEYE, etc.) are treated as best-effort PINHOLE — the focal
+ * length and principal point still apply, but distortion is dropped.
+ */
+export type ColmapCameraModel =
+  | "PINHOLE"
+  | "SIMPLE_PINHOLE"
+  | "OPENCV"
+  | "RADIAL"
+  | "SIMPLE_RADIAL";
+
 export interface CameraParams {
+  model: ColmapCameraModel;
   width: number;
   height: number;
   fx: number;
   fy: number;
   cx: number;
   cy: number;
+  /** Brown-Conrady radial 2nd-order. Zero on PINHOLE. */
+  k1: number;
+  /** Brown-Conrady radial 4th-order. */
+  k2: number;
+  /** Brown-Conrady tangential P1. */
+  p1: number;
+  /** Brown-Conrady tangential P2. */
+  p2: number;
 }
 
+/**
+ * Param packing per model, for reference:
+ *   SIMPLE_PINHOLE: f, cx, cy
+ *   PINHOLE:        fx, fy, cx, cy
+ *   SIMPLE_RADIAL:  f, cx, cy, k1
+ *   RADIAL:         f, cx, cy, k1, k2
+ *   OPENCV:         fx, fy, cx, cy, k1, k2, p1, p2
+ */
 function parseCamerasTxt(content: string): CameraParams | null {
   const lines = content.split("\n");
   for (const line of lines) {
@@ -222,16 +251,43 @@ function parseCamerasTxt(content: string): CameraParams | null {
     if (!trimmed || trimmed.startsWith("#")) continue;
 
     const parts = trimmed.split(/\s+/);
-    // Format: CAMERA_ID MODEL WIDTH HEIGHT PARAMS...
-    if (parts.length >= 8 && parts[1] === "PINHOLE") {
-      return {
-        width: parseFloat(parts[2]),
-        height: parseFloat(parts[3]),
-        fx: parseFloat(parts[4]),
-        fy: parseFloat(parts[5]),
-        cx: parseFloat(parts[6]),
-        cy: parseFloat(parts[7]),
-      };
+    if (parts.length < 5) continue;
+
+    const model = parts[1] as string;
+    const width = parseFloat(parts[2]);
+    const height = parseFloat(parts[3]);
+    const p = parts.slice(4).map(parseFloat);
+
+    const make = (over: Partial<CameraParams> & { fx: number; fy: number; cx: number; cy: number; model: ColmapCameraModel }): CameraParams => ({
+      width, height,
+      k1: 0, k2: 0, p1: 0, p2: 0,
+      ...over,
+    });
+
+    switch (model) {
+      case "SIMPLE_PINHOLE":
+        if (p.length >= 3) return make({ model: "SIMPLE_PINHOLE", fx: p[0], fy: p[0], cx: p[1], cy: p[2] });
+        break;
+      case "PINHOLE":
+        if (p.length >= 4) return make({ model: "PINHOLE", fx: p[0], fy: p[1], cx: p[2], cy: p[3] });
+        break;
+      case "SIMPLE_RADIAL":
+        if (p.length >= 4) return make({ model: "SIMPLE_RADIAL", fx: p[0], fy: p[0], cx: p[1], cy: p[2], k1: p[3] });
+        break;
+      case "RADIAL":
+        if (p.length >= 5) return make({ model: "RADIAL", fx: p[0], fy: p[0], cx: p[1], cy: p[2], k1: p[3], k2: p[4] });
+        break;
+      case "OPENCV":
+        if (p.length >= 8) return make({
+          model: "OPENCV",
+          fx: p[0], fy: p[1], cx: p[2], cy: p[3],
+          k1: p[4], k2: p[5], p1: p[6], p2: p[7],
+        });
+        break;
+      default:
+        // Unrecognised model — skip and continue scanning. If nothing else
+        // matches we'll return null and the caller falls back to defaults.
+        continue;
     }
   }
   return null;
