@@ -60,6 +60,7 @@ import {
   CubemapEquirectNode,
   CubemapFacesNode,
   ColorGradeNode,
+  PanoShiftNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
@@ -129,6 +130,7 @@ const nodeTypes: NodeTypes = {
   cubemapEquirect: CubemapEquirectNode,
   cubemapFaces: CubemapFacesNode,
   colorGrade: ColorGradeNode,
+  panoShift: PanoShiftNode,
 };
 
 const edgeTypes: EdgeTypes = {
@@ -247,6 +249,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
         outputs: ["image", "up", "down", "left", "right", "front", "back"],
       };
     case "colorGrade":
+      return { inputs: ["image"], outputs: ["image"] };
+    case "panoShift":
       return { inputs: ["image"], outputs: ["image"] };
     default:
       return { inputs: [], outputs: [] };
@@ -541,6 +545,7 @@ export function WorkflowCanvas() {
     cubemapEquirect: 'Cube ⇄ Pano',
     cubemapFaces: 'Cube ⇄ Faces',
     colorGrade: 'Color Grade',
+    panoShift: 'Pano Shift',
   };
 
   // Helper to get node title (used for FloatingNodeHeader)
@@ -1759,6 +1764,7 @@ export function WorkflowCanvas() {
             cubemapEquirect: { width: 320, height: 320 },
             cubemapFaces: { width: 340, height: 360 },
             colorGrade: { width: 340, height: 460 },
+            panoShift: { width: 320, height: 280 },
           };
           const dims = defaultDimensions[nodeType];
           addNode(nodeType, { x: centerX - dims.width / 2, y: centerY - dims.height / 2 });

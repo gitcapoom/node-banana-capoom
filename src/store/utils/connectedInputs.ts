@@ -169,6 +169,9 @@ export function getSourceOutput(
   } else if (sourceNode.type === "colorGrade") {
     const cgData = sourceNode.data as import("@/types").ColorGradeNodeData;
     return { type: "image", value: cgData.outputImage || cgData.sourceImage || null };
+  } else if (sourceNode.type === "panoShift") {
+    const psData = sourceNode.data as import("@/types").PanoShiftNodeData;
+    return { type: "image", value: psData.outputImage || psData.sourceImage || null };
   } else if (sourceNode.type === "cubemapFaces") {
     const cfData = sourceNode.data as import("@/types").CubemapFacesNodeData;
     if (cfData.mode === "split") {

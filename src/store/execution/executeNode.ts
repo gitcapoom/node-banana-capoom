@@ -24,6 +24,7 @@ import {
   executeCubemapEquirect,
   executeCubemapFaces,
   executeColorGrade,
+  executePanoShift,
 } from "./simpleNodeExecutors";
 import { executeNanoBanana } from "./nanoBananaExecutor";
 import { executeGenerateVideo } from "./generateVideoExecutor";
@@ -154,6 +155,9 @@ export async function executeNode(
       break;
     case "colorGrade":
       await executeColorGrade(ctx);
+      break;
+    case "panoShift":
+      await executePanoShift(ctx);
       break;
   }
 }

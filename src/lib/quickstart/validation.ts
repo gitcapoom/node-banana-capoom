@@ -49,6 +49,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "cubemapEquirect",
   "cubemapFaces",
   "colorGrade",
+  "panoShift",
 ];
 
 const VALID_HANDLE_TYPES = ["image", "text", "audio", "video", "easeCurve", "3d", "reference"];
@@ -92,6 +93,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   cubemapEquirect: { width: 320, height: 320 },
   cubemapFaces: { width: 340, height: 360 },
   colorGrade: { width: 340, height: 460 },
+  panoShift: { width: 320, height: 280 },
 };
 
 /**
@@ -582,6 +584,12 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         multiply:   { r: 1, g: 1, b: 1 },
         offset:     { r: 0, g: 0, b: 0 },
         gamma:      { r: 1, g: 1, b: 1 },
+        outputImage: null,
+      };
+    case "panoShift":
+      return {
+        sourceImage: null,
+        shiftX: 0,
         outputImage: null,
       };
   }
