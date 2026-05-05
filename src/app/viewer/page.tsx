@@ -38,6 +38,7 @@ import {
   frameToTime,
 } from "./cameraAnimation";
 import { exportColmap, importColmap } from "./colmapIO";
+import { createDistortionPass, computeFovMargin } from "./distortionShader";
 import { exportVideo } from "./videoExport";
 import type { ExportSettings } from "./ExportDialog";
 import Timeline from "./Timeline";
@@ -625,6 +626,29 @@ export default function StandaloneViewerPage() {
   const defaultTransform = { position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } };
   const [transform, setTransform] = useState(defaultTransform);
 
+  // Lens distortion (Brown-Conrady / OpenCV model). Auto-populated from
+  // an imported COLMAP cameras.txt; user can override via sliders.
+  // Identity (zero coefficients) → renderer skips the distortion pass.
+  interface DistortionState {
+    enabled: boolean;
+    fx: number;
+    fy: number;
+    cx: number;
+    cy: number;
+    k1: number;
+    k2: number;
+    p1: number;
+    p2: number;
+    imageWidth: number;
+    imageHeight: number;
+  }
+  const [distortion, setDistortion] = useState<DistortionState>({
+    enabled: false,
+    fx: 1000, fy: 1000, cx: 960, cy: 540,
+    k1: 0, k2: 0, p1: 0, p2: 0,
+    imageWidth: 1920, imageHeight: 1080,
+  });
+
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -637,6 +661,12 @@ export default function StandaloneViewerPage() {
 
   // Depth capture refs
   const depthRenderTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
+
+  // Distortion pass refs
+  const distortionRef = useRef<DistortionState>(distortion);
+  const distortionPassRef = useRef<ReturnType<typeof createDistortionPass> | null>(null);
+  const distortionTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
+  useEffect(() => { distortionRef.current = distortion; }, [distortion]);
   const depthMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
   const depthSceneRef = useRef<THREE.Scene | null>(null);
   const depthCameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -758,6 +788,19 @@ export default function StandaloneViewerPage() {
     renderer.setClearColor(0x111111);
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+
+    // Distortion post-pass + an off-screen target the scene renders into
+    // when distortion is enabled. Both are persistent — sized lazily during
+    // animate() to match the active viewport.
+    const distortionPass = createDistortionPass();
+    distortionPassRef.current = distortionPass;
+    const distortionTarget = new THREE.WebGLRenderTarget(2, 2, {
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+      depthBuffer: true,
+      stencilBuffer: false,
+    });
+    distortionTargetRef.current = distortionTarget;
 
     // Scene
     const scene = new THREE.Scene();
@@ -1003,15 +1046,79 @@ export default function StandaloneViewerPage() {
       const vpX = Math.round((canvasW - vpW) / 2);
       const vpY = Math.round((canvasH - vpH) / 2);
 
-      // Clear full canvas to black, then render scene in the active viewport
+      const dist = distortionRef.current;
+      const useDistortion = dist.enabled && (dist.k1 !== 0 || dist.k2 !== 0 || dist.p1 !== 0 || dist.p2 !== 0);
+
+      // Always start from a fully cleared canvas.
+      renderer.setRenderTarget(null);
       renderer.setScissorTest(false);
       renderer.setClearColor(0x000000, 1);
       renderer.clear();
-      renderer.setViewport(vpX, vpY, vpW, vpH);
-      renderer.setScissor(vpX, vpY, vpW, vpH);
-      renderer.setScissorTest(true);
-      renderer.render(scene, camera);
-      renderer.setScissorTest(false);
+
+      if (useDistortion && distortionPassRef.current && distortionTargetRef.current) {
+        // 1) Render the scene to an off-screen RT at viewport size, with a
+        //    slight FOV margin so distortion has source pixels at the edges.
+        const target = distortionTargetRef.current;
+        if (target.width !== vpW || target.height !== vpH) {
+          target.setSize(Math.max(2, vpW), Math.max(2, vpH));
+        }
+        const margin = computeFovMargin({
+          width: dist.imageWidth, height: dist.imageHeight,
+          fx: dist.fx, fy: dist.fy, cx: dist.cx, cy: dist.cy,
+          k1: dist.k1, k2: dist.k2, p1: dist.p1, p2: dist.p2,
+        });
+        const baseFov = camera.fov;
+        if (margin > 1) {
+          // Wider FOV = smaller focal. tan(newHalf) = margin * tan(oldHalf).
+          const halfRad = THREE.MathUtils.degToRad(baseFov / 2);
+          const newHalf = Math.atan(margin * Math.tan(halfRad));
+          camera.fov = THREE.MathUtils.radToDeg(newHalf) * 2;
+          camera.updateProjectionMatrix();
+        }
+        renderer.setRenderTarget(target);
+        renderer.setViewport(0, 0, vpW, vpH);
+        renderer.setClearColor(0x000000, 1);
+        renderer.clear();
+        renderer.render(scene, camera);
+        if (margin > 1) {
+          camera.fov = baseFov;
+          camera.updateProjectionMatrix();
+        }
+
+        // 2) Distortion pass — sample the RT, write distorted result to the
+        //    canvas inside the active viewport.
+        const pass = distortionPassRef.current;
+        // COLMAP intrinsics are in source-image pixels; scale to RT size.
+        const sx = vpW / dist.imageWidth;
+        const sy = vpH / dist.imageHeight;
+        pass.uniforms.tDiffuse.value = target.texture;
+        pass.uniforms.resolution.value.set(vpW, vpH);
+        // Bake the FOV margin into fx/fy so the lookup hits the correct
+        // source pixels even though the RT was rendered at a wider FOV.
+        pass.uniforms.fx.value = (dist.fx * sx) * margin;
+        pass.uniforms.fy.value = (dist.fy * sy) * margin;
+        pass.uniforms.cx.value = dist.cx * sx;
+        pass.uniforms.cy.value = dist.cy * sy;
+        pass.uniforms.k1.value = dist.k1;
+        pass.uniforms.k2.value = dist.k2;
+        pass.uniforms.p1.value = dist.p1;
+        pass.uniforms.p2.value = dist.p2;
+        pass.uniforms.enabled.value = 1;
+
+        renderer.setRenderTarget(null);
+        renderer.setViewport(vpX, vpY, vpW, vpH);
+        renderer.setScissor(vpX, vpY, vpW, vpH);
+        renderer.setScissorTest(true);
+        renderer.render(pass.scene, pass.camera);
+        renderer.setScissorTest(false);
+      } else {
+        // Distortion off → original direct path.
+        renderer.setViewport(vpX, vpY, vpW, vpH);
+        renderer.setScissor(vpX, vpY, vpW, vpH);
+        renderer.setScissorTest(true);
+        renderer.render(scene, camera);
+        renderer.setScissorTest(false);
+      }
       // Reset viewport for any subsequent readPixels / UI
       renderer.setViewport(0, 0, canvasW, canvasH);
     }
@@ -1043,6 +1150,10 @@ export default function StandaloneViewerPage() {
       controls.dispose();
       depthTarget.dispose();
       depthMaterial.dispose();
+      distortionTarget.dispose();
+      distortionPass.dispose();
+      distortionPassRef.current = null;
+      distortionTargetRef.current = null;
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -1471,6 +1582,55 @@ export default function StandaloneViewerPage() {
         };
         const bitrate = codecBitrates[settings.codec] || 20_000_000;
 
+        // If distortion is on, build a post-process pass that mirrors the
+        // viewer's live distortion: render the scene at a slight FOV margin,
+        // then warp through the inverse Brown-Conrady shader before readback.
+        const distSnap = distortionRef.current;
+        const useDistortion = distSnap.enabled && (
+          distSnap.k1 !== 0 || distSnap.k2 !== 0 || distSnap.p1 !== 0 || distSnap.p2 !== 0
+        );
+        let exportPostProcess: Parameters<typeof exportVideo>[0]["postProcess"];
+        if (useDistortion) {
+          const exportPass = createDistortionPass();
+          const margin = computeFovMargin({
+            width: distSnap.imageWidth,
+            height: distSnap.imageHeight,
+            fx: distSnap.fx, fy: distSnap.fy,
+            cx: distSnap.cx, cy: distSnap.cy,
+            k1: distSnap.k1, k2: distSnap.k2,
+            p1: distSnap.p1, p2: distSnap.p2,
+          });
+          exportPostProcess = {
+            prepareCamera: () => {
+              if (margin <= 1) return null;
+              const baseFov = camera.fov;
+              const halfRad = THREE.MathUtils.degToRad(baseFov / 2);
+              const newHalf = Math.atan(margin * Math.tan(halfRad));
+              return THREE.MathUtils.radToDeg(newHalf) * 2;
+            },
+            apply: (rendererArg, src, dst, w, h) => {
+              const sx = w / distSnap.imageWidth;
+              const sy = h / distSnap.imageHeight;
+              exportPass.uniforms.tDiffuse.value = src.texture;
+              exportPass.uniforms.resolution.value.set(w, h);
+              exportPass.uniforms.fx.value = (distSnap.fx * sx) * margin;
+              exportPass.uniforms.fy.value = (distSnap.fy * sy) * margin;
+              exportPass.uniforms.cx.value = distSnap.cx * sx;
+              exportPass.uniforms.cy.value = distSnap.cy * sy;
+              exportPass.uniforms.k1.value = distSnap.k1;
+              exportPass.uniforms.k2.value = distSnap.k2;
+              exportPass.uniforms.p1.value = distSnap.p1;
+              exportPass.uniforms.p2.value = distSnap.p2;
+              exportPass.uniforms.enabled.value = 1;
+              rendererArg.setRenderTarget(dst);
+              rendererArg.setViewport(0, 0, w, h);
+              rendererArg.setClearColor(0x000000, 1);
+              rendererArg.clear();
+              rendererArg.render(exportPass.scene, exportPass.camera);
+            },
+          };
+        }
+
         const result = await exportVideo({
           renderer,
           scene,
@@ -1483,6 +1643,7 @@ export default function StandaloneViewerPage() {
             settings.mode === "depth" || settings.mode === "both"
               ? captureDepthFrameForExport
               : undefined,
+          postProcess: exportPostProcess,
           onProgress: (frame, total) => {
             setExportProgress({ frame, total });
           },
@@ -1591,6 +1752,25 @@ export default function StandaloneViewerPage() {
           Math.abs(preset.ratio - importedAspect) < Math.abs(ASPECT_RATIO_PRESETS[bestIdx].ratio - importedAspect) ? idx : bestIdx
         , 0);
         setAspectIndex(bestAspect);
+
+        // Lens distortion — populate from imported intrinsics. Auto-enable
+        // when the COLMAP camera carried non-zero coefficients.
+        const hasDistortion =
+          cameraParams.k1 !== 0 || cameraParams.k2 !== 0 ||
+          cameraParams.p1 !== 0 || cameraParams.p2 !== 0;
+        setDistortion({
+          enabled: hasDistortion,
+          fx: cameraParams.fx,
+          fy: cameraParams.fy,
+          cx: cameraParams.cx,
+          cy: cameraParams.cy,
+          k1: cameraParams.k1,
+          k2: cameraParams.k2,
+          p1: cameraParams.p1,
+          p2: cameraParams.p2,
+          imageWidth: cameraParams.width,
+          imageHeight: cameraParams.height,
+        });
       }
 
       // Apply first keyframe camera
@@ -1980,6 +2160,74 @@ export default function StandaloneViewerPage() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* Lens distortion (Brown-Conrady, OpenCV model) */}
+              <div className="mt-2 pt-2 border-t border-neutral-800">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[9px] text-neutral-500">Lens distortion</label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setDistortion((d) => ({
+                        ...d, k1: 0, k2: 0, p1: 0, p2: 0,
+                      }))}
+                      className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+                      title="Zero all distortion coefficients"
+                    >
+                      Reset
+                    </button>
+                    <button
+                      onClick={() => setDistortion((d) => ({ ...d, enabled: !d.enabled }))}
+                      className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                        distortion.enabled
+                          ? "bg-indigo-600 text-white"
+                          : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                      }`}
+                    >
+                      {distortion.enabled ? "On" : "Off"}
+                    </button>
+                  </div>
+                </div>
+                {distortion.enabled && (
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    {(
+                      [
+                        { key: "k1", label: "k1", min: -1, max: 1, step: 0.005 },
+                        { key: "k2", label: "k2", min: -1, max: 1, step: 0.005 },
+                        { key: "p1", label: "p1", min: -0.1, max: 0.1, step: 0.0005 },
+                        { key: "p2", label: "p2", min: -0.1, max: 0.1, step: 0.0005 },
+                      ] as const
+                    ).map((s) => {
+                      const v = distortion[s.key];
+                      return (
+                        <div key={s.key} className="flex items-center gap-1">
+                          <label className="text-[9px] text-neutral-500 w-[14px] shrink-0">{s.label}</label>
+                          <input
+                            type="range"
+                            min={s.min}
+                            max={s.max}
+                            step={s.step}
+                            value={v}
+                            onChange={(e) =>
+                              setDistortion((d) => ({ ...d, [s.key]: parseFloat(e.target.value) }))
+                            }
+                            className="flex-1 h-1 accent-indigo-500 cursor-pointer min-w-0"
+                          />
+                          <input
+                            type="number"
+                            step={s.step}
+                            value={v}
+                            onChange={(e) => {
+                              const n = parseFloat(e.target.value);
+                              if (Number.isFinite(n)) setDistortion((d) => ({ ...d, [s.key]: n }));
+                            }}
+                            className="w-[52px] shrink-0 text-[9px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none tabular-nums"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Nav mode toggle */}

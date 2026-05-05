@@ -23,6 +23,32 @@ export interface VideoExportOptions {
     height: number,
     globalRange?: { min: number; max: number }
   ) => { imageData: ImageData | null; min: number; max: number } | null;
+  /**
+   * Optional post-processing pass applied AFTER the scene is rendered into
+   * `srcTarget`. The callback should render a fullscreen quad (or whatever)
+   * into `dstTarget`. If omitted, the scene render is the final image.
+   *
+   * Used to bake lens distortion into the export — the viewer page wires
+   * this up to the same distortion pass that drives the live preview.
+   *
+   * The callback may also adjust the camera FOV before the scene render to
+   * compensate for the FOV margin its post-pass needs (return the adjusted
+   * FOV from `prepareCamera`; the export resets `camera.fov` after each
+   * frame).
+   */
+  postProcess?: {
+    /** Called once per frame BEFORE the scene render. Return null to keep
+     *  the camera unchanged. */
+    prepareCamera?: () => number | null;
+    /** Apply the post-pass: read from src, write to dst. */
+    apply: (
+      renderer: THREE.WebGLRenderer,
+      srcTarget: THREE.WebGLRenderTarget,
+      dstTarget: THREE.WebGLRenderTarget,
+      width: number,
+      height: number
+    ) => void;
+  };
   onProgress?: (frame: number, totalFrames: number) => void;
 }
 
@@ -144,7 +170,7 @@ async function exportVideoWebCodecs(
 ): Promise<VideoExportResult> {
   const {
     renderer, scene, camera, path, mode, resolution,
-    bitrate = DEFAULT_BITRATE, captureDepthFrame, onProgress,
+    bitrate = DEFAULT_BITRATE, captureDepthFrame, postProcess, onProgress,
   } = opts;
 
   const width = ensureEvenDimension(resolution.width);
@@ -159,7 +185,15 @@ async function exportVideoWebCodecs(
   const renderTarget = new THREE.WebGLRenderTarget(width, height, {
     format: THREE.RGBAFormat,
     type: THREE.UnsignedByteType,
+    depthBuffer: true,
   });
+  // Second target for post-processing (e.g. distortion). Created lazily.
+  const postTarget = postProcess
+    ? new THREE.WebGLRenderTarget(width, height, {
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+      })
+    : null;
 
   const origAspect = camera.aspect;
   const origFov = camera.fov;
@@ -218,10 +252,30 @@ async function exportVideoWebCodecs(
       camera.updateProjectionMatrix();
 
       if (needRgb) {
+        // Optional FOV margin for the distortion pass.
+        let restoreFov: number | null = null;
+        if (postProcess?.prepareCamera) {
+          const newFov = postProcess.prepareCamera();
+          if (newFov != null) {
+            restoreFov = camera.fov;
+            camera.fov = newFov;
+            camera.updateProjectionMatrix();
+          }
+        }
         renderer.setRenderTarget(renderTarget);
         renderer.render(scene, camera);
+        if (restoreFov != null) {
+          camera.fov = restoreFov;
+          camera.updateProjectionMatrix();
+        }
+        // Apply post-pass if any → readback target becomes postTarget.
+        let readTarget: THREE.WebGLRenderTarget = renderTarget;
+        if (postProcess && postTarget) {
+          postProcess.apply(renderer, renderTarget, postTarget, width, height);
+          readTarget = postTarget;
+        }
         renderer.setRenderTarget(null);
-        safeReadPixels(renderer, renderTarget, 0, 0, width, height, pixelBuf);
+        safeReadPixels(renderer, readTarget, 0, 0, width, height, pixelBuf);
 
         const imageData = new ImageData(width, height);
         flipVerticallyInto(pixelBuf, imageData.data, width, height);
@@ -255,6 +309,7 @@ async function exportVideoWebCodecs(
     camera.updateProjectionMatrix();
     renderer.setSize(origSize.x, origSize.y);
     renderTarget.dispose();
+    postTarget?.dispose();
     renderer.render(scene, camera);
   }
 
@@ -268,7 +323,7 @@ async function exportVideoMediaRecorder(
 ): Promise<VideoExportResult> {
   const {
     renderer, scene, camera, path, mode, resolution,
-    bitrate = DEFAULT_BITRATE, captureDepthFrame, onProgress,
+    bitrate = DEFAULT_BITRATE, captureDepthFrame, postProcess, onProgress,
   } = opts;
 
   const width = ensureEvenDimension(resolution.width);
@@ -283,7 +338,14 @@ async function exportVideoMediaRecorder(
   const renderTarget = new THREE.WebGLRenderTarget(width, height, {
     format: THREE.RGBAFormat,
     type: THREE.UnsignedByteType,
+    depthBuffer: true,
   });
+  const postTarget = postProcess
+    ? new THREE.WebGLRenderTarget(width, height, {
+        format: THREE.RGBAFormat,
+        type: THREE.UnsignedByteType,
+      })
+    : null;
 
   const origAspect = camera.aspect;
   const origFov = camera.fov;
@@ -338,10 +400,28 @@ async function exportVideoMediaRecorder(
       camera.updateProjectionMatrix();
 
       if (rgbRecorder) {
+        let restoreFov: number | null = null;
+        if (postProcess?.prepareCamera) {
+          const newFov = postProcess.prepareCamera();
+          if (newFov != null) {
+            restoreFov = camera.fov;
+            camera.fov = newFov;
+            camera.updateProjectionMatrix();
+          }
+        }
         renderer.setRenderTarget(renderTarget);
         renderer.render(scene, camera);
+        if (restoreFov != null) {
+          camera.fov = restoreFov;
+          camera.updateProjectionMatrix();
+        }
+        let readTarget: THREE.WebGLRenderTarget = renderTarget;
+        if (postProcess && postTarget) {
+          postProcess.apply(renderer, renderTarget, postTarget, width, height);
+          readTarget = postTarget;
+        }
         renderer.setRenderTarget(null);
-        safeReadPixels(renderer, renderTarget, 0, 0, width, height, pixelBuf);
+        safeReadPixels(renderer, readTarget, 0, 0, width, height, pixelBuf);
         const imageData = rgbCtx.createImageData(width, height);
         flipVerticallyInto(pixelBuf, imageData.data, width, height);
         rgbCtx.putImageData(imageData, 0, 0);
@@ -378,6 +458,7 @@ async function exportVideoMediaRecorder(
     camera.updateProjectionMatrix();
     renderer.setSize(origSize.x, origSize.y);
     renderTarget.dispose();
+    postTarget?.dispose();
     renderer.render(scene, camera);
   }
 
