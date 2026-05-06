@@ -657,6 +657,11 @@ export default function StandaloneViewerPage() {
   // and rescales any keyframes/live-camera position when changed.
   const [cameraScale, setCameraScale] = useState(1.0);
 
+  // COLMAP source up-axis. Three.js + the splat are Y-up; VP/photogrammetry
+  // tracks are typically Z-up. When set to 'z', imports get pre-rotated
+  // -π/2 about X. Toggling at runtime rotates the loaded path the same way.
+  const [colmapUpAxis, setColmapUpAxis] = useState<"y" | "z">("y");
+
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -681,6 +686,8 @@ export default function StandaloneViewerPage() {
   useEffect(() => { distortionScaleRef.current = distortionScale; }, [distortionScale]);
   const cameraScaleRef = useRef<number>(cameraScale);
   useEffect(() => { cameraScaleRef.current = cameraScale; }, [cameraScale]);
+  const colmapUpAxisRef = useRef<"y" | "z">(colmapUpAxis);
+  useEffect(() => { colmapUpAxisRef.current = colmapUpAxis; }, [colmapUpAxis]);
   const depthMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
   const depthSceneRef = useRef<THREE.Scene | null>(null);
   const depthCameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -1548,6 +1555,43 @@ export default function StandaloneViewerPage() {
     []
   );
 
+  /**
+   * Up-axis toggle handler. Three.js + the splat are Y-up; VP tracks are
+   * typically Z-up. Flipping the toggle rotates the loaded path ±π/2 about
+   * X so the camera trajectory aligns with the splat. Future imports honour
+   * the same convention via `colmapUpAxisRef` in `handleColmapImport`.
+   *   y → z: rotate +π/2 about X (un-rotates a previously-corrected path)
+   *   z → y: rotate -π/2 about X (corrects Z-up source into Y-up)
+   */
+  const handleChangeColmapUpAxis = useCallback(
+    (next: "y" | "z") => {
+      const prev = colmapUpAxisRef.current;
+      if (next === prev) return;
+      const angle = next === "z" ? Math.PI / 2 : -Math.PI / 2;
+      const rotMat = new THREE.Matrix4().makeRotationX(angle);
+      const rotQuat = new THREE.Quaternion().setFromRotationMatrix(rotMat);
+      setCameraPath((path) => ({
+        ...path,
+        keyframes: path.keyframes.map((kf) => ({
+          ...kf,
+          position: kf.position.clone().applyMatrix4(rotMat),
+          quaternion: rotQuat.clone().multiply(kf.quaternion),
+        })),
+      }));
+      if (cameraRef.current) {
+        cameraRef.current.position.applyMatrix4(rotMat);
+        cameraRef.current.quaternion.premultiply(rotQuat);
+        // Keep yaw/pitch refs in sync for fly mode.
+        const euler = new THREE.Euler();
+        euler.setFromQuaternion(cameraRef.current.quaternion, "YXZ");
+        yawRef.current = euler.y;
+        pitchRef.current = euler.x;
+      }
+      setColmapUpAxis(next);
+    },
+    []
+  );
+
   // ─── Depth capture helper for video export ──────────────────────
 
   // Reusable float render target for depth visualization during export
@@ -1777,18 +1821,34 @@ export default function StandaloneViewerPage() {
       const blob = new Blob([await file.arrayBuffer()]);
       const { path: importedPath, cameraParams } = await importColmap(blob, cameraPath.fps);
 
-      // Apply the current camera-scale to imported translations. Lets the user
-      // set "100" once for cm-scale shoots and have every subsequent import
-      // auto-scale into the metre-scale splat world.
+      // Apply the current camera-scale to imported translations, and pre-rotate
+      // Z-up sources into Three.js Y-up if the toggle is set. Lets the user set
+      // "100" + "Z" once for a cm-scale Z-up VP shoot and have every subsequent
+      // import auto-align with the splat world.
       const scale = cameraScaleRef.current;
-      const scaledPath: CameraPath = scale === 1
+      const needsScale = scale !== 1;
+      const needsRotate = colmapUpAxisRef.current === "z";
+      let rotMat: THREE.Matrix4 | null = null;
+      let rotQuat: THREE.Quaternion | null = null;
+      if (needsRotate) {
+        // Z-up → Y-up: rotate -π/2 about X.
+        rotMat = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+        rotQuat = new THREE.Quaternion().setFromRotationMatrix(rotMat);
+      }
+      const scaledPath: CameraPath = (!needsScale && !needsRotate)
         ? importedPath
         : {
             ...importedPath,
-            keyframes: importedPath.keyframes.map((kf) => ({
-              ...kf,
-              position: kf.position.clone().multiplyScalar(scale),
-            })),
+            keyframes: importedPath.keyframes.map((kf) => {
+              const pos = kf.position.clone();
+              const quat = kf.quaternion.clone();
+              if (needsScale) pos.multiplyScalar(scale);
+              if (rotMat && rotQuat) {
+                pos.applyMatrix4(rotMat);
+                quat.premultiply(rotQuat);
+              }
+              return { ...kf, position: pos, quaternion: quat };
+            }),
           };
       setCameraPath(scaledPath);
       setCurrentFrame(0);
@@ -2338,6 +2398,27 @@ export default function StandaloneViewerPage() {
                     }}
                     className="w-[64px] shrink-0 text-[9px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none tabular-nums"
                   />
+                </div>
+                {/* COLMAP source up-axis. Toggling rotates the loaded path ±π/2
+                    about X; new imports honour the current setting. */}
+                <div className="mt-2 flex items-center gap-2">
+                  <label className="text-[9px] text-neutral-500">Up axis</label>
+                  <div className="flex gap-1">
+                    {(["y", "z"] as const).map((ax) => (
+                      <button
+                        key={ax}
+                        onClick={() => handleChangeColmapUpAxis(ax)}
+                        className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                          colmapUpAxis === ax
+                            ? "bg-indigo-600 text-white"
+                            : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                        }`}
+                        title={ax === "y" ? "Y-up source (Three.js, splats)" : "Z-up source (VP, photogrammetry)"}
+                      >
+                        {ax.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
