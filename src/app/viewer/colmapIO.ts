@@ -117,14 +117,17 @@ export async function importColmap(
   const JSZip = (await import("jszip")).default;
   const zip = await JSZip.loadAsync(zipBlob);
 
-  // Find cameras.txt and images.txt (may be nested in a subfolder)
+  // Find cameras.txt, images.txt, and the optional Nodos extras.txt sidecar
+  // (may be nested in a subfolder).
   let camerasFile: string | null = null;
   let imagesFile: string | null = null;
+  let extrasFile: string | null = null;
 
   zip.forEach((relativePath) => {
     const lower = relativePath.toLowerCase();
     if (lower.endsWith("cameras.txt")) camerasFile = relativePath;
     if (lower.endsWith("images.txt")) imagesFile = relativePath;
+    if (lower.endsWith("extras.txt")) extrasFile = relativePath;
   });
 
   if (!camerasFile || !imagesFile) {
@@ -133,9 +136,17 @@ export async function importColmap(
 
   const camerasContent = await zip.file(camerasFile)!.async("text");
   const imagesContent = await zip.file(imagesFile)!.async("text");
+  const extrasContent = extrasFile ? await zip.file(extrasFile)!.async("text") : null;
 
   // Parse cameras.txt → extract focal length for FOV calculation
   const cameraParams = parseCamerasTxt(camerasContent);
+
+  // If extras.txt is present, fold DISTORTION_SCALE into cameraParams so the
+  // viewer can use it as the FOV margin instead of estimating from k1/k2.
+  if (cameraParams && extrasContent) {
+    const extras = parseExtrasTxt(extrasContent);
+    if (extras) cameraParams.distortionScale = extras.distortionScale;
+  }
 
   // Parse images.txt → extract poses
   const poses = parseImagesTxt(imagesContent);
@@ -234,6 +245,36 @@ export interface CameraParams {
   p1: number;
   /** Brown-Conrady tangential P2. */
   p2: number;
+  /**
+   * Optional FOV-margin multiplier from a Nodos-style `extras.txt` sidecar
+   * (column DISTORTION_SCALE). When present the renderer uses this directly
+   * as the focal multiplier instead of estimating from k1/k2.
+   */
+  distortionScale?: number;
+}
+
+/**
+ * Pull DISTORTION_SCALE from the first non-comment row of a Nodos
+ * `extras.txt`. Schema:
+ *   IMAGE_ID, ZOOM, FOCUS, FOCUS_DISTANCE, RENDER_RATIO, NODAL_OFFSET,
+ *   DISTORTION_SCALE, SENSOR_W_MM, SENSOR_H_MM, ROT_X, ROT_Y, ROT_Z
+ *
+ * The shoot is one-camera in practice, so the value is uniform across rows;
+ * we take the first row's value.
+ */
+export function parseExtrasTxt(content: string): { distortionScale: number } | null {
+  const lines = content.split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const parts = trimmed.split(/\s+/);
+    // Index 6 = DISTORTION_SCALE (0-based after IMAGE_ID).
+    if (parts.length >= 7) {
+      const v = parseFloat(parts[6]);
+      if (Number.isFinite(v) && v > 0) return { distortionScale: v };
+    }
+  }
+  return null;
 }
 
 /**

@@ -32,7 +32,7 @@ const TRACK_Y = 16;
 const TRACK_HEIGHT = 20;
 const KEYFRAME_SIZE = 8;
 const PLAYHEAD_WIDTH = 2;
-const FPS_OPTIONS = [12, 24, 30, 60];
+const FPS_OPTIONS = [12, 24, 25, 30, 60];
 
 // ─── Component ──────────────────────────────────────────────────
 

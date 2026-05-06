@@ -649,6 +649,14 @@ export default function StandaloneViewerPage() {
     imageWidth: 1920, imageHeight: 1080,
   });
 
+  // Optional measured FOV margin from extras.txt DISTORTION_SCALE. When set,
+  // overrides the heuristic computeFovMargin() in render + export paths.
+  const [distortionScale, setDistortionScale] = useState<number | null>(null);
+
+  // Camera-translation scale (cm ↔ m). Multiplies imported COLMAP positions
+  // and rescales any keyframes/live-camera position when changed.
+  const [cameraScale, setCameraScale] = useState(1.0);
+
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -667,6 +675,12 @@ export default function StandaloneViewerPage() {
   const distortionPassRef = useRef<ReturnType<typeof createDistortionPass> | null>(null);
   const distortionTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
   useEffect(() => { distortionRef.current = distortion; }, [distortion]);
+
+  // Track current values for use inside the imperative animate loop.
+  const distortionScaleRef = useRef<number | null>(distortionScale);
+  useEffect(() => { distortionScaleRef.current = distortionScale; }, [distortionScale]);
+  const cameraScaleRef = useRef<number>(cameraScale);
+  useEffect(() => { cameraScaleRef.current = cameraScale; }, [cameraScale]);
   const depthMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
   const depthSceneRef = useRef<THREE.Scene | null>(null);
   const depthCameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -1062,11 +1076,16 @@ export default function StandaloneViewerPage() {
         if (target.width !== vpW || target.height !== vpH) {
           target.setSize(Math.max(2, vpW), Math.max(2, vpH));
         }
-        const margin = computeFovMargin({
-          width: dist.imageWidth, height: dist.imageHeight,
-          fx: dist.fx, fy: dist.fy, cx: dist.cx, cy: dist.cy,
-          k1: dist.k1, k2: dist.k2, p1: dist.p1, p2: dist.p2,
-        });
+        // Prefer a measured DISTORTION_SCALE (Nodos extras.txt) when present;
+        // fall back to the heuristic estimate otherwise.
+        const measured = distortionScaleRef.current;
+        const margin = (measured && measured > 0)
+          ? measured
+          : computeFovMargin({
+              width: dist.imageWidth, height: dist.imageHeight,
+              fx: dist.fx, fy: dist.fy, cx: dist.cx, cy: dist.cy,
+              k1: dist.k1, k2: dist.k2, p1: dist.p1, p2: dist.p2,
+            });
         const baseFov = camera.fov;
         if (margin > 1) {
           // Wider FOV = smaller focal. tan(newHalf) = margin * tan(oldHalf).
@@ -1495,7 +1514,36 @@ export default function StandaloneViewerPage() {
 
   const handleChangeFps = useCallback(
     (fps: number) => {
+      // Frame count stays the same — only the playback rate changes.
       setCameraPath((prev) => ({ ...prev, fps }));
+    },
+    []
+  );
+
+  /**
+   * Camera-scale slider handler. Multiplies every keyframe's position by
+   * `next / prev` and rescales the live camera position the same way, so
+   * the existing camera path stretches/shrinks around the world origin
+   * without touching the splat. Pure translation rescale — rotation/FOV
+   * untouched.
+   */
+  const handleChangeCameraScale = useCallback(
+    (next: number) => {
+      if (!Number.isFinite(next) || next <= 0) return;
+      const prev = cameraScaleRef.current;
+      if (next === prev) return;
+      const factor = next / prev;
+      setCameraPath((path) => ({
+        ...path,
+        keyframes: path.keyframes.map((kf) => ({
+          ...kf,
+          position: kf.position.clone().multiplyScalar(factor),
+        })),
+      }));
+      if (cameraRef.current) {
+        cameraRef.current.position.multiplyScalar(factor);
+      }
+      setCameraScale(next);
     },
     []
   );
@@ -1592,14 +1640,18 @@ export default function StandaloneViewerPage() {
         let exportPostProcess: Parameters<typeof exportVideo>[0]["postProcess"];
         if (useDistortion) {
           const exportPass = createDistortionPass();
-          const margin = computeFovMargin({
-            width: distSnap.imageWidth,
-            height: distSnap.imageHeight,
-            fx: distSnap.fx, fy: distSnap.fy,
-            cx: distSnap.cx, cy: distSnap.cy,
-            k1: distSnap.k1, k2: distSnap.k2,
-            p1: distSnap.p1, p2: distSnap.p2,
-          });
+          // Prefer measured DISTORTION_SCALE over heuristic estimate.
+          const measuredMargin = distortionScaleRef.current;
+          const margin = (measuredMargin && measuredMargin > 0)
+            ? measuredMargin
+            : computeFovMargin({
+                width: distSnap.imageWidth,
+                height: distSnap.imageHeight,
+                fx: distSnap.fx, fy: distSnap.fy,
+                cx: distSnap.cx, cy: distSnap.cy,
+                k1: distSnap.k1, k2: distSnap.k2,
+                p1: distSnap.p1, p2: distSnap.p2,
+              });
           exportPostProcess = {
             prepareCamera: () => {
               if (margin <= 1) return null;
@@ -1724,7 +1776,21 @@ export default function StandaloneViewerPage() {
     try {
       const blob = new Blob([await file.arrayBuffer()]);
       const { path: importedPath, cameraParams } = await importColmap(blob, cameraPath.fps);
-      setCameraPath(importedPath);
+
+      // Apply the current camera-scale to imported translations. Lets the user
+      // set "100" once for cm-scale shoots and have every subsequent import
+      // auto-scale into the metre-scale splat world.
+      const scale = cameraScaleRef.current;
+      const scaledPath: CameraPath = scale === 1
+        ? importedPath
+        : {
+            ...importedPath,
+            keyframes: importedPath.keyframes.map((kf) => ({
+              ...kf,
+              position: kf.position.clone().multiplyScalar(scale),
+            })),
+          };
+      setCameraPath(scaledPath);
       setCurrentFrame(0);
       setIsTimelineVisible(true);
 
@@ -1771,11 +1837,17 @@ export default function StandaloneViewerPage() {
           imageWidth: cameraParams.width,
           imageHeight: cameraParams.height,
         });
+
+        // Optional measured FOV margin from extras.txt → use directly in the
+        // render and export paths instead of the heuristic estimate.
+        setDistortionScale(
+          typeof cameraParams.distortionScale === "number" ? cameraParams.distortionScale : null,
+        );
       }
 
-      // Apply first keyframe camera
-      if (importedPath.keyframes.length > 0 && cameraRef.current) {
-        const kf = importedPath.keyframes[0];
+      // Apply first keyframe camera (already pre-scaled in scaledPath).
+      if (scaledPath.keyframes.length > 0 && cameraRef.current) {
+        const kf = scaledPath.keyframes[0];
         cameraRef.current.position.copy(kf.position);
         cameraRef.current.quaternion.copy(kf.quaternion);
         cameraRef.current.fov = kf.fov;
@@ -2228,6 +2300,45 @@ export default function StandaloneViewerPage() {
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* Camera scale (cm ↔ m worlds). Multiplies camera-track translations
+                  so a cm-scale COLMAP pairs with metre-scale splats without
+                  resizing the splat. Pure translation rescale — splat untouched. */}
+              <div className="mt-2 pt-2 border-t border-neutral-800">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[9px] text-neutral-500">Camera scale</label>
+                  <button
+                    onClick={() => handleChangeCameraScale(1)}
+                    className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+                    title="Reset camera scale to 1.0"
+                  >
+                    ↺
+                  </button>
+                </div>
+                <div className="flex items-center gap-1">
+                  {/* Log slider: 0.001 (10^-3) → 1000 (10^3). */}
+                  <input
+                    type="range"
+                    min={-3}
+                    max={3}
+                    step={0.01}
+                    value={Math.log10(cameraScale)}
+                    onChange={(e) => handleChangeCameraScale(Math.pow(10, parseFloat(e.target.value)))}
+                    className="flex-1 h-1 accent-indigo-500 cursor-pointer min-w-0"
+                  />
+                  <input
+                    type="number"
+                    step="any"
+                    min={0}
+                    value={cameraScale}
+                    onChange={(e) => {
+                      const n = parseFloat(e.target.value);
+                      if (Number.isFinite(n) && n > 0) handleChangeCameraScale(n);
+                    }}
+                    className="w-[64px] shrink-0 text-[9px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none tabular-nums"
+                  />
+                </div>
               </div>
 
               {/* Nav mode toggle */}
