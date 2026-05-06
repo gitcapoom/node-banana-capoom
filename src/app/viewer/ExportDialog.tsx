@@ -36,7 +36,7 @@ const RESOLUTION_PRESETS = [
   { label: "3840x2160 (4K)", width: 3840, height: 2160 },
 ];
 
-const FPS_OPTIONS = [12, 24, 30, 60];
+const FPS_OPTIONS = [12, 24, 25, 30, 60];
 
 const CODEC_PRESETS: { key: CodecPreset; label: string; description: string }[] = [
   { key: "h264", label: "H.264", description: "20 Mbps — fast, good quality" },

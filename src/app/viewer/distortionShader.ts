@@ -169,6 +169,10 @@ export function createDistortionPass(): {
  *
  * Returns a multiplier ≥ 1 to scale the camera's effective focal length
  * (smaller focal = wider FOV → bigger source coverage).
+ *
+ * Note: when a calibration sidecar carries a measured `DISTORTION_SCALE`
+ * (e.g. Nodos `extras.txt`), callers should use that value directly instead
+ * of this estimator — it's the authoritative number for that exact lens/zoom.
  */
 export function computeFovMargin(p: {
   width: number;
