@@ -704,6 +704,10 @@ export default function StandaloneViewerPage() {
   const keysPressedRef = useRef<Set<string>>(new Set());
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
+  // Roll (Euler z, YXZ order). Tracked alongside yaw/pitch so fly-mode can
+  // preserve the camera's full orientation after playback / scrub of paths
+  // whose YXZ decomposition has non-zero z (e.g. Z-up tracks rotated to Y-up).
+  const rollRef = useRef(0);
   const isMouseDraggingRef = useRef(false);
   const lastMouseRef = useRef({ x: 0, y: 0 });
   const navModeRef = useRef<"orbit" | "fly">("fly");
@@ -717,11 +721,12 @@ export default function StandaloneViewerPage() {
     }
 
     if (navMode === "fly" && cameraRef.current) {
-      // Extract yaw/pitch from current camera quaternion
+      // Extract yaw/pitch/roll from current camera quaternion
       const euler = new THREE.Euler();
       euler.setFromQuaternion(cameraRef.current.quaternion, "YXZ");
       yawRef.current = euler.y;
       pitchRef.current = euler.x;
+      rollRef.current = euler.z;
     } else if (navMode === "orbit" && cameraRef.current && controlsRef.current) {
       // Set orbit target 1 unit in front of camera
       const dir = new THREE.Vector3();
@@ -783,6 +788,7 @@ export default function StandaloneViewerPage() {
       cameraRef.current.position.set(0, 1.5, 0);
       yawRef.current = 0;
       pitchRef.current = 0;
+      rollRef.current = 0;
       cameraRef.current.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, "YXZ"));
     } else if (controlsRef.current) {
       cameraRef.current.position.set(0, 1.5, 0.01);
@@ -984,11 +990,15 @@ export default function StandaloneViewerPage() {
             camera.fov = evaluated.fov;
             camera.updateProjectionMatrix();
 
-            // Sync yaw/pitch for fly mode
+            // Sync yaw/pitch/roll for fly mode. Roll matters for paths whose
+            // YXZ decomposition has non-zero z (e.g. Z-up tracks rotated to Y-up
+            // by the up-axis toggle); without it the fly branch would zero the
+            // roll component on the very next frame and snap the orientation.
             const euler = new THREE.Euler();
             euler.setFromQuaternion(camera.quaternion, "YXZ");
             yawRef.current = euler.y;
             pitchRef.current = euler.x;
+            rollRef.current = euler.z;
           }
 
           // Batch state updates via postMessage to avoid excessive renders
@@ -1014,11 +1024,13 @@ export default function StandaloneViewerPage() {
           }
         }
       } else if (navModeRef.current === "fly") {
-        // Apply yaw/pitch
+        // Apply yaw/pitch/roll. Roll is preserved across playback so paths
+        // whose orientations only express cleanly with non-zero Euler-z
+        // (rotated Z-up tracks) don't snap on every animate tick.
         const euler = new THREE.Euler(
           pitchRef.current,
           yawRef.current,
-          0,
+          rollRef.current,
           "YXZ"
         );
         camera.quaternion.setFromEuler(euler);
@@ -1468,11 +1480,12 @@ export default function StandaloneViewerPage() {
         camera.fov = evaluated.fov;
         camera.updateProjectionMatrix();
 
-        // Sync fly mode refs
+        // Sync fly mode refs (incl. roll, see play-loop comment).
         const euler = new THREE.Euler();
         euler.setFromQuaternion(camera.quaternion, "YXZ");
         yawRef.current = euler.y;
         pitchRef.current = euler.x;
+        rollRef.current = euler.z;
       }
     },
     [cameraPath]
@@ -1560,14 +1573,14 @@ export default function StandaloneViewerPage() {
    * typically Z-up. Flipping the toggle rotates the loaded path ±π/2 about
    * X so the camera trajectory aligns with the splat. Future imports honour
    * the same convention via `colmapUpAxisRef` in `handleColmapImport`.
-   *   y → z: rotate +π/2 about X (un-rotates a previously-corrected path)
-   *   z → y: rotate -π/2 about X (corrects Z-up source into Y-up)
+   *   y → z (toggle says "source was Z-up"): rotate Z-up source → Y-up = -π/2 about X
+   *   z → y (toggle says "actually Y-up"):    rotate Y-up → Z-up source = +π/2 about X
    */
   const handleChangeColmapUpAxis = useCallback(
     (next: "y" | "z") => {
       const prev = colmapUpAxisRef.current;
       if (next === prev) return;
-      const angle = next === "z" ? Math.PI / 2 : -Math.PI / 2;
+      const angle = next === "z" ? -Math.PI / 2 : Math.PI / 2;
       const rotMat = new THREE.Matrix4().makeRotationX(angle);
       const rotQuat = new THREE.Quaternion().setFromRotationMatrix(rotMat);
       setCameraPath((path) => ({
@@ -1581,11 +1594,12 @@ export default function StandaloneViewerPage() {
       if (cameraRef.current) {
         cameraRef.current.position.applyMatrix4(rotMat);
         cameraRef.current.quaternion.premultiply(rotQuat);
-        // Keep yaw/pitch refs in sync for fly mode.
+        // Keep yaw/pitch/roll refs in sync for fly mode.
         const euler = new THREE.Euler();
         euler.setFromQuaternion(cameraRef.current.quaternion, "YXZ");
         yawRef.current = euler.y;
         pitchRef.current = euler.x;
+        rollRef.current = euler.z;
       }
       setColmapUpAxis(next);
     },
@@ -1917,6 +1931,7 @@ export default function StandaloneViewerPage() {
         euler.setFromQuaternion(cameraRef.current.quaternion, "YXZ");
         yawRef.current = euler.y;
         pitchRef.current = euler.x;
+        rollRef.current = euler.z;
       }
     } catch (err) {
       console.error("COLMAP import failed:", err);
