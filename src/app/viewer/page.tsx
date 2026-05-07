@@ -844,7 +844,24 @@ export default function StandaloneViewerPage() {
       const offset = new THREE.Vector3(1, 0.5, 1).normalize().multiplyScalar(distance);
       camera.position.copy(center).add(offset);
       camera.lookAt(center);
+
+      // Adapt near/far to the splat's actual extent. Defaults of (0.01, 1000)
+      // clip cm-scale splats up close and VP-scale splats far away. Use the
+      // framing distance as the reference scale: near at 1/1000 of distance,
+      // far at 100×, with floors so we don't go below the original defaults
+      // for typical metre-scale splats.
+      camera.near = Math.max(0.001, distance / 1000);
+      camera.far = Math.max(1000, distance * 100);
       camera.updateProjectionMatrix();
+
+      // Keep the depth-visualization shader's uniforms in sync — it reads
+      // cameraNear/cameraFar to linearize the depth buffer.
+      const depthMat = depthMaterialRef.current;
+      if (depthMat) {
+        depthMat.uniforms.cameraNear.value = camera.near;
+        depthMat.uniforms.cameraFar.value = camera.far;
+      }
+
       if (controlsRef.current) {
         controlsRef.current.target.copy(center);
         controlsRef.current.update();
