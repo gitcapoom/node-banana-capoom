@@ -662,6 +662,11 @@ export default function StandaloneViewerPage() {
   // -π/2 about X. Toggling at runtime rotates the loaded path the same way.
   const [colmapUpAxis, setColmapUpAxis] = useState<"y" | "z">("y");
 
+  // Scene helpers — ground grid (XZ plane in Y-up) and origin axes (RGB).
+  // Both default on as visual reference for inspecting splats.
+  const [showGrid, setShowGrid] = useState(true);
+  const [showAxes, setShowAxes] = useState(true);
+
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -671,6 +676,8 @@ export default function StandaloneViewerPage() {
   const animationIdRef = useRef<number>(0);
   const splatMeshRef = useRef<unknown>(null);
   const initRef = useRef(false);
+  const gridHelperRef = useRef<THREE.GridHelper | null>(null);
+  const axesHelperRef = useRef<THREE.AxesHelper | null>(null);
 
   // Depth capture refs
   const depthRenderTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
@@ -688,6 +695,9 @@ export default function StandaloneViewerPage() {
   useEffect(() => { cameraScaleRef.current = cameraScale; }, [cameraScale]);
   const colmapUpAxisRef = useRef<"y" | "z">(colmapUpAxis);
   useEffect(() => { colmapUpAxisRef.current = colmapUpAxis; }, [colmapUpAxis]);
+  // Sync helper visibility with toggles.
+  useEffect(() => { if (gridHelperRef.current) gridHelperRef.current.visible = showGrid; }, [showGrid]);
+  useEffect(() => { if (axesHelperRef.current) axesHelperRef.current.visible = showAxes; }, [showAxes]);
   const depthMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
   const depthSceneRef = useRef<THREE.Scene | null>(null);
   const depthCameraRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -781,17 +791,82 @@ export default function StandaloneViewerPage() {
 
   // ─── Center camera helper ────────────────────────────────────────
 
+  /**
+   * Frame the camera on the loaded splat — SuperSplat-style 3/4 view.
+   *
+   * Computes the splat's world bounding box, then places the camera at a
+   * distance that fits the bbox vertically with the current FOV, offset
+   * along (1, 0.5, 1) so the splat reads as a 3/4 perspective rather than
+   * straight-on. Aims the camera at the bbox centre and points OrbitControls
+   * at the same point so orbit/zoom feels natural.
+   *
+   * Falls back to a fixed (0, 1.5, 0) pose when no splat is loaded yet.
+   */
   const centerCamera = useCallback(() => {
     if (!cameraRef.current) return;
+    const camera = cameraRef.current;
 
+    // Try to fit to the splat's bounding box. Spark's SplatMesh exposes
+    // `getBoundingBox()` which walks the packed splat data — Box3.setFromObject
+    // wouldn't work since SplatMesh doesn't have standard geometry.
+    const splat = splatMeshRef.current as
+      | (THREE.Object3D & { getBoundingBox?: (centersOnly?: boolean) => THREE.Box3 })
+      | null;
+    let center: THREE.Vector3 | null = null;
+    let distance = 0;
+    if (splat?.getBoundingBox) {
+      try {
+        const bbox = splat.getBoundingBox(false);
+        if (
+          bbox &&
+          Number.isFinite(bbox.min.x) && Number.isFinite(bbox.max.x) &&
+          !bbox.isEmpty()
+        ) {
+          center = bbox.getCenter(new THREE.Vector3());
+          // Apply the splat's world transform (it may be scaled/rotated).
+          center.applyMatrix4(splat.matrixWorld);
+          const size = bbox.getSize(new THREE.Vector3());
+          // Account for any uniform scale on the splat object.
+          const splatScale = new THREE.Vector3();
+          splat.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), splatScale);
+          const maxScale = Math.max(splatScale.x, splatScale.y, splatScale.z);
+          const radius = Math.max(size.x, size.y, size.z) * 0.5 * maxScale;
+          const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+          // Fit-to-vfov distance with a small margin so edges aren't clipped.
+          distance = (radius / Math.sin(halfFov)) * 1.15;
+        }
+      } catch {
+        // SplatMesh might not be ready yet — fall through to fixed pose.
+      }
+    }
+
+    if (center && distance > 0) {
+      const offset = new THREE.Vector3(1, 0.5, 1).normalize().multiplyScalar(distance);
+      camera.position.copy(center).add(offset);
+      camera.lookAt(center);
+      camera.updateProjectionMatrix();
+      if (controlsRef.current) {
+        controlsRef.current.target.copy(center);
+        controlsRef.current.update();
+      }
+      // Sync fly-mode refs from the new orientation (incl. roll).
+      const euler = new THREE.Euler();
+      euler.setFromQuaternion(camera.quaternion, "YXZ");
+      yawRef.current = euler.y;
+      pitchRef.current = euler.x;
+      rollRef.current = euler.z;
+      return;
+    }
+
+    // No splat yet — fall back to the original fixed pose.
     if (navModeRef.current === "fly") {
-      cameraRef.current.position.set(0, 1.5, 0);
+      camera.position.set(0, 1.5, 0);
       yawRef.current = 0;
       pitchRef.current = 0;
       rollRef.current = 0;
-      cameraRef.current.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, "YXZ"));
+      camera.quaternion.setFromEuler(new THREE.Euler(0, 0, 0, "YXZ"));
     } else if (controlsRef.current) {
-      cameraRef.current.position.set(0, 1.5, 0.01);
+      camera.position.set(0, 1.5, 0.01);
       controlsRef.current.target.set(0, 1.5, -1);
       controlsRef.current.update();
     }
@@ -855,6 +930,33 @@ export default function StandaloneViewerPage() {
 
     // Ambient light
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+    // ─── Scene helpers ─────────────────────────────────────
+    // Ground grid on the XZ plane at y=0. Sized 20m square / 1m divisions —
+    // good for typical metre-scale splats. Centre line a touch brighter so
+    // the X/Z axes are easy to pick out.
+    const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+    // GridHelper materials are LineBasicMaterial — make them transparent so
+    // the splat behind reads cleanly. depthWrite=false so the grid never
+    // hides splats above it.
+    const gridMats = Array.isArray(gridHelper.material) ? gridHelper.material : [gridHelper.material];
+    for (const m of gridMats) {
+      const mat = m as THREE.LineBasicMaterial;
+      mat.transparent = true;
+      mat.opacity = 0.5;
+      mat.depthWrite = false;
+    }
+    scene.add(gridHelper);
+    gridHelperRef.current = gridHelper;
+
+    // Origin axes — X red, Y green, Z blue. Default 1m length.
+    const axesHelper = new THREE.AxesHelper(1);
+    const axesMat = axesHelper.material as THREE.LineBasicMaterial;
+    axesMat.transparent = true;
+    axesMat.opacity = 0.9;
+    axesMat.depthWrite = false;
+    scene.add(axesHelper);
+    axesHelperRef.current = axesHelper;
 
     // ─── Depth capture setup ───────────────────────────────
     const depthTarget = new THREE.WebGLRenderTarget(
@@ -2435,6 +2537,41 @@ export default function StandaloneViewerPage() {
                     ))}
                   </div>
                 </div>
+              </div>
+
+              {/* Scene helpers — ground grid and origin axes. Frame button
+                  re-fits the camera to the loaded splat (SuperSplat-style 3/4 view). */}
+              <div className="mt-2 pt-2 border-t border-neutral-800 flex items-center gap-2 flex-wrap">
+                <label className="text-[9px] text-neutral-500">Helpers</label>
+                <button
+                  onClick={() => setShowGrid((v) => !v)}
+                  className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                    showGrid
+                      ? "bg-indigo-600 text-white"
+                      : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                  }`}
+                  title="Toggle ground grid (XZ plane)"
+                >
+                  Grid
+                </button>
+                <button
+                  onClick={() => setShowAxes((v) => !v)}
+                  className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                    showAxes
+                      ? "bg-indigo-600 text-white"
+                      : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                  }`}
+                  title="Toggle origin axes (X red, Y green, Z blue)"
+                >
+                  Axes
+                </button>
+                <button
+                  onClick={() => centerCamera()}
+                  className="text-[10px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+                  title="Frame the camera on the splat (SuperSplat-style 3/4 view)"
+                >
+                  Frame
+                </button>
               </div>
 
               {/* Nav mode toggle */}
