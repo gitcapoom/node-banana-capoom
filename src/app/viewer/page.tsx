@@ -682,12 +682,11 @@ export default function StandaloneViewerPage() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationIdRef = useRef<number>(0);
   const splatMeshRef = useRef<unknown>(null);
-  // True when the currently loaded splat is a PLY. 3DGS PLY files are stored
-  // in RDF (+X right, +Y down, +Z forward) -- Spark's PLY loader passes
-  // positions through unchanged, so we apply a 180-deg rotation about X
-  // (RDF -> RUB) on top of the user transform. SPZ self-normalizes via its
-  // coordinate_system header.
-  const splatNeedsRdfToRubRef = useRef(false);
+  // True when the currently loaded splat is a PLY. PLY has no embedded
+  // coordinate-system metadata, so we orient it using the user-selected
+  // `colmapWorldFrame` (the same one applied to COLMAP camera tracks). SPZ
+  // self-normalizes via its coordinate_system header and is exempt.
+  const splatIsPlyRef = useRef(false);
   const initRef = useRef(false);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const axesHelperRef = useRef<THREE.AxesHelper | null>(null);
@@ -1378,15 +1377,13 @@ export default function StandaloneViewerPage() {
       // filename rides in the `name` query param. Check both.
       const filenameHint =
         new URLSearchParams(window.location.search).get("name") || "";
-      splatNeedsRdfToRubRef.current =
+      splatIsPlyRef.current =
         /\.ply($|\?)/i.test(url) || /\.ply$/i.test(filenameHint);
       // Apply the base PLY rotation now; the user-transform useEffect won't
       // re-fire for this new mesh since splatMeshRef hasn't been assigned yet.
-      if (splatNeedsRdfToRubRef.current) {
-        (splatMesh as unknown as THREE.Object3D).quaternion.setFromAxisAngle(
-          new THREE.Vector3(1, 0, 0),
-          Math.PI
-        );
+      if (splatIsPlyRef.current) {
+        const baseRot = worldFrameToSceneRotation(colmapWorldFrameRef.current);
+        (splatMesh as unknown as THREE.Object3D).quaternion.setFromRotationMatrix(baseRot);
       }
       scene.add(splatMesh);
       splatMeshRef.current = splatMesh;
@@ -1439,12 +1436,10 @@ export default function StandaloneViewerPage() {
       });
 
       await splatMesh.initialized;
-      splatNeedsRdfToRubRef.current = /\.ply$/i.test(file.name);
-      if (splatNeedsRdfToRubRef.current) {
-        (splatMesh as unknown as THREE.Object3D).quaternion.setFromAxisAngle(
-          new THREE.Vector3(1, 0, 0),
-          Math.PI
-        );
+      splatIsPlyRef.current = /\.ply$/i.test(file.name);
+      if (splatIsPlyRef.current) {
+        const baseRot = worldFrameToSceneRotation(colmapWorldFrameRef.current);
+        (splatMesh as unknown as THREE.Object3D).quaternion.setFromRotationMatrix(baseRot);
       }
       scene.add(splatMesh);
       splatMeshRef.current = splatMesh;
@@ -1483,9 +1478,10 @@ export default function StandaloneViewerPage() {
     const mesh = splatMeshRef.current as THREE.Object3D | null;
     if (!mesh) return;
     mesh.position.set(transform.position.x, transform.position.y, transform.position.z);
-    // User transform composes on top of the PLY base rotation (RDF -> RUB
-    // = 180 deg about X). Quaternion composition so user-controlled Y/Z
-    // don't get reordered by Euler axis-order semantics.
+    // User transform composes on top of the PLY base rotation, which is
+    // determined by the user-selected coordinate system (same setting that
+    // governs COLMAP track import/export). Quaternion composition so
+    // user-controlled Y/Z don't get reordered by Euler axis-order semantics.
     const userQuat = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(
         THREE.MathUtils.degToRad(transform.rotation.x),
@@ -1494,17 +1490,16 @@ export default function StandaloneViewerPage() {
         "XYZ"
       )
     );
-    if (splatNeedsRdfToRubRef.current) {
-      const basePly = new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(1, 0, 0),
-        Math.PI
+    if (splatIsPlyRef.current) {
+      const basePly = new THREE.Quaternion().setFromRotationMatrix(
+        worldFrameToSceneRotation(colmapWorldFrame)
       );
       mesh.quaternion.copy(basePly).multiply(userQuat);
     } else {
       mesh.quaternion.copy(userQuat);
     }
     mesh.scale.set(transform.scale.x, transform.scale.y, transform.scale.z);
-  }, [transform]);
+  }, [transform, colmapWorldFrame]);
 
   // ─── Capture screenshot ────────────────────────────────────────
 
@@ -2585,7 +2580,7 @@ export default function StandaloneViewerPage() {
                     path to keep it aligned with the splat. */}
                 <div
                   className="mt-2 flex items-center gap-2"
-                  title="Coordinate system of the original capture. Applied to imported and exported COLMAP camera tracks so they line up with the splat."
+                  title="Coordinate system of the original capture. Applied to imported and exported COLMAP camera tracks, and to PLY splats at load (SPZ uses its embedded metadata)."
                 >
                   <label className="text-[9px] text-neutral-500 shrink-0">Coordinate system</label>
                   <select
