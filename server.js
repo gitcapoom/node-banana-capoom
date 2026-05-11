@@ -1,13 +1,13 @@
 // Custom Next.js server with extended timeout for video generation
 // Node.js default server.requestTimeout is 5 minutes (300,000ms)
-// We extend it to 10 minutes for long-running fal.ai video generation
+// We extend it to 25 minutes for long-running video generation (muapi/fal)
 
 const { createServer } = require('http');
 const next = require('next');
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST || '0.0.0.0';
-const port = (process.env.PORT || '3001').trim();
+const port = (process.env.PORT || '3000').trim();
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();

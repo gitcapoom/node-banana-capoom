@@ -2,23 +2,77 @@ import * as THREE from "three";
 import type { CameraPath, CameraKeyframe } from "./cameraAnimation";
 import { evaluateCameraPath, createEmptyPath } from "./cameraAnimation";
 
+// ─── COLMAP convention ──────────────────────────────────────────
+//
+// COLMAP camera frame is fixed by spec: RH, +X right, +Y down, +Z forward
+// (the camera looks along +Z). The COLMAP *world* frame, however, is not
+// pinned by the spec -- it inherits whatever convention the producing tool
+// used. We model that with `ColmapWorldFrame`.
+//
+// Three.js scene frame: RH, +X right, +Y up, +Z back (camera looks -Z).
+//
+// images.txt holds, per image:
+//   QW QX QY QZ = R_w2c quaternion (world-to-camera rotation), in COLMAP frame.
+//   TX TY TZ    = world-to-camera translation, t = -R_w2c · camera_world_pos.
+// Recover camera world position as: C = -R_w2c^T · t.
+//
+// The camera-axis frame change between Three.js cam (RUB) and COLMAP cam (RDF)
+// is D = diag(1, -1, -1) = 180° about X. This is always applied on the camera
+// side. The world-axis change depends on `ColmapWorldFrame` -- see
+// `worldFrameToSceneRotation` below.
+
+/**
+ * Convention of the COLMAP *world* frame, i.e. the frame in which TX/TY/TZ
+ * and the recovered camera positions are expressed. The COLMAP *camera*
+ * frame (RDF) is spec-fixed and not configurable.
+ */
+export type ColmapWorldFrame = "y-up" | "y-down" | "z-up";
+
+/**
+ * Rotation that maps a vector expressed in the external COLMAP world frame
+ * to the Three.js scene frame (Y-up, RUB).
+ *   - "y-up":   identity. Source is already in glTF / Three.js / Maya / Unity convention.
+ *   - "y-down": 180° about X. Raw COLMAP / OpenCV / vanilla SfM (Y-down, Z-forward).
+ *   - "z-up":   -90° about X. Blender / Unreal / RealityCapture / Metashape (+Z up, +Y forward).
+ *
+ * The inverse (scene → external world) is the transpose, since all three are
+ * proper rotations.
+ */
+export function worldFrameToSceneRotation(frame: ColmapWorldFrame): THREE.Matrix4 {
+  switch (frame) {
+    case "y-up":
+      return new THREE.Matrix4().identity();
+    case "y-down":
+      return new THREE.Matrix4().makeRotationX(Math.PI);
+    case "z-up":
+      return new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+  }
+}
+
+// Camera-axes change Three.js cam (RUB) ↔ COLMAP cam (RDF), as a Matrix4.
+// 180° about X = diag(1, -1, -1, 1). Its own inverse.
+const D_CAMERA_AXES = new THREE.Matrix4().makeRotationX(Math.PI);
+
 // ─── COLMAP Export ──────────────────────────────────────────────
 
 /**
- * Export a CameraPath as COLMAP-format cameras.txt + images.txt bundled in a ZIP.
- *
- * COLMAP uses a right-handed coordinate system with Y-down, Z-forward.
- * Three.js uses Y-up, Z-out-of-screen. Conversion negates Y and Z.
+ * Export a CameraPath as COLMAP-spec cameras.txt + images.txt bundled in a ZIP.
+ * Output is standard COLMAP format and interoperates with COLMAP itself,
+ * 3D Gaussian Splatting trainers, NerfStudio, etc.
  *
  * cameras.txt: PINHOLE model — CAMERA_ID PINHOLE WIDTH HEIGHT fx fy cx cy
- * images.txt: IMAGE_ID QW QX QY QZ TX TY TZ CAMERA_ID IMAGE_NAME
+ * images.txt:  IMAGE_ID QW QX QY QZ TX TY TZ CAMERA_ID IMAGE_NAME (R_w2c, t).
+ *
+ * `worldFrame` selects the convention for the external world frame (defaults
+ * to "y-down" = raw COLMAP / OpenCV). See `ColmapWorldFrame`.
  */
 export async function exportColmap(
   path: CameraPath,
   width: number,
   height: number,
   sensorWidthMm: number,
-  focalLengthMm: number
+  focalLengthMm: number,
+  worldFrame: ColmapWorldFrame = "y-down"
 ): Promise<Blob> {
   const JSZip = (await import("jszip")).default;
   const zip = new JSZip();
@@ -37,55 +91,49 @@ export async function exportColmap(
   zip.file("cameras.txt", camerasContent);
 
   // ─── images.txt ─────────────────────────────────────────
-  let imagesContent = "# Image list with two lines of data per image:\n";
+  let imagesContent = "# COLMAP poses. Standard format (colmap.github.io/format.html).\n";
+  imagesContent += `# Camera frame: RH, +X right, +Y down, +Z forward (camera looks along +Z).\n`;
+  imagesContent += `# World frame:  ${worldFrame}\n`;
+  imagesContent += "# (QW, QX, QY, QZ) is the world-to-camera rotation R_w2c.\n";
+  imagesContent += "# (TX, TY, TZ) is the world-to-camera translation: t = -R_w2c * camera_world_position.\n";
+  imagesContent += "# Recover camera position in the COLMAP world frame as: C = -R_w2c^T * t.\n";
+  imagesContent += "# Image list with two lines of data per image:\n";
   imagesContent += "#   IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME\n";
   imagesContent += "#   POINTS2D[] as (X, Y, POINT3D_ID)\n";
   imagesContent += `# Number of images: ${path.durationFrames}\n`;
 
-  const rotMat = new THREE.Matrix4();
+  // Rotation that maps scene (Three.js Y-up RUB) → external COLMAP world frame.
+  const sceneToWorld = worldFrameToSceneRotation(worldFrame).clone().transpose();
+  // Camera-axes change: Three.js cam (RUB) → COLMAP cam (RDF). Same matrix in both directions.
+  const camAxes = D_CAMERA_AXES;
+
+  const scratch = new THREE.Matrix4();
 
   for (let frame = 0; frame < path.durationFrames; frame++) {
     const cam = evaluateCameraPath(path, frame);
     if (!cam) continue;
 
-    // Three.js → COLMAP coordinate conversion
-    // COLMAP: Y-down, Z-forward. Three.js: Y-up, Z-backward.
-    // Negate Y and Z components of both quaternion and position.
-    const q = cam.quaternion.clone();
+    // R_c2w in scene frame, Three.js cam axes.
+    const R_c2w_scene = scratch.makeRotationFromQuaternion(cam.quaternion).clone();
 
-    // Build rotation matrix from Three.js quaternion
-    rotMat.makeRotationFromQuaternion(q);
-    const R = new THREE.Matrix3().setFromMatrix4(rotMat);
+    // Compose: scene→world on the left, cam-axes change on the right.
+    //   R_c2w_world_colmapCam = sceneToWorld · R_c2w_scene · D
+    const R_c2w_world = new THREE.Matrix4()
+      .multiplyMatrices(sceneToWorld, R_c2w_scene)
+      .multiply(camAxes);
 
-    // Convert to COLMAP coordinate system: flip Y and Z axes
-    // R_colmap = diag(1, -1, -1) * R_threejs
-    const re = R.elements; // column-major
-    // Negate rows 1 and 2 (Y and Z rows)
-    re[1] = -re[1]; re[4] = -re[4]; re[7] = -re[7]; // Y row
-    re[2] = -re[2]; re[5] = -re[5]; re[8] = -re[8]; // Z row
+    const R_w2c = R_c2w_world.clone().transpose();
+    const q_w2c = new THREE.Quaternion().setFromRotationMatrix(R_w2c);
 
-    // Extract quaternion from COLMAP rotation matrix
-    const colmapRotMat = new THREE.Matrix4().identity();
-    colmapRotMat.elements[0] = re[0]; colmapRotMat.elements[1] = re[1]; colmapRotMat.elements[2] = re[2];
-    colmapRotMat.elements[4] = re[3]; colmapRotMat.elements[5] = re[4]; colmapRotMat.elements[6] = re[5];
-    colmapRotMat.elements[8] = re[6]; colmapRotMat.elements[9] = re[7]; colmapRotMat.elements[10] = re[8];
-    const colmapQ = new THREE.Quaternion().setFromRotationMatrix(colmapRotMat);
-
-    // COLMAP translation = -R * camera_position (world-to-camera transform)
-    const pos = cam.position.clone();
-    // Apply coordinate flip to position first
-    pos.y = -pos.y;
-    pos.z = -pos.z;
-    // t = -R * pos
-    const R3 = new THREE.Matrix3();
-    R3.elements = [...re];
-    const t = pos.clone().applyMatrix3(R3).negate();
+    // Camera position in the external world frame, then t = -R_w2c · pos_world.
+    const pos_world = cam.position.clone().applyMatrix4(sceneToWorld);
+    const t = pos_world.clone().applyMatrix4(R_w2c).negate();
 
     const imageId = frame + 1;
     const imageName = `frame_${String(frame).padStart(5, "0")}.png`;
 
     // IMAGE_ID QW QX QY QZ TX TY TZ CAMERA_ID NAME
-    imagesContent += `${imageId} ${colmapQ.w.toFixed(8)} ${colmapQ.x.toFixed(8)} ${colmapQ.y.toFixed(8)} ${colmapQ.z.toFixed(8)} ${t.x.toFixed(8)} ${t.y.toFixed(8)} ${t.z.toFixed(8)} 1 ${imageName}\n`;
+    imagesContent += `${imageId} ${q_w2c.w.toFixed(8)} ${q_w2c.x.toFixed(8)} ${q_w2c.y.toFixed(8)} ${q_w2c.z.toFixed(8)} ${t.x.toFixed(8)} ${t.y.toFixed(8)} ${t.z.toFixed(8)} 1 ${imageName}\n`;
     // Empty POINTS2D line (no feature points)
     imagesContent += "\n";
   }
@@ -112,7 +160,8 @@ export interface ColmapImportResult {
  */
 export async function importColmap(
   zipBlob: Blob,
-  fps = 24
+  fps = 25,
+  worldFrame: ColmapWorldFrame = "y-down"
 ): Promise<ColmapImportResult> {
   const JSZip = (await import("jszip")).default;
   const zip = await JSZip.loadAsync(zipBlob);
@@ -155,41 +204,30 @@ export async function importColmap(
     return { path: createEmptyPath(120, fps), cameraParams };
   }
 
+  // Rotation that maps external COLMAP world frame → scene (Three.js Y-up RUB).
+  const worldToScene = worldFrameToSceneRotation(worldFrame);
+  const camAxes = D_CAMERA_AXES;
+
   // Convert COLMAP poses → Three.js CameraKeyframes
   const keyframes: CameraKeyframe[] = poses.map((pose, index) => {
-    // Reverse the COLMAP → Three.js coordinate conversion
-    // COLMAP: R_colmap = diag(1,-1,-1) * R_threejs
-    // So: R_threejs = diag(1,-1,-1) * R_colmap (since diag(1,-1,-1) is its own inverse)
+    // images.txt holds R_w2c (COLMAP cam axes, external world) and t.
+    const q_w2c = new THREE.Quaternion(pose.qx, pose.qy, pose.qz, pose.qw);
+    const R_w2c = new THREE.Matrix4().makeRotationFromQuaternion(q_w2c);
+    const R_c2w_world_colmapCam = R_w2c.clone().transpose();
 
-    const colmapQ = new THREE.Quaternion(pose.qx, pose.qy, pose.qz, pose.qw);
-
-    // Build COLMAP rotation matrix
-    const colmapRotMat = new THREE.Matrix4().makeRotationFromQuaternion(colmapQ);
-    const colmapRe = new THREE.Matrix3().setFromMatrix4(colmapRotMat).elements;
-
-    // Recover position using the ORIGINAL COLMAP rotation BEFORE flipping
-    // Export did: pos_colmap = diag(1,-1,-1)*pos_threejs, then t = -R_colmap * pos_colmap
-    // So: pos_colmap = -R_colmap^T * t, then pos_threejs = diag(1,-1,-1)*pos_colmap
-    const colmapR3 = new THREE.Matrix3();
-    colmapR3.elements = [...colmapRe];
-    const colmapR3T = colmapR3.clone().transpose();
+    // Camera position in the external world frame: C = -R_c2w · t.
     const t = new THREE.Vector3(pose.tx, pose.ty, pose.tz);
-    const posColmap = t.clone().applyMatrix3(colmapR3T).negate();
-    // Undo coordinate flip: COLMAP→Three.js
-    posColmap.y = -posColmap.y;
-    posColmap.z = -posColmap.z;
+    const pos_world = t.clone().applyMatrix4(R_c2w_world_colmapCam).negate();
 
-    // Now flip the rotation matrix to get Three.js rotation
-    // Undo Y/Z flip: negate rows 1 and 2
-    const re = [...colmapRe]; // work on a copy
-    re[1] = -re[1]; re[4] = -re[4]; re[7] = -re[7];
-    re[2] = -re[2]; re[5] = -re[5]; re[8] = -re[8];
+    // Compose: world→scene on the left, cam-axes change on the right.
+    //   R_c2w_scene_threejsCam = worldToScene · R_c2w_world_colmapCam · D
+    const R_c2w_scene = new THREE.Matrix4()
+      .multiplyMatrices(worldToScene, R_c2w_world_colmapCam)
+      .multiply(camAxes);
+    const threeQ = new THREE.Quaternion().setFromRotationMatrix(R_c2w_scene);
 
-    const threeRotMat = new THREE.Matrix4().identity();
-    threeRotMat.elements[0] = re[0]; threeRotMat.elements[1] = re[1]; threeRotMat.elements[2] = re[2];
-    threeRotMat.elements[4] = re[3]; threeRotMat.elements[5] = re[4]; threeRotMat.elements[6] = re[5];
-    threeRotMat.elements[8] = re[6]; threeRotMat.elements[9] = re[7]; threeRotMat.elements[10] = re[8];
-    const threeQ = new THREE.Quaternion().setFromRotationMatrix(threeRotMat);
+    // Position frame change: pos_scene = worldToScene · pos_world.
+    const posThree = pos_world.clone().applyMatrix4(worldToScene);
 
     // Compute FOV from camera intrinsics
     let fov = 60; // fallback
@@ -199,7 +237,7 @@ export async function importColmap(
 
     return {
       time: poses.length > 1 ? index / (poses.length - 1) : 0,
-      position: posColmap,
+      position: posThree,
       quaternion: threeQ,
       fov,
     };

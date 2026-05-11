@@ -32,7 +32,7 @@ export interface EvaluatedCamera {
 // ─── Path Helpers ───────────────────────────────────────────────
 
 /** Create a default empty camera path */
-export function createEmptyPath(durationFrames = 120, fps = 24): CameraPath {
+export function createEmptyPath(durationFrames = 120, fps = 25): CameraPath {
   return { keyframes: [], durationFrames, fps };
 }
 
