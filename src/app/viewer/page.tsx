@@ -1111,8 +1111,12 @@ export default function StandaloneViewerPage() {
           );
           lastPlayTimeRef.current = time;
 
+          // Keep the fractional accumulator in the ref; rounding it back would
+          // truncate small per-tick deltas (frameDelta < 0.5 happens whenever
+          // fps < refresh-rate, e.g. 24fps on a 60Hz display) and playback
+          // would park on frame 0.
+          currentFrameRef.current = newFrame;
           const frame = Math.round(newFrame);
-          currentFrameRef.current = frame;
 
           // Apply camera from path
           const evaluated = evaluateCameraPath(path, frame);
