@@ -37,7 +37,12 @@ import {
   evaluateCameraPath,
   frameToTime,
 } from "./cameraAnimation";
-import { exportColmap, importColmap } from "./colmapIO";
+import {
+  exportColmap,
+  importColmap,
+  worldFrameToSceneRotation,
+  type ColmapWorldFrame,
+} from "./colmapIO";
 import { createDistortionPass, computeFovMargin } from "./distortionShader";
 import { exportVideo } from "./videoExport";
 import type { ExportSettings } from "./ExportDialog";
@@ -657,10 +662,12 @@ export default function StandaloneViewerPage() {
   // and rescales any keyframes/live-camera position when changed.
   const [cameraScale, setCameraScale] = useState(1.0);
 
-  // COLMAP source up-axis. Three.js + the splat are Y-up; VP/photogrammetry
-  // tracks are typically Z-up. When set to 'z', imports get pre-rotated
-  // -π/2 about X. Toggling at runtime rotates the loaded path the same way.
-  const [colmapUpAxis, setColmapUpAxis] = useState<"y" | "z">("y");
+  // Convention of the COLMAP world frame for import/export. Default "y-down"
+  // matches the raw COLMAP / OpenCV spec; switch to "z-up" for Blender /
+  // Unreal / RealityCapture / Metashape exports, or "y-up" for glTF / Three.js
+  // sources. Used symmetrically on import and export, and toggling rotates the
+  // currently loaded path so it stays aligned with the splat.
+  const [colmapWorldFrame, setColmapWorldFrame] = useState<ColmapWorldFrame>("y-down");
 
   // Scene helpers — ground grid (XZ plane in Y-up) and origin axes (RGB).
   // Both default on as visual reference for inspecting splats.
@@ -675,6 +682,12 @@ export default function StandaloneViewerPage() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationIdRef = useRef<number>(0);
   const splatMeshRef = useRef<unknown>(null);
+  // True when the currently loaded splat is a PLY. 3DGS PLY files are stored
+  // in RDF (+X right, +Y down, +Z forward) -- Spark's PLY loader passes
+  // positions through unchanged, so we apply a 180-deg rotation about X
+  // (RDF -> RUB) on top of the user transform. SPZ self-normalizes via its
+  // coordinate_system header.
+  const splatNeedsRdfToRubRef = useRef(false);
   const initRef = useRef(false);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const axesHelperRef = useRef<THREE.AxesHelper | null>(null);
@@ -693,8 +706,8 @@ export default function StandaloneViewerPage() {
   useEffect(() => { distortionScaleRef.current = distortionScale; }, [distortionScale]);
   const cameraScaleRef = useRef<number>(cameraScale);
   useEffect(() => { cameraScaleRef.current = cameraScale; }, [cameraScale]);
-  const colmapUpAxisRef = useRef<"y" | "z">(colmapUpAxis);
-  useEffect(() => { colmapUpAxisRef.current = colmapUpAxis; }, [colmapUpAxis]);
+  const colmapWorldFrameRef = useRef<ColmapWorldFrame>(colmapWorldFrame);
+  useEffect(() => { colmapWorldFrameRef.current = colmapWorldFrame; }, [colmapWorldFrame]);
   // Sync helper visibility with toggles.
   useEffect(() => { if (gridHelperRef.current) gridHelperRef.current.visible = showGrid; }, [showGrid]);
   useEffect(() => { if (axesHelperRef.current) axesHelperRef.current.visible = showAxes; }, [showAxes]);
@@ -1357,6 +1370,20 @@ export default function StandaloneViewerPage() {
       });
 
       await splatMesh.initialized;
+      // URLs from SpzViewerNode are blob: URLs with no extension; the real
+      // filename rides in the `name` query param. Check both.
+      const filenameHint =
+        new URLSearchParams(window.location.search).get("name") || "";
+      splatNeedsRdfToRubRef.current =
+        /\.ply($|\?)/i.test(url) || /\.ply$/i.test(filenameHint);
+      // Apply the base PLY rotation now; the user-transform useEffect won't
+      // re-fire for this new mesh since splatMeshRef hasn't been assigned yet.
+      if (splatNeedsRdfToRubRef.current) {
+        (splatMesh as unknown as THREE.Object3D).quaternion.setFromAxisAngle(
+          new THREE.Vector3(1, 0, 0),
+          Math.PI
+        );
+      }
       scene.add(splatMesh);
       splatMeshRef.current = splatMesh;
     } catch (err) {
@@ -1408,6 +1435,13 @@ export default function StandaloneViewerPage() {
       });
 
       await splatMesh.initialized;
+      splatNeedsRdfToRubRef.current = /\.ply$/i.test(file.name);
+      if (splatNeedsRdfToRubRef.current) {
+        (splatMesh as unknown as THREE.Object3D).quaternion.setFromAxisAngle(
+          new THREE.Vector3(1, 0, 0),
+          Math.PI
+        );
+      }
       scene.add(splatMesh);
       splatMeshRef.current = splatMesh;
     } catch (err) {
@@ -1445,11 +1479,26 @@ export default function StandaloneViewerPage() {
     const mesh = splatMeshRef.current as THREE.Object3D | null;
     if (!mesh) return;
     mesh.position.set(transform.position.x, transform.position.y, transform.position.z);
-    mesh.rotation.set(
-      THREE.MathUtils.degToRad(transform.rotation.x),
-      THREE.MathUtils.degToRad(transform.rotation.y),
-      THREE.MathUtils.degToRad(transform.rotation.z)
+    // User transform composes on top of the PLY base rotation (RDF -> RUB
+    // = 180 deg about X). Quaternion composition so user-controlled Y/Z
+    // don't get reordered by Euler axis-order semantics.
+    const userQuat = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        THREE.MathUtils.degToRad(transform.rotation.x),
+        THREE.MathUtils.degToRad(transform.rotation.y),
+        THREE.MathUtils.degToRad(transform.rotation.z),
+        "XYZ"
+      )
     );
+    if (splatNeedsRdfToRubRef.current) {
+      const basePly = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(1, 0, 0),
+        Math.PI
+      );
+      mesh.quaternion.copy(basePly).multiply(userQuat);
+    } else {
+      mesh.quaternion.copy(userQuat);
+    }
     mesh.scale.set(transform.scale.x, transform.scale.y, transform.scale.z);
   }, [transform]);
 
@@ -1688,19 +1737,23 @@ export default function StandaloneViewerPage() {
   );
 
   /**
-   * Up-axis toggle handler. Three.js + the splat are Y-up; VP tracks are
-   * typically Z-up. Flipping the toggle rotates the loaded path ±π/2 about
-   * X so the camera trajectory aligns with the splat. Future imports honour
-   * the same convention via `colmapUpAxisRef` in `handleColmapImport`.
-   *   y → z (toggle says "source was Z-up"): rotate Z-up source → Y-up = -π/2 about X
-   *   z → y (toggle says "actually Y-up"):    rotate Y-up → Z-up source = +π/2 about X
+   * COLMAP world-frame handler. The loaded keyframes were produced under the
+   * previous frame's interpretation; re-interpreting the same source under
+   * `next` is equivalent to rotating the scene by
+   *   R = worldToScene(next) · worldToScene(prev)^T
+   * which we apply to every keyframe and to the live camera so the trajectory
+   * stays aligned with the splat after the switch.
    */
-  const handleChangeColmapUpAxis = useCallback(
-    (next: "y" | "z") => {
-      const prev = colmapUpAxisRef.current;
+  const handleChangeColmapWorldFrame = useCallback(
+    (next: ColmapWorldFrame) => {
+      const prev = colmapWorldFrameRef.current;
       if (next === prev) return;
-      const angle = next === "z" ? -Math.PI / 2 : Math.PI / 2;
-      const rotMat = new THREE.Matrix4().makeRotationX(angle);
+      const W_prev = worldFrameToSceneRotation(prev);
+      const W_next = worldFrameToSceneRotation(next);
+      const rotMat = new THREE.Matrix4().multiplyMatrices(
+        W_next,
+        W_prev.clone().transpose()
+      );
       const rotQuat = new THREE.Quaternion().setFromRotationMatrix(rotMat);
       setCameraPath((path) => ({
         ...path,
@@ -1720,7 +1773,7 @@ export default function StandaloneViewerPage() {
         pitchRef.current = euler.x;
         rollRef.current = euler.z;
       }
-      setColmapUpAxis(next);
+      setColmapWorldFrame(next);
     },
     []
   );
@@ -1916,7 +1969,8 @@ export default function StandaloneViewerPage() {
             settings.resolution.width,
             settings.resolution.height,
             sensor.widthMm,
-            focalLength
+            focalLength,
+            colmapWorldFrameRef.current
           );
           // Download COLMAP zip to browser
           triggerDownload(colmapBlob, `${nameSlug}_colmap.zip`);
@@ -1952,36 +2006,24 @@ export default function StandaloneViewerPage() {
   const handleColmapImport = useCallback(async (file: File) => {
     try {
       const blob = new Blob([await file.arrayBuffer()]);
-      const { path: importedPath, cameraParams } = await importColmap(blob, cameraPath.fps);
+      // World-frame conversion (Z-up / Y-down / Y-up → scene) happens inside
+      // importColmap. We only need to apply the user's camera-scale here.
+      const { path: importedPath, cameraParams } = await importColmap(
+        blob,
+        cameraPath.fps,
+        colmapWorldFrameRef.current
+      );
 
-      // Apply the current camera-scale to imported translations, and pre-rotate
-      // Z-up sources into Three.js Y-up if the toggle is set. Lets the user set
-      // "100" + "Z" once for a cm-scale Z-up VP shoot and have every subsequent
-      // import auto-align with the splat world.
       const scale = cameraScaleRef.current;
       const needsScale = scale !== 1;
-      const needsRotate = colmapUpAxisRef.current === "z";
-      let rotMat: THREE.Matrix4 | null = null;
-      let rotQuat: THREE.Quaternion | null = null;
-      if (needsRotate) {
-        // Z-up → Y-up: rotate -π/2 about X.
-        rotMat = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
-        rotQuat = new THREE.Quaternion().setFromRotationMatrix(rotMat);
-      }
-      const scaledPath: CameraPath = (!needsScale && !needsRotate)
+      const scaledPath: CameraPath = !needsScale
         ? importedPath
         : {
             ...importedPath,
-            keyframes: importedPath.keyframes.map((kf) => {
-              const pos = kf.position.clone();
-              const quat = kf.quaternion.clone();
-              if (needsScale) pos.multiplyScalar(scale);
-              if (rotMat && rotQuat) {
-                pos.applyMatrix4(rotMat);
-                quat.premultiply(rotQuat);
-              }
-              return { ...kf, position: pos, quaternion: quat };
-            }),
+            keyframes: importedPath.keyframes.map((kf) => ({
+              ...kf,
+              position: kf.position.clone().multiplyScalar(scale),
+            })),
           };
       setCameraPath(scaledPath);
       setCurrentFrame(0);
@@ -2533,26 +2575,30 @@ export default function StandaloneViewerPage() {
                     className="w-[64px] shrink-0 text-[9px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none tabular-nums"
                   />
                 </div>
-                {/* COLMAP source up-axis. Toggling rotates the loaded path ±π/2
-                    about X; new imports honour the current setting. */}
-                <div className="mt-2 flex items-center gap-2">
-                  <label className="text-[9px] text-neutral-500">Up axis</label>
-                  <div className="flex gap-1">
-                    {(["y", "z"] as const).map((ax) => (
-                      <button
-                        key={ax}
-                        onClick={() => handleChangeColmapUpAxis(ax)}
-                        className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
-                          colmapUpAxis === ax
-                            ? "bg-indigo-600 text-white"
-                            : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
-                        }`}
-                        title={ax === "y" ? "Y-up source (Three.js, splats)" : "Z-up source (VP, photogrammetry)"}
-                      >
-                        {ax.toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
+                {/* COLMAP world-frame convention. Applied on both import
+                    (source → scene) and export (scene → file), so round-trips
+                    stay consistent. Switching at runtime rotates the loaded
+                    path to keep it aligned with the splat. */}
+                <div
+                  className="mt-2 flex items-center gap-2"
+                  title="Coordinate system of the original capture. Applied to imported and exported COLMAP camera tracks so they line up with the splat."
+                >
+                  <label className="text-[9px] text-neutral-500 shrink-0">Coordinate system</label>
+                  <select
+                    value={colmapWorldFrame}
+                    onChange={(e) => handleChangeColmapWorldFrame(e.target.value as ColmapWorldFrame)}
+                    className="flex-1 min-w-0 text-[10px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+                  >
+                    <option value="y-down" title="Raw COLMAP, OpenCV, OpenSfM, hloc, pixsfm. Camera-frame convention: +X right, +Y down, +Z forward. This is the COLMAP spec default.">
+                      COLMAP / OpenCV (Y-down)
+                    </option>
+                    <option value="y-up" title="glTF, Three.js, Maya, Unity, USD-Y. +X right, +Y up, +Z back. Use for files exported from a Y-up DCC or round-tripped through this viewer.">
+                      glTF / Three.js (Y-up)
+                    </option>
+                    <option value="z-up" title="Blender, Unreal, RealityCapture, Metashape, Postshot, 3ds Max. +X right, +Y forward, +Z up.">
+                      Blender / Unreal / RealityCapture (Z-up)
+                    </option>
+                  </select>
                 </div>
               </div>
 
