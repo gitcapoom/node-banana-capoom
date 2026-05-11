@@ -613,7 +613,7 @@ export default function StandaloneViewerPage() {
   const [navMode, setNavMode] = useState<"orbit" | "fly">("fly");
 
   // Animation state
-  const [cameraPath, setCameraPath] = useState<CameraPath>(createEmptyPath(120, 24));
+  const [cameraPath, setCameraPath] = useState<CameraPath>(createEmptyPath(120, 25));
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLooping, setIsLooping] = useState(false);

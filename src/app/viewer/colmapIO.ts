@@ -160,7 +160,7 @@ export interface ColmapImportResult {
  */
 export async function importColmap(
   zipBlob: Blob,
-  fps = 24,
+  fps = 25,
   worldFrame: ColmapWorldFrame = "y-down"
 ): Promise<ColmapImportResult> {
   const JSZip = (await import("jszip")).default;
