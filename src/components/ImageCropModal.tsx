@@ -5,6 +5,7 @@ import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group } from "rea
 import Konva from "konva";
 import { useImageCropStore, type CropRegion } from "@/store/imageCropStore";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { cropImageToDataUrl } from "@/utils/cropImage";
 import type { ImageCropAspectLock } from "@/types";
 
 const ASPECT_PRESETS: { key: ImageCropAspectLock; label: string; ratio: number | null }[] = [
@@ -158,14 +159,35 @@ export function ImageCropModal() {
     [image, cropRegion, setAspectLock, setCropRegion]
   );
 
-  const handleApply = useCallback(() => {
+  const handleApply = useCallback(async () => {
     if (!sourceNodeId) return;
+
+    // Compute the cropped data URL synchronously here so downstream nodes see
+    // the new `outputImage` in the same update as `cropRegion`/`aspectLock`.
+    // Previously we wrote only the region and trusted ImageCropNode's effect
+    // to recompute via `cropImageToDataUrl`, but the effect's fingerprint
+    // dedup and async resolve could leave the output stale for downstream
+    // consumers (which read `nodeData.outputImage` directly).
+    //
+    // If there's no region, fall back to passthrough (source as output).
+    // On crop failure, also fall back so we never block the modal.
+    let outputImage: string | null = sourceImage;
+    if (sourceImage && cropRegion) {
+      try {
+        outputImage = await cropImageToDataUrl(sourceImage, cropRegion);
+      } catch (err) {
+        console.error("ImageCropModal: crop failed, falling back to source", err);
+        outputImage = sourceImage;
+      }
+    }
+
     updateNodeData(sourceNodeId, {
       cropRegion,
       aspectLock,
+      outputImage,
     });
     closeModal();
-  }, [sourceNodeId, cropRegion, aspectLock, updateNodeData, closeModal]);
+  }, [sourceNodeId, sourceImage, cropRegion, aspectLock, updateNodeData, closeModal]);
 
   // Convert relative region to Konva pixel box (on the stage, not scaled)
   const regionToBox = (r: CropRegion | null) => {
