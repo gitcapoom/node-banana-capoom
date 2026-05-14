@@ -256,6 +256,10 @@ function renderDepthFloat(
   w: number,
   h: number
 ): Float32Array | null {
+  // Repoint `tDepth` to the active target — the depth material was init-bound
+  // to a different render target, so without this the linearise shader reads
+  // the wrong buffer (e.g. live DoF would lag, click-to-focus would mispick).
+  depthMat.uniforms.tDepth.value = depthTarget.depthTexture;
   depthMat.uniforms.cameraNear.value = camera.near;
   depthMat.uniforms.cameraFar.value = camera.far;
 
@@ -316,6 +320,12 @@ function renderDepthLive(
   depthVisTarget: THREE.WebGLRenderTarget,
   passes = 2,
 ): void {
+  // The depth material was initialised with `tDepth` bound to the export's
+  // own depth target. For the live path we render into a *different* RT, so
+  // we have to repoint the uniform every call — otherwise the linearise
+  // shader reads stale data from the export target and the DoF blur appears
+  // to lag the camera.
+  depthMat.uniforms.tDepth.value = depthTarget.depthTexture;
   depthMat.uniforms.cameraNear.value = camera.near;
   depthMat.uniforms.cameraFar.value = camera.far;
 
@@ -429,6 +439,10 @@ export function captureDepthImageData(
   w: number,
   h: number
 ): ImageData | null {
+  // Repoint `tDepth` to the active target — the depth material was init-bound
+  // to a different render target, so without this the linearise shader reads
+  // the wrong buffer (e.g. live DoF would lag, click-to-focus would mispick).
+  depthMat.uniforms.tDepth.value = depthTarget.depthTexture;
   depthMat.uniforms.cameraNear.value = camera.near;
   depthMat.uniforms.cameraFar.value = camera.far;
 
@@ -1040,8 +1054,10 @@ export default function StandaloneViewerPage() {
     });
     dofTargetRef.current = dofTarget;
     // Live depth: two float RTs that mirror the export pair but stay on the
-    // GPU. `depthLiveTarget` holds the raw stochastic accumulation; the
-    // linearise pass writes the final per-pixel Z (m) into `depthVisLive`.
+    // GPU. `depthLiveTarget` holds the raw stochastic accumulation and a
+    // sampleable `DepthTexture` (so the linearise shader can read it via
+    // texture2D); the linearise pass writes the final per-pixel Z (m) into
+    // `depthVisLive`. setSize auto-resizes the attached DepthTexture.
     const depthLiveTarget = new THREE.WebGLRenderTarget(2, 2, {
       type: THREE.FloatType,
       format: THREE.RGBAFormat,
@@ -1049,6 +1065,9 @@ export default function StandaloneViewerPage() {
       magFilter: THREE.NearestFilter,
       depthBuffer: true,
     });
+    depthLiveTarget.depthTexture = new THREE.DepthTexture(2, 2);
+    depthLiveTarget.depthTexture.format = THREE.DepthFormat;
+    depthLiveTarget.depthTexture.type = THREE.UnsignedIntType;
     depthLiveTargetRef.current = depthLiveTarget;
     const depthVisLiveTarget = new THREE.WebGLRenderTarget(2, 2, {
       type: THREE.FloatType,
@@ -2234,6 +2253,10 @@ export default function StandaloneViewerPage() {
                     magFilter: THREE.NearestFilter,
                     depthBuffer: true,
                   });
+                  // Sampleable depth attachment for the linearise shader.
+                  depthLive.depthTexture = new THREE.DepthTexture(w, h);
+                  depthLive.depthTexture.format = THREE.DepthFormat;
+                  depthLive.depthTexture.type = THREE.UnsignedIntType;
                 }
                 if (!depthVis || depthVis.width !== w || depthVis.height !== h) {
                   depthVis?.dispose();

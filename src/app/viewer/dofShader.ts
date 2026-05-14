@@ -89,11 +89,19 @@ export const DOF_FRAG = /* glsl */ `
   varying vec2 vUv;
 
   // Thin-lens CoC in pixels. Z ≤ 0 marks background → no blur.
+  //
+  // Derivation (everything in metres):
+  //   CoC_m = A_m · f_m · |Z − S| / (Z · (S − f_m))
+  //   CoC_px = CoC_m · (imageW / sensor_m) = CoC_mm · (imageW / sensor_mm)
+  // We carry A and f in millimetres for UI ergonomics, so the conversion
+  // collapses to a single division by 1000:
+  //   CoC_mm = (A_mm * f_mm / 1000) * |Z - S| / (Z * (S - f_mm/1000))
+  //   CoC_px = CoC_mm * pxPerMm
   float computeCoC(float Z) {
     if (Z <= 0.0) return 0.0;
     float fm = focalMm * 0.001;                          // focal length, metres
     float denom = max(Z * (focusM - fm), 1e-4);          // guard near singularity
-    float coCmm = focalMm * apertureMm * abs(Z - focusM) / denom;
+    float coCmm = focalMm * apertureMm * abs(Z - focusM) / (denom * 1000.0);
     return clamp(coCmm * pxPerMm, 0.0, maxBlurPx);
   }
 
