@@ -175,7 +175,7 @@ function dilateDepth(data: Float32Array, w: number, h: number, iterations = 2) {
  *
  * Returns saved state array to pass to restoreSceneDepthWrite().
  */
-function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
+function forceSceneDepthWrite(scene: THREE.Scene, stochastic = true): SavedMeshState[] {
   const saved: SavedMeshState[] = [];
   scene.traverse((child) => {
     const mesh = child as THREE.Mesh;
@@ -197,11 +197,15 @@ function forceSceneDepthWrite(scene: THREE.Scene): SavedMeshState[] {
       mesh.onBeforeRender = () => {};
       mat.depthWrite = true;
       mat.transparent = false;
-      // Enable stochastic mode: fragments are randomly kept/discarded based on
-      // alpha, so low-alpha splat edges get discarded instead of writing as
-      // solid opaque discs in the depth buffer.
+      // Stochastic mode: fragments are randomly kept/discarded based on alpha,
+      // so low-alpha splat edges get discarded instead of writing as solid
+      // opaque discs in the depth buffer. Needs multiple accumulation passes
+      // to fill in coverage — perfect for the export hero depth, but at 1-2
+      // passes (live use) the depth buffer ends up sparse and the DoF shader
+      // reads "background" for most pixels. The live path therefore disables
+      // stochastic so every confident splat writes to depth in a single pass.
       if (hasStochastic) {
-        mat.uniforms.stochastic.value = true;
+        mat.uniforms.stochastic.value = stochastic;
       }
       // Raise minAlpha to reject low-confidence floating splats
       if (hasMinAlpha) {
@@ -300,11 +304,13 @@ function renderDepthFloat(
 }
 
 /**
- * GPU-only depth render for the real-time DoF pass. Same scaffold as
- * `renderDepthFloat` but cheaper: fewer accumulation passes (default 2,
- * vs 16 for hero-quality), no readPixels, no CPU floater cleanup. The
- * linearised depth stays in `depthVisTarget.texture` for the DoF shader
- * to sample directly.
+ * GPU-only depth render for the real-time DoF pass. Splats render with
+ * stochastic mode **off** so a single pass produces a fully populated
+ * depth buffer (each confident splat above `minAlpha` writes its disc to
+ * the depth attachment). Result: ~1× splat cost for depth, vs 16× for
+ * the export's stochastic-accumulation hero depth. No readPixels, no CPU
+ * floater cleanup — the linearised depth lives in `depthVisTarget.texture`
+ * for the DoF shader to sample directly.
  *
  * Resize is the caller's responsibility — `depthTarget` and `depthVisTarget`
  * must already be sized to `w × h`.
@@ -318,33 +324,20 @@ function renderDepthLive(
   depthScene: THREE.Scene,
   depthCam: THREE.OrthographicCamera,
   depthVisTarget: THREE.WebGLRenderTarget,
-  passes = 2,
 ): void {
-  // The depth material was initialised with `tDepth` bound to the export's
-  // own depth target. For the live path we render into a *different* RT, so
-  // we have to repoint the uniform every call — otherwise the linearise
-  // shader reads stale data from the export target and the DoF blur appears
-  // to lag the camera.
+  // Repoint `tDepth` to the active target (the material was init-bound to
+  // the export's own depthTarget, so without this the linearise shader
+  // reads stale data and DoF appears to lag the camera).
   depthMat.uniforms.tDepth.value = depthTarget.depthTexture;
   depthMat.uniforms.cameraNear.value = camera.near;
   depthMat.uniforms.cameraFar.value = camera.far;
 
-  const savedStates = forceSceneDepthWrite(scene);
-  const prevAutoClear = renderer.autoClear;
-  renderer.autoClear = false;
+  // Non-stochastic depth: every confident splat writes its disc in one pass.
+  const savedStates = forceSceneDepthWrite(scene, /* stochastic */ false);
 
   renderer.setRenderTarget(depthTarget);
   renderer.clear(true, true, true);
-  for (let pass = 0; pass < passes; pass++) {
-    for (const s of savedStates) {
-      const mat = s.mesh.material as THREE.ShaderMaterial;
-      if (mat.uniforms?.time !== undefined) {
-        mat.uniforms.time.value = pass * 0.123;
-      }
-    }
-    renderer.render(scene, camera);
-  }
-  renderer.autoClear = prevAutoClear;
+  renderer.render(scene, camera);
   restoreSceneDepthWrite(savedStates);
 
   renderer.setRenderTarget(depthVisTarget);
@@ -1524,7 +1517,7 @@ export default function StandaloneViewerPage() {
         renderDepthLive(
           renderer, scene, camera,
           depthLive, depthMaterialRef.current, depthSceneRef.current, depthCameraRef.current,
-          depthVisLive, 2,
+          depthVisLive,
         );
         resetFov();
 
@@ -2268,12 +2261,15 @@ export default function StandaloneViewerPage() {
                   });
                 }
 
-                // 4 stochastic passes — better quality than the 2-pass live
-                // version, still much cheaper than the 16-pass hero depth.
+                // Non-stochastic single-pass depth — every confident splat
+                // (above DEPTH_MIN_ALPHA) writes to the depth buffer, fully
+                // populated. Cheaper than the export's 16-pass hero depth
+                // and good enough for DoF where the disk blur averages out
+                // any minor edge artefacts anyway.
                 renderDepthLive(
                   rendererArg, scene, camera,
                   depthLive, depthMaterialRef.current, depthSceneRef.current, depthCameraRef.current,
-                  depthVis, 4,
+                  depthVis,
                 );
 
                 const aperture = exportFocalMm / Math.max(0.1, dofSnap.fNumber);
