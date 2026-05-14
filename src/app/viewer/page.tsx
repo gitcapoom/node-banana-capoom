@@ -44,6 +44,7 @@ import {
   type ColmapWorldFrame,
 } from "./colmapIO";
 import { createDistortionPass, computeFovMargin } from "./distortionShader";
+import { createDofPass } from "./dofShader";
 import { exportVideo } from "./videoExport";
 import type { ExportSettings } from "./ExportDialog";
 import Timeline from "./Timeline";
@@ -292,6 +293,54 @@ function renderDepthFloat(
   dilateDepth(floatPixels, w, h);
 
   return floatPixels;
+}
+
+/**
+ * GPU-only depth render for the real-time DoF pass. Same scaffold as
+ * `renderDepthFloat` but cheaper: fewer accumulation passes (default 2,
+ * vs 16 for hero-quality), no readPixels, no CPU floater cleanup. The
+ * linearised depth stays in `depthVisTarget.texture` for the DoF shader
+ * to sample directly.
+ *
+ * Resize is the caller's responsibility — `depthTarget` and `depthVisTarget`
+ * must already be sized to `w × h`.
+ */
+function renderDepthLive(
+  renderer: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  camera: THREE.PerspectiveCamera,
+  depthTarget: THREE.WebGLRenderTarget,
+  depthMat: THREE.ShaderMaterial,
+  depthScene: THREE.Scene,
+  depthCam: THREE.OrthographicCamera,
+  depthVisTarget: THREE.WebGLRenderTarget,
+  passes = 2,
+): void {
+  depthMat.uniforms.cameraNear.value = camera.near;
+  depthMat.uniforms.cameraFar.value = camera.far;
+
+  const savedStates = forceSceneDepthWrite(scene);
+  const prevAutoClear = renderer.autoClear;
+  renderer.autoClear = false;
+
+  renderer.setRenderTarget(depthTarget);
+  renderer.clear(true, true, true);
+  for (let pass = 0; pass < passes; pass++) {
+    for (const s of savedStates) {
+      const mat = s.mesh.material as THREE.ShaderMaterial;
+      if (mat.uniforms?.time !== undefined) {
+        mat.uniforms.time.value = pass * 0.123;
+      }
+    }
+    renderer.render(scene, camera);
+  }
+  renderer.autoClear = prevAutoClear;
+  restoreSceneDepthWrite(savedStates);
+
+  renderer.setRenderTarget(depthVisTarget);
+  renderer.clear(true, true, true);
+  renderer.render(depthScene, depthCam);
+  renderer.setRenderTarget(null);
 }
 
 /** Extract min/max depth from float pixels (for global range scan) */
@@ -674,6 +723,21 @@ export default function StandaloneViewerPage() {
   const [showGrid, setShowGrid] = useState(true);
   const [showAxes, setShowAxes] = useState(true);
 
+  // Depth-of-field. Thin-lens CoC, scatter-as-gather disk blur. CPU side
+  // derives focal/aperture/sensor-pixels from the active camera preset; the
+  // shader does the per-pixel math. `halfRes` shrinks the live pass for fps,
+  // `showCoC` swaps the output to a CoC heatmap for tuning focus distance.
+  const [dof, setDof] = useState({
+    enabled: false,
+    fNumber: 2.8,
+    focusM: 3.0,
+    halfRes: false,
+    showCoC: false,
+  });
+  // Click-to-focus: when true, the next canvas click reads depth at the cursor
+  // and writes the result into `dof.focusM`. One-shot; auto-clears.
+  const [focusPickMode, setFocusPickMode] = useState(false);
+
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -699,6 +763,21 @@ export default function StandaloneViewerPage() {
   const distortionPassRef = useRef<ReturnType<typeof createDistortionPass> | null>(null);
   const distortionTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
   useEffect(() => { distortionRef.current = distortion; }, [distortion]);
+
+  // Depth-of-field pass refs. The DoF pass reads `colorRT` + a linearised
+  // depth RT (rendered live each frame at the active pass resolution) and
+  // writes a defocus-blurred RT that's then either fed into distortion or
+  // blitted straight to the canvas. Click-to-focus uses the
+  // `focusPickModeRef` flag to gate the next canvas click.
+  const dofRef = useRef(dof);
+  useEffect(() => { dofRef.current = dof; }, [dof]);
+  const focusPickModeRef = useRef(focusPickMode);
+  useEffect(() => { focusPickModeRef.current = focusPickMode; }, [focusPickMode]);
+  const dofPassRef = useRef<ReturnType<typeof createDofPass> | null>(null);
+  const dofTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
+  const dofPassthroughRef = useRef<ReturnType<typeof createDofPass> | null>(null); // enabled=0 → cheap blit
+  const depthLiveTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
+  const depthVisLiveTargetRef = useRef<THREE.WebGLRenderTarget | null>(null);
 
   // Track current values for use inside the imperative animate loop.
   const distortionScaleRef = useRef<number | null>(distortionScale);
@@ -739,7 +818,9 @@ export default function StandaloneViewerPage() {
     navModeRef.current = navMode;
 
     if (controlsRef.current) {
-      controlsRef.current.enabled = navMode === "orbit";
+      // Orbit is disabled while focus-pick is armed so the first click goes
+      // through tryPickFocus instead of starting an orbit drag.
+      controlsRef.current.enabled = navMode === "orbit" && !focusPickMode;
     }
 
     if (navMode === "fly" && cameraRef.current) {
@@ -758,7 +839,17 @@ export default function StandaloneViewerPage() {
       );
       controlsRef.current.update();
     }
-  }, [navMode]);
+  }, [navMode, focusPickMode]);
+
+  // Visual feedback for focus-pick mode: crosshair cursor on the canvas.
+  useEffect(() => {
+    const el = rendererRef.current?.domElement;
+    if (!el) return;
+    el.style.cursor = focusPickMode ? "crosshair" : "";
+    return () => {
+      if (el) el.style.cursor = "";
+    };
+  }, [focusPickMode]);
 
   // Always-on-top: re-focus viewer popup when it loses focus
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
@@ -933,6 +1024,40 @@ export default function StandaloneViewerPage() {
     });
     distortionTargetRef.current = distortionTarget;
 
+    // DoF post-pass + RT for the blurred result. A second "passthrough"
+    // copy of the same shader (with `enabled = 0`) is reused as a cheap
+    // texture-blit when we need to copy a colour RT to the canvas without
+    // distortion (i.e. DoF on, distortion off).
+    const dofPass = createDofPass();
+    dofPassRef.current = dofPass;
+    const dofPassthrough = createDofPass();
+    dofPassthroughRef.current = dofPassthrough;
+    const dofTarget = new THREE.WebGLRenderTarget(2, 2, {
+      format: THREE.RGBAFormat,
+      type: THREE.UnsignedByteType,
+      depthBuffer: false,
+      stencilBuffer: false,
+    });
+    dofTargetRef.current = dofTarget;
+    // Live depth: two float RTs that mirror the export pair but stay on the
+    // GPU. `depthLiveTarget` holds the raw stochastic accumulation; the
+    // linearise pass writes the final per-pixel Z (m) into `depthVisLive`.
+    const depthLiveTarget = new THREE.WebGLRenderTarget(2, 2, {
+      type: THREE.FloatType,
+      format: THREE.RGBAFormat,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      depthBuffer: true,
+    });
+    depthLiveTargetRef.current = depthLiveTarget;
+    const depthVisLiveTarget = new THREE.WebGLRenderTarget(2, 2, {
+      type: THREE.FloatType,
+      format: THREE.RGBAFormat,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+    });
+    depthVisLiveTargetRef.current = depthVisLiveTarget;
+
     // Scene
     const scene = new THREE.Scene();
     sceneRef.current = scene;
@@ -1056,7 +1181,79 @@ export default function StandaloneViewerPage() {
     // ─── Fly mode mouse listeners ────────────────────────────
     const canvas = renderer.domElement;
 
+    /**
+     * Click-to-focus: when DoF's "Pick focus" mode is active, the next canvas
+     * click runs a one-off full-res depth render and sets `dof.focusM` to the
+     * depth under the cursor. Returns true if the click was consumed by pick
+     * mode (so the fly-nav drag below is suppressed).
+     */
+    const tryPickFocus = (e: MouseEvent): boolean => {
+      if (!focusPickModeRef.current) return false;
+      const cam = cameraRef.current;
+      const depthTarget = depthRenderTargetRef.current;
+      const depthMat = depthMaterialRef.current;
+      const dScene = depthSceneRef.current;
+      const dCam = depthCameraRef.current;
+      const depthVis = depthVisLiveTargetRef.current;
+      if (!cam || !depthTarget || !depthMat || !dScene || !dCam || !depthVis) {
+        setFocusPickMode(false);
+        return true;
+      }
+
+      // Mirror the animate-loop viewport calc so the click maps to the same
+      // pixel grid the depth render produces.
+      const canvasW = renderer.domElement.clientWidth;
+      const canvasH = renderer.domElement.clientHeight;
+      const selAspect = selectedAspectRef.current;
+      let vpW: number, vpH: number;
+      if (canvasW / canvasH > selAspect) {
+        vpH = canvasH; vpW = Math.round(canvasH * selAspect);
+      } else {
+        vpW = canvasW; vpH = Math.round(canvasW / selAspect);
+      }
+      const vpX = Math.round((canvasW - vpW) / 2);
+      const vpY = Math.round((canvasH - vpH) / 2);
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      // Click outside the active viewport: cancel pick mode without picking.
+      if (px < vpX || px >= vpX + vpW || py < vpY || py >= vpY + vpH) {
+        setFocusPickMode(false);
+        return true;
+      }
+
+      // Hero-quality 16-pass depth read (~30-50 ms one-off — acceptable for a
+      // click event).
+      depthTarget.setSize(vpW, vpH);
+      depthVis.setSize(vpW, vpH);
+      const floatPixels = renderDepthFloat(
+        renderer, scene, cam,
+        depthTarget, depthMat, dScene, dCam,
+        depthVis, vpW, vpH,
+      );
+      if (!floatPixels) {
+        setFocusPickMode(false);
+        return true;
+      }
+
+      // readRenderTargetPixels uses GL's bottom-left origin; convert from the
+      // canvas's top-left CSS pixels.
+      const localX = Math.max(0, Math.min(vpW - 1, Math.floor(px - vpX)));
+      const localY = Math.max(0, Math.min(vpH - 1, vpH - 1 - Math.floor(py - vpY)));
+      const idx = (localY * vpW + localX) * 4;
+      const Z = floatPixels[idx];
+      if (Number.isFinite(Z) && Z > 0) {
+        setDof((d) => ({ ...d, focusM: Z }));
+      }
+      setFocusPickMode(false);
+      return true;
+    };
+
     const onMouseDown = (e: MouseEvent) => {
+      // Focus picker gets first dibs — when active, consume the click so the
+      // fly-nav drag doesn't kick in mid-pick.
+      if (tryPickFocus(e)) return;
       if (navModeRef.current !== "fly") return;
       isMouseDraggingRef.current = true;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
@@ -1216,6 +1413,15 @@ export default function StandaloneViewerPage() {
 
       const dist = distortionRef.current;
       const useDistortion = dist.enabled && (dist.k1 !== 0 || dist.k2 !== 0 || dist.p1 !== 0 || dist.p2 !== 0);
+      const dofState = dofRef.current;
+      const useDof = dofState.enabled && (dofState.showCoC || dofState.fNumber < 32); // a sane upper bound; aperture stops controlling blur past f/32
+
+      // Working resolution for the off-screen chain. Half-res only kicks in
+      // when DoF is on (it shrinks both the splat render and the DoF taps —
+      // the dominant costs). Distortion alone keeps full-res.
+      const halfRes = useDof && dofState.halfRes;
+      const passW = halfRes ? Math.max(2, vpW >> 1) : vpW;
+      const passH = halfRes ? Math.max(2, vpH >> 1) : vpH;
 
       // Always start from a fully cleared canvas.
       renderer.setRenderTarget(null);
@@ -1223,51 +1429,128 @@ export default function StandaloneViewerPage() {
       renderer.setClearColor(0x000000, 1);
       renderer.clear();
 
-      if (useDistortion && distortionPassRef.current && distortionTargetRef.current) {
-        // 1) Render the scene to an off-screen RT at viewport size, with a
-        //    slight FOV margin so distortion has source pixels at the edges.
-        const target = distortionTargetRef.current;
-        if (target.width !== vpW || target.height !== vpH) {
-          target.setSize(Math.max(2, vpW), Math.max(2, vpH));
-        }
-        // Prefer a measured DISTORTION_SCALE (Nodos extras.txt) when present;
-        // fall back to the heuristic estimate otherwise.
+      const needsRT = useDistortion || useDof;
+
+      if (!needsRT) {
+        // Fast path: scene direct to canvas (no post chain).
+        renderer.setViewport(vpX, vpY, vpW, vpH);
+        renderer.setScissor(vpX, vpY, vpW, vpH);
+        renderer.setScissorTest(true);
+        renderer.render(scene, camera);
+        renderer.setScissorTest(false);
+        renderer.setViewport(0, 0, canvasW, canvasH);
+        return;
+      }
+
+      // ── 1. Scene → colorRT (reuse the distortion target) ────────
+      const colorRT = distortionTargetRef.current!;
+      if (colorRT.width !== passW || colorRT.height !== passH) {
+        colorRT.setSize(passW, passH);
+      }
+      // FOV margin only matters when distortion is on. Apply it for both the
+      // colour and depth passes so their UVs stay aligned.
+      let margin = 1;
+      if (useDistortion) {
         const measured = distortionScaleRef.current;
-        const margin = (measured && measured > 0)
+        margin = (measured && measured > 0)
           ? measured
           : computeFovMargin({
               width: dist.imageWidth, height: dist.imageHeight,
               fx: dist.fx, fy: dist.fy, cx: dist.cx, cy: dist.cy,
               k1: dist.k1, k2: dist.k2, p1: dist.p1, p2: dist.p2,
             });
-        const baseFov = camera.fov;
-        if (margin > 1) {
-          // Wider FOV = smaller focal. tan(newHalf) = margin * tan(oldHalf).
-          const halfRad = THREE.MathUtils.degToRad(baseFov / 2);
-          const newHalf = Math.atan(margin * Math.tan(halfRad));
-          camera.fov = THREE.MathUtils.radToDeg(newHalf) * 2;
-          camera.updateProjectionMatrix();
-        }
-        renderer.setRenderTarget(target);
-        renderer.setViewport(0, 0, vpW, vpH);
+      }
+      const baseFov = camera.fov;
+      const expandFov = () => {
+        if (margin <= 1) return;
+        const halfRad = THREE.MathUtils.degToRad(baseFov / 2);
+        const newHalf = Math.atan(margin * Math.tan(halfRad));
+        camera.fov = THREE.MathUtils.radToDeg(newHalf) * 2;
+        camera.updateProjectionMatrix();
+      };
+      const resetFov = () => {
+        if (margin <= 1) return;
+        camera.fov = baseFov;
+        camera.updateProjectionMatrix();
+      };
+
+      expandFov();
+      renderer.setRenderTarget(colorRT);
+      renderer.setViewport(0, 0, passW, passH);
+      renderer.setClearColor(0x000000, 1);
+      renderer.clear();
+      renderer.render(scene, camera);
+      // FOV stays expanded across the depth pass below; reset after that.
+
+      // ── 2. DoF pass (depth render + scatter-as-gather) ───────────
+      let currentTex: THREE.Texture = colorRT.texture;
+      if (
+        useDof &&
+        dofPassRef.current &&
+        dofTargetRef.current &&
+        depthLiveTargetRef.current &&
+        depthVisLiveTargetRef.current &&
+        depthMaterialRef.current &&
+        depthSceneRef.current &&
+        depthCameraRef.current
+      ) {
+        const dofRT = dofTargetRef.current;
+        const depthLive = depthLiveTargetRef.current;
+        const depthVisLive = depthVisLiveTargetRef.current;
+        if (dofRT.width !== passW || dofRT.height !== passH) dofRT.setSize(passW, passH);
+        if (depthLive.width !== passW || depthLive.height !== passH) depthLive.setSize(passW, passH);
+        if (depthVisLive.width !== passW || depthVisLive.height !== passH) depthVisLive.setSize(passW, passH);
+
+        // Live depth render — 2 stochastic passes, GPU-only (no readPixels).
+        renderDepthLive(
+          renderer, scene, camera,
+          depthLive, depthMaterialRef.current, depthSceneRef.current, depthCameraRef.current,
+          depthVisLive, 2,
+        );
+        resetFov();
+
+        // CoC uniforms — derived from the active camera preset.
+        const dofPass = dofPassRef.current;
+        const aperture = focalLength / Math.max(0.1, dofState.fNumber);
+        const focusM = Math.max(focalLength / 1000 + 0.001, dofState.focusM);
+        const pxPerMm = passW / Math.max(0.1, sensor.widthMm);
+        dofPass.uniforms.tColor.value = colorRT.texture;
+        dofPass.uniforms.tDepth.value = depthVisLive.texture;
+        dofPass.uniforms.resolution.value.set(passW, passH);
+        dofPass.uniforms.focalMm.value = focalLength;
+        dofPass.uniforms.apertureMm.value = aperture;
+        dofPass.uniforms.focusM.value = focusM;
+        dofPass.uniforms.pxPerMm.value = pxPerMm;
+        dofPass.uniforms.maxBlurPx.value = 60;
+        dofPass.uniforms.showCoC.value = dofState.showCoC ? 1 : 0;
+        dofPass.uniforms.enabled.value = 1;
+
+        renderer.setRenderTarget(dofRT);
+        renderer.setViewport(0, 0, passW, passH);
         renderer.setClearColor(0x000000, 1);
         renderer.clear();
-        renderer.render(scene, camera);
-        if (margin > 1) {
-          camera.fov = baseFov;
-          camera.updateProjectionMatrix();
-        }
+        renderer.render(dofPass.scene, dofPass.camera);
 
-        // 2) Distortion pass — sample the RT, write distorted result to the
-        //    canvas inside the active viewport.
+        currentTex = dofRT.texture;
+      } else {
+        resetFov();
+      }
+
+      // ── 3. Final composite → canvas ─────────────────────────────
+      renderer.setRenderTarget(null);
+      renderer.setViewport(vpX, vpY, vpW, vpH);
+      renderer.setScissor(vpX, vpY, vpW, vpH);
+      renderer.setScissorTest(true);
+
+      if (useDistortion && distortionPassRef.current) {
+        // Distortion samples `currentTex` (either raw scene or DoF-blurred).
+        // The shader works in UV space, so source res can differ from output —
+        // half-res DoF still warps cleanly through full-res distortion.
         const pass = distortionPassRef.current;
-        // COLMAP intrinsics are in source-image pixels; scale to RT size.
         const sx = vpW / dist.imageWidth;
         const sy = vpH / dist.imageHeight;
-        pass.uniforms.tDiffuse.value = target.texture;
+        pass.uniforms.tDiffuse.value = currentTex;
         pass.uniforms.resolution.value.set(vpW, vpH);
-        // Bake the FOV margin into fx/fy so the lookup hits the correct
-        // source pixels even though the RT was rendered at a wider FOV.
         pass.uniforms.fx.value = (dist.fx * sx) * margin;
         pass.uniforms.fy.value = (dist.fy * sy) * margin;
         pass.uniforms.cx.value = dist.cx * sx;
@@ -1277,21 +1560,17 @@ export default function StandaloneViewerPage() {
         pass.uniforms.p1.value = dist.p1;
         pass.uniforms.p2.value = dist.p2;
         pass.uniforms.enabled.value = 1;
-
-        renderer.setRenderTarget(null);
-        renderer.setViewport(vpX, vpY, vpW, vpH);
-        renderer.setScissor(vpX, vpY, vpW, vpH);
-        renderer.setScissorTest(true);
         renderer.render(pass.scene, pass.camera);
-        renderer.setScissorTest(false);
-      } else {
-        // Distortion off → original direct path.
-        renderer.setViewport(vpX, vpY, vpW, vpH);
-        renderer.setScissor(vpX, vpY, vpW, vpH);
-        renderer.setScissorTest(true);
-        renderer.render(scene, camera);
-        renderer.setScissorTest(false);
+      } else if (dofPassthroughRef.current) {
+        // DoF on, distortion off → cheap passthrough blit (DoF shader with
+        // enabled=0 short-circuits to `texture2D(tColor, uv)`).
+        const blit = dofPassthroughRef.current;
+        blit.uniforms.tColor.value = currentTex;
+        blit.uniforms.resolution.value.set(vpW, vpH);
+        blit.uniforms.enabled.value = 0;
+        renderer.render(blit.scene, blit.camera);
       }
+      renderer.setScissorTest(false);
       // Reset viewport for any subsequent readPixels / UI
       renderer.setViewport(0, 0, canvasW, canvasH);
     }
@@ -1327,6 +1606,16 @@ export default function StandaloneViewerPage() {
       distortionPass.dispose();
       distortionPassRef.current = null;
       distortionTargetRef.current = null;
+      dofPass.dispose();
+      dofPassthrough.dispose();
+      dofTarget.dispose();
+      depthLiveTarget.dispose();
+      depthVisLiveTarget.dispose();
+      dofPassRef.current = null;
+      dofPassthroughRef.current = null;
+      dofTargetRef.current = null;
+      depthLiveTargetRef.current = null;
+      depthVisLiveTargetRef.current = null;
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -1843,6 +2132,10 @@ export default function StandaloneViewerPage() {
       setIsExporting(true);
       setExportProgress({ frame: 0, total: settings.durationFrames });
 
+      // Hoisted out of the try so the finally clause can dispose them even
+      // if the export throws midway.
+      const exportDisposers: Array<() => void> = [];
+
       try {
         // Update path with export settings
         const exportPath: CameraPath = {
@@ -1859,55 +2152,159 @@ export default function StandaloneViewerPage() {
         };
         const bitrate = codecBitrates[settings.codec] || 20_000_000;
 
-        // If distortion is on, build a post-process pass that mirrors the
-        // viewer's live distortion: render the scene at a slight FOV margin,
-        // then warp through the inverse Brown-Conrady shader before readback.
+        // Build a post-process chain that mirrors the live viewer's render
+        // path: optional DoF blur, then optional Brown-Conrady distortion.
+        // Both passes get their own per-export resources (passes + RTs) so
+        // they don't clobber the live pipeline running in the background.
         const distSnap = distortionRef.current;
         const useDistortion = distSnap.enabled && (
           distSnap.k1 !== 0 || distSnap.k2 !== 0 || distSnap.p1 !== 0 || distSnap.p2 !== 0
         );
+        const dofSnap = dofRef.current;
+        const useExportDof = dofSnap.enabled;
+        // Capture lens settings for the DoF CoC formula (`focalLength`,
+        // `sensor.widthMm` come from the active camera preset in scope).
+        const exportFocalMm = focalLength;
+        const exportSensorMm = sensor.widthMm;
         let exportPostProcess: Parameters<typeof exportVideo>[0]["postProcess"];
-        if (useDistortion) {
-          const exportPass = createDistortionPass();
-          // Prefer measured DISTORTION_SCALE over heuristic estimate.
-          const measuredMargin = distortionScaleRef.current;
-          const margin = (measuredMargin && measuredMargin > 0)
-            ? measuredMargin
-            : computeFovMargin({
-                width: distSnap.imageWidth,
-                height: distSnap.imageHeight,
-                fx: distSnap.fx, fy: distSnap.fy,
-                cx: distSnap.cx, cy: distSnap.cy,
-                k1: distSnap.k1, k2: distSnap.k2,
-                p1: distSnap.p1, p2: distSnap.p2,
-              });
+        if (useDistortion || useExportDof) {
+          // Distortion needs an FOV margin so the scene render covers the
+          // pixels the inverse warp will pull in.
+          let margin = 1;
+          if (useDistortion) {
+            const measuredMargin = distortionScaleRef.current;
+            margin = (measuredMargin && measuredMargin > 0)
+              ? measuredMargin
+              : computeFovMargin({
+                  width: distSnap.imageWidth,
+                  height: distSnap.imageHeight,
+                  fx: distSnap.fx, fy: distSnap.fy,
+                  cx: distSnap.cx, cy: distSnap.cy,
+                  k1: distSnap.k1, k2: distSnap.k2,
+                  p1: distSnap.p1, p2: distSnap.p2,
+                });
+          }
+
+          const distortionExportPass = useDistortion ? createDistortionPass() : null;
+          const dofExportPass = useExportDof ? createDofPass() : null;
+          // Blit shader: only used when DoF is on but distortion is off, so we
+          // can copy the DoF result into the destination RT.
+          const dofExportBlit = (useExportDof && !useDistortion) ? createDofPass() : null;
+          if (distortionExportPass) exportDisposers.push(() => distortionExportPass.dispose());
+          if (dofExportPass) exportDisposers.push(() => dofExportPass.dispose());
+          if (dofExportBlit) exportDisposers.push(() => dofExportBlit.dispose());
+
+          // Lazy private RTs — sized on first apply when (w, h) are known.
+          let dofRT: THREE.WebGLRenderTarget | null = null;
+          let depthLive: THREE.WebGLRenderTarget | null = null;
+          let depthVis: THREE.WebGLRenderTarget | null = null;
+          exportDisposers.push(() => { dofRT?.dispose(); depthLive?.dispose(); depthVis?.dispose(); });
+
           exportPostProcess = {
             prepareCamera: () => {
-              if (margin <= 1) return null;
+              if (!useDistortion || margin <= 1) return null;
               const baseFov = camera.fov;
               const halfRad = THREE.MathUtils.degToRad(baseFov / 2);
               const newHalf = Math.atan(margin * Math.tan(halfRad));
               return THREE.MathUtils.radToDeg(newHalf) * 2;
             },
             apply: (rendererArg, src, dst, w, h) => {
-              const sx = w / distSnap.imageWidth;
-              const sy = h / distSnap.imageHeight;
-              exportPass.uniforms.tDiffuse.value = src.texture;
-              exportPass.uniforms.resolution.value.set(w, h);
-              exportPass.uniforms.fx.value = (distSnap.fx * sx) * margin;
-              exportPass.uniforms.fy.value = (distSnap.fy * sy) * margin;
-              exportPass.uniforms.cx.value = distSnap.cx * sx;
-              exportPass.uniforms.cy.value = distSnap.cy * sy;
-              exportPass.uniforms.k1.value = distSnap.k1;
-              exportPass.uniforms.k2.value = distSnap.k2;
-              exportPass.uniforms.p1.value = distSnap.p1;
-              exportPass.uniforms.p2.value = distSnap.p2;
-              exportPass.uniforms.enabled.value = 1;
-              rendererArg.setRenderTarget(dst);
-              rendererArg.setViewport(0, 0, w, h);
-              rendererArg.setClearColor(0x000000, 1);
-              rendererArg.clear();
-              rendererArg.render(exportPass.scene, exportPass.camera);
+              let current: THREE.WebGLRenderTarget = src;
+
+              // ── DoF (if enabled): render depth, run scatter-as-gather ──
+              if (
+                dofExportPass &&
+                depthMaterialRef.current &&
+                depthSceneRef.current &&
+                depthCameraRef.current
+              ) {
+                if (!dofRT || dofRT.width !== w || dofRT.height !== h) {
+                  dofRT?.dispose();
+                  dofRT = new THREE.WebGLRenderTarget(w, h, {
+                    format: THREE.RGBAFormat,
+                    type: THREE.UnsignedByteType,
+                  });
+                }
+                if (!depthLive || depthLive.width !== w || depthLive.height !== h) {
+                  depthLive?.dispose();
+                  depthLive = new THREE.WebGLRenderTarget(w, h, {
+                    type: THREE.FloatType,
+                    format: THREE.RGBAFormat,
+                    minFilter: THREE.NearestFilter,
+                    magFilter: THREE.NearestFilter,
+                    depthBuffer: true,
+                  });
+                }
+                if (!depthVis || depthVis.width !== w || depthVis.height !== h) {
+                  depthVis?.dispose();
+                  depthVis = new THREE.WebGLRenderTarget(w, h, {
+                    type: THREE.FloatType,
+                    format: THREE.RGBAFormat,
+                    minFilter: THREE.NearestFilter,
+                    magFilter: THREE.NearestFilter,
+                  });
+                }
+
+                // 4 stochastic passes — better quality than the 2-pass live
+                // version, still much cheaper than the 16-pass hero depth.
+                renderDepthLive(
+                  rendererArg, scene, camera,
+                  depthLive, depthMaterialRef.current, depthSceneRef.current, depthCameraRef.current,
+                  depthVis, 4,
+                );
+
+                const aperture = exportFocalMm / Math.max(0.1, dofSnap.fNumber);
+                const focusM = Math.max(exportFocalMm / 1000 + 0.001, dofSnap.focusM);
+                const pxPerMm = w / Math.max(0.1, exportSensorMm);
+                dofExportPass.uniforms.tColor.value = current.texture;
+                dofExportPass.uniforms.tDepth.value = depthVis.texture;
+                dofExportPass.uniforms.resolution.value.set(w, h);
+                dofExportPass.uniforms.focalMm.value = exportFocalMm;
+                dofExportPass.uniforms.apertureMm.value = aperture;
+                dofExportPass.uniforms.focusM.value = focusM;
+                dofExportPass.uniforms.pxPerMm.value = pxPerMm;
+                dofExportPass.uniforms.maxBlurPx.value = 60;
+                dofExportPass.uniforms.showCoC.value = 0; // never debug overlay in export
+                dofExportPass.uniforms.enabled.value = 1;
+
+                rendererArg.setRenderTarget(dofRT);
+                rendererArg.setViewport(0, 0, w, h);
+                rendererArg.setClearColor(0x000000, 1);
+                rendererArg.clear();
+                rendererArg.render(dofExportPass.scene, dofExportPass.camera);
+                current = dofRT;
+              }
+
+              // ── Distortion (if enabled) or DoF-only passthrough blit ──
+              if (distortionExportPass) {
+                const sx = w / distSnap.imageWidth;
+                const sy = h / distSnap.imageHeight;
+                distortionExportPass.uniforms.tDiffuse.value = current.texture;
+                distortionExportPass.uniforms.resolution.value.set(w, h);
+                distortionExportPass.uniforms.fx.value = (distSnap.fx * sx) * margin;
+                distortionExportPass.uniforms.fy.value = (distSnap.fy * sy) * margin;
+                distortionExportPass.uniforms.cx.value = distSnap.cx * sx;
+                distortionExportPass.uniforms.cy.value = distSnap.cy * sy;
+                distortionExportPass.uniforms.k1.value = distSnap.k1;
+                distortionExportPass.uniforms.k2.value = distSnap.k2;
+                distortionExportPass.uniforms.p1.value = distSnap.p1;
+                distortionExportPass.uniforms.p2.value = distSnap.p2;
+                distortionExportPass.uniforms.enabled.value = 1;
+                rendererArg.setRenderTarget(dst);
+                rendererArg.setViewport(0, 0, w, h);
+                rendererArg.setClearColor(0x000000, 1);
+                rendererArg.clear();
+                rendererArg.render(distortionExportPass.scene, distortionExportPass.camera);
+              } else if (dofExportBlit) {
+                dofExportBlit.uniforms.tColor.value = current.texture;
+                dofExportBlit.uniforms.resolution.value.set(w, h);
+                dofExportBlit.uniforms.enabled.value = 0;
+                rendererArg.setRenderTarget(dst);
+                rendererArg.setViewport(0, 0, w, h);
+                rendererArg.setClearColor(0x000000, 1);
+                rendererArg.clear();
+                rendererArg.render(dofExportBlit.scene, dofExportBlit.camera);
+              }
             },
           };
         }
@@ -1995,6 +2392,11 @@ export default function StandaloneViewerPage() {
       } finally {
         setIsExporting(false);
         setExportProgress(null);
+        // Dispose any post-process resources (shaders + RTs) allocated for
+        // this export run. Live preview keeps its own separate instances.
+        for (const fn of exportDisposers) {
+          try { fn(); } catch { /* ignore */ }
+        }
       }
     },
     [cameraPath, worldName, sensor.widthMm, focalLength, captureDepthFrameForExport]
@@ -2533,6 +2935,118 @@ export default function StandaloneViewerPage() {
                         </div>
                       );
                     })}
+                  </div>
+                )}
+              </div>
+
+              {/* Depth-of-field (thin-lens, scatter-as-gather disk blur).
+                  Aperture + focus distance drive a 24-tap CoC blur on every
+                  frame. Click "Pick" to set focus by clicking in the viewport. */}
+              <div className="mt-2 pt-2 border-t border-neutral-800">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[9px] text-neutral-500">Depth of field</label>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setDof((d) => ({ ...d, fNumber: 2.8, focusM: 3.0, halfRes: false, showCoC: false }))}
+                      className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+                      title="Reset DoF params"
+                    >
+                      Reset
+                    </button>
+                    <button
+                      onClick={() => setDof((d) => ({ ...d, enabled: !d.enabled }))}
+                      className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                        dof.enabled
+                          ? "bg-indigo-600 text-white"
+                          : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                      }`}
+                    >
+                      {dof.enabled ? "On" : "Off"}
+                    </button>
+                  </div>
+                </div>
+                {dof.enabled && (
+                  <div className="flex flex-col gap-1">
+                    {/* f-number (log 1.4 → 22) */}
+                    <div className="flex items-center gap-1">
+                      <label className="text-[9px] text-neutral-500 w-[26px] shrink-0">f/</label>
+                      <input
+                        type="range"
+                        min={Math.log10(1.4)}
+                        max={Math.log10(22)}
+                        step={0.001}
+                        value={Math.log10(dof.fNumber)}
+                        onChange={(e) => setDof((d) => ({ ...d, fNumber: Math.pow(10, parseFloat(e.target.value)) }))}
+                        className="flex-1 h-1 accent-indigo-500 cursor-pointer min-w-0"
+                      />
+                      <input
+                        type="number"
+                        step={0.1}
+                        min={1}
+                        value={Number(dof.fNumber.toFixed(2))}
+                        onChange={(e) => {
+                          const n = parseFloat(e.target.value);
+                          if (Number.isFinite(n) && n > 0) setDof((d) => ({ ...d, fNumber: n }));
+                        }}
+                        className="w-[52px] shrink-0 text-[9px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none tabular-nums"
+                      />
+                    </div>
+                    {/* Focus distance (log 0.1 → 100 m) */}
+                    <div className="flex items-center gap-1">
+                      <label className="text-[9px] text-neutral-500 w-[26px] shrink-0">focus</label>
+                      <input
+                        type="range"
+                        min={Math.log10(0.1)}
+                        max={Math.log10(100)}
+                        step={0.001}
+                        value={Math.log10(Math.max(0.1, dof.focusM))}
+                        onChange={(e) => setDof((d) => ({ ...d, focusM: Math.pow(10, parseFloat(e.target.value)) }))}
+                        className="flex-1 h-1 accent-indigo-500 cursor-pointer min-w-0"
+                      />
+                      <input
+                        type="number"
+                        step={0.01}
+                        min={0}
+                        value={Number(dof.focusM.toFixed(3))}
+                        onChange={(e) => {
+                          const n = parseFloat(e.target.value);
+                          if (Number.isFinite(n) && n > 0) setDof((d) => ({ ...d, focusM: n }));
+                        }}
+                        className="w-[52px] shrink-0 text-[9px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none tabular-nums"
+                      />
+                    </div>
+                    {/* Pick focus + half-res + show-CoC row */}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <button
+                        onClick={() => setFocusPickMode((m) => !m)}
+                        title="Click in the viewport to set focus there"
+                        className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                          focusPickMode
+                            ? "bg-amber-500 text-neutral-900"
+                            : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                        }`}
+                      >
+                        {focusPickMode ? "Click to focus…" : "Pick focus"}
+                      </button>
+                      <label className="text-[9px] text-neutral-400 flex items-center gap-1 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={dof.halfRes}
+                          onChange={(e) => setDof((d) => ({ ...d, halfRes: e.target.checked }))}
+                          className="accent-indigo-500"
+                        />
+                        ½-res
+                      </label>
+                      <label className="text-[9px] text-neutral-400 flex items-center gap-1 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={dof.showCoC}
+                          onChange={(e) => setDof((d) => ({ ...d, showCoC: e.target.checked }))}
+                          className="accent-indigo-500"
+                        />
+                        Show CoC
+                      </label>
+                    </div>
                   </div>
                 )}
               </div>
