@@ -2173,7 +2173,10 @@ export default function StandaloneViewerPage() {
           distSnap.k1 !== 0 || distSnap.k2 !== 0 || distSnap.p1 !== 0 || distSnap.p2 !== 0
         );
         const dofSnap = dofRef.current;
-        const useExportDof = dofSnap.enabled;
+        // DoF bake is opt-in per export via the dialog checkbox — the live
+        // toggle just controls the default. We snapshot aperture / focus
+        // from `dofSnap` regardless so the user's tuning carries through.
+        const useExportDof = settings.bakeDoF;
         // Capture lens settings for the DoF CoC formula (`focalLength`,
         // `sensor.widthMm` come from the active camera preset in scope).
         const exportFocalMm = focalLength;
@@ -2261,6 +2264,21 @@ export default function StandaloneViewerPage() {
                   });
                 }
 
+                // Re-apply the distortion FOV margin around the depth render
+                // so it matches the colour render's framing. videoExport
+                // resets camera.fov to the base after the colour pass and
+                // before this `apply` callback fires; without re-bumping
+                // here, depth UVs would be offset relative to colour and
+                // CoC would be wrong at every pixel.
+                let restoreFovInApply: number | null = null;
+                if (useDistortion && margin > 1) {
+                  const baseFov = camera.fov;
+                  const halfRad = THREE.MathUtils.degToRad(baseFov / 2);
+                  const newHalf = Math.atan(margin * Math.tan(halfRad));
+                  restoreFovInApply = baseFov;
+                  camera.fov = THREE.MathUtils.radToDeg(newHalf) * 2;
+                  camera.updateProjectionMatrix();
+                }
                 // Non-stochastic single-pass depth — every confident splat
                 // (above DEPTH_MIN_ALPHA) writes to the depth buffer, fully
                 // populated. Cheaper than the export's 16-pass hero depth
@@ -2271,6 +2289,10 @@ export default function StandaloneViewerPage() {
                   depthLive, depthMaterialRef.current, depthSceneRef.current, depthCameraRef.current,
                   depthVis,
                 );
+                if (restoreFovInApply != null) {
+                  camera.fov = restoreFovInApply;
+                  camera.updateProjectionMatrix();
+                }
 
                 const aperture = exportFocalMm / Math.max(0.1, dofSnap.fNumber);
                 const focusM = Math.max(exportFocalMm / 1000 + 0.001, dofSnap.focusM);
@@ -3361,6 +3383,7 @@ export default function StandaloneViewerPage() {
           path={cameraPath}
           sensorWidthMm={sensor.widthMm}
           focalLengthMm={focalLength}
+          defaultBakeDoF={dof.enabled}
           onExport={handleExport}
           onClose={() => setShowExportDialog(false)}
           isExporting={isExporting}

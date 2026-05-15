@@ -16,12 +16,18 @@ export interface ExportSettings {
   durationFrames: number;
   codec: CodecPreset;
   includeColmap: boolean;
+  /** Bake the live DoF blur into the output video. Off by default — DoF
+   *  adds ~1x splat-render cost (the live depth pass) per frame. */
+  bakeDoF: boolean;
 }
 
 export interface ExportDialogProps {
   path: CameraPath;
   sensorWidthMm: number;
   focalLengthMm: number;
+  /** Initial state for the "Bake DoF" checkbox. Wire to the viewer's live
+   *  DoF.enabled so opening the dialog while DoF is on pre-selects it. */
+  defaultBakeDoF?: boolean;
   onExport: (settings: ExportSettings) => void;
   onClose: () => void;
   isExporting: boolean;
@@ -48,6 +54,7 @@ const CODEC_PRESETS: { key: CodecPreset; label: string; description: string }[] 
 
 export default function ExportDialog({
   path,
+  defaultBakeDoF = false,
   onExport,
   onClose,
   isExporting,
@@ -59,6 +66,7 @@ export default function ExportDialog({
   const [durationFrames, setDurationFrames] = useState(path.durationFrames);
   const [codec, setCodec] = useState<CodecPreset>("h264");
   const [includeColmap, setIncludeColmap] = useState(true);
+  const [bakeDoF, setBakeDoF] = useState(defaultBakeDoF);
 
   const resolution = RESOLUTION_PRESETS[resIndex];
   const durationSec = fps > 0 ? (durationFrames / fps).toFixed(1) : "0";
@@ -71,8 +79,9 @@ export default function ExportDialog({
       durationFrames,
       codec,
       includeColmap,
+      bakeDoF,
     });
-  }, [mode, resolution, fps, durationFrames, codec, includeColmap, onExport]);
+  }, [mode, resolution, fps, durationFrames, codec, includeColmap, bakeDoF, onExport]);
 
   const progressPct =
     exportProgress && exportProgress.total > 0
@@ -201,6 +210,20 @@ export default function ExportDialog({
             ))}
           </div>
         </div>
+
+        {/* DoF bake checkbox — uses the live aperture / focus / sensor params */}
+        <label className="flex items-center gap-2 mb-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={bakeDoF}
+            onChange={(e) => setBakeDoF(e.target.checked)}
+            disabled={isExporting}
+            className="rounded border-neutral-600 bg-neutral-800 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+          />
+          <span className="text-neutral-300 text-[11px]">
+            Bake depth of field into video (uses live aperture / focus settings)
+          </span>
+        </label>
 
         {/* COLMAP checkbox */}
         <label className="flex items-center gap-2 mb-4 cursor-pointer">
