@@ -38,17 +38,12 @@ export interface ProviderSettings {
 // LLM Provider Options
 export type LLMProvider = "google" | "openai" | "anthropic";
 
-// LLM Model Options
-export type LLMModelType =
-  | "gemini-2.5-flash"
-  | "gemini-3-flash-preview"
-  | "gemini-3-pro-preview"
-  | "gemini-3.1-pro-preview"
-  | "gpt-4.1-mini"
-  | "gpt-4.1-nano"
-  | "claude-opus-4.6"
-  | "claude-sonnet-4.5"
-  | "claude-haiku-4.5";
+// LLM Model Options — provider-specific model ID as returned by each
+// provider's /models endpoint (e.g. "gemini-2.5-flash", "gpt-4.1-mini",
+// "claude-sonnet-4-5-20250929"). The list is fetched dynamically by
+// `/api/llm/models`; this stays a plain `string` so new launches don't
+// need a type change to be selectable.
+export type LLMModelType = string;
 
 // Recently used models tracking
 export interface RecentModel {

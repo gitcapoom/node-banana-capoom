@@ -11,24 +11,24 @@ function generateRequestId(): string {
   return `llm-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
-// Map model types to actual API model IDs
-const GOOGLE_MODEL_MAP: Record<string, string> = {
-  "gemini-2.5-flash": "gemini-2.5-flash",
-  "gemini-3-flash-preview": "gemini-3-flash-preview",
-  "gemini-3-pro-preview": "gemini-3-pro-preview",
-  "gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
-};
-
-const OPENAI_MODEL_MAP: Record<string, string> = {
-  "gpt-4.1-mini": "gpt-4.1-mini",
-  "gpt-4.1-nano": "gpt-4.1-nano",
-};
-
-const ANTHROPIC_MODEL_MAP: Record<string, string> = {
+// Legacy alias maps. Older workflows stored friendly slugs (e.g.
+// "claude-sonnet-4.5") that don't match the provider's canonical model ID
+// (e.g. "claude-sonnet-4-5-20250929"). New workflows store the canonical
+// ID directly because the LLM node now fetches `/api/llm/models` and
+// populates its dropdown from each provider's `models` endpoint. These
+// maps stay as a fallback so existing saved workflows keep working — if
+// a model lookup misses, we pass the value through unchanged.
+const GOOGLE_MODEL_ALIASES: Record<string, string> = {};
+const OPENAI_MODEL_ALIASES: Record<string, string> = {};
+const ANTHROPIC_MODEL_ALIASES: Record<string, string> = {
   "claude-sonnet-4.5": "claude-sonnet-4-5-20250929",
   "claude-haiku-4.5": "claude-haiku-4-5-20251001",
   "claude-opus-4.6": "claude-opus-4-6",
 };
+
+function resolveModel(aliases: Record<string, string>, model: string): string {
+  return aliases[model] ?? model;
+}
 
 async function generateWithGoogle(
   prompt: string,
@@ -47,7 +47,7 @@ async function generateWithGoogle(
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const modelId = GOOGLE_MODEL_MAP[model];
+  const modelId = resolveModel(GOOGLE_MODEL_ALIASES, model);
 
   logger.info('api.llm', 'Calling Google AI API', {
     requestId,
@@ -130,7 +130,7 @@ async function generateWithOpenAI(
     throw new Error("OPENAI_API_KEY not configured. Add it to .env.local or configure in Settings.");
   }
 
-  const modelId = OPENAI_MODEL_MAP[model];
+  const modelId = resolveModel(OPENAI_MODEL_ALIASES, model);
 
   logger.info('api.llm', 'Calling OpenAI API', {
     requestId,
@@ -213,7 +213,7 @@ async function generateWithAnthropic(
     throw new Error("ANTHROPIC_API_KEY not configured. Add it to .env.local or configure in Settings.");
   }
 
-  const modelId = ANTHROPIC_MODEL_MAP[model];
+  const modelId = resolveModel(ANTHROPIC_MODEL_ALIASES, model);
 
   logger.info('api.llm', 'Calling Anthropic API', {
     requestId,

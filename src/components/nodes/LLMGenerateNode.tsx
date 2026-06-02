@@ -1,24 +1,30 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { buildLlmHeaders } from "@/store/utils/buildApiHeaders";
 import { LLMGenerateNodeData, LLMProvider, LLMModelType } from "@/types";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 
-// LLM providers and models
+// LLM providers — the model list for each is fetched dynamically below.
 const LLM_PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: "google", label: "Google" },
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
 ];
 
-const LLM_MODELS: Record<LLMProvider, { value: LLMModelType; label: string }[]> = {
+// Fallback model lists used when the live `/api/llm/models` call hasn't
+// resolved yet, or when the user has no API key configured for that
+// provider. Keeps the dropdown functional offline. Kept short on purpose
+// — once the live fetch completes it replaces this with everything the
+// provider advertises (filtered to chat-completion models).
+const FALLBACK_MODELS: Record<LLMProvider, { value: string; label: string }[]> = {
   google: [
-    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
     { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
     { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro" },
     { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
   ],
@@ -32,6 +38,39 @@ const LLM_MODELS: Record<LLMProvider, { value: LLMModelType; label: string }[]> 
     { value: "claude-opus-4.6", label: "Claude Opus 4.6" },
   ],
 };
+
+// Module-level cache so all instances of the node share one fetch.
+// Re-fetched when the user provides API keys (cache key = the joined key
+// triple), and on an explicit refresh.
+type ModelLists = Record<LLMProvider, { value: string; label: string }[]>;
+let modelCachePromise: Promise<ModelLists> | null = null;
+let modelCacheKey: string | null = null;
+
+async function fetchModelLists(
+  headers: Record<string, string>,
+): Promise<ModelLists> {
+  const lists: ModelLists = { google: [], openai: [], anthropic: [] };
+  try {
+    const res = await fetch("/api/llm/models", { headers });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data: {
+      google: { id: string; label: string }[];
+      openai: { id: string; label: string }[];
+      anthropic: { id: string; label: string }[];
+    } = await res.json();
+    for (const provider of ["google", "openai", "anthropic"] as const) {
+      lists[provider] = (data[provider] || []).map((m) => ({ value: m.id, label: m.label }));
+    }
+  } catch (err) {
+    console.warn("[LLMGenerateNode] failed to fetch model list, falling back to static list:", err);
+  }
+  // Anywhere the live fetch yielded nothing, fall back so the dropdown
+  // still has options.
+  for (const provider of ["google", "openai", "anthropic"] as const) {
+    if (!lists[provider].length) lists[provider] = FALLBACK_MODELS[provider];
+  }
+  return lists;
+}
 
 type LLMGenerateNodeType = Node<LLMGenerateNodeData, "llmGenerate">;
 
@@ -74,11 +113,54 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     updateNodeData(id, { parametersExpanded: !isParamsExpanded });
   }, [id, isParamsExpanded, updateNodeData]);
 
+  // Pull the API keys via the same helper the executor uses, then key the
+  // model-list cache by them so adding a key re-fetches automatically.
+  const providerSettings = useWorkflowStore((s) => s.providerSettings);
+  const llmKeys = useMemo(
+    () => ({
+      google: providerSettings.providers.gemini?.apiKey || "",
+      openai: providerSettings.providers.openai?.apiKey || "",
+      anthropic: providerSettings.providers.anthropic?.apiKey || "",
+    }),
+    [providerSettings],
+  );
+
+  const [modelLists, setModelLists] = useState<ModelLists>(FALLBACK_MODELS);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  useEffect(() => {
+    const cacheKey = `${llmKeys.google}|${llmKeys.openai}|${llmKeys.anthropic}|${refreshTick}`;
+    if (modelCacheKey !== cacheKey || !modelCachePromise) {
+      modelCacheKey = cacheKey;
+      // Build the headers for /api/llm/models the same way an executor would
+      // build them for /api/llm. We deliberately union all three providers'
+      // headers in one request so the endpoint can fan out in parallel.
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      Object.assign(headers, buildLlmHeaders("google", providerSettings));
+      Object.assign(headers, buildLlmHeaders("openai", providerSettings));
+      Object.assign(headers, buildLlmHeaders("anthropic", providerSettings));
+      modelCachePromise = fetchModelLists(headers);
+    }
+    let cancelled = false;
+    modelCachePromise.then((lists) => {
+      if (!cancelled) setModelLists(lists);
+    });
+    return () => { cancelled = true; };
+  }, [llmKeys.google, llmKeys.openai, llmKeys.anthropic, providerSettings, refreshTick]);
+
+  const handleRefreshModels = useCallback(() => {
+    // Invalidate the module cache and re-fetch.
+    modelCachePromise = null;
+    modelCacheKey = null;
+    setRefreshTick((n) => n + 1);
+  }, []);
+
   // LLM parameter handlers
   const handleProviderChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const newProvider = e.target.value as LLMProvider;
-      const firstModelForProvider = LLM_MODELS[newProvider][0].value;
+      const firstModelForProvider =
+        modelLists[newProvider][0]?.value ?? FALLBACK_MODELS[newProvider][0].value;
       const updates: Partial<LLMGenerateNodeData> = {
         provider: newProvider,
         model: firstModelForProvider,
@@ -88,7 +170,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
       }
       updateNodeData(id, updates);
     },
-    [id, nodeData.temperature, updateNodeData]
+    [id, nodeData.temperature, modelLists, updateNodeData]
   );
 
   const handleModelChange = useCallback(
@@ -113,7 +195,15 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
   );
 
   const provider = nodeData.provider || "google";
-  const availableModels = LLM_MODELS[provider] || LLM_MODELS.google;
+  // Use the live list when present; if the selected model isn't in the
+  // live list (e.g. legacy alias like "claude-sonnet-4.5"), tack it on at
+  // the top so the dropdown can still display it.
+  const baseModels = modelLists[provider] || FALLBACK_MODELS[provider];
+  const availableModels = useMemo(() => {
+    if (!nodeData.model) return baseModels;
+    if (baseModels.some((m) => m.value === nodeData.model)) return baseModels;
+    return [{ value: nodeData.model, label: `${nodeData.model} (saved)` }, ...baseModels];
+  }, [baseModels, nodeData.model]);
 
   return (
     <BaseNode
@@ -157,6 +247,15 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                   <option key={m.value} value={m.value}>{m.label}</option>
                 ))}
               </select>
+              <button
+                onClick={handleRefreshModels}
+                title="Refresh model list from each provider"
+                className="nodrag nopan w-5 h-5 shrink-0 rounded text-neutral-500 hover:text-white hover:bg-neutral-800 transition-colors flex items-center justify-center"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </button>
             </div>
 
             {/* Temperature */}
