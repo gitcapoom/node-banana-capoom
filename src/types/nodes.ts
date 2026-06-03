@@ -521,6 +521,22 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   status: NodeStatus;
   error: string | null;
   lastGenerationCost?: number | null; // Cost of the last generation run
+
+  // ─── Conversation mode (multi-turn chat) ───────────────────────
+  /** When true, the node remembers turns and sends the full transcript
+   *  on every run. Default false → one-shot like before. */
+  conversationMode?: boolean;
+  /** Optional system prompt prepended to every request as the provider's
+   *  native system slot. Stored separately from `conversation` because
+   *  all three providers carry it in a dedicated field. */
+  systemPrompt?: string;
+  /** Persistent multi-turn history. Each Run appends one user turn (with
+   *  the current text/image inputs) and one assistant turn. Carries
+   *  through workflow save/load. */
+  conversation?: import("./api").ConversationTurn[];
+  /** Cap the most recent N user+assistant turns sent on each request.
+   *  0 / undefined = unlimited. Useful to control token spend. */
+  maxHistoryTurns?: number;
 }
 
 /**

@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
-import { LLMGenerateNodeData, LLMProvider, LLMModelType } from "@/types";
+import { LLMGenerateNodeData, LLMProvider, LLMModelType, ConversationTurn } from "@/types";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
@@ -98,6 +98,57 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     },
     [id, updateNodeData]
   );
+
+  // ─── Conversation mode handlers ───────────────────────────────
+  const conversation = nodeData.conversation ?? [];
+  const conversationMode = nodeData.conversationMode === true;
+
+  const handleToggleConversationMode = useCallback(() => {
+    updateNodeData(id, { conversationMode: !conversationMode });
+  }, [id, conversationMode, updateNodeData]);
+
+  const handleSystemPromptChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      updateNodeData(id, { systemPrompt: e.target.value });
+    },
+    [id, updateNodeData]
+  );
+
+  const handleMaxHistoryChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const n = parseInt(e.target.value, 10);
+      updateNodeData(id, { maxHistoryTurns: Number.isFinite(n) && n >= 0 ? n : 0 });
+    },
+    [id, updateNodeData]
+  );
+
+  const handleClearConversation = useCallback(() => {
+    if (conversation.length === 0) return;
+    if (!confirm("Clear all conversation history? (System prompt is kept.)")) return;
+    updateNodeData(id, { conversation: [], outputText: null });
+  }, [id, conversation.length, updateNodeData]);
+
+  const handleRemoveTurn = useCallback(
+    (index: number) => {
+      const next = conversation.slice(0, index).concat(conversation.slice(index + 1));
+      // If we just removed the last assistant turn, also clear outputText so
+      // downstream pins don't keep emitting it.
+      const lastWasAssistant =
+        index === conversation.length - 1 && conversation[index]?.role === "assistant";
+      updateNodeData(id, {
+        conversation: next,
+        ...(lastWasAssistant ? { outputText: null } : {}),
+      });
+    },
+    [id, conversation, updateNodeData]
+  );
+
+  // Auto-scroll the transcript to the bottom when new turns arrive.
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [conversation.length, nodeData.status]);
 
   const provider = nodeData.provider || "google";
   // Use the live list when present; if the selected model isn't in the
@@ -194,6 +245,59 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                 className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
               />
             </div>
+
+            {/* ─── Conversation mode ───────────────────────── */}
+            <div className="border-t border-neutral-800 pt-1.5 mt-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={conversationMode}
+                  onChange={handleToggleConversationMode}
+                  className="nodrag accent-blue-500"
+                />
+                <span className="text-[11px] text-neutral-300">Conversation mode</span>
+                {conversationMode && conversation.length > 0 && (
+                  <span className="text-[10px] text-neutral-500 ml-auto">
+                    {conversation.filter(t => t.role === "user").length} turn{conversation.filter(t => t.role === "user").length === 1 ? "" : "s"}
+                  </span>
+                )}
+              </label>
+              {conversationMode && (
+                <div className="mt-1.5 space-y-1.5">
+                  {/* System prompt */}
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] text-neutral-500">System prompt</label>
+                    <textarea
+                      value={nodeData.systemPrompt ?? ""}
+                      onChange={handleSystemPromptChange}
+                      placeholder="(optional) e.g. You are a concise, factual assistant."
+                      rows={2}
+                      className="nodrag nopan w-full text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white resize-y min-h-[36px] max-h-[120px]"
+                    />
+                  </div>
+                  {/* Max history + clear */}
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] text-neutral-500 shrink-0">Max turns</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={nodeData.maxHistoryTurns ?? 0}
+                      onChange={handleMaxHistoryChange}
+                      title="Most-recent N user+assistant pairs to send each request. 0 = unlimited."
+                      className="nodrag nopan w-14 text-[11px] py-0.5 px-1 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white tabular-nums"
+                    />
+                    <button
+                      onClick={handleClearConversation}
+                      disabled={conversation.length === 0}
+                      className="nodrag nopan ml-auto text-[10px] py-0.5 px-2 rounded bg-neutral-800 hover:bg-red-900/60 text-neutral-400 hover:text-white disabled:opacity-40 disabled:hover:bg-neutral-800 disabled:hover:text-neutral-400 transition-colors"
+                    >
+                      Clear history
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </InlineParameterPanel>
       ) : undefined}
@@ -223,7 +327,16 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
       />
 
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
-        {nodeData.status === "loading" ? (
+        {conversationMode ? (
+          // ─── Conversation transcript view ───────────────────────
+          <ConversationTranscript
+            conversation={conversation}
+            status={nodeData.status}
+            error={nodeData.error}
+            onRemoveTurn={handleRemoveTurn}
+            transcriptRef={transcriptRef}
+          />
+        ) : nodeData.status === "loading" ? (
           <div className="w-full h-full bg-neutral-900/40 flex items-center justify-center">
             <svg
               className="w-4 h-4 animate-spin text-neutral-400"
@@ -313,5 +426,122 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
       </div>
 
     </BaseNode>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Conversation transcript view
+// ─────────────────────────────────────────────────────────────────
+
+interface ConversationTranscriptProps {
+  conversation: ConversationTurn[];
+  status: LLMGenerateNodeData["status"];
+  error: string | null;
+  onRemoveTurn: (index: number) => void;
+  transcriptRef: React.RefObject<HTMLDivElement | null>;
+}
+
+function ConversationTranscript({
+  conversation,
+  status,
+  error,
+  onRemoveTurn,
+  transcriptRef,
+}: ConversationTranscriptProps) {
+  const isLoading = status === "loading";
+  const isError = status === "error";
+
+  return (
+    <div className="relative w-full h-full bg-neutral-900/40">
+      {conversation.length === 0 && !isLoading ? (
+        <div className="w-full h-full flex flex-col items-center justify-center gap-1 px-3 text-center">
+          <span className="text-neutral-400 text-[11px]">Conversation mode</span>
+          <span className="text-neutral-600 text-[10px]">
+            Connect text input and Run to start. Each Run sends the full transcript.
+          </span>
+        </div>
+      ) : (
+        <div
+          ref={transcriptRef}
+          className="w-full h-full overflow-auto nowheel py-1 px-1.5 space-y-1"
+        >
+          {conversation.map((turn, i) => (
+            <ConversationRow
+              key={`${turn.timestamp ?? i}-${i}`}
+              turn={turn}
+              onRemove={() => onRemoveTurn(i)}
+            />
+          ))}
+          {isLoading && (
+            // Inline thinking indicator at the bottom while the assistant
+            // turn is in flight.
+            <div className="flex items-center gap-1 px-1 py-0.5">
+              <span className="text-[9px] uppercase tracking-wide text-blue-400/80 w-3 shrink-0">A</span>
+              <span className="text-neutral-500 text-[10px] italic">
+                <span className="inline-block animate-pulse">…thinking</span>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isError && error && (
+        <div className="absolute bottom-1 left-1 right-1 bg-red-900/80 text-red-100 text-[10px] px-2 py-1 rounded shadow-lg">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ConversationRowProps {
+  turn: ConversationTurn;
+  onRemove: () => void;
+}
+
+function ConversationRow({ turn, onRemove }: ConversationRowProps) {
+  const isUser = turn.role === "user";
+  return (
+    <div className="group/row flex items-start gap-1 px-1 py-0.5 rounded hover:bg-neutral-800/40 transition-colors">
+      <span
+        className={`text-[9px] uppercase tracking-wide w-3 shrink-0 mt-[1px] ${
+          isUser ? "text-neutral-500" : "text-blue-400/80"
+        }`}
+        title={isUser ? "User" : "Assistant"}
+      >
+        {isUser ? "U" : "A"}
+      </span>
+      <div className="flex-1 min-w-0">
+        {turn.images && turn.images.length > 0 && (
+          <div className="flex gap-1 mb-0.5">
+            {turn.images.slice(0, 3).map((img, i) => (
+              <img
+                key={i}
+                src={img}
+                alt=""
+                className="w-8 h-8 object-cover rounded border border-neutral-700"
+              />
+            ))}
+            {turn.images.length > 3 && (
+              <span className="text-[9px] text-neutral-500 self-end">
+                +{turn.images.length - 3}
+              </span>
+            )}
+          </div>
+        )}
+        <p className="text-[10px] text-neutral-300 whitespace-pre-wrap break-words leading-[1.35]">
+          {turn.text}
+        </p>
+      </div>
+      <button
+        onClick={(e) => { e.stopPropagation(); onRemove(); }}
+        className="nodrag nopan w-3 h-3 mt-[1px] shrink-0 rounded text-neutral-600 opacity-0 group-hover/row:opacity-100 hover:text-red-400 transition-all flex items-center justify-center"
+        title="Drop this turn"
+      >
+        <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
   );
 }

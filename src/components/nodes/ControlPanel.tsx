@@ -993,6 +993,35 @@ function LLMControls({ node }: { node: Node }) {
     [node.id, updateNodeData]
   );
 
+  // ─── Conversation handlers (mirror LLMGenerateNode's inline panel) ──
+  const conversation = nodeData.conversation ?? [];
+  const conversationMode = nodeData.conversationMode === true;
+
+  const handleToggleConversationMode = useCallback(() => {
+    updateNodeData(node.id, { conversationMode: !conversationMode });
+  }, [node.id, conversationMode, updateNodeData]);
+
+  const handleSystemPromptChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      updateNodeData(node.id, { systemPrompt: e.target.value });
+    },
+    [node.id, updateNodeData]
+  );
+
+  const handleMaxHistoryChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const n = parseInt(e.target.value, 10);
+      updateNodeData(node.id, { maxHistoryTurns: Number.isFinite(n) && n >= 0 ? n : 0 });
+    },
+    [node.id, updateNodeData]
+  );
+
+  const handleClearConversation = useCallback(() => {
+    if (conversation.length === 0) return;
+    if (!confirm("Clear all conversation history? (System prompt is kept.)")) return;
+    updateNodeData(node.id, { conversation: [], outputText: null });
+  }, [node.id, conversation.length, updateNodeData]);
+
   const provider = nodeData.provider || "google";
   const baseModels = modelLists[provider] || FALLBACK_MODELS[provider];
   // Tack a non-listed saved model onto the top of the dropdown so it can
@@ -1070,6 +1099,57 @@ function LLMControls({ node }: { node: Node }) {
           onChange={handleMaxTokensChange}
           className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
         />
+      </div>
+
+      {/* ─── Conversation mode ─────────────────────────────── */}
+      <div className="border-t border-neutral-700 pt-3">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={conversationMode}
+            onChange={handleToggleConversationMode}
+            className="nodrag accent-blue-500"
+          />
+          <span className="text-xs font-medium text-neutral-300">Conversation mode</span>
+          {conversationMode && conversation.length > 0 && (
+            <span className="text-[10px] text-neutral-500 ml-auto">
+              {conversation.filter(t => t.role === "user").length} turn{conversation.filter(t => t.role === "user").length === 1 ? "" : "s"}
+            </span>
+          )}
+        </label>
+        {conversationMode && (
+          <div className="mt-2 space-y-2">
+            <div>
+              <label className="block text-[10px] text-neutral-500 mb-1">System prompt</label>
+              <textarea
+                value={nodeData.systemPrompt ?? ""}
+                onChange={handleSystemPromptChange}
+                placeholder="(optional) e.g. You are a concise, factual assistant."
+                rows={2}
+                className="nodrag nopan w-full text-xs py-1 px-2 bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y min-h-[48px] max-h-[160px]"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[10px] text-neutral-500 shrink-0">Max turns</label>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={nodeData.maxHistoryTurns ?? 0}
+                onChange={handleMaxHistoryChange}
+                title="Most-recent N user+assistant pairs to send each request. 0 = unlimited."
+                className="nodrag nopan w-16 text-xs py-0.5 px-1 bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500 tabular-nums"
+              />
+              <button
+                onClick={handleClearConversation}
+                disabled={conversation.length === 0}
+                className="nodrag nopan ml-auto text-[10px] py-1 px-2 rounded bg-neutral-700 hover:bg-red-900/60 text-neutral-300 disabled:opacity-40 disabled:hover:bg-neutral-700 transition-colors"
+              >
+                Clear history
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end">

@@ -5,7 +5,7 @@
  * Used by both executeWorkflow and regenerateNode.
  */
 
-import type { LLMGenerateNodeData } from "@/types";
+import type { LLMGenerateNodeData, ConversationTurn } from "@/types";
 import { buildLlmHeaders } from "@/store/utils/buildApiHeaders";
 import type { NodeExecutionContext } from "./types";
 
@@ -51,9 +51,42 @@ export async function executeLlmGenerate(
     throw new Error("Missing text input");
   }
 
+  // Build the new user turn. In one-shot mode this becomes the only
+  // turn the API sees; in conversation mode it gets appended to the
+  // saved transcript before sending.
+  const newUserTurn: ConversationTurn = {
+    role: "user",
+    text,
+    ...(images.length > 0 ? { images } : {}),
+    timestamp: Date.now(),
+  };
+
+  const useConversation = nodeData.conversationMode === true;
+  const priorConversation = nodeData.conversation ?? [];
+
+  // Apply the max-turns cap. A "turn" is one user+assistant pair, so
+  // we keep the last (2 * maxHistoryTurns) entries plus the new user
+  // turn. 0 / undefined / negative = unlimited.
+  const cap = nodeData.maxHistoryTurns ?? 0;
+  const slicedPrior = cap > 0
+    ? priorConversation.slice(Math.max(0, priorConversation.length - cap * 2))
+    : priorConversation;
+
+  const outboundMessages: ConversationTurn[] = useConversation
+    ? [...slicedPrior, newUserTurn]
+    : [newUserTurn];
+
+  // In conversation mode, immediately persist the new user turn so the
+  // UI's transcript shows it during the loading state. (Assistant turn
+  // is appended on success below.)
+  const persistedConversation = useConversation
+    ? [...priorConversation, newUserTurn]
+    : priorConversation;
+
   updateNodeData(node.id, {
     inputPrompt: text,
     inputImages: images,
+    ...(useConversation ? { conversation: persistedConversation } : {}),
     status: "loading",
     error: null,
     lastGenerationCost: null,
@@ -66,8 +99,8 @@ export async function executeLlmGenerate(
       method: "POST",
       headers,
       body: JSON.stringify({
-        prompt: text,
-        ...(images.length > 0 && { images }),
+        messages: outboundMessages,
+        ...(useConversation && nodeData.systemPrompt ? { system: nodeData.systemPrompt } : {}),
         provider: nodeData.provider,
         model: nodeData.model,
         temperature: nodeData.temperature,
@@ -88,6 +121,9 @@ export async function executeLlmGenerate(
       updateNodeData(node.id, {
         status: "error",
         error: errorMessage,
+        // Roll back the optimistic user turn so the failed prompt isn't
+        // permanently in the transcript. User can edit & retry cleanly.
+        ...(useConversation ? { conversation: priorConversation } : {}),
       });
       throw new Error(errorMessage);
     }
@@ -95,8 +131,16 @@ export async function executeLlmGenerate(
     const result = await response.json();
 
     if (result.success && result.text) {
+      const assistantTurn: ConversationTurn = {
+        role: "assistant",
+        text: result.text,
+        timestamp: Date.now(),
+      };
       updateNodeData(node.id, {
         outputText: result.text,
+        ...(useConversation
+          ? { conversation: [...persistedConversation, assistantTurn] }
+          : {}),
         status: "complete",
         error: null,
       });
@@ -124,6 +168,7 @@ export async function executeLlmGenerate(
     updateNodeData(node.id, {
       status: "error",
       error: errorMessage,
+      ...(useConversation ? { conversation: priorConversation } : {}),
     });
     throw new Error(errorMessage);
   }
