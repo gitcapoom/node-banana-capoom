@@ -2,12 +2,23 @@
 // Node.js default server.requestTimeout is 5 minutes (300,000ms)
 // We extend it to 25 minutes for long-running video generation (muapi/fal)
 
+// Load .env files early — Next normally reads them during app.prepare(), but
+// that fires AFTER `port` is captured below, so any PORT defined in
+// .env.local / .env.production would be ignored without this. @next/env
+// ships with next, no new dependency.
+const { loadEnvConfig } = require('@next/env');
+loadEnvConfig(process.cwd(), process.env.NODE_ENV !== 'production');
+
 const { createServer } = require('http');
 const next = require('next');
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST || '0.0.0.0';
-const port = (process.env.PORT || '3001').trim();
+// Default 3000 (production-safe — this file IS the production server when you
+// run `node server.js` after `next build`). For local dev on a different
+// port, set `PORT=3001` in `.env.local` and the early loadEnvConfig above
+// will pick it up before this line runs.
+const port = (process.env.PORT || '3000').trim();
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
