@@ -1,76 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
-import { buildLlmHeaders } from "@/store/utils/buildApiHeaders";
 import { LLMGenerateNodeData, LLMProvider, LLMModelType } from "@/types";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
+import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 
-// LLM providers — the model list for each is fetched dynamically below.
+// LLM providers — the model list for each is fetched live via the
+// `useLlmModelLists` hook (shared with ControlPanel).
 const LLM_PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: "google", label: "Google" },
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
 ];
-
-// Fallback model lists used when the live `/api/llm/models` call hasn't
-// resolved yet, or when the user has no API key configured for that
-// provider. Keeps the dropdown functional offline. Kept short on purpose
-// — once the live fetch completes it replaces this with everything the
-// provider advertises (filtered to chat-completion models).
-const FALLBACK_MODELS: Record<LLMProvider, { value: string; label: string }[]> = {
-  google: [
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
-    { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro" },
-    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
-  ],
-  openai: [
-    { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
-    { value: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
-  ],
-  anthropic: [
-    { value: "claude-sonnet-4.5", label: "Claude Sonnet 4.5" },
-    { value: "claude-haiku-4.5", label: "Claude Haiku 4.5" },
-    { value: "claude-opus-4.6", label: "Claude Opus 4.6" },
-  ],
-};
-
-// Module-level cache so all instances of the node share one fetch.
-// Re-fetched when the user provides API keys (cache key = the joined key
-// triple), and on an explicit refresh.
-type ModelLists = Record<LLMProvider, { value: string; label: string }[]>;
-let modelCachePromise: Promise<ModelLists> | null = null;
-let modelCacheKey: string | null = null;
-
-async function fetchModelLists(
-  headers: Record<string, string>,
-): Promise<ModelLists> {
-  const lists: ModelLists = { google: [], openai: [], anthropic: [] };
-  try {
-    const res = await fetch("/api/llm/models", { headers });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data: {
-      google: { id: string; label: string }[];
-      openai: { id: string; label: string }[];
-      anthropic: { id: string; label: string }[];
-    } = await res.json();
-    for (const provider of ["google", "openai", "anthropic"] as const) {
-      lists[provider] = (data[provider] || []).map((m) => ({ value: m.id, label: m.label }));
-    }
-  } catch (err) {
-    console.warn("[LLMGenerateNode] failed to fetch model list, falling back to static list:", err);
-  }
-  // Anywhere the live fetch yielded nothing, fall back so the dropdown
-  // still has options.
-  for (const provider of ["google", "openai", "anthropic"] as const) {
-    if (!lists[provider].length) lists[provider] = FALLBACK_MODELS[provider];
-  }
-  return lists;
-}
 
 type LLMGenerateNodeType = Node<LLMGenerateNodeData, "llmGenerate">;
 
@@ -113,47 +58,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     updateNodeData(id, { parametersExpanded: !isParamsExpanded });
   }, [id, isParamsExpanded, updateNodeData]);
 
-  // Pull the API keys via the same helper the executor uses, then key the
-  // model-list cache by them so adding a key re-fetches automatically.
-  const providerSettings = useWorkflowStore((s) => s.providerSettings);
-  const llmKeys = useMemo(
-    () => ({
-      google: providerSettings.providers.gemini?.apiKey || "",
-      openai: providerSettings.providers.openai?.apiKey || "",
-      anthropic: providerSettings.providers.anthropic?.apiKey || "",
-    }),
-    [providerSettings],
-  );
-
-  const [modelLists, setModelLists] = useState<ModelLists>(FALLBACK_MODELS);
-  const [refreshTick, setRefreshTick] = useState(0);
-
-  useEffect(() => {
-    const cacheKey = `${llmKeys.google}|${llmKeys.openai}|${llmKeys.anthropic}|${refreshTick}`;
-    if (modelCacheKey !== cacheKey || !modelCachePromise) {
-      modelCacheKey = cacheKey;
-      // Build the headers for /api/llm/models the same way an executor would
-      // build them for /api/llm. We deliberately union all three providers'
-      // headers in one request so the endpoint can fan out in parallel.
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      Object.assign(headers, buildLlmHeaders("google", providerSettings));
-      Object.assign(headers, buildLlmHeaders("openai", providerSettings));
-      Object.assign(headers, buildLlmHeaders("anthropic", providerSettings));
-      modelCachePromise = fetchModelLists(headers);
-    }
-    let cancelled = false;
-    modelCachePromise.then((lists) => {
-      if (!cancelled) setModelLists(lists);
-    });
-    return () => { cancelled = true; };
-  }, [llmKeys.google, llmKeys.openai, llmKeys.anthropic, providerSettings, refreshTick]);
-
-  const handleRefreshModels = useCallback(() => {
-    // Invalidate the module cache and re-fetch.
-    modelCachePromise = null;
-    modelCacheKey = null;
-    setRefreshTick((n) => n + 1);
-  }, []);
+  const { modelLists, refresh: handleRefreshModels } = useLlmModelLists();
 
   // LLM parameter handlers
   const handleProviderChange = useCallback(

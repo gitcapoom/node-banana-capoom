@@ -8,6 +8,7 @@ import { NodeType, NanoBananaNodeData, LLMGenerateNodeData, GenerateVideoNodeDat
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { ModelParameters } from "./ModelParameters";
+import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { CubicBezierEditor } from "@/components/CubicBezierEditor";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 import { evaluateRule } from "@/store/utils/ruleEvaluation";
@@ -63,24 +64,6 @@ const LLM_PROVIDERS: { value: LLMProvider; label: string }[] = [
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
 ];
-
-const LLM_MODELS: Record<LLMProvider, { value: LLMModelType; label: string }[]> = {
-  google: [
-    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash" },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { value: "gemini-3-pro-preview", label: "Gemini 3.0 Pro" },
-    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro" },
-  ],
-  openai: [
-    { value: "gpt-4.1-mini", label: "GPT-4.1 Mini" },
-    { value: "gpt-4.1-nano", label: "GPT-4.1 Nano" },
-  ],
-  anthropic: [
-    { value: "claude-sonnet-4.5", label: "Claude Sonnet 4.5" },
-    { value: "claude-haiku-4.5", label: "Claude Haiku 4.5" },
-    { value: "claude-opus-4.6", label: "Claude Opus 4.6" },
-  ],
-};
 
 // Image/video/audio/3d generation capabilities
 const IMAGE_CAPABILITIES: ModelCapability[] = ["text-to-image", "image-to-image"];
@@ -967,10 +950,16 @@ function LLMControls({ node }: { node: Node }) {
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
 
+  // Live per-provider model lists (Google/OpenAI/Anthropic), fetched via
+  // /api/llm/models. Shared with LLMGenerateNode's inline params so the
+  // two surfaces stay in sync.
+  const { modelLists, refresh: handleRefreshModels } = useLlmModelLists();
+
   const handleProviderChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const newProvider = e.target.value as LLMProvider;
-      const firstModelForProvider = LLM_MODELS[newProvider][0].value;
+      const firstModelForProvider =
+        modelLists[newProvider][0]?.value ?? FALLBACK_MODELS[newProvider][0].value;
       const updates: Partial<LLMGenerateNodeData> = {
         provider: newProvider,
         model: firstModelForProvider,
@@ -980,7 +969,7 @@ function LLMControls({ node }: { node: Node }) {
       }
       updateNodeData(node.id, updates);
     },
-    [node.id, updateNodeData, nodeData.temperature]
+    [node.id, updateNodeData, nodeData.temperature, modelLists]
   );
 
   const handleModelChange = useCallback(
@@ -1005,7 +994,14 @@ function LLMControls({ node }: { node: Node }) {
   );
 
   const provider = nodeData.provider || "google";
-  const availableModels = LLM_MODELS[provider] || LLM_MODELS.google;
+  const baseModels = modelLists[provider] || FALLBACK_MODELS[provider];
+  // Tack a non-listed saved model onto the top of the dropdown so it can
+  // still display (mirrors LLMGenerateNode behaviour).
+  const availableModels = useMemo(() => {
+    if (!nodeData.model) return baseModels;
+    if (baseModels.some((m) => m.value === nodeData.model)) return baseModels;
+    return [{ value: nodeData.model, label: `${nodeData.model} (saved)` }, ...baseModels];
+  }, [baseModels, nodeData.model]);
 
   return (
     <div className="space-y-3">
@@ -1024,15 +1020,26 @@ function LLMControls({ node }: { node: Node }) {
 
       <div>
         <label className="block text-xs font-medium text-neutral-300 mb-1">Model</label>
-        <select
-          value={nodeData.model || availableModels[0].value}
-          onChange={handleModelChange}
-          className="nodrag nopan w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          {availableModels.map(m => (
-            <option key={m.value} value={m.value}>{m.label}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-1">
+          <select
+            value={nodeData.model || availableModels[0].value}
+            onChange={handleModelChange}
+            className="nodrag nopan flex-1 min-w-0 px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            {availableModels.map(m => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleRefreshModels}
+            title="Refresh model list from each provider"
+            className="nodrag nopan w-6 h-6 shrink-0 rounded text-neutral-400 hover:text-white hover:bg-neutral-700 transition-colors flex items-center justify-center"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div>
