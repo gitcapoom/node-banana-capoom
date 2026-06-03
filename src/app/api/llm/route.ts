@@ -395,6 +395,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Strip image entries that don't look like an image URL — protects
+    // against text-typed sources being wired to the image handle upstream
+    // (React Flow doesn't enforce handle-type matching on edges).
+    const isLikelyImageUrl = (s: unknown): s is string => {
+      if (typeof s !== "string" || s.length === 0) return false;
+      return s.startsWith("data:image/") || s.startsWith("http://") || s.startsWith("https://") || s.startsWith("blob:");
+    };
+    normMessages = normMessages.map((m) => {
+      if (!m.images || m.images.length === 0) return m;
+      const valid = m.images.filter(isLikelyImageUrl);
+      return valid.length === m.images.length ? m : { ...m, images: valid };
+    });
+
     const totalImages = normMessages.reduce((n, m) => n + (m.images?.length ?? 0), 0);
     logger.info('api.llm', 'LLM generation request received', {
       requestId,

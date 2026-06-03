@@ -43,12 +43,37 @@ export async function executeLlmGenerate(
     text = inputs.text ?? nodeData.inputPrompt;
   }
 
+  // Defensive validation — the image-handle on this node accepts any edge
+  // (React Flow doesn't strictly type-check connections), so a text-typed
+  // source wired to it would land its prose into `images` and the
+  // provider would reject the request with a cryptic "Invalid image".
+  // Filter to entries that actually look like image URLs; warn the user
+  // (via the node error) if any were dropped so they can fix their wiring.
+  const isLikelyImageUrl = (s: unknown): s is string => {
+    if (typeof s !== "string" || s.length === 0) return false;
+    if (s.startsWith("data:image/")) return true;
+    if (s.startsWith("http://") || s.startsWith("https://")) return true;
+    if (s.startsWith("blob:")) return true;
+    return false;
+  };
+  const rawImageCount = images.length;
+  images = images.filter(isLikelyImageUrl);
+  const droppedCount = rawImageCount - images.length;
+
   if (!text) {
     updateNodeData(node.id, {
       status: "error",
-      error: "Missing text input - connect a prompt node or set internal prompt",
+      error: droppedCount > 0
+        ? `Image input is wired to a non-image source (${droppedCount} dropped). Connect an image-typed output (Image Input, Generate Image, Crop, etc.) to the image handle, or remove the bad edge.`
+        : "Missing text input - connect a prompt node or set internal prompt",
     });
     throw new Error("Missing text input");
+  }
+  if (droppedCount > 0) {
+    console.warn(
+      `[llmGenerateExecutor] Dropped ${droppedCount} non-image value(s) from the image input ` +
+      `(text was wired to the image handle?). Sent ${images.length} valid image(s).`,
+    );
   }
 
   // Build the new user turn. In one-shot mode this becomes the only
