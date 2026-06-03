@@ -97,10 +97,20 @@ async function fetchOpenAI(apiKey: string): Promise<ModelEntry[]> {
   // - `instruct` is the legacy v1/completions endpoint family
   //   (e.g. gpt-3.5-turbo-instruct) — separate endpoint, not chat.
   const KEEP = /^(gpt-|o[134])/i;
-  const DROP = /(embed|moderation|whisper|tts|realtime|audio|transcribe|search|image|dall-e|babbage|davinci|moonshine|instruct)/i;
+  const DROP_KIND = /(embed|moderation|whisper|tts|realtime|audio|transcribe|search|image|dall-e|babbage|davinci|moonshine|instruct)/i;
+
+  // Trim the dropdown to flat canonical names only — hide:
+  //   `-pro$` / `-pro-…`     → Pro tier (separate research endpoint and/or
+  //                            chat-completions incompatible: gpt-5-pro,
+  //                            gpt-5.5-pro-2026-04-23, o1-pro, o3-pro, …)
+  //   `-YYYY-MM-DD$`         → dated snapshots (gpt-5.5-2026-04-23, …)
+  //   `-DDDD$`               → compact dated snapshots (gpt-4-0613, …)
+  // Leaves gpt-5.5, gpt-5.5-mini, gpt-5.5-nano, gpt-4o, gpt-4o-mini, o3,
+  // o3-mini, o4-mini, o1, gpt-4.1, gpt-4-turbo, gpt-3.5-turbo, etc.
+  const DROP_VARIANT = /(-pro$|-pro-|-\d{4}-\d{2}-\d{2}$|-\d{4}$)/i;
 
   return all
-    .filter((m) => KEEP.test(m.id) && !DROP.test(m.id))
+    .filter((m) => KEEP.test(m.id) && !DROP_KIND.test(m.id) && !DROP_VARIANT.test(m.id))
     .sort((a, b) => (b.created ?? 0) - (a.created ?? 0))
     .map((m) => ({ id: m.id, label: prettyLabel(m.id) }));
 }
