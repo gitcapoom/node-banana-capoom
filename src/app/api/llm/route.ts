@@ -30,14 +30,49 @@ function resolveModel(aliases: Record<string, string>, model: string): string {
   return aliases[model] ?? model;
 }
 
+/**
+ * Inspect the leading bytes of base64-encoded image data and return its
+ * actual MIME type. Upstream nodes sometimes label a PNG as
+ * `image/jpeg` (or worse, default everything to PNG) — OpenAI rejects
+ * mismatched URLs as "Invalid image", and Anthropic's base64 source
+ * blocks need an accurate `media_type`. Falls back to the caller-provided
+ * default if the magic bytes are unrecognised.
+ */
+function detectImageMimeFromBase64(base64Data: string, fallback: string): string {
+  try {
+    const firstBytes = Buffer.from(base64Data.substring(0, 16), "base64");
+    if (firstBytes[0] === 0xFF && firstBytes[1] === 0xD8) return "image/jpeg";
+    if (firstBytes[0] === 0x89 && firstBytes[1] === 0x50 && firstBytes[2] === 0x4E && firstBytes[3] === 0x47) return "image/png";
+    if (firstBytes[0] === 0x52 && firstBytes[1] === 0x49 && firstBytes[2] === 0x46 && firstBytes[3] === 0x46) return "image/webp";
+    if (firstBytes[0] === 0x47 && firstBytes[1] === 0x49 && firstBytes[2] === 0x46) return "image/gif";
+  } catch { /* keep declared mediaType on decode failure */ }
+  return fallback;
+}
+
+/**
+ * Rebuild an image data URL with the correct MIME type detected from
+ * magic bytes. Non-data URLs (http/https/blob) pass through unchanged
+ * because the wire format is provider-agnostic.
+ */
+function normalizeImageDataUrl(img: string): string {
+  if (!img.startsWith("data:")) return img;
+  const matches = img.match(/^data:(.+?);base64,(.+)$/);
+  if (!matches) return img;
+  const declared = matches[1];
+  const base64Data = matches[2];
+  const actual = detectImageMimeFromBase64(base64Data, declared);
+  return actual === declared ? img : `data:${actual};base64,${base64Data}`;
+}
+
 /** Convert a data URL to Gemini's inlineData part shape. */
 function googleImagePart(img: string): { inlineData: { mimeType: string; data: string } } {
-  const matches = img.match(/^data:(.+?);base64,(.+)$/);
+  const normalized = normalizeImageDataUrl(img);
+  const matches = normalized.match(/^data:(.+?);base64,(.+)$/);
   if (matches) {
     return { inlineData: { mimeType: matches[1], data: matches[2] } };
   }
   // Fallback: assume PNG if no data URL prefix
-  return { inlineData: { mimeType: "image/png", data: img } };
+  return { inlineData: { mimeType: "image/png", data: normalized } };
 }
 
 type GooglePart = { inlineData: { mimeType: string; data: string } } | { text: string };
@@ -161,9 +196,15 @@ async function generateWithOpenAI(
   if (system) apiMessages.push({ role: "system", content: system });
   for (const m of messages) {
     if (m.role === "user" && m.images && m.images.length > 0) {
+      // Normalise each data URL — upstream MIME labels are often wrong
+      // (Generate Image / Crop frequently emit PNG bytes labelled as JPEG
+      // or vice versa). OpenAI rejects mismatched URLs as "Invalid image".
       const content: OpenAIContentBlock[] = [
         { type: "text", text: m.text },
-        ...m.images.map((img) => ({ type: "image_url" as const, image_url: { url: img } })),
+        ...m.images.map((img) => ({
+          type: "image_url" as const,
+          image_url: { url: normalizeImageDataUrl(img) },
+        })),
       ];
       apiMessages.push({ role: "user", content });
     } else {
@@ -248,17 +289,8 @@ async function anthropicImageBlock(imgArg: string): Promise<AnthropicContentBloc
   }
   const matches = img.match(/^data:(.+?);base64,(.+)$/);
   const base64Data = matches ? matches[2] : img;
-  let mediaType = matches ? matches[1] : "image/png";
-
-  // Detect actual image type from magic bytes (data URL mime is often wrong)
-  try {
-    const firstBytes = Buffer.from(base64Data.substring(0, 16), "base64");
-    if (firstBytes[0] === 0xFF && firstBytes[1] === 0xD8) mediaType = "image/jpeg";
-    else if (firstBytes[0] === 0x89 && firstBytes[1] === 0x50 && firstBytes[2] === 0x4E && firstBytes[3] === 0x47) mediaType = "image/png";
-    else if (firstBytes[0] === 0x52 && firstBytes[1] === 0x49 && firstBytes[2] === 0x46 && firstBytes[3] === 0x46) mediaType = "image/webp";
-    else if (firstBytes[0] === 0x47 && firstBytes[1] === 0x49 && firstBytes[2] === 0x46) mediaType = "image/gif";
-  } catch { /* keep declared mediaType */ }
-
+  const declared = matches ? matches[1] : "image/png";
+  const mediaType = detectImageMimeFromBase64(base64Data, declared);
   return {
     type: "image",
     source: { type: "base64", media_type: mediaType, data: base64Data },
