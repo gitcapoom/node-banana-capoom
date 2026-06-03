@@ -517,6 +517,16 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   model: LLMModelType;
   temperature: number;
   maxTokens: number;
+  /** Provider-agnostic reasoning / thinking effort.
+   *    off    = no reasoning override (provider default; reasoning-era
+   *             models still reason internally)
+   *    low    = light reasoning (Anthropic 2k thinking tokens, OpenAI
+   *             "low", Gemini 1k thinking budget)
+   *    medium = balanced (Anthropic 8k, OpenAI "medium", Gemini dynamic)
+   *    high   = deep (Anthropic 16k, OpenAI "high", Gemini 8k)
+   *  Only sent to providers/models that support reasoning; hidden in the
+   *  UI otherwise. Defaults to "off". */
+  reasoning?: "off" | "low" | "medium" | "high";
   parametersExpanded?: boolean; // Collapse state for inline parameter display
   status: NodeStatus;
   error: string | null;
@@ -875,6 +885,7 @@ export interface LLMNodeDefaults {
   model?: LLMModelType;
   temperature?: number;
   maxTokens?: number;
+  reasoning?: "off" | "low" | "medium" | "high";
 }
 
 export interface NodeDefaultsConfig {

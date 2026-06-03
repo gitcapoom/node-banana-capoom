@@ -111,12 +111,73 @@ function googleImagePart(img: string): { inlineData: { mimeType: string; data: s
 type GooglePart = { inlineData: { mimeType: string; data: string } } | { text: string };
 type GoogleContent = { role: "user" | "model"; parts: GooglePart[] };
 
+// ─── Reasoning / thinking ─────────────────────────────────────────
+// Cross-provider dial-up for "think more before answering". Each
+// provider exposes a different native parameter — we map a single
+// off/low/medium/high level to whichever shape applies.
+
+export type ReasoningLevel = "off" | "low" | "medium" | "high";
+
+/**
+ * Does this provider+model accept a reasoning/thinking parameter?
+ * Reasoning-era models (o1+, GPT-5+, Claude 3.7 Sonnet / 4+, Gemini 2.5+)
+ * do; everything else either ignores it or returns 400.
+ */
+function supportsReasoning(provider: string, model: string): boolean {
+  const m = model.toLowerCase();
+  if (provider === "openai") {
+    // o1/o3/o4 family + GPT-5 family.
+    return /^o[134](-|$)/.test(m) || /^gpt-5/.test(m);
+  }
+  if (provider === "anthropic") {
+    // Claude 3.7 Sonnet, all Claude 4.x+ (Opus / Sonnet / Haiku).
+    return /^claude-3-7-sonnet/.test(m) || /^claude-(opus|sonnet|haiku)-[4-9]/.test(m);
+  }
+  if (provider === "google") {
+    if (!/^gemini-(2\.5|3)/.test(m)) return false;
+    // The image-gen and TTS Gemini variants don't expose thinkingConfig.
+    if (/-image\b/.test(m) || /-tts\b/.test(m)) return false;
+    return true;
+  }
+  return false;
+}
+
+/** Anthropic `thinking.budget_tokens`. Higher = deeper reasoning, costs
+ *  more output tokens. Note: the budget is *subtracted* from max_tokens,
+ *  so users dialing this up may need to bump Max Tokens too. */
+function anthropicThinkingBudget(level: ReasoningLevel): number {
+  switch (level) {
+    case "low": return 2048;
+    case "medium": return 8192;
+    case "high": return 16384;
+    default: return 0;
+  }
+}
+
+/** OpenAI's `reasoning_effort`. "minimal" is opt-out-style on GPT-5;
+ *  we treat "off" as omit so the provider uses its default rather than
+ *  silently weakening quality. */
+function openaiReasoningEffort(level: ReasoningLevel): "low" | "medium" | "high" | null {
+  return level === "off" ? null : level;
+}
+
+/** Google `thinkingConfig.thinkingBudget`. -1 = let the model decide. */
+function geminiThinkingBudget(level: ReasoningLevel): number {
+  switch (level) {
+    case "low": return 1024;
+    case "medium": return -1;
+    case "high": return 8192;
+    default: return 0;
+  }
+}
+
 async function generateWithGoogle(
   messages: ConversationTurn[],
   system: string | undefined,
   model: LLMModelType,
   temperature: number,
   maxTokens: number,
+  reasoning: ReasoningLevel,
   requestId?: string,
   userApiKey?: string | null
 ): Promise<string> {
@@ -160,6 +221,12 @@ async function generateWithGoogle(
     contents.push({ role: m.role === "assistant" ? "model" : "user", parts });
   }
 
+  // Reasoning: Gemini 2.5+ thinking variants accept a thinkingConfig.
+  // -1 means "let the model decide" (dynamic budget). Skip the field
+  // entirely for off so unsupported models don't 400.
+  const useReasoning = reasoning !== "off" && supportsReasoning("google", modelId);
+  const thinkingBudget = useReasoning ? geminiThinkingBudget(reasoning) : null;
+
   const startTime = Date.now();
   const response = await ai.models.generateContent({
     model: modelId,
@@ -168,6 +235,7 @@ async function generateWithGoogle(
       temperature,
       maxOutputTokens: maxTokens,
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+      ...(thinkingBudget !== null ? { thinkingConfig: { thinkingBudget } } : {}),
     },
   });
   const duration = Date.now() - startTime;
@@ -202,6 +270,7 @@ async function generateWithOpenAI(
   model: LLMModelType,
   temperature: number,
   maxTokens: number,
+  reasoning: ReasoningLevel,
   requestId?: string,
   userApiKey?: string | null
 ): Promise<string> {
@@ -255,6 +324,13 @@ async function generateWithOpenAI(
     }
   }
 
+  // Reasoning: o1/o3/o4/GPT-5 family accept `reasoning_effort`. For all
+  // other OpenAI models the field is silently ignored — but we still
+  // gate on supportsReasoning so the wire payload stays clean.
+  const effort = reasoning !== "off" && supportsReasoning("openai", modelId)
+    ? openaiReasoningEffort(reasoning)
+    : null;
+
   const startTime = Date.now();
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -270,6 +346,7 @@ async function generateWithOpenAI(
       // instead"). `max_completion_tokens` is supported across the entire
       // current chat-completions family, so we use it universally.
       max_completion_tokens: maxTokens,
+      ...(effort ? { reasoning_effort: effort } : {}),
     }),
   });
   const duration = Date.now() - startTime;
@@ -337,6 +414,7 @@ async function generateWithAnthropic(
   model: LLMModelType,
   temperature: number,
   maxTokens: number,
+  reasoning: ReasoningLevel,
   requestId?: string,
   userApiKey?: string | null
 ): Promise<string> {
@@ -379,6 +457,21 @@ async function generateWithAnthropic(
     }
   }
 
+  // Reasoning: extended thinking. Anthropic requires temperature to be
+  // omitted (or =1) whenever thinking is enabled, AND the thinking
+  // budget is *deducted from* max_tokens — so we need to ensure the
+  // budget fits with headroom for the actual reply.
+  const useReasoning = reasoning !== "off" && supportsReasoning("anthropic", modelId);
+  const thinkBudget = useReasoning ? anthropicThinkingBudget(reasoning) : 0;
+  // Reserve at least 1024 tokens for the visible reply on top of thinking;
+  // bump max_tokens automatically if the user's slider would leave no room.
+  const effectiveMaxTokens = thinkBudget > 0
+    ? Math.max(maxTokens, thinkBudget + 1024)
+    : maxTokens;
+  const tempForRequest = thinkBudget > 0
+    ? null
+    : (anthropicAcceptsTemperature(modelId) ? temperature : null);
+
   const startTime = Date.now();
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -390,9 +483,10 @@ async function generateWithAnthropic(
     body: JSON.stringify({
       model: modelId,
       messages: apiMessages,
-      ...(anthropicAcceptsTemperature(modelId) ? { temperature } : {}),
-      max_tokens: maxTokens,
+      ...(tempForRequest !== null ? { temperature: tempForRequest } : {}),
+      max_tokens: effectiveMaxTokens,
       ...(system ? { system } : {}),
+      ...(thinkBudget > 0 ? { thinking: { type: "enabled", budget_tokens: thinkBudget } } : {}),
     }),
   });
   const duration = Date.now() - startTime;
@@ -408,7 +502,12 @@ async function generateWithAnthropic(
   }
 
   const data = await response.json();
-  const text = data.content?.[0]?.text;
+  // With extended thinking the response array starts with `thinking`
+  // blocks; find the first text block instead of blindly grabbing [0].
+  type AnthropicResponseBlock = { type: string; text?: string };
+  const blocks: AnthropicResponseBlock[] = Array.isArray(data.content) ? data.content : [];
+  const textBlock = blocks.find((b) => b.type === "text" && typeof b.text === "string");
+  const text = textBlock?.text;
 
   if (!text) {
     logger.error('api.error', 'No text in Anthropic response', { requestId });
@@ -442,7 +541,8 @@ export async function POST(request: NextRequest) {
       provider,
       model,
       temperature = 0.7,
-      maxTokens = 1024
+      maxTokens = 1024,
+      reasoning = "off",
     } = body;
 
     // Normalise to a single internal shape (`messages[]`). New multi-turn
@@ -490,11 +590,11 @@ export async function POST(request: NextRequest) {
     let text: string;
 
     if (provider === "google") {
-      text = await generateWithGoogle(normMessages, system, model, temperature, maxTokens, requestId, geminiApiKey);
+      text = await generateWithGoogle(normMessages, system, model, temperature, maxTokens, reasoning, requestId, geminiApiKey);
     } else if (provider === "openai") {
-      text = await generateWithOpenAI(normMessages, system, model, temperature, maxTokens, requestId, openaiApiKey);
+      text = await generateWithOpenAI(normMessages, system, model, temperature, maxTokens, reasoning, requestId, openaiApiKey);
     } else if (provider === "anthropic") {
-      text = await generateWithAnthropic(normMessages, system, model, temperature, maxTokens, requestId, anthropicApiKey);
+      text = await generateWithAnthropic(normMessages, system, model, temperature, maxTokens, reasoning, requestId, anthropicApiKey);
     } else {
       logger.warn('api.llm', 'Unknown provider requested', { requestId, provider });
       return NextResponse.json<LLMGenerateResponse>(

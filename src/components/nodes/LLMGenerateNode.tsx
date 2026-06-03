@@ -161,6 +161,37 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     return [{ value: nodeData.model, label: `${nodeData.model} (saved)` }, ...baseModels];
   }, [baseModels, nodeData.model]);
 
+  // Auto-fill the latest model when none is set. New nodes are created
+  // with `model: ""` so this picks up the live list's freshest entry as
+  // soon as the fetch resolves. Only fires while model is empty — a user
+  // who explicitly picks an older model from the dropdown keeps it.
+  useEffect(() => {
+    if (!nodeData.model && baseModels.length > 0) {
+      updateNodeData(id, { model: baseModels[0].value });
+    }
+  }, [id, nodeData.model, baseModels, updateNodeData]);
+
+  // Reasoning support gating — hide the dial when the selected model
+  // doesn't accept it. Mirrors the helpers in /api/llm/route.ts.
+  const supportsReasoning = useMemo(() => {
+    const m = (nodeData.model || "").toLowerCase();
+    if (provider === "openai") return /^o[134](-|$)/.test(m) || /^gpt-5/.test(m);
+    if (provider === "anthropic") return /^claude-3-7-sonnet/.test(m) || /^claude-(opus|sonnet|haiku)-[4-9]/.test(m);
+    if (provider === "google") {
+      if (!/^gemini-(2\.5|3)/.test(m)) return false;
+      if (/-image\b/.test(m) || /-tts\b/.test(m)) return false;
+      return true;
+    }
+    return false;
+  }, [provider, nodeData.model]);
+  const reasoningLevel = (nodeData.reasoning ?? "off") as "off" | "low" | "medium" | "high";
+  const handleReasoningChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      updateNodeData(id, { reasoning: e.target.value as "off" | "low" | "medium" | "high" });
+    },
+    [id, updateNodeData],
+  );
+
   return (
     <BaseNode
       id={id}
@@ -245,6 +276,24 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                 className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
               />
             </div>
+
+            {/* Reasoning (only when the selected model supports it) */}
+            {supportsReasoning && (
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] text-neutral-400 shrink-0">Reasoning</label>
+                <select
+                  value={reasoningLevel}
+                  onChange={handleReasoningChange}
+                  className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
+                  title="Higher = more thinking before reply. Costs more output tokens."
+                >
+                  <option value="off">Off (provider default)</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+            )}
 
             {/* ─── Conversation mode ───────────────────────── */}
             <div className="border-t border-neutral-800 pt-1.5 mt-1">

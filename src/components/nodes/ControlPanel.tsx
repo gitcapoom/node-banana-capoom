@@ -1022,6 +1022,13 @@ function LLMControls({ node }: { node: Node }) {
     updateNodeData(node.id, { conversation: [], outputText: null });
   }, [node.id, conversation.length, updateNodeData]);
 
+  const handleReasoningChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      updateNodeData(node.id, { reasoning: e.target.value as "off" | "low" | "medium" | "high" });
+    },
+    [node.id, updateNodeData],
+  );
+
   const provider = nodeData.provider || "google";
   const baseModels = modelLists[provider] || FALLBACK_MODELS[provider];
   // Tack a non-listed saved model onto the top of the dropdown so it can
@@ -1031,6 +1038,27 @@ function LLMControls({ node }: { node: Node }) {
     if (baseModels.some((m) => m.value === nodeData.model)) return baseModels;
     return [{ value: nodeData.model, label: `${nodeData.model} (saved)` }, ...baseModels];
   }, [baseModels, nodeData.model]);
+
+  // Auto-fill the newest model when none is set — see LLMGenerateNode.
+  useEffect(() => {
+    if (!nodeData.model && baseModels.length > 0) {
+      updateNodeData(node.id, { model: baseModels[0].value });
+    }
+  }, [node.id, nodeData.model, baseModels, updateNodeData]);
+
+  // Reasoning support gating (mirrors /api/llm/route.ts).
+  const supportsReasoning = useMemo(() => {
+    const m = (nodeData.model || "").toLowerCase();
+    if (provider === "openai") return /^o[134](-|$)/.test(m) || /^gpt-5/.test(m);
+    if (provider === "anthropic") return /^claude-3-7-sonnet/.test(m) || /^claude-(opus|sonnet|haiku)-[4-9]/.test(m);
+    if (provider === "google") {
+      if (!/^gemini-(2\.5|3)/.test(m)) return false;
+      if (/-image\b/.test(m) || /-tts\b/.test(m)) return false;
+      return true;
+    }
+    return false;
+  }, [provider, nodeData.model]);
+  const reasoningLevel = (nodeData.reasoning ?? "off") as "off" | "low" | "medium" | "high";
 
   return (
     <div className="space-y-3">
@@ -1100,6 +1128,23 @@ function LLMControls({ node }: { node: Node }) {
           className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
         />
       </div>
+
+      {supportsReasoning && (
+        <div>
+          <label className="block text-xs font-medium text-neutral-300 mb-1">Reasoning</label>
+          <select
+            value={reasoningLevel}
+            onChange={handleReasoningChange}
+            title="Higher = more thinking before reply. Costs more output tokens."
+            className="nodrag nopan w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="off">Off (provider default)</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+      )}
 
       {/* ─── Conversation mode ─────────────────────────────── */}
       <div className="border-t border-neutral-700 pt-3">

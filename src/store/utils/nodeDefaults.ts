@@ -248,14 +248,20 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
     case "llmGenerate": {
       const nodeDefaults = loadNodeDefaults();
       const llmDefaults = nodeDefaults.llm;
+      // Model defaults to "" so the LLMGenerateNode auto-fills with the
+      // live list's first entry (= the provider's newest model) once the
+      // /api/llm/models fetch resolves. If the user explicitly picks a
+      // different model from the dropdown, that gets saved and respected
+      // — the auto-fill only runs while model is empty.
       return {
         inputPrompt: null,
         inputImages: [],
         outputText: null,
         provider: llmDefaults?.provider ?? "google",
-        model: llmDefaults?.model ?? "gemini-3-flash-preview",
+        model: llmDefaults?.model ?? "",
         temperature: llmDefaults?.temperature ?? 0.7,
         maxTokens: llmDefaults?.maxTokens ?? 8192,
+        reasoning: llmDefaults?.reasoning ?? "off",
         status: "idle",
         error: null,
         lastGenerationCost: null,

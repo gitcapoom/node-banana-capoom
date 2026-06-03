@@ -65,6 +65,10 @@ export interface LLMGenerateRequest {
   model: LLMModelType;
   temperature?: number;
   maxTokens?: number;
+  /** Provider-agnostic reasoning / thinking effort. The route translates
+   *  this into each provider's native param: Anthropic `thinking.budget_tokens`,
+   *  OpenAI `reasoning_effort`, Google `thinkingConfig.thinkingBudget`. */
+  reasoning?: "off" | "low" | "medium" | "high";
 }
 
 export interface LLMGenerateResponse {

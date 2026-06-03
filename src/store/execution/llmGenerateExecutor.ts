@@ -130,6 +130,7 @@ export async function executeLlmGenerate(
         model: nodeData.model,
         temperature: nodeData.temperature,
         maxTokens: nodeData.maxTokens,
+        ...(nodeData.reasoning && nodeData.reasoning !== "off" ? { reasoning: nodeData.reasoning } : {}),
       }),
       ...(signal ? { signal } : {}),
     });
