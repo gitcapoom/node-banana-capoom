@@ -31,6 +31,39 @@ function resolveModel(aliases: Record<string, string>, model: string): string {
 }
 
 /**
+ * Per-provider hard limits for inline image payloads (data URLs, decoded
+ * to raw bytes). Larger images get auto-compressed via `compressImage`
+ * before hitting the wire. Numbers are the providers' documented limits:
+ *
+ *   Anthropic: 5 MB per image (vision spec)
+ *   OpenAI:    20 MB per image (chat completions vision)
+ *   Google:    20 MB per inline blob (Gemini inlineData spec)
+ *
+ * We compress AT the limit (not just over it) so a marginal image
+ * doesn't sit right at the threshold and trip transport-side variation.
+ */
+const PROVIDER_IMAGE_LIMITS = {
+  anthropic: 5 * 1024 * 1024,
+  openai: 20 * 1024 * 1024,
+  google: 20 * 1024 * 1024,
+} as const;
+
+/**
+ * If a base64 image data URL exceeds the given byte limit, run it through
+ * the shared `compressImage` (PNG→JPEG, then optional 50% resize).
+ * Non-data URLs and already-small images pass through unchanged.
+ */
+async function enforceImageSize(img: string, limitBytes: number, providerLabel: string): Promise<string> {
+  if (!img.startsWith("data:")) return img;
+  const match = img.match(/^data:(.+?);base64,(.+)$/);
+  if (!match) return img;
+  const rawSize = Math.ceil(match[2].length * 3 / 4);
+  if (rawSize <= limitBytes) return img;
+  console.log(`[LLM/${providerLabel}] Image ${(rawSize / 1024 / 1024).toFixed(1)}MB exceeds ${(limitBytes / 1024 / 1024).toFixed(0)}MB limit, compressing...`);
+  return await compressImage(img);
+}
+
+/**
  * Inspect the leading bytes of base64-encoded image data and return its
  * actual MIME type. Upstream nodes sometimes label a PNG as
  * `image/jpeg` (or worse, default everything to PNG) — OpenAI rejects
@@ -112,15 +145,20 @@ async function generateWithGoogle(
 
   // Translate turns into Gemini's `contents` array. Assistant role is
   // `model` in Gemini parlance. Each turn's images become inlineData parts
-  // followed by a text part.
-  const contents: GoogleContent[] = messages.map((m) => {
+  // followed by a text part. Async because oversized images go through
+  // sharp-based compression before encoding.
+  const contents: GoogleContent[] = [];
+  for (const m of messages) {
     const parts: GooglePart[] = [];
     if (m.images && m.images.length > 0) {
-      for (const img of m.images) parts.push(googleImagePart(img));
+      for (const img of m.images) {
+        const sized = await enforceImageSize(img, PROVIDER_IMAGE_LIMITS.google, "google");
+        parts.push(googleImagePart(sized));
+      }
     }
     parts.push({ text: m.text });
-    return { role: m.role === "assistant" ? "model" : "user", parts };
-  });
+    contents.push({ role: m.role === "assistant" ? "model" : "user", parts });
+  }
 
   const startTime = Date.now();
   const response = await ai.models.generateContent({
@@ -196,17 +234,22 @@ async function generateWithOpenAI(
   if (system) apiMessages.push({ role: "system", content: system });
   for (const m of messages) {
     if (m.role === "user" && m.images && m.images.length > 0) {
-      // Normalise each data URL — upstream MIME labels are often wrong
-      // (Generate Image / Crop frequently emit PNG bytes labelled as JPEG
-      // or vice versa). OpenAI rejects mismatched URLs as "Invalid image".
-      const content: OpenAIContentBlock[] = [
-        { type: "text", text: m.text },
-        ...m.images.map((img) => ({
-          type: "image_url" as const,
-          image_url: { url: normalizeImageDataUrl(img) },
-        })),
-      ];
-      apiMessages.push({ role: "user", content });
+      // First cap size (OpenAI: 20 MB / image), then normalise the data
+      // URL MIME so the prefix matches the actual bytes. Upstream nodes
+      // frequently mis-label PNG bytes as JPEG or vice versa, and OpenAI
+      // rejects mismatched URLs as "Invalid image".
+      const imageBlocks: OpenAIContentBlock[] = [];
+      for (const img of m.images) {
+        const sized = await enforceImageSize(img, PROVIDER_IMAGE_LIMITS.openai, "openai");
+        imageBlocks.push({
+          type: "image_url",
+          image_url: { url: normalizeImageDataUrl(sized) },
+        });
+      }
+      apiMessages.push({
+        role: "user",
+        content: [{ type: "text", text: m.text }, ...imageBlocks],
+      });
     } else {
       apiMessages.push({ role: m.role, content: m.text });
     }
@@ -263,8 +306,6 @@ type AnthropicContentBlock =
   | { type: "image"; source: { type: "base64"; media_type: string; data: string } };
 type AnthropicMessage = { role: "user" | "assistant"; content: string | AnthropicContentBlock[] };
 
-const ANTHROPIC_IMAGE_LIMIT = 5 * 1024 * 1024; // 5 MB
-
 /**
  * Anthropic's "thinking-era" Opus models (Opus 4.5 onward and any Opus 5+)
  * reject explicit `temperature` — the API returns 400 with
@@ -279,14 +320,7 @@ function anthropicAcceptsTemperature(model: string): boolean {
 
 /** Convert a (possibly oversized) data URL into Anthropic's image block. */
 async function anthropicImageBlock(imgArg: string): Promise<AnthropicContentBlock> {
-  let img = imgArg;
-  // Proactively compress images that exceed Anthropic's 5MB limit
-  const rawMatch = img.match(/^data:(.+?);base64,(.+)$/);
-  const rawSize = rawMatch ? Math.ceil(rawMatch[2].length * 3 / 4) : 0;
-  if (rawSize > ANTHROPIC_IMAGE_LIMIT) {
-    console.log(`[LLM] Image ${(rawSize / 1024 / 1024).toFixed(1)}MB exceeds 5MB limit, compressing...`);
-    img = await compressImage(img);
-  }
+  const img = await enforceImageSize(imgArg, PROVIDER_IMAGE_LIMITS.anthropic, "anthropic");
   const matches = img.match(/^data:(.+?);base64,(.+)$/);
   const base64Data = matches ? matches[2] : img;
   const declared = matches ? matches[1] : "image/png";
