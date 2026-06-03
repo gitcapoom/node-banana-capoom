@@ -91,10 +91,13 @@ async function fetchOpenAI(apiKey: string): Promise<ModelEntry[]> {
   const all: OpenAIModel[] = Array.isArray(data?.data) ? data.data : [];
 
   // Heuristic filter — the /v1/models endpoint returns embeddings, audio,
-  // image, moderation, and other non-chat models too. Keep only models we
-  // can plausibly send to /v1/chat/completions.
+  // image, moderation, completions-only, and other non-chat models too.
+  // Keep only models we can plausibly send to /v1/chat/completions.
+  //
+  // - `instruct` is the legacy v1/completions endpoint family
+  //   (e.g. gpt-3.5-turbo-instruct) — separate endpoint, not chat.
   const KEEP = /^(gpt-|o[134])/i;
-  const DROP = /(embed|moderation|whisper|tts|realtime|audio|transcribe|search|image|dall-e|babbage|davinci|moonshine)/i;
+  const DROP = /(embed|moderation|whisper|tts|realtime|audio|transcribe|search|image|dall-e|babbage|davinci|moonshine|instruct)/i;
 
   return all
     .filter((m) => KEEP.test(m.id) && !DROP.test(m.id))

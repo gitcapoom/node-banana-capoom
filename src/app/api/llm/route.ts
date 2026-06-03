@@ -182,7 +182,10 @@ async function generateWithOpenAI(
       model: modelId,
       messages: apiMessages,
       temperature,
-      max_tokens: maxTokens,
+      // GPT-5+ and o1/o3/o4 reject `max_tokens` ("Use 'max_completion_tokens'
+      // instead"). `max_completion_tokens` is supported across the entire
+      // current chat-completions family, so we use it universally.
+      max_completion_tokens: maxTokens,
     }),
   });
   const duration = Date.now() - startTime;
@@ -220,6 +223,18 @@ type AnthropicContentBlock =
 type AnthropicMessage = { role: "user" | "assistant"; content: string | AnthropicContentBlock[] };
 
 const ANTHROPIC_IMAGE_LIMIT = 5 * 1024 * 1024; // 5 MB
+
+/**
+ * Anthropic's "thinking-era" Opus models (Opus 4.5 onward and any Opus 5+)
+ * reject explicit `temperature` — the API returns 400 with
+ * "`temperature` is deprecated for this model." Everything earlier
+ * (Sonnet/Haiku across all generations, Opus 4 / 4.1) still accepts it.
+ */
+function anthropicAcceptsTemperature(model: string): boolean {
+  if (/^claude-opus-4-[5-9]/.test(model)) return false;
+  if (/^claude-opus-(\d{2,}|[5-9])/.test(model)) return false;
+  return true;
+}
 
 /** Convert a (possibly oversized) data URL into Anthropic's image block. */
 async function anthropicImageBlock(imgArg: string): Promise<AnthropicContentBlock> {
@@ -309,7 +324,7 @@ async function generateWithAnthropic(
     body: JSON.stringify({
       model: modelId,
       messages: apiMessages,
-      temperature,
+      ...(anthropicAcceptsTemperature(modelId) ? { temperature } : {}),
       max_tokens: maxTokens,
       ...(system ? { system } : {}),
     }),
