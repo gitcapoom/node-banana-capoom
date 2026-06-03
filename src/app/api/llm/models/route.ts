@@ -181,9 +181,12 @@ export async function GET(request: NextRequest): Promise<NextResponse<LlmModelsR
 
   return NextResponse.json(result, {
     headers: {
-      // Short cache so a hot reload doesn't re-hit the providers, but new
-      // model launches show up within a few minutes.
-      "Cache-Control": "private, max-age=300",
+      // Very short cache so changes to the server-side filter / a fresh
+      // provider model launch are reflected within ~30s of the next
+      // dropdown open. The client hook also fetches with `cache:
+      // 'no-store'` and cache-busts on explicit refresh, so this is just
+      // a safety net for the passive path.
+      "Cache-Control": "private, max-age=30",
     },
   });
 }

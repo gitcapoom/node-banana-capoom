@@ -60,10 +60,16 @@ let modelCacheKey: string | null = null;
 
 async function fetchModelLists(
   headers: Record<string, string>,
+  bustParam: string | null = null,
 ): Promise<LlmModelLists> {
   const lists: LlmModelLists = { google: [], openai: [], anthropic: [] };
   try {
-    const res = await fetch("/api/llm/models", { headers });
+    // `cache: 'no-store'` skips the browser HTTP cache so explicit
+    // refreshes always hit the route. A query-string cache-buster on
+    // explicit refresh also defeats any intermediary (service workers,
+    // dev-tools "preserve cache", etc.).
+    const url = bustParam ? `/api/llm/models?_=${bustParam}` : "/api/llm/models";
+    const res = await fetch(url, { headers, cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data: {
       google: { id: string; label: string }[];
@@ -115,7 +121,10 @@ export function useLlmModelLists(): UseLlmModelLists {
       Object.assign(headers, buildLlmHeaders("google", providerSettings));
       Object.assign(headers, buildLlmHeaders("openai", providerSettings));
       Object.assign(headers, buildLlmHeaders("anthropic", providerSettings));
-      modelCachePromise = fetchModelLists(headers);
+      // Cache-bust on every explicit refresh tick > 0 so intermediaries
+      // can't serve a stale response (e.g. devtools "Preserve cache").
+      const bust = refreshTick > 0 ? `${refreshTick}-${performance.now()}` : null;
+      modelCachePromise = fetchModelLists(headers, bust);
     }
     let cancelled = false;
     modelCachePromise.then((lists) => {
