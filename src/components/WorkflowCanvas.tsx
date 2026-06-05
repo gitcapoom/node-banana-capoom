@@ -49,6 +49,7 @@ import {
   PanoViewerNode,
   PanoEditorNode,
   MaskPainterNode,
+  RotoNode,
   VideoTrimNode,
   VideoFrameGrabNode,
   RouterNode,
@@ -126,6 +127,7 @@ const nodeTypes: NodeTypes = {
   panoViewer: PanoViewerNode,
   panoEditor: PanoEditorNode,
   maskPainter: MaskPainterNode,
+  roto: RotoNode,
   videoInput: VideoInputNode,
   imageCrop: ImageCropNode,
   mirror: MirrorNode,
@@ -236,6 +238,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "panoEditor":
       return { inputs: ["image-0", "image-1", "text"], outputs: ["image"] };
     case "maskPainter":
+      return { inputs: ["image"], outputs: ["image"] };
+    case "roto":
       return { inputs: ["image"], outputs: ["image"] };
     case "videoInput":
       return { inputs: ["video"], outputs: ["video"] };
@@ -546,6 +550,7 @@ export function WorkflowCanvas() {
     panoCrop: 'Pano Crop',
     panoEditor: 'Pano Editor',
     maskPainter: 'Mask Painter',
+    roto: 'Roto',
     videoInput: 'Video Input',
     glbViewer: '3D Viewer',
     imageCrop: 'Image Crop',
@@ -1341,12 +1346,12 @@ export function WorkflowCanvas() {
       // Create the new node at the drop position
       const newNodeId = addNode(nodeType, flowPosition);
 
-      // If creating an annotation or mask painter node from an image source, populate it with the source image
-      if ((nodeType === "annotation" || nodeType === "maskPainter") && connectionType === "source" && handleType === "image" && sourceNodeId) {
+      // If creating an annotation, mask painter, or roto node from an image source, populate it with the source image
+      if ((nodeType === "annotation" || nodeType === "maskPainter" || nodeType === "roto") && connectionType === "source" && handleType === "image" && sourceNodeId) {
         const sourceImage = getImageFromNode(sourceNodeId);
         if (sourceImage) {
-          if (nodeType === "maskPainter") {
-            // Mask painter: set sourceImage for the modal reference, but NOT outputMask — preview stays empty/black
+          if (nodeType === "maskPainter" || nodeType === "roto") {
+            // Mask painter / roto: set sourceImage for the modal reference, but NOT the matte — preview stays empty/black
             updateNodeData(newNodeId, { sourceImage });
           } else {
             // Annotation: set both sourceImage and outputImage (annotation passes through the image)
@@ -1391,10 +1396,10 @@ export function WorkflowCanvas() {
       } else if (handleType === "image") {
         if (nodeType === "output") {
           targetHandleId = "universal";
-        } else if (nodeType === "annotation" || nodeType === "maskPainter" || nodeType === "splitGrid" || nodeType === "outputGallery" || nodeType === "imageCompare") {
+        } else if (nodeType === "annotation" || nodeType === "maskPainter" || nodeType === "roto" || nodeType === "splitGrid" || nodeType === "outputGallery" || nodeType === "imageCompare") {
           targetHandleId = "image";
-          // annotation and maskPainter also have an image output
-          if (nodeType === "annotation" || nodeType === "maskPainter") {
+          // annotation, maskPainter, and roto also have an image output
+          if (nodeType === "annotation" || nodeType === "maskPainter" || nodeType === "roto") {
             sourceHandleIdForNewNode = "image";
           }
         } else if (nodeType === "nanoBanana" || nodeType === "generateVideo") {
@@ -1768,6 +1773,7 @@ export function WorkflowCanvas() {
             panoViewer: { width: 300, height: 280 },
             panoEditor: { width: 300, height: 300 },
             maskPainter: { width: 260, height: 300 },
+            roto: { width: 260, height: 300 },
             videoInput: { width: 320, height: 300 },
             imageCrop: { width: 300, height: 280 },
             mirror: { width: 300, height: 300 },
@@ -2504,6 +2510,8 @@ export function WorkflowCanvas() {
                 return "#fb923c"; // orange-400 (panorama editor)
               case "maskPainter":
                 return "#a3a3a3"; // neutral-400 (mask painting)
+              case "roto":
+                return "#38bdf8"; // sky-400 (roto shapes)
               case "videoInput":
                 return "#8b5cf6"; // violet-600 (video input)
               default:

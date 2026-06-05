@@ -475,6 +475,40 @@ export async function executeMaskPainter(ctx: NodeExecutionContext): Promise<voi
 }
 
 /**
+ * Roto node: mirror the upstream image into sourceImage, then rasterize the
+ * stored Bezier shapes into a white-on-black matte. Unlike MaskPainter,
+ * Roto's rasterizer is a pure function, so a headless workflow run
+ * regenerates the matte from the stored shapes without reopening the editor.
+ */
+export async function executeRoto(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const image = images[0] || null;
+    const data = node.data as import("@/types").RotoNodeData;
+    if (image && image !== data.sourceImage) {
+      updateNodeData(node.id, { sourceImage: image, sourceImageRef: undefined });
+    }
+    if (!data.shapes || data.shapes.length === 0) {
+      if (data.outputMask !== null) updateNodeData(node.id, { outputMask: null });
+      return;
+    }
+    const w = data.imageWidth ?? 0;
+    const h = data.imageHeight ?? 0;
+    if (w > 0 && h > 0) {
+      const { rasterizeRoto } = await import("@/utils/rasterizeRoto");
+      const mask = rasterizeRoto(data.shapes, w, h, { invert: data.invert });
+      updateNodeData(node.id, { outputMask: mask, outputMaskRef: undefined });
+    }
+    // else: shapes authored before imageWidth/Height stored — keep existing outputMask.
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Roto node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
  * Image Crop node: receives upstream image and applies the persisted crop region.
  * If no region is defined, passes the image through unchanged.
  * Crop region uses relative (0-1) coordinates so it adapts to any input resolution.

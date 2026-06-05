@@ -31,6 +31,7 @@ import {
   PanoViewerNodeData,
   PanoEditorNodeData,
   MaskPainterNodeData,
+  RotoNodeData,
   VideoInputNodeData,
   ImageCropNodeData,
   MirrorNodeData,
@@ -83,6 +84,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   panoViewer: { width: 300, height: 280 },
   panoEditor: { width: 300, height: 300 },
   maskPainter: { width: 260, height: 300 },
+  roto: { width: 260, height: 300 },
   videoInput: { width: 320, height: 300 },
   imageCrop: { width: 300, height: 280 },
   mirror: { width: 300, height: 300 },
@@ -459,6 +461,13 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         blurRadius: 0,
         invertMask: false,
       } as MaskPainterNodeData;
+    case "roto":
+      return {
+        sourceImage: null,
+        shapes: [],
+        outputMask: null,
+        invert: false,
+      } as RotoNodeData;
     case "videoInput":
       return {
         videoFile: null,

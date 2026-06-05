@@ -12,10 +12,12 @@ import type {
   BaseNodeData,
 } from "./annotation";
 import type { MaskPainterNodeData } from "./maskPainter";
+import type { RotoNodeData } from "./roto";
 
 // Re-export types from annotation and mask painter for convenience
 export type { AnnotationNodeData, BaseNodeData };
 export type { MaskPainterNodeData };
+export type { RotoNodeData };
 
 // Import from domain files to avoid circular dependencies
 import type { AspectRatio, Resolution, ModelType } from "./models";
@@ -56,6 +58,7 @@ export type NodeType =
   | "panoViewer"
   | "panoEditor"
   | "maskPainter"
+  | "roto"
   | "videoInput"
   | "imageCrop"
   | "mirror"
@@ -867,6 +870,7 @@ export type WorkflowNodeData =
   | PanoViewerNodeData
   | PanoEditorNodeData
   | MaskPainterNodeData
+  | RotoNodeData
   | VideoInputNodeData
   | ImageCropNodeData
   | MirrorNodeData

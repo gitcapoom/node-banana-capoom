@@ -44,6 +44,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "panoViewer",
   "panoEditor",
   "maskPainter",
+  "roto",
   "imageCrop",
   "mirror",
   "cubemapEquirect",
@@ -88,6 +89,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   panoViewer: { width: 300, height: 280 },
   panoEditor: { width: 300, height: 300 },
   maskPainter: { width: 260, height: 300 },
+  roto: { width: 260, height: 300 },
   imageCrop: { width: 300, height: 280 },
   mirror: { width: 300, height: 300 },
   cubemapEquirect: { width: 320, height: 320 },
@@ -541,6 +543,13 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         brushSize: 30,
         blurRadius: 0,
         invertMask: false,
+      };
+    case "roto":
+      return {
+        sourceImage: null,
+        shapes: [],
+        outputMask: null,
+        invert: false,
       };
     case "imageCrop":
       return {

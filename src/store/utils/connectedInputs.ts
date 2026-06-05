@@ -155,6 +155,8 @@ export function getSourceOutput(
     return { type: "image", value: (sourceNode.data as PanoEditorNodeData).outputImage || null };
   } else if (sourceNode.type === "maskPainter") {
     return { type: "image", value: (sourceNode.data as MaskPainterNodeData).outputMask || null };
+  } else if (sourceNode.type === "roto") {
+    return { type: "image", value: (sourceNode.data as import("@/types").RotoNodeData).outputMask || null };
   } else if (sourceNode.type === "videoInput") {
     return { type: "video", value: (sourceNode.data as VideoInputNodeData).videoFile };
   } else if (sourceNode.type === "imageCrop") {

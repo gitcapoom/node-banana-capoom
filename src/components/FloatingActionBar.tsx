@@ -43,6 +43,7 @@ const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: str
       { type: "annotation", label: "Annotate" },
       { type: "panoEditor", label: "Pano Edit" },
       { type: "maskPainter", label: "Mask Paint" },
+      { type: "roto", label: "Roto" },
       { type: "imageCrop", label: "Image Crop" },
       { type: "mirror", label: "Mirror" },
       { type: "cubemapEquirect", label: "Cube ⇄ Pano" },
