@@ -132,14 +132,48 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
   );
 
   // Wheel popover anchored to the swatch (portaled to body so it isn't
-  // clipped by the node's scroll container).
+  // clipped by the node's scroll container). Position is clamped into the
+  // viewport on open and the user can drag it by its header.
+  const POP_W = 210;
+  const POP_H = 220;
   const swatchRef = useRef<HTMLButtonElement>(null);
   const [wheelOpen, setWheelOpen] = useState(false);
   const [popPos, setPopPos] = useState<{ left: number; top: number } | null>(null);
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+
+  const clampPos = (left: number, top: number) => ({
+    left: Math.max(8, Math.min(window.innerWidth - POP_W - 8, left)),
+    top: Math.max(8, Math.min(window.innerHeight - POP_H - 8, top)),
+  });
+
   const openWheel = useCallback(() => {
     const rect = swatchRef.current?.getBoundingClientRect();
-    if (rect) setPopPos({ left: rect.left, top: rect.bottom + 4 });
+    if (rect) {
+      // Prefer below the swatch; flip above if it would overflow the bottom.
+      let top = rect.bottom + 4;
+      if (top + POP_H > window.innerHeight) top = rect.top - POP_H - 4;
+      setPopPos(clampPos(rect.left, top));
+    }
     setWheelOpen(true);
+  }, []);
+
+  const onHeaderDown = useCallback((e: React.PointerEvent) => {
+    e.stopPropagation();
+    setPopPos((cur) => {
+      if (cur) dragRef.current = { dx: e.clientX - cur.left, dy: e.clientY - cur.top };
+      return cur;
+    });
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+  }, []);
+  const onHeaderMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    e.stopPropagation();
+    setPopPos(clampPos(e.clientX - dragRef.current.dx, e.clientY - dragRef.current.dy));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const onHeaderUp = useCallback((e: React.PointerEvent) => {
+    dragRef.current = null;
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
   }, []);
   useEffect(() => {
     if (!wheelOpen) return;
@@ -233,12 +267,29 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
         {wheelOpen && popPos && createPortal(
           <div
             id="grade-wheel-pop"
-            className="fixed z-[300] bg-neutral-900/95 border border-neutral-700 rounded-lg p-3 shadow-2xl backdrop-blur-sm"
-            style={{ left: popPos.left, top: popPos.top }}
+            className="fixed z-[300] bg-neutral-900/95 border border-neutral-700 rounded-lg shadow-2xl backdrop-blur-sm"
+            style={{ left: popPos.left, top: popPos.top, width: POP_W }}
             onMouseDown={(e) => e.stopPropagation()}
           >
-            <div className="text-[10px] text-neutral-400 mb-2">{def.label}</div>
-            <div className="flex items-start gap-2">
+            {/* Draggable header */}
+            <div
+              className="flex items-center justify-between px-3 py-1.5 border-b border-neutral-800 cursor-move select-none touch-none"
+              onPointerDown={onHeaderDown}
+              onPointerMove={onHeaderMove}
+              onPointerUp={onHeaderUp}
+            >
+              <span className="text-[10px] text-neutral-300">{def.label}</span>
+              <button
+                onClick={() => setWheelOpen(false)}
+                className="w-4 h-4 flex items-center justify-center text-neutral-500 hover:text-white"
+                title="Close"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex items-start gap-2 p-3">
               <ColorWheel point={wheelPoint} onChange={onWheel} onReset={reset} />
               {/* Vertical level (master) slider */}
               <div className="flex flex-col items-center gap-1 h-[130px]">
@@ -256,7 +307,7 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
                 <span className="text-[9px] text-neutral-400 tabular-nums">{level.toFixed(2)}</span>
               </div>
             </div>
-            <div className="flex items-center justify-between mt-2">
+            <div className="flex items-center justify-between px-3 pb-3 -mt-1">
               <span className="text-[9px] text-neutral-500 tabular-nums">
                 R{value.r.toFixed(2)} G{value.g.toFixed(2)} B{value.b.toFixed(2)}
               </span>
