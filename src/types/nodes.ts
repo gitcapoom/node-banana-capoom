@@ -188,6 +188,11 @@ export interface ColorGradeNodeData extends BaseNodeData {
   multiply: GradeChannelValue | number;
   offset: GradeChannelValue | number;
   gamma: GradeChannelValue | number;
+  /** Clamp the low / high end of the output to 0 / 1. Default false so
+   *  values pass through un-clamped to the next color node (float chain).
+   *  The 8-bit thumbnail / non-color output always clamps regardless. */
+  clampBlacks?: boolean;
+  clampWhites?: boolean;
   outputImage: string | null;
   outputImageRef?: string;
 }
@@ -205,6 +210,8 @@ export interface HsvCorrectNodeData extends BaseNodeData {
   saturation: number;
   /** Multiplier; 1 = unchanged. */
   value: number;
+  clampBlacks?: boolean;
+  clampWhites?: boolean;
   outputImage: string | null;
   outputImageRef?: string;
 }
@@ -218,11 +225,13 @@ export interface ContrastAdjustNodeData extends BaseNodeData {
   sourceImageRef?: string;
   /** Multiplier on (in - pivot); 1 = unchanged, <1 flattens, >1 punches. */
   contrast: number;
-  /** 0..1. 0 = hard clip (classical linear contrast).
+  /** 0..1. 0 = linear (unbounded — passes float through).
    *  1 = full S-curve, asymptotic soft-clip. */
   rolloff: number;
   /** 0..1. Pivot of the S-curve. 0.5 = neutral grey midpoint. */
   pivot: number;
+  clampBlacks?: boolean;
+  clampWhites?: boolean;
   outputImage: string | null;
   outputImageRef?: string;
 }

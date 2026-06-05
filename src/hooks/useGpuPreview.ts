@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useMemo, useRef, type RefObject } from "react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import {
   renderShaderToCanvas,
   processImageWithShader,
   type UniformValue,
 } from "@/utils/webglProcess";
+import {
+  floatSupported,
+  hasFloat,
+  releaseColorNode,
+  renderColorNodeToCanvas,
+  commitColorNode,
+  type ShaderInput,
+} from "@/utils/colorChain";
 
 /**
  * Live GPU preview into a visible <canvas>.
@@ -86,4 +94,112 @@ export function useGpuCommit(
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeId, sourceImage, shaderSource, uniformsKey, isIdentity, delay]);
+}
+
+// ─── Chainable color node (float pipeline) ────────────────────────
+
+export interface UseColorNodeArgs {
+  id: string;
+  /** 8-bit display URL of the upstream output (fallback input + the
+   *  change-signal that re-fires effects when upstream recomputes). */
+  sourceImage: string | null;
+  /** Upstream node id IF it is another color node (so we can read its
+   *  float texture as input); null otherwise. */
+  upstreamColorNodeId: string | null;
+  shaderSource: string;
+  /** Node-specific uniforms (clamp uniforms are added automatically). */
+  uniforms: Record<string, UniformValue>;
+  clampBlacks: boolean;
+  clampWhites: boolean;
+  isIdentity: boolean;
+  nodeCanvasRef: RefObject<HTMLCanvasElement | null>;
+  overlayCanvasRef: RefObject<HTMLCanvasElement | null>;
+  overlayOpen: boolean;
+  commitDelay?: number;
+}
+
+/**
+ * Drives a chainable color node end-to-end:
+ *  - LIVE PREVIEW into the in-node canvas (+ overlay when open), reading
+ *    the upstream node's float texture when available so the preview
+ *    reflects un-clamped chain input.
+ *  - DEBOUNCED COMMIT that renders this node's float texture (for the
+ *    next color node) and writes an 8-bit display URL to `outputImage`
+ *    (for the thumbnail + any non-color downstream consumer).
+ *  - Falls back to the clamped 8-bit webglProcess path when GPU float
+ *    support is unavailable, so behaviour degrades to today's.
+ *  - Releases the node's float texture on unmount.
+ */
+export function useColorNode(args: UseColorNodeArgs): void {
+  const {
+    id, sourceImage, upstreamColorNodeId, shaderSource, uniforms,
+    clampBlacks, clampWhites, isIdentity,
+    nodeCanvasRef, overlayCanvasRef, overlayOpen, commitDelay = 220,
+  } = args;
+  const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
+
+  // Fold the clamp toggles into the uniform set the shaders expect.
+  const effUniforms: Record<string, UniformValue> = useMemo(
+    () => ({ ...uniforms, u_clampLow: clampBlacks ? 1 : 0, u_clampHigh: clampWhites ? 1 : 0 }),
+    [uniforms, clampBlacks, clampWhites],
+  );
+  const uniformsKey = JSON.stringify(effUniforms);
+
+  const effUniformsRef = useRef(effUniforms);
+  effUniformsRef.current = effUniforms;
+
+  // Resolve the shader input: upstream float texture when present, else
+  // the 8-bit display URL.
+  const resolveInput = (): ShaderInput | null => {
+    if (!sourceImage) return null;
+    if (upstreamColorNodeId && hasFloat(upstreamColorNodeId)) {
+      return { floatNodeId: upstreamColorNodeId };
+    }
+    return { url: sourceImage };
+  };
+
+  // ── Live preview (node canvas + overlay canvas) ──
+  useEffect(() => {
+    const input = resolveInput();
+    if (!input) return;
+    let cancelled = false;
+    const drawTo = async (canvas: HTMLCanvasElement | null) => {
+      if (!canvas || cancelled) return;
+      const ok = floatSupported()
+        ? await renderColorNodeToCanvas(input, shaderSource, effUniforms, canvas)
+        : false;
+      if (!ok && !cancelled && sourceImage) {
+        // 8-bit fallback (also handles the "upstream float not ready" case).
+        await renderShaderToCanvas(sourceImage, shaderSource, effUniforms, canvas)
+          .catch((e) => console.error("useColorNode preview fallback:", e));
+      }
+    };
+    drawTo(nodeCanvasRef.current);
+    if (overlayOpen) drawTo(overlayCanvasRef.current);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, sourceImage, upstreamColorNodeId, shaderSource, uniformsKey, overlayOpen]);
+
+  // ── Debounced commit (float texture + display URL) ──
+  useEffect(() => {
+    if (!sourceImage) {
+      updateNodeData(id, { outputImage: null });
+      return;
+    }
+    const handle = setTimeout(async () => {
+      const input = resolveInput();
+      if (!input || !sourceImage) return;
+      const displayUrl = await commitColorNode(
+        input, shaderSource, effUniformsRef.current, id, isIdentity, sourceImage,
+      );
+      updateNodeData(id, { outputImage: displayUrl, outputImageRef: undefined });
+    }, commitDelay);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, sourceImage, upstreamColorNodeId, shaderSource, uniformsKey, isIdentity, commitDelay]);
+
+  // ── Release the float texture on unmount ──
+  useEffect(() => {
+    return () => releaseColorNode(id);
+  }, [id]);
 }

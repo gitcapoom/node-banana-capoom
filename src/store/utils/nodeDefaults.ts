@@ -518,6 +518,8 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         hueShift: 0,
         saturation: 1,
         value: 1,
+        clampBlacks: false,
+        clampWhites: false,
         outputImage: null,
       } as HsvCorrectNodeData;
     case "contrastAdjust":
@@ -526,6 +528,8 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         contrast: 1,
         rolloff: 0.3,
         pivot: 0.5,
+        clampBlacks: false,
+        clampWhites: false,
         outputImage: null,
       } as ContrastAdjustNodeData;
     case "panoShift":

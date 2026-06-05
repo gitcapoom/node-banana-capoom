@@ -5,10 +5,11 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { useGpuLivePreview, useGpuCommit } from "@/hooks/useGpuPreview";
+import { useColorNode } from "@/hooks/useGpuPreview";
 import { CONTRAST_SHADER } from "@/utils/imageShaders";
 import type { UniformValue } from "@/utils/webglProcess";
 import { GpuEditorOverlay } from "./GpuEditorOverlay";
+import { ClampToggles, COLOR_NODE_TYPES } from "./colorNodeShared";
 import type { ContrastAdjustNodeData } from "@/types";
 
 type ContrastAdjustNodeType = Node<ContrastAdjustNodeData, "contrastAdjust">;
@@ -42,14 +43,21 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
   const nodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const incomingImage = useWorkflowStore((state) => {
+  const incomingImage = useWorkflowStore((state): string | null => {
     const edge = state.edges.find((e) => e.target === id && e.targetHandle === "image");
     if (!edge) return null;
-    const sourceNode = state.nodes.find((n) => n.id === edge.source);
-    if (!sourceNode) return null;
-    const out = getSourceOutput(sourceNode, edge.sourceHandle);
+    const src = state.nodes.find((n) => n.id === edge.source);
+    if (!src) return null;
+    const out = getSourceOutput(src, edge.sourceHandle);
     return out.type === "image" ? out.value : null;
   });
+  const upstreamColorNodeId = useWorkflowStore((state): string | null => {
+    const edge = state.edges.find((e) => e.target === id && e.targetHandle === "image");
+    if (!edge) return null;
+    const src = state.nodes.find((n) => n.id === edge.source);
+    return src && COLOR_NODE_TYPES.has(src.type as string) ? src.id : null;
+  });
+
   useEffect(() => {
     if (incomingImage !== nodeData.sourceImage) {
       updateNodeData(id, { sourceImage: incomingImage, sourceImageRef: undefined });
@@ -57,26 +65,46 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
   }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
 
   const uniforms: Record<string, UniformValue> = useMemo(
-    () => ({
-      u_contrast: nodeData.contrast,
-      u_rolloff: nodeData.rolloff,
-      u_pivot: nodeData.pivot,
-    }),
+    () => ({ u_contrast: nodeData.contrast, u_rolloff: nodeData.rolloff, u_pivot: nodeData.pivot }),
     [nodeData.contrast, nodeData.rolloff, nodeData.pivot],
   );
-  const identity = isIdentity(nodeData);
 
-  useGpuLivePreview(nodeCanvasRef, nodeData.sourceImage, CONTRAST_SHADER, uniforms);
-  useGpuLivePreview(overlayCanvasRef, nodeData.sourceImage, CONTRAST_SHADER, uniforms, overlayOpen);
-  useGpuCommit(id, nodeData.sourceImage, CONTRAST_SHADER, uniforms, identity);
+  useColorNode({
+    id,
+    sourceImage: nodeData.sourceImage,
+    upstreamColorNodeId,
+    shaderSource: CONTRAST_SHADER,
+    uniforms,
+    clampBlacks: nodeData.clampBlacks ?? false,
+    clampWhites: nodeData.clampWhites ?? false,
+    isIdentity: isIdentity(nodeData),
+    nodeCanvasRef,
+    overlayCanvasRef,
+    overlayOpen,
+  });
 
   const handleSliderChange = useCallback(
     (key: SliderDef["key"], v: number) => updateNodeData(id, { [key]: v }),
     [id, updateNodeData],
   );
   const handleReset = useCallback(() => updateNodeData(id, DEFAULTS), [id, updateNodeData]);
+  const setClamp = useCallback(
+    (which: "clampBlacks" | "clampWhites", v: boolean) => updateNodeData(id, { [which]: v }),
+    [id, updateNodeData],
+  );
 
   const hasImage = !!nodeData.sourceImage;
+
+  const controls = (
+    <>
+      <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />
+      <ClampToggles
+        clampBlacks={nodeData.clampBlacks ?? false}
+        clampWhites={nodeData.clampWhites ?? false}
+        onChange={setClamp}
+      />
+    </>
+  );
 
   return (
     <>
@@ -98,16 +126,12 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
           )}
         </div>
 
-        <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />
+        {controls}
       </BaseNode>
 
       {overlayOpen && hasImage && (
-        <GpuEditorOverlay
-          title="Contrast Adjust"
-          canvasRef={overlayCanvasRef}
-          onClose={() => setOverlayOpen(false)}
-        >
-          <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />
+        <GpuEditorOverlay title="Contrast Adjust" canvasRef={overlayCanvasRef} onClose={() => setOverlayOpen(false)}>
+          {controls}
         </GpuEditorOverlay>
       )}
     </>
@@ -145,10 +169,7 @@ function SliderRows({ nodeData, onSlider, onReset }: SliderRowsProps) {
           </div>
         );
       })}
-      <button
-        onClick={onReset}
-        className="nodrag nopan text-[10px] text-neutral-400 hover:text-white self-end"
-      >
+      <button onClick={onReset} className="nodrag nopan text-[10px] text-neutral-400 hover:text-white self-end">
         Reset all
       </button>
     </div>

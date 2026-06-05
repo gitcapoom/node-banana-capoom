@@ -23,6 +23,11 @@
 // Each parameter is a vec3 so the user can unlink master mode and tune
 // R/G/B independently — same shape as the existing CPU LUT builder.
 
+// u_clampLow / u_clampHigh (0 or 1): when 1, clamp the low / high end to
+// 0 / 1. Default 0 (off) so values outside [0,1] pass through to the
+// next node in a float chain. The 8-bit display / output always clamps
+// anyway (a monitor can't show out-of-range), so leaving these off only
+// affects what flows to a downstream *float-aware* color node.
 export const GRADE_SHADER = /* glsl */ `
 uniform vec3 u_blackpoint;
 uniform vec3 u_whitepoint;
@@ -31,23 +36,25 @@ uniform vec3 u_gain;
 uniform vec3 u_multiply;
 uniform vec3 u_offset;
 uniform vec3 u_gamma;
+uniform float u_clampLow;
+uniform float u_clampHigh;
 
 void main() {
   vec4 src = texture2D(u_tex, v_uv);
   vec3 wbp = u_whitepoint - u_blackpoint;
-  // Per-channel guard — for a singular channel (whitepoint==blackpoint)
-  // mix(identity, graded) using a step.
   vec3 nonSingular = step(vec3(1e-6), abs(wbp));
   vec3 safeWbp = mix(vec3(1.0), wbp, nonSingular);
   vec3 A = u_multiply * (u_gain - u_lift) / safeWbp;
   vec3 B = u_offset + u_lift - u_blackpoint * A;
   vec3 linear = src.rgb * A + B;
   vec3 invGamma = vec3(1.0) / max(u_gamma, vec3(1e-6));
-  // pow undefined for negative bases — clamp to 0 first.
+  // pow undefined for negative bases — guard to 0, but DON'T clamp the
+  // high end so super-white values survive into a float chain.
   vec3 outRgb = pow(max(linear, vec3(0.0)), invGamma);
-  // Where the channel is singular, pass through source unchanged.
   outRgb = mix(src.rgb, outRgb, nonSingular);
-  gl_FragColor = vec4(clamp(outRgb, 0.0, 1.0), src.a);
+  if (u_clampLow > 0.5) outRgb = max(outRgb, 0.0);
+  if (u_clampHigh > 0.5) outRgb = min(outRgb, 1.0);
+  gl_FragColor = vec4(outRgb, src.a);
 }
 `;
 
@@ -60,6 +67,8 @@ export const HSV_SHADER = /* glsl */ `
 uniform float u_hueShift;     // degrees
 uniform float u_saturation;   // multiplier; 1.0 = unchanged
 uniform float u_value;        // multiplier; 1.0 = unchanged
+uniform float u_clampLow;
+uniform float u_clampHigh;
 
 // Sam Hocevar's branchless rgb→hsv.
 vec3 rgb2hsv(vec3 c) {
@@ -84,8 +93,12 @@ void main() {
   vec3 hsv = rgb2hsv(src.rgb);
   hsv.x = fract(hsv.x + u_hueShift / 360.0);
   hsv.y = clamp(hsv.y * u_saturation, 0.0, 1.0);
+  // value multiplier may push brightness above 1 — keep it for a float
+  // chain rather than clamping here.
   hsv.z = max(hsv.z * u_value, 0.0);
-  vec3 rgb = clamp(hsv2rgb(hsv), 0.0, 1.0);
+  vec3 rgb = hsv2rgb(hsv);
+  if (u_clampLow > 0.5) rgb = max(rgb, 0.0);
+  if (u_clampHigh > 0.5) rgb = min(rgb, 1.0);
   gl_FragColor = vec4(rgb, src.a);
 }
 `;
@@ -104,8 +117,10 @@ void main() {
 
 export const CONTRAST_SHADER = /* glsl */ `
 uniform float u_contrast;     // 1.0 = unchanged. <1 = flatten, >1 = punch.
-uniform float u_rolloff;      // 0..1; 0 = hard clip, 1 = full sigmoid.
+uniform float u_rolloff;      // 0..1; 0 = linear (unbounded), 1 = full sigmoid.
 uniform float u_pivot;        // 0..1; midpoint of the S-curve.
+uniform float u_clampLow;
+uniform float u_clampHigh;
 
 // tanh isn't a WebGL-1 / GLSL-ES-1.0 builtin (only WebGL2 has it), so
 // implement it from exp. (exp(x) - exp(-x)) / (exp(x) + exp(-x)).
@@ -132,9 +147,24 @@ void main() {
   soft.r = softCurve(c.r, k);
   soft.g = softCurve(c.g, k);
   soft.b = softCurve(c.b, k);
-  // At rolloff = 0, use raw clamp (linear classical contrast).
-  vec3 hard = clamp(c, 0.0, 1.0);
-  vec3 outRgb = mix(hard, soft, clamp(u_rolloff, 0.0, 1.0));
+  // At rolloff = 0 the linear curve is UNBOUNDED (passes float through);
+  // rolloff > 0 soft-clips toward (0,1) — which is itself the clamp.
+  vec3 lin = c;
+  vec3 outRgb = mix(lin, soft, clamp(u_rolloff, 0.0, 1.0));
+  if (u_clampLow > 0.5) outRgb = max(outRgb, 0.0);
+  if (u_clampHigh > 0.5) outRgb = min(outRgb, 1.0);
   gl_FragColor = vec4(outRgb, src.a);
+}
+`;
+
+/**
+ * Display passthrough — samples a (possibly float / out-of-range) texture
+ * and clamps it to [0,1] for the 8-bit display canvas / output PNG. Used
+ * to render a float chain texture down to a viewable thumbnail.
+ */
+export const DISPLAY_CLAMP_SHADER = /* glsl */ `
+void main() {
+  vec4 src = texture2D(u_tex, v_uv);
+  gl_FragColor = vec4(clamp(src.rgb, 0.0, 1.0), src.a);
 }
 `;

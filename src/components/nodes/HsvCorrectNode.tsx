@@ -5,10 +5,11 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { useGpuLivePreview, useGpuCommit } from "@/hooks/useGpuPreview";
+import { useColorNode } from "@/hooks/useGpuPreview";
 import { HSV_SHADER } from "@/utils/imageShaders";
 import type { UniformValue } from "@/utils/webglProcess";
 import { GpuEditorOverlay } from "./GpuEditorOverlay";
+import { ClampToggles, COLOR_NODE_TYPES } from "./colorNodeShared";
 import type { HsvCorrectNodeData } from "@/types";
 
 type HsvCorrectNodeType = Node<HsvCorrectNodeData, "hsvCorrect">;
@@ -42,15 +43,23 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
   const nodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Mirror upstream output into sourceImage.
-  const incomingImage = useWorkflowStore((state) => {
+  // Upstream display URL (fallback input + change signal).
+  const incomingImage = useWorkflowStore((state): string | null => {
     const edge = state.edges.find((e) => e.target === id && e.targetHandle === "image");
     if (!edge) return null;
-    const sourceNode = state.nodes.find((n) => n.id === edge.source);
-    if (!sourceNode) return null;
-    const out = getSourceOutput(sourceNode, edge.sourceHandle);
+    const src = state.nodes.find((n) => n.id === edge.source);
+    if (!src) return null;
+    const out = getSourceOutput(src, edge.sourceHandle);
     return out.type === "image" ? out.value : null;
   });
+  // Upstream node id IF it's a color node (so we can read its float texture).
+  const upstreamColorNodeId = useWorkflowStore((state): string | null => {
+    const edge = state.edges.find((e) => e.target === id && e.targetHandle === "image");
+    if (!edge) return null;
+    const src = state.nodes.find((n) => n.id === edge.source);
+    return src && COLOR_NODE_TYPES.has(src.type as string) ? src.id : null;
+  });
+
   useEffect(() => {
     if (incomingImage !== nodeData.sourceImage) {
       updateNodeData(id, { sourceImage: incomingImage, sourceImageRef: undefined });
@@ -58,29 +67,46 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
   }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
 
   const uniforms: Record<string, UniformValue> = useMemo(
-    () => ({
-      u_hueShift: nodeData.hueShift,
-      u_saturation: nodeData.saturation,
-      u_value: nodeData.value,
-    }),
+    () => ({ u_hueShift: nodeData.hueShift, u_saturation: nodeData.saturation, u_value: nodeData.value }),
     [nodeData.hueShift, nodeData.saturation, nodeData.value],
   );
-  const identity = isIdentityHsv(nodeData);
 
-  // Live GPU preview into the in-node canvas (always) + overlay canvas
-  // (only while open). No store write, no encode — 60 fps slider drags.
-  useGpuLivePreview(nodeCanvasRef, nodeData.sourceImage, HSV_SHADER, uniforms);
-  useGpuLivePreview(overlayCanvasRef, nodeData.sourceImage, HSV_SHADER, uniforms, overlayOpen);
-  // Debounced commit of outputImage for downstream / save.
-  useGpuCommit(id, nodeData.sourceImage, HSV_SHADER, uniforms, identity);
+  useColorNode({
+    id,
+    sourceImage: nodeData.sourceImage,
+    upstreamColorNodeId,
+    shaderSource: HSV_SHADER,
+    uniforms,
+    clampBlacks: nodeData.clampBlacks ?? false,
+    clampWhites: nodeData.clampWhites ?? false,
+    isIdentity: isIdentityHsv(nodeData),
+    nodeCanvasRef,
+    overlayCanvasRef,
+    overlayOpen,
+  });
 
   const handleSliderChange = useCallback(
     (key: SliderDef["key"], v: number) => updateNodeData(id, { [key]: v }),
     [id, updateNodeData],
   );
   const handleReset = useCallback(() => updateNodeData(id, DEFAULTS), [id, updateNodeData]);
+  const setClamp = useCallback(
+    (which: "clampBlacks" | "clampWhites", v: boolean) => updateNodeData(id, { [which]: v }),
+    [id, updateNodeData],
+  );
 
   const hasImage = !!nodeData.sourceImage;
+
+  const controls = (
+    <>
+      <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />
+      <ClampToggles
+        clampBlacks={nodeData.clampBlacks ?? false}
+        clampWhites={nodeData.clampWhites ?? false}
+        onChange={setClamp}
+      />
+    </>
+  );
 
   return (
     <>
@@ -102,16 +128,12 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
           )}
         </div>
 
-        <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />
+        {controls}
       </BaseNode>
 
       {overlayOpen && hasImage && (
-        <GpuEditorOverlay
-          title="HSV Color Correct"
-          canvasRef={overlayCanvasRef}
-          onClose={() => setOverlayOpen(false)}
-        >
-          <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />
+        <GpuEditorOverlay title="HSV Color Correct" canvasRef={overlayCanvasRef} onClose={() => setOverlayOpen(false)}>
+          {controls}
         </GpuEditorOverlay>
       )}
     </>
@@ -149,10 +171,7 @@ function SliderRows({ nodeData, onSlider, onReset }: SliderRowsProps) {
           </div>
         );
       })}
-      <button
-        onClick={onReset}
-        className="nodrag nopan text-[10px] text-neutral-400 hover:text-white self-end"
-      >
+      <button onClick={onReset} className="nodrag nopan text-[10px] text-neutral-400 hover:text-white self-end">
         Reset all
       </button>
     </div>

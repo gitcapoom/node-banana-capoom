@@ -30,7 +30,7 @@ import { parseVarTags } from "@/utils/parseVarTags";
 import { cropImageToDataUrl } from "@/utils/cropImage";
 import { mirrorImage } from "@/utils/mirrorImage";
 import { applyCubemapEquirect, splitCubemap, combineCubemap, CUBE_FACES, type CubeFace } from "@/utils/cubemapEquirect";
-import { applyGrade, coerceChannel } from "@/utils/colorGrade";
+import { coerceChannel } from "@/utils/colorGrade";
 import { shiftImageX } from "@/utils/panoShift";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 
@@ -718,21 +718,31 @@ export async function executeColorGrade(ctx: NodeExecutionContext): Promise<void
       updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
     }
 
-    try {
-      const output = await applyGrade(incoming, {
-        blackpoint: coerceChannel(nodeData.blackpoint, 0),
-        whitepoint: coerceChannel(nodeData.whitepoint, 1),
-        lift:       coerceChannel(nodeData.lift, 0),
-        gain:       coerceChannel(nodeData.gain, 1),
-        multiply:   coerceChannel(nodeData.multiply, 1),
-        offset:     coerceChannel(nodeData.offset, 0),
-        gamma:      coerceChannel(nodeData.gamma, 1),
-      });
-      updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
-    } catch (err) {
-      console.error(`[Workflow] Color Grade failed:`, err);
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
-    }
+    const p = {
+      blackpoint: coerceChannel(nodeData.blackpoint, 0),
+      whitepoint: coerceChannel(nodeData.whitepoint, 1),
+      lift:       coerceChannel(nodeData.lift, 0),
+      gain:       coerceChannel(nodeData.gain, 1),
+      multiply:   coerceChannel(nodeData.multiply, 1),
+      offset:     coerceChannel(nodeData.offset, 0),
+      gamma:      coerceChannel(nodeData.gamma, 1),
+    };
+    const { commitColorNode } = await import("@/utils/colorChain");
+    const { GRADE_SHADER } = await import("@/utils/imageShaders");
+    const { isIdentityGrade } = await import("@/utils/colorGrade");
+    const input = await resolveColorChainInput(ctx, incoming);
+    const output = await commitColorNode(input, GRADE_SHADER, {
+      u_blackpoint: [p.blackpoint.r, p.blackpoint.g, p.blackpoint.b],
+      u_whitepoint: [p.whitepoint.r, p.whitepoint.g, p.whitepoint.b],
+      u_lift:       [p.lift.r, p.lift.g, p.lift.b],
+      u_gain:       [p.gain.r, p.gain.g, p.gain.b],
+      u_multiply:   [p.multiply.r, p.multiply.g, p.multiply.b],
+      u_offset:     [p.offset.r, p.offset.g, p.offset.b],
+      u_gamma:      [p.gamma.r, p.gamma.g, p.gamma.b],
+      u_clampLow:   nodeData.clampBlacks ? 1 : 0,
+      u_clampHigh:  nodeData.clampWhites ? 1 : 0,
+    }, node.id, isIdentityGrade(p), incoming);
+    updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Color Grade node ${node.id} failed:`, message);
@@ -741,7 +751,27 @@ export async function executeColorGrade(ctx: NodeExecutionContext): Promise<void
 }
 
 /**
- * HSV Color Correct executor — GPU shader, hue/sat/value.
+ * Resolve a color node's shader input during a workflow run: the upstream
+ * color node's float texture when present (so the chain composes in
+ * float), else the 8-bit incoming URL.
+ */
+async function resolveColorChainInput(
+  ctx: NodeExecutionContext,
+  incoming: string,
+): Promise<import("@/utils/colorChain").ShaderInput> {
+  const { COLOR_NODE_TYPES, hasFloat } = await import("@/utils/colorChain");
+  const edges = ctx.getEdges();
+  const nodes = ctx.getNodes();
+  const edge = edges.find(
+    (e) => e.target === ctx.node.id && (e.targetHandle === "image" || e.targetHandle == null),
+  );
+  const src = edge ? nodes.find((n) => n.id === edge.source) : null;
+  const upstreamId = src && COLOR_NODE_TYPES.has(src.type as string) ? src.id : null;
+  return upstreamId && hasFloat(upstreamId) ? { floatNodeId: upstreamId } : { url: incoming };
+}
+
+/**
+ * HSV Color Correct executor — GPU shader, hue/sat/value, float chain.
  */
 export async function executeHsvCorrect(ctx: NodeExecutionContext): Promise<void> {
   const { node, getConnectedInputs, updateNodeData } = ctx;
@@ -759,27 +789,18 @@ export async function executeHsvCorrect(ctx: NodeExecutionContext): Promise<void
     if (incoming !== nodeData.sourceImage) {
       updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
     }
-    // Identity → passthrough.
     const isIdentity = nodeData.hueShift === 0 && nodeData.saturation === 1 && nodeData.value === 1;
-    if (isIdentity) {
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
-      return;
-    }
-    try {
-      const [{ processImageWithShader }, { HSV_SHADER }] = await Promise.all([
-        import("@/utils/webglProcess"),
-        import("@/utils/imageShaders"),
-      ]);
-      const output = await processImageWithShader(incoming, HSV_SHADER, {
-        u_hueShift: nodeData.hueShift,
-        u_saturation: nodeData.saturation,
-        u_value: nodeData.value,
-      });
-      updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
-    } catch (err) {
-      console.error(`[Workflow] HSV Correct failed:`, err);
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
-    }
+    const { commitColorNode } = await import("@/utils/colorChain");
+    const { HSV_SHADER } = await import("@/utils/imageShaders");
+    const input = await resolveColorChainInput(ctx, incoming);
+    const output = await commitColorNode(input, HSV_SHADER, {
+      u_hueShift: nodeData.hueShift,
+      u_saturation: nodeData.saturation,
+      u_value: nodeData.value,
+      u_clampLow: nodeData.clampBlacks ? 1 : 0,
+      u_clampHigh: nodeData.clampWhites ? 1 : 0,
+    }, node.id, isIdentity, incoming);
+    updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] HSV Correct node ${node.id} failed:`, message);
@@ -788,7 +809,7 @@ export async function executeHsvCorrect(ctx: NodeExecutionContext): Promise<void
 }
 
 /**
- * Contrast Adjust executor — GPU shader, S-curve with roll-off.
+ * Contrast Adjust executor — GPU shader, S-curve roll-off, float chain.
  */
 export async function executeContrastAdjust(ctx: NodeExecutionContext): Promise<void> {
   const { node, getConnectedInputs, updateNodeData } = ctx;
@@ -807,25 +828,17 @@ export async function executeContrastAdjust(ctx: NodeExecutionContext): Promise<
       updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
     }
     const isIdentity = nodeData.contrast === 1;
-    if (isIdentity) {
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
-      return;
-    }
-    try {
-      const [{ processImageWithShader }, { CONTRAST_SHADER }] = await Promise.all([
-        import("@/utils/webglProcess"),
-        import("@/utils/imageShaders"),
-      ]);
-      const output = await processImageWithShader(incoming, CONTRAST_SHADER, {
-        u_contrast: nodeData.contrast,
-        u_rolloff: nodeData.rolloff,
-        u_pivot: nodeData.pivot,
-      });
-      updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
-    } catch (err) {
-      console.error(`[Workflow] Contrast Adjust failed:`, err);
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
-    }
+    const { commitColorNode } = await import("@/utils/colorChain");
+    const { CONTRAST_SHADER } = await import("@/utils/imageShaders");
+    const input = await resolveColorChainInput(ctx, incoming);
+    const output = await commitColorNode(input, CONTRAST_SHADER, {
+      u_contrast: nodeData.contrast,
+      u_rolloff: nodeData.rolloff,
+      u_pivot: nodeData.pivot,
+      u_clampLow: nodeData.clampBlacks ? 1 : 0,
+      u_clampHigh: nodeData.clampWhites ? 1 : 0,
+    }, node.id, isIdentity, incoming);
+    updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Contrast Adjust node ${node.id} failed:`, message);

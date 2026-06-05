@@ -17,9 +17,10 @@ import {
   type GradeChannelValue,
   type GradeParams,
 } from "@/utils/colorGrade";
-import { useGpuLivePreview, useGpuCommit } from "@/hooks/useGpuPreview";
+import { useColorNode } from "@/hooks/useGpuPreview";
 import { GRADE_SHADER } from "@/utils/imageShaders";
 import type { UniformValue } from "@/utils/webglProcess";
+import { ClampToggles, COLOR_NODE_TYPES } from "./colorNodeShared";
 import type { ColorGradeNodeData } from "@/types";
 
 type ColorGradeNodeType = Node<ColorGradeNodeData, "colorGrade">;
@@ -245,6 +246,16 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
     }
     return null;
   });
+  // Upstream node id IF it's another color node (read its float texture).
+  const upstreamColorNodeId = useWorkflowStore((state): string | null => {
+    for (const edge of state.edges) {
+      if (edge.target !== id) continue;
+      if (edge.targetHandle !== "image" && edge.targetHandle != null) continue;
+      const src = state.nodes.find((n) => n.id === edge.source);
+      if (src && COLOR_NODE_TYPES.has(src.type as string)) return src.id;
+    }
+    return null;
+  });
 
   useEffect(() => {
     if (incomingImage !== nodeData.sourceImage) {
@@ -318,11 +329,26 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
   const nodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Live GPU preview (in-node always, overlay only while open) + a
-  // debounced commit of outputImage for downstream / save.
-  useGpuLivePreview(nodeCanvasRef, nodeData.sourceImage, GRADE_SHADER, uniforms);
-  useGpuLivePreview(overlayCanvasRef, nodeData.sourceImage, GRADE_SHADER, uniforms, overlayOpen);
-  useGpuCommit(id, nodeData.sourceImage, GRADE_SHADER, uniforms, identity);
+  // Float-chain pipeline: live canvas preview + debounced commit (float
+  // texture for the next color node, 8-bit display URL for the thumbnail).
+  useColorNode({
+    id,
+    sourceImage: nodeData.sourceImage,
+    upstreamColorNodeId,
+    shaderSource: GRADE_SHADER,
+    uniforms,
+    clampBlacks: nodeData.clampBlacks ?? false,
+    clampWhites: nodeData.clampWhites ?? false,
+    isIdentity: identity,
+    nodeCanvasRef,
+    overlayCanvasRef,
+    overlayOpen,
+  });
+
+  const setClamp = useCallback(
+    (which: "clampBlacks" | "clampWhites", v: boolean) => updateNodeData(id, { [which]: v }),
+    [id, updateNodeData],
+  );
 
   const hasImage = !!nodeData.sourceImage;
 
@@ -372,6 +398,14 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
         )}
       </div>
 
+      <div className="px-1 nodrag">
+        <ClampToggles
+          clampBlacks={nodeData.clampBlacks ?? false}
+          clampWhites={nodeData.clampWhites ?? false}
+          onChange={setClamp}
+        />
+      </div>
+
       {hasImage ? (
         <div
           className="relative w-full flex-1 min-h-0 cursor-pointer"
@@ -416,17 +450,24 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
             );
           })}
         </div>
-        <button
-          onClick={resetAll}
-          disabled={identity}
-          className={`mt-2 text-[11px] py-1 px-3 rounded transition-colors ${
-            identity
-              ? "bg-neutral-800 text-neutral-600"
-              : "bg-neutral-700 text-neutral-200 hover:bg-neutral-600"
-          }`}
-        >
-          Reset all
-        </button>
+        <div className="mt-2 flex items-center gap-3">
+          <button
+            onClick={resetAll}
+            disabled={identity}
+            className={`text-[11px] py-1 px-3 rounded transition-colors ${
+              identity
+                ? "bg-neutral-800 text-neutral-600"
+                : "bg-neutral-700 text-neutral-200 hover:bg-neutral-600"
+            }`}
+          >
+            Reset all
+          </button>
+          <ClampToggles
+            clampBlacks={nodeData.clampBlacks ?? false}
+            clampWhites={nodeData.clampWhites ?? false}
+            onChange={setClamp}
+          />
+        </div>
       </GpuEditorOverlay>
     )}
     </>
