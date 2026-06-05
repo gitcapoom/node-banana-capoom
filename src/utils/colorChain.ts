@@ -34,12 +34,20 @@ export type ShaderInput = { url: string } | { floatNodeId: string };
 /** Node types that participate in the float color chain. */
 export const COLOR_NODE_TYPES = new Set<string>(["colorGrade", "hsvCorrect", "contrastAdjust"]);
 
+// u_flipY: 1.0 for canvas-targeted passes (the browser presents the
+// default framebuffer top-left, and uploaded images are GL bottom-left,
+// so we flip to display upright — same convention as webglProcess).
+// 0.0 for FBO-targeted passes (rendering into a float texture must
+// PRESERVE the input orientation, so the float texture stays
+// interchangeable with an uploaded image texture; flipping here would
+// store the float chain upside-down and mirror downstream previews).
 const VERT = `
 attribute vec2 a_pos;
+uniform float u_flipY;
 varying vec2 v_uv;
 void main() {
   v_uv = a_pos * 0.5 + 0.5;
-  v_uv.y = 1.0 - v_uv.y;
+  if (u_flipY > 0.5) v_uv.y = 1.0 - v_uv.y;
   gl_Position = vec4(a_pos, 0.0, 1.0);
 }
 `;
@@ -259,6 +267,9 @@ export function renderColorNodeToFloat(
     gl.bindTexture(gl.TEXTURE_2D, inTex.tex);
     gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
     setUniforms(gl, prog, uniforms);
+    // FBO pass: preserve orientation (no flip), so this float texture is
+    // interchangeable with an uploaded image texture.
+    gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 0.0);
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -291,6 +302,7 @@ export function floatNodeToDataUrl(nodeId: string): Promise<string | null> {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
+    gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 1.0); // canvas → flip for upright display
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0);
@@ -361,6 +373,7 @@ export function renderColorNodeToCanvas(
     gl.bindTexture(gl.TEXTURE_2D, inTex.tex);
     gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
     setUniforms(gl, prog, uniforms);
+    gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 1.0); // canvas → flip for upright display
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 0);
