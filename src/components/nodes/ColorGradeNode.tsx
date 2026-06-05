@@ -102,15 +102,18 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
 
   // Slider+number block factored out so the master row and each channel
   // row in split mode share rendering.
-  const Track = ({
-    chValue,
-    onCh,
-    accent,
-  }: {
-    chValue: number;
-    onCh: (v: number) => void;
-    accent?: string;
-  }) => (
+  //
+  // IMPORTANT: this is a plain render *function*, called inline as
+  // `{renderTrack(...)}` — NOT a nested React component used as
+  // `<Track />`. A nested component gets a fresh type identity on every
+  // GradeRow render, which makes React unmount + remount both <input>s
+  // each tick — catastrophic mid-slider-drag, ×7 rows. Calling it as a
+  // function inlines the JSX and reconciles normally (no remount).
+  const renderTrack = (
+    chValue: number,
+    onCh: (v: number) => void,
+    accent?: string,
+  ) => (
     <>
       <input
         type="range"
@@ -151,7 +154,7 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
 
         {!expanded ? (
           // Master mode → single track
-          <Track chValue={value.r} onCh={setMaster} />
+          renderTrack(value.r, setMaster)
         ) : (
           // In split mode the master track row is replaced by spacer so
           // the buttons stay right-aligned.
@@ -210,7 +213,7 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
                 style={{ backgroundColor: CHANNEL_COLOR[ch] }}
                 title={ch.toUpperCase()}
               />
-              <Track chValue={value[ch]} onCh={(v) => setChannel(ch, v)} accent={CHANNEL_COLOR[ch]} />
+              {renderTrack(value[ch], (v) => setChannel(ch, v), CHANNEL_COLOR[ch])}
             </div>
           ))}
         </div>
@@ -222,14 +225,16 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
 export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
-  const edges = useWorkflowStore((state) => state.edges);
-  const nodes = useWorkflowStore((state) => state.nodes);
-
-  const incomingImage = useMemo<string | null>(() => {
-    for (const edge of edges) {
+  // Scoped selector that returns just the incoming image string. Zustand
+  // bails out when the result is === across renders, so this node only
+  // re-renders when its upstream image actually changes — NOT on every
+  // unrelated store update (which subscribing to the whole `nodes` array
+  // would cause, and which was a chunk of the Color Grade drag lag).
+  const incomingImage = useWorkflowStore((state): string | null => {
+    for (const edge of state.edges) {
       if (edge.target !== id) continue;
       if (edge.targetHandle !== "image" && edge.targetHandle != null) continue;
-      const src = nodes.find((n) => n.id === edge.source);
+      const src = state.nodes.find((n) => n.id === edge.source);
       if (!src) continue;
       const out = getSourceOutput(
         src,
@@ -239,7 +244,7 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
       if (out.type === "image" && out.value) return out.value;
     }
     return null;
-  }, [edges, nodes, id]);
+  });
 
   useEffect(() => {
     if (incomingImage !== nodeData.sourceImage) {
