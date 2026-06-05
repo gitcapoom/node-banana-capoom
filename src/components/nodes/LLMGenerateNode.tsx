@@ -8,6 +8,7 @@ import { LLMGenerateNodeData, LLMProvider, LLMModelType, ConversationTurn } from
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
+import { useCanRun } from "@/hooks/useCanRun";
 
 // LLM providers — the model list for each is fetched live via the
 // `useLlmModelLists` hook (shared with ControlPanel).
@@ -24,7 +25,11 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
 
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  // Per-node Run gating: canRun is true unless this node is currently
+  // executing or one of its upstream deps is. Use `isExecuting` for the
+  // executing-border / "Running..." labels; don't fall back to the
+  // global `state.isRunning` (which lights up unrelated nodes).
+  const { canRun, blockedReason, isExecuting } = useCanRun(id);
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
@@ -197,7 +202,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
       id={id}
       selected={selected}
       hasError={nodeData.status === "error"}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
       fullBleed
       settingsExpanded={inlineParametersEnabled && isParamsExpanded}
       settingsPanel={inlineParametersEnabled ? (
@@ -446,9 +451,9 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
               </button>
               <button
                 onClick={handleRegenerate}
-                disabled={isRunning}
+                disabled={!canRun}
                 className="nodrag nopan w-5 h-5 bg-neutral-900/80 hover:bg-blue-600/80 disabled:opacity-50 disabled:cursor-not-allowed rounded flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
-                title="Regenerate"
+                title={blockedReason || "Regenerate"}
               >
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />

@@ -5,6 +5,7 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { SpzViewerNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 import { saveMediaImmediately } from "@/utils/mediaStorage";
@@ -33,7 +34,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   const nodes = useWorkflowStore((state) => state.nodes);
   const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { isExecuting } = useCanRun(id);
 
   const viewerWindowRef = useRef<Window | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -261,7 +262,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     <BaseNode
       id={id}
       selected={selected}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
     >
       {/* Input Handle — 3D data */}
       <Handle

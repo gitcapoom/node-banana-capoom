@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { VideoTrimNodeData } from "@/types";
 import { checkEncoderSupport } from "@/hooks/useStitchVideos";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
@@ -24,7 +25,7 @@ export function VideoTrimNode({ id, data, selected }: NodeProps<VideoTrimNodeTyp
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, isExecuting } = useCanRun(id);
   const edges = useWorkflowStore((state) => state.edges);
   const nodes = useWorkflowStore((state) => state.nodes);
 
@@ -256,7 +257,7 @@ export function VideoTrimNode({ id, data, selected }: NodeProps<VideoTrimNodeTyp
     <BaseNode
       id={id}
       selected={selected}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
       hasError={nodeData.status === "error"}
       minWidth={360}
       minHeight={360}
@@ -413,7 +414,7 @@ export function VideoTrimNode({ id, data, selected }: NodeProps<VideoTrimNodeTyp
         <div className="shrink-0 flex justify-end px-1">
           <button
             onClick={handleTrim}
-            disabled={!canTrim || nodeData.status === "loading" || isRunning}
+            disabled={!canTrim || nodeData.status === "loading" || !canRun}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed rounded text-white text-xs font-medium transition-colors"
           >
             {nodeData.status === "loading" ? "Processing..." : "Trim"}

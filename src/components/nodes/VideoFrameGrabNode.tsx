@@ -4,6 +4,7 @@ import React, { useMemo } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { VideoFrameGrabNodeData } from "@/types";
 
 type VideoFrameGrabNodeType = Node<VideoFrameGrabNodeData, "videoFrameGrab">;
@@ -12,7 +13,7 @@ export function VideoFrameGrabNode({ id, data, selected }: NodeProps<VideoFrameG
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, isExecuting } = useCanRun(id);
   const edges = useWorkflowStore((state) => state.edges);
   const nodes = useWorkflowStore((state) => state.nodes);
 
@@ -29,7 +30,7 @@ export function VideoFrameGrabNode({ id, data, selected }: NodeProps<VideoFrameG
   }, [edges, nodes, id]);
 
   const hasSourceVideo = Boolean(sourceVideoUrl);
-  const canExtract = hasSourceVideo && nodeData.status !== "loading" && !isRunning;
+  const canExtract = hasSourceVideo && nodeData.status !== "loading" && canRun;
 
   const handleExtract = () => {
     regenerateNode(id);
@@ -39,7 +40,7 @@ export function VideoFrameGrabNode({ id, data, selected }: NodeProps<VideoFrameG
     <BaseNode
       id={id}
       selected={selected}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
       hasError={nodeData.status === "error"}
       minWidth={320}
       minHeight={320}

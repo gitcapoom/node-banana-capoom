@@ -4,6 +4,7 @@ import React, { useCallback } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { PanoEditorNodeData } from "@/types";
 
 type PanoEditorNodeType = Node<PanoEditorNodeData, "panoEditor">;
@@ -22,7 +23,7 @@ type PanoEditorNodeType = Node<PanoEditorNodeData, "panoEditor">;
 export function PanoEditorNode({ id, data, selected }: NodeProps<PanoEditorNodeType>) {
   const nodeData = data;
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { isExecuting } = useCanRun(id);
 
   const handleRun = useCallback(() => {
     regenerateNode(id);
@@ -46,7 +47,7 @@ export function PanoEditorNode({ id, data, selected }: NodeProps<PanoEditorNodeT
     <BaseNode
       id={id}
       selected={selected}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
     >
       {/* Input Handle — original panorama */}
       <Handle

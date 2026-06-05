@@ -6,6 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { ProviderBadge } from "./ProviderBadge";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { GenerateAudioNodeData, ProviderType, SelectedModel, ModelInputDef } from "@/types";
 import { ProviderModel } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
@@ -110,7 +111,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
   );
 
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { isExecuting } = useCanRun(id);
 
   const handleRegenerate = useCallback(() => {
     regenerateNode(id);
@@ -238,7 +239,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
         id={id}
         selected={selected}
         settingsExpanded={inlineParametersEnabled && isParamsExpanded}
-        isExecuting={isRunning}
+        isExecuting={isExecuting}
         hasError={nodeData.status === "error"}
         minWidth={300}
         minHeight={250}

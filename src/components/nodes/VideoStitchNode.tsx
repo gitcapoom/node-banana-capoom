@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { VideoStitchNodeData } from "@/types";
 import { checkEncoderSupport } from "@/hooks/useStitchVideos";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
@@ -18,7 +19,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
   const nodes = useWorkflowStore((state) => state.nodes);
   const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map());
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, isExecuting } = useCanRun(id);
   const removeEdge = useWorkflowStore((state) => state.removeEdge);
   const videoBlobUrl = useVideoBlobUrl(nodeData.outputVideo ?? null);
   const videoAutoplayRef = useVideoAutoplay(id, selected);
@@ -439,7 +440,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
     <BaseNode
       id={id}
       selected={selected}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
       hasError={nodeData.status === "error"}
       minWidth={500}
       minHeight={280}
@@ -604,7 +605,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
 
             <button
               onClick={handleStitch}
-              disabled={orderedClips.length < 2 || nodeData.status === "loading" || isRunning}
+              disabled={orderedClips.length < 2 || nodeData.status === "loading" || !canRun}
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed rounded text-white text-xs font-medium transition-colors"
             >
               {nodeData.status === "loading" ? "Processing..." : "Stitch"}

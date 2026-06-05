@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { EaseCurveNodeData } from "@/types";
 import { checkEncoderSupport } from "@/hooks/useStitchVideos";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
@@ -16,7 +17,7 @@ const VIDEO_HEIGHT = 320;
 export function EaseCurveNode({ id, data, selected }: NodeProps<EaseCurveNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { isExecuting } = useCanRun(id);
   const edges = useWorkflowStore((state) => state.edges);
   const removeEdge = useWorkflowStore((state) => state.removeEdge);
   const videoBlobUrl = useVideoBlobUrl(nodeData.outputVideo ?? null);
@@ -172,7 +173,7 @@ export function EaseCurveNode({ id, data, selected }: NodeProps<EaseCurveNodeTyp
       id={id}
       selected={selected}
       fullBleed
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
       hasError={nodeData.status === "error"}
       minWidth={340}
       minHeight={VIDEO_HEIGHT}

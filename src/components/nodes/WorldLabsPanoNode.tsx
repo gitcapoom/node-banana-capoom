@@ -4,6 +4,7 @@ import React, { useCallback, useMemo } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { WorldLabsPanoNodeData } from "@/types";
@@ -35,7 +36,7 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const edges = useWorkflowStore((state) => state.edges);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { isExecuting } = useCanRun(id);
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
@@ -182,7 +183,7 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
     <BaseNode
       id={id}
       selected={selected}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
       hasError={nodeData.status === "error"}
       settingsExpanded={inlineParametersEnabled && isParamsExpanded}
       settingsPanel={inlineParametersEnabled ? (

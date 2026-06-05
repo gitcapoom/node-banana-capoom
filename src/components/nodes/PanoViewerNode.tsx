@@ -4,6 +4,7 @@ import React, { useCallback, useMemo, useState, useEffect, useRef } from "react"
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { PanoViewerNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 
@@ -37,7 +38,7 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
   const addNode = useWorkflowStore((state) => state.addNode);
   const nodes = useWorkflowStore((state) => state.nodes);
   const edges = useWorkflowStore((state) => state.edges);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { isExecuting } = useCanRun(id);
 
   const viewerWindowRef = useRef<Window | null>(null);
   const blobUrlRef = useRef<string | null>(null);
@@ -188,7 +189,7 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
     <BaseNode
       id={id}
       selected={selected}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
     >
       {/* Input Handle — equirectangular panorama */}
       <Handle

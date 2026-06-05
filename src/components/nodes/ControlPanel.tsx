@@ -9,6 +9,7 @@ import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { ModelParameters } from "./ModelParameters";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
+import { useCanRun } from "@/hooks/useCanRun";
 import { CubicBezierEditor } from "@/components/CubicBezierEditor";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 import { evaluateRule } from "@/store/utils/ruleEvaluation";
@@ -205,7 +206,7 @@ function WorldLabsPanoControls({ node }: { node: Node }) {
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const edges = useWorkflowStore((state) => state.edges);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
 
   const connectedImageCount = useMemo(() => {
     return edges.filter(
@@ -288,11 +289,12 @@ function WorldLabsPanoControls({ node }: { node: Node }) {
       <div className="flex justify-end">
         <button
           onClick={() => regenerateNode(node.id)}
-          disabled={isRunning}
+          disabled={!canRun}
+          title={blockedReason || undefined}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-          {isRunning ? "Running..." : "Run"}
+          {isExecuting ? "Running..." : "Run"}
         </button>
       </div>
     </div>
@@ -304,7 +306,7 @@ function WorldLabsWorldControls({ node }: { node: Node }) {
   const nodeData = node.data as WorldLabsWorldNodeData;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
 
   return (
     <div className="space-y-4">
@@ -363,11 +365,12 @@ function WorldLabsWorldControls({ node }: { node: Node }) {
       <div className="flex justify-end">
         <button
           onClick={() => regenerateNode(node.id)}
-          disabled={isRunning}
+          disabled={!canRun}
+          title={blockedReason || undefined}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-          {isRunning ? "Running..." : "Run"}
+          {isExecuting ? "Running..." : "Run"}
         </button>
       </div>
     </div>
@@ -380,7 +383,7 @@ function GenerateImageControls({ node }: { node: Node }) {
   const nodeData = node.data as NanoBananaNodeData;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
   const { replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -689,11 +692,12 @@ function GenerateImageControls({ node }: { node: Node }) {
       <div className="flex justify-end">
         <button
           onClick={() => regenerateNode(node.id)}
-          disabled={isRunning}
+          disabled={!canRun}
+          title={blockedReason || undefined}
           className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-          {isRunning ? "Running..." : "Run"}
+          {isExecuting ? "Running..." : "Run"}
         </button>
       </div>
 
@@ -714,7 +718,7 @@ function GenerateVideoControls({ node }: { node: Node }) {
   const nodeData = node.data as GenerateVideoNodeData;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
   const [isBrowseDialogOpen, setIsBrowseDialogOpen] = useState(false);
 
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "fal";
@@ -793,11 +797,12 @@ function GenerateVideoControls({ node }: { node: Node }) {
       <div className="flex justify-end">
         <button
           onClick={() => regenerateNode(node.id)}
-          disabled={isRunning}
+          disabled={!canRun}
+          title={blockedReason || undefined}
           className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-          {isRunning ? "Running..." : "Run"}
+          {isExecuting ? "Running..." : "Run"}
         </button>
       </div>
 
@@ -818,7 +823,7 @@ function Generate3DControls({ node }: { node: Node }) {
   const nodeData = node.data as Generate3DNodeData;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
   const [isBrowseDialogOpen, setIsBrowseDialogOpen] = useState(false);
 
   const currentProvider: ProviderType = nodeData.selectedModel?.provider || "fal";
@@ -899,11 +904,12 @@ function Generate3DControls({ node }: { node: Node }) {
       <div className="flex justify-end">
         <button
           onClick={() => regenerateNode(node.id)}
-          disabled={isRunning}
+          disabled={!canRun}
+          title={blockedReason || undefined}
           className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-          {isRunning ? "Running..." : "Run"}
+          {isExecuting ? "Running..." : "Run"}
         </button>
       </div>
 
@@ -922,7 +928,7 @@ function Generate3DControls({ node }: { node: Node }) {
 // Generate Audio Controls
 function GenerateAudioControls({ node }: { node: Node }) {
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
 
   return (
     <div className="space-y-3">
@@ -932,11 +938,12 @@ function GenerateAudioControls({ node }: { node: Node }) {
       <div className="flex justify-end">
         <button
           onClick={() => regenerateNode(node.id)}
-          disabled={isRunning}
+          disabled={!canRun}
+          title={blockedReason || undefined}
           className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-          {isRunning ? "Running..." : "Run"}
+          {isExecuting ? "Running..." : "Run"}
         </button>
       </div>
     </div>
@@ -948,7 +955,7 @@ function LLMControls({ node }: { node: Node }) {
   const nodeData = node.data as LLMGenerateNodeData;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
 
   // Live per-provider model lists (Google/OpenAI/Anthropic), fetched via
   // /api/llm/models. Shared with LLMGenerateNode's inline params so the
@@ -1200,11 +1207,12 @@ function LLMControls({ node }: { node: Node }) {
       <div className="flex justify-end">
         <button
           onClick={() => regenerateNode(node.id)}
-          disabled={isRunning}
+          disabled={!canRun}
+          title={blockedReason || undefined}
           className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-          {isRunning ? "Running..." : "Run"}
+          {isExecuting ? "Running..." : "Run"}
         </button>
       </div>
     </div>
@@ -1216,7 +1224,7 @@ function EaseCurveControls({ node }: { node: Node }) {
   const nodeData = node.data as EaseCurveNodeData;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
   const edges = useWorkflowStore((state) => state.edges);
   const removeEdge = useWorkflowStore((state) => state.removeEdge);
   const [showPresets, setShowPresets] = useState(false);
@@ -1351,11 +1359,12 @@ function EaseCurveControls({ node }: { node: Node }) {
       <div className="flex justify-end">
         <button
           onClick={() => regenerateNode(node.id)}
-          disabled={isRunning}
+          disabled={!canRun}
+          title={blockedReason || undefined}
           className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
         >
           <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-          {isRunning ? "Applying..." : "Apply"}
+          {isExecuting ? "Applying..." : "Apply"}
         </button>
       </div>
 
@@ -1403,7 +1412,7 @@ function ConditionalSwitchControls({ node }: { node: Node }) {
   const nodeData = node.data as ConditionalSwitchNodeData;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const handleRuleValueChange = useCallback(
@@ -1523,11 +1532,12 @@ function ConditionalSwitchControls({ node }: { node: Node }) {
       <div className="flex justify-end">
         <button
           onClick={() => regenerateNode(node.id)}
-          disabled={isRunning}
+          disabled={!canRun}
+          title={blockedReason || undefined}
           className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
         >
           <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-          {isRunning ? "Running..." : "Run"}
+          {isExecuting ? "Running..." : "Run"}
         </button>
       </div>
     </div>

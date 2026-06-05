@@ -5,6 +5,7 @@ import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals
 import { BaseNode } from "./BaseNode";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { Generate3DNodeData, ProviderType, SelectedModel, ModelInputDef } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
@@ -132,7 +133,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
   );
 
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { isExecuting } = useCanRun(id);
 
   const handleRegenerate = useCallback(() => {
     regenerateNode(id);
@@ -442,7 +443,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
       id={id}
       selected={selected}
       settingsExpanded={inlineParametersEnabled && isParamsExpanded}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
       hasError={nodeData.status === "error"}
       settingsPanel={inlineParametersEnabled ? (
         <InlineParameterPanel

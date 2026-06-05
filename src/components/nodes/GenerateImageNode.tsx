@@ -5,6 +5,7 @@ import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals
 import { BaseNode } from "./BaseNode";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, saveNanoBananaDefaults, useProviderApiKeys } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 import { NanoBananaNodeData, AspectRatio, Resolution, ModelType, MODEL_DISPLAY_NAMES, ProviderType, SelectedModel, ModelInputDef } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
@@ -360,7 +361,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   }, [id, updateNodeData]);
 
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { isExecuting } = useCanRun(id);
 
   const handleRegenerate = useCallback(() => {
     regenerateNode(id);
@@ -556,7 +557,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     <BaseNode
       id={id}
       selected={selected}
-      isExecuting={isRunning}
+      isExecuting={isExecuting}
       hasError={nodeData.status === "error"}
       fullBleed
       settingsExpanded={inlineParametersEnabled && isParamsExpanded}

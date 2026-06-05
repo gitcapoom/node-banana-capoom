@@ -64,6 +64,7 @@ import {
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
 import { evaluateRule } from "./utils/ruleEvaluation";
 import { computeDimmedNodes } from "./utils/dimmingUtils";
+import { getRunBlocker } from "./utils/runGating";
 import {
   executeAnnotation,
   executeArray,
@@ -1632,10 +1633,19 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   regenerateNode: async (nodeId: string) => {
-    const { nodes, updateNodeData, isRunning } = get();
+    const { nodes, edges, updateNodeData, currentNodeIds } = get();
 
-    if (isRunning) {
-      logger.warn('node.execution', 'Cannot regenerate node, workflow already running', { nodeId });
+    // Per-node gating: refuse only when *this* node is currently in
+    // flight, or when one of its transitive upstream deps is. Unrelated
+    // in-flight work elsewhere in the graph no longer blocks us, so the
+    // user can Run nodes in parallel as long as their inputs are stable.
+    const blocker = getRunBlocker(nodeId, currentNodeIds, nodes, edges);
+    if (blocker) {
+      logger.warn('node.execution', 'Cannot regenerate node, blocked by in-flight work', {
+        nodeId,
+        blockerNodeId: blocker.id,
+        blockerKind: blocker.kind,
+      });
       return;
     }
 
@@ -1645,7 +1655,21 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       return;
     }
 
-    set({ isRunning: true, currentNodeIds: [nodeId] });
+    // Add this node to the in-flight set without disturbing other runs.
+    // `isRunning` is derived: true when any node is executing. We cleanup
+    // in the matching try/finally below.
+    set((s) => ({
+      isRunning: true,
+      currentNodeIds: [...s.currentNodeIds, nodeId],
+    }));
+    // Inline finalizer used by every exit path below — removes this node
+    // from currentNodeIds and updates isRunning based on what's left.
+    const finalize = () => {
+      set((s) => {
+        const remaining = s.currentNodeIds.filter((id) => id !== nodeId);
+        return { isRunning: remaining.length > 0, currentNodeIds: remaining };
+      });
+    };
 
     await logger.startSession();
     logger.info('node.execution', 'Regenerating node', {
@@ -1674,12 +1698,12 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         await executeSplitGrid(executionCtx);
       } else if (node.type === "videoStitch") {
         await executeVideoStitch(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        finalize();
         await logger.endSession();
         return;
       } else if (node.type === "easeCurve") {
         await executeEaseCurve(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        finalize();
         await logger.endSession();
         return;
       } else if (node.type === "worldLabsPano") {
@@ -1692,17 +1716,17 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         await executePanoEditor(executionCtx);
       } else if (node.type === "videoTrim") {
         await executeVideoTrim(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        finalize();
         await logger.endSession();
         return;
       } else if (node.type === "videoFrameGrab") {
         await executeVideoFrameGrab(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        finalize();
         await logger.endSession();
         return;
       } else if (node.type === "output") {
         await executeOutput(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
+        finalize();
         await logger.endSession();
         return;
       } else if (node.type === "maskPainter") {
@@ -1746,7 +1770,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       }
 
       logger.info('node.execution', 'Node regeneration completed successfully', { nodeId });
-      set({ isRunning: false, currentNodeIds: [] });
+      finalize();
 
       saveLogSession();
       await logger.endSession();
@@ -1760,7 +1784,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         status: "error",
         error: error instanceof Error ? error.message : "Regeneration failed",
       });
-      set({ isRunning: false, currentNodeIds: [] });
+      finalize();
 
       saveLogSession();
       await logger.endSession();

@@ -6,6 +6,7 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useCanRun } from "@/hooks/useCanRun";
 import { OutputNodeData } from "@/types";
 
 import { FileSaveDialog } from "../FileSaveDialog";
@@ -23,7 +24,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const connectedEdgeCount = useWorkflowStore(
     (state) => state.edges.filter((edge) => edge.target === id).length
   );
-  const isRunning = useWorkflowStore((state) => state.isRunning);
+  const { isExecuting } = useCanRun(id);
   const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const nodes = useWorkflowStore((state) => state.nodes);
   const edges = useWorkflowStore((state) => state.edges);
@@ -372,7 +373,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
       <BaseNode
         id={id}
         selected={selected}
-        isExecuting={isRunning}
+        isExecuting={isExecuting}
         contentClassName="flex-1 min-h-0 relative"
         className="min-w-[200px]"
         aspectFitMedia={aspectMedia}
