@@ -42,6 +42,28 @@ function smoothTangents(pts: RotoPoint[], i: number, closed: boolean): { inH: Pt
     outH: { x: a.x + dx * handleLen, y: a.y + dy * handleLen },
   };
 }
+/** Fill in fields missing from shapes saved before feather tangents existed
+ *  (featherIn/featherOut/featherBroken) so the editor never reads undefined. */
+function normalizePoint(p: RotoPoint): RotoPoint {
+  const anchor = p.anchor;
+  const inH = p.inHandle ?? anchor;
+  const outH = p.outHandle ?? anchor;
+  const feather = p.feather ?? anchor;
+  const offx = feather.x - anchor.x;
+  const offy = feather.y - anchor.y;
+  return {
+    ...p,
+    anchor, inHandle: inH, outHandle: outH, feather,
+    featherIn: p.featherIn ?? { x: inH.x + offx, y: inH.y + offy },
+    featherOut: p.featherOut ?? { x: outH.x + offx, y: outH.y + offy },
+    broken: p.broken ?? false,
+    featherBroken: p.featherBroken ?? false,
+  };
+}
+function normalizeShape(s: RotoShape): RotoShape {
+  return { ...s, points: s.points.map(normalizePoint) };
+}
+
 /** Multiply every coordinate of every shape by s (for downscaled preview). */
 function scaleShapes(shapes: RotoShape[], s: number): RotoShape[] {
   const sp = (p: Pt) => ({ x: p.x * s, y: p.y * s });
@@ -98,8 +120,8 @@ export function RotoModal() {
   const [mattePreview, setMattePreview] = useState(false);
   const [matteImg, setMatteImg] = useState<HTMLImageElement | null>(null);
 
-  const [work, setWork] = useState<RotoShape[]>(shapes);
-  useEffect(() => { setWork(shapes); }, [shapes]);
+  const [work, setWork] = useState<RotoShape[]>(() => shapes.map(normalizeShape));
+  useEffect(() => { setWork(shapes.map(normalizeShape)); }, [shapes]);
   const workRef = useRef(work);
   useEffect(() => { workRef.current = work; }, [work]);
 
