@@ -11,6 +11,7 @@ import { getSourceOutput } from "@/store/utils/connectedInputs";
 import {
   channelToHex,
   coerceChannel,
+  hexToChannel,
   IDENTITY_GRADE,
   isIdentityGrade,
   isMaster,
@@ -91,6 +92,18 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
   const reset = useCallback(() => {
     onChange(masterValue(def.defaultValue));
   }, [def.defaultValue, onChange]);
+
+  // Native colour picker — kept as an option alongside the wheel. Sets
+  // r/g/b directly to the picked colour, clamped to the row's range.
+  const colorInputRef = useRef<HTMLInputElement>(null);
+  const onColorPicked = useCallback(
+    (hex: string) => {
+      const picked = hexToChannel(hex);
+      const clamp = (n: number) => Math.max(def.min, Math.min(def.max, n));
+      onChange({ r: clamp(picked.r), g: clamp(picked.g), b: clamp(picked.b) });
+    },
+    [def.min, def.max, onChange],
+  );
 
   // ─── Colour wheel (balance) + level (master) ───────────────────
   // Disk radius maps to ±(¼ of the row's range) of channel balance.
@@ -247,12 +260,33 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
               <span className="text-[9px] text-neutral-500 tabular-nums">
                 R{value.r.toFixed(2)} G{value.g.toFixed(2)} B{value.b.toFixed(2)}
               </span>
-              <button
-                onClick={reset}
-                className="text-[9px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
-              >
-                Reset
-              </button>
+              <div className="flex items-center gap-1.5">
+                {/* Native colour picker — alternative to the wheel. */}
+                <button
+                  onClick={() => colorInputRef.current?.click()}
+                  className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                  title="Pick a colour directly (sets R/G/B)"
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-sm border border-neutral-600"
+                    style={{ backgroundColor: swatchHex }}
+                  />
+                  Picker
+                </button>
+                <input
+                  ref={colorInputRef}
+                  type="color"
+                  value={swatchHex}
+                  onChange={(e) => onColorPicked(e.target.value)}
+                  className="sr-only"
+                />
+                <button
+                  onClick={reset}
+                  className="text-[9px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                >
+                  Reset
+                </button>
+              </div>
             </div>
           </div>,
           document.body,
