@@ -24,6 +24,8 @@ import {
   executeCubemapEquirect,
   executeCubemapFaces,
   executeColorGrade,
+  executeHsvCorrect,
+  executeContrastAdjust,
   executePanoShift,
 } from "./simpleNodeExecutors";
 import { executeNanoBanana } from "./nanoBananaExecutor";
@@ -155,6 +157,12 @@ export async function executeNode(
       break;
     case "colorGrade":
       await executeColorGrade(ctx);
+      break;
+    case "hsvCorrect":
+      await executeHsvCorrect(ctx);
+      break;
+    case "contrastAdjust":
+      await executeContrastAdjust(ctx);
       break;
     case "panoShift":
       await executePanoShift(ctx);

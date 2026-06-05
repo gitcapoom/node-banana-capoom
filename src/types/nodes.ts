@@ -62,6 +62,8 @@ export type NodeType =
   | "cubemapEquirect"
   | "cubemapFaces"
   | "colorGrade"
+  | "hsvCorrect"
+  | "contrastAdjust"
   | "panoShift";
 
 /**
@@ -186,6 +188,41 @@ export interface ColorGradeNodeData extends BaseNodeData {
   multiply: GradeChannelValue | number;
   offset: GradeChannelValue | number;
   gamma: GradeChannelValue | number;
+  outputImage: string | null;
+  outputImageRef?: string;
+}
+
+/**
+ * HSV Color Correct node — hue shift / saturation / value adjustments.
+ * GPU-native; sliders preview live.
+ */
+export interface HsvCorrectNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  /** Degrees [-180..180]; 0 = unchanged. */
+  hueShift: number;
+  /** Multiplier; 1 = unchanged, 0 = greyscale, 2 = doubled. */
+  saturation: number;
+  /** Multiplier; 1 = unchanged. */
+  value: number;
+  outputImage: string | null;
+  outputImageRef?: string;
+}
+
+/**
+ * Contrast Adjust node — S-curve contrast with smooth roll-off so
+ * highlights and shadows don't clip abruptly. GPU-native; live preview.
+ */
+export interface ContrastAdjustNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  /** Multiplier on (in - pivot); 1 = unchanged, <1 flattens, >1 punches. */
+  contrast: number;
+  /** 0..1. 0 = hard clip (classical linear contrast).
+   *  1 = full S-curve, asymptotic soft-clip. */
+  rolloff: number;
+  /** 0..1. Pivot of the S-curve. 0.5 = neutral grey midpoint. */
+  pivot: number;
   outputImage: string | null;
   outputImageRef?: string;
 }
@@ -827,6 +864,8 @@ export type WorkflowNodeData =
   | CubemapEquirectNodeData
   | CubemapFacesNodeData
   | ColorGradeNodeData
+  | HsvCorrectNodeData
+  | ContrastAdjustNodeData
   | PanoShiftNodeData;
 
 /**

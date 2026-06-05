@@ -741,6 +741,99 @@ export async function executeColorGrade(ctx: NodeExecutionContext): Promise<void
 }
 
 /**
+ * HSV Color Correct executor — GPU shader, hue/sat/value.
+ */
+export async function executeHsvCorrect(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const incoming = images[0] || null;
+    const nodeData = node.data as import("@/types").HsvCorrectNodeData;
+
+    if (!incoming) {
+      if (nodeData.outputImage !== null) {
+        updateNodeData(node.id, { outputImage: null, sourceImage: null });
+      }
+      return;
+    }
+    if (incoming !== nodeData.sourceImage) {
+      updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
+    }
+    // Identity → passthrough.
+    const isIdentity = nodeData.hueShift === 0 && nodeData.saturation === 1 && nodeData.value === 1;
+    if (isIdentity) {
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      return;
+    }
+    try {
+      const [{ processImageWithShader }, { HSV_SHADER }] = await Promise.all([
+        import("@/utils/webglProcess"),
+        import("@/utils/imageShaders"),
+      ]);
+      const output = await processImageWithShader(incoming, HSV_SHADER, {
+        u_hueShift: nodeData.hueShift,
+        u_saturation: nodeData.saturation,
+        u_value: nodeData.value,
+      });
+      updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
+    } catch (err) {
+      console.error(`[Workflow] HSV Correct failed:`, err);
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] HSV Correct node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
+ * Contrast Adjust executor — GPU shader, S-curve with roll-off.
+ */
+export async function executeContrastAdjust(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const incoming = images[0] || null;
+    const nodeData = node.data as import("@/types").ContrastAdjustNodeData;
+
+    if (!incoming) {
+      if (nodeData.outputImage !== null) {
+        updateNodeData(node.id, { outputImage: null, sourceImage: null });
+      }
+      return;
+    }
+    if (incoming !== nodeData.sourceImage) {
+      updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
+    }
+    const isIdentity = nodeData.contrast === 1;
+    if (isIdentity) {
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      return;
+    }
+    try {
+      const [{ processImageWithShader }, { CONTRAST_SHADER }] = await Promise.all([
+        import("@/utils/webglProcess"),
+        import("@/utils/imageShaders"),
+      ]);
+      const output = await processImageWithShader(incoming, CONTRAST_SHADER, {
+        u_contrast: nodeData.contrast,
+        u_rolloff: nodeData.rolloff,
+        u_pivot: nodeData.pivot,
+      });
+      updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
+    } catch (err) {
+      console.error(`[Workflow] Contrast Adjust failed:`, err);
+      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Contrast Adjust node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
  * Pano Shift executor — horizontal pixel shift with seam wrap-around.
  */
 export async function executePanoShift(ctx: NodeExecutionContext): Promise<void> {

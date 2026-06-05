@@ -169,6 +169,12 @@ export function getSourceOutput(
   } else if (sourceNode.type === "colorGrade") {
     const cgData = sourceNode.data as import("@/types").ColorGradeNodeData;
     return { type: "image", value: cgData.outputImage || cgData.sourceImage || null };
+  } else if (sourceNode.type === "hsvCorrect") {
+    const hData = sourceNode.data as import("@/types").HsvCorrectNodeData;
+    return { type: "image", value: hData.outputImage || hData.sourceImage || null };
+  } else if (sourceNode.type === "contrastAdjust") {
+    const cData = sourceNode.data as import("@/types").ContrastAdjustNodeData;
+    return { type: "image", value: cData.outputImage || cData.sourceImage || null };
   } else if (sourceNode.type === "panoShift") {
     const psData = sourceNode.data as import("@/types").PanoShiftNodeData;
     return { type: "image", value: psData.outputImage || psData.sourceImage || null };

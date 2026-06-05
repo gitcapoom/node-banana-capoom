@@ -37,6 +37,8 @@ import {
   CubemapEquirectNodeData,
   CubemapFacesNodeData,
   ColorGradeNodeData,
+  HsvCorrectNodeData,
+  ContrastAdjustNodeData,
   PanoShiftNodeData,
   WorkflowNodeData,
   GroupColor,
@@ -87,6 +89,8 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   cubemapEquirect: { width: 320, height: 320 },
   cubemapFaces: { width: 340, height: 360 },
   colorGrade: { width: 340, height: 460 },
+  hsvCorrect: { width: 280, height: 380 },
+  contrastAdjust: { width: 280, height: 380 },
   panoShift: { width: 320, height: 280 },
 };
 
@@ -508,6 +512,22 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         gamma:      { r: 1, g: 1, b: 1 },
         outputImage: null,
       } as ColorGradeNodeData;
+    case "hsvCorrect":
+      return {
+        sourceImage: null,
+        hueShift: 0,
+        saturation: 1,
+        value: 1,
+        outputImage: null,
+      } as HsvCorrectNodeData;
+    case "contrastAdjust":
+      return {
+        sourceImage: null,
+        contrast: 1,
+        rolloff: 0.3,
+        pivot: 0.5,
+        outputImage: null,
+      } as ContrastAdjustNodeData;
     case "panoShift":
       return {
         sourceImage: null,

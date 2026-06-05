@@ -60,6 +60,8 @@ import {
   CubemapEquirectNode,
   CubemapFacesNode,
   ColorGradeNode,
+  HsvCorrectNode,
+  ContrastAdjustNode,
   PanoShiftNode,
 } from "./nodes";
 
@@ -130,6 +132,8 @@ const nodeTypes: NodeTypes = {
   cubemapEquirect: CubemapEquirectNode,
   cubemapFaces: CubemapFacesNode,
   colorGrade: ColorGradeNode,
+  hsvCorrect: HsvCorrectNode,
+  contrastAdjust: ContrastAdjustNode,
   panoShift: PanoShiftNode,
 };
 
@@ -249,6 +253,10 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
         outputs: ["image", "up", "down", "left", "right", "front", "back"],
       };
     case "colorGrade":
+      return { inputs: ["image"], outputs: ["image"] };
+    case "hsvCorrect":
+      return { inputs: ["image"], outputs: ["image"] };
+    case "contrastAdjust":
       return { inputs: ["image"], outputs: ["image"] };
     case "panoShift":
       return { inputs: ["image"], outputs: ["image"] };
@@ -545,6 +553,8 @@ export function WorkflowCanvas() {
     cubemapEquirect: 'Cube ⇄ Pano',
     cubemapFaces: 'Cube ⇄ Faces',
     colorGrade: 'Color Grade',
+    hsvCorrect: 'HSV Color Correct',
+    contrastAdjust: 'Contrast Adjust',
     panoShift: 'Pano Shift',
   };
 
@@ -1764,6 +1774,8 @@ export function WorkflowCanvas() {
             cubemapEquirect: { width: 320, height: 320 },
             cubemapFaces: { width: 340, height: 360 },
             colorGrade: { width: 340, height: 460 },
+            hsvCorrect: { width: 280, height: 380 },
+            contrastAdjust: { width: 280, height: 380 },
             panoShift: { width: 320, height: 280 },
           };
           const dims = defaultDimensions[nodeType];

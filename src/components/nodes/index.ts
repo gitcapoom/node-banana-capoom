@@ -34,5 +34,7 @@ export { MirrorNode } from "./MirrorNode";
 export { CubemapEquirectNode } from "./CubemapEquirectNode";
 export { CubemapFacesNode } from "./CubemapFacesNode";
 export { ColorGradeNode } from "./ColorGradeNode";
+export { HsvCorrectNode } from "./HsvCorrectNode";
+export { ContrastAdjustNode } from "./ContrastAdjustNode";
 export { PanoShiftNode } from "./PanoShiftNode";
 export { GroupNode } from "./GroupNode";

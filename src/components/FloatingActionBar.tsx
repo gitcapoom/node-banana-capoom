@@ -49,6 +49,8 @@ const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: str
       { type: "cubemapFaces", label: "Cube ⇄ Faces" },
       { type: "panoShift", label: "Pano Shift" },
       { type: "colorGrade", label: "Color Grade" },
+      { type: "hsvCorrect", label: "HSV Color Correct" },
+      { type: "contrastAdjust", label: "Contrast Adjust" },
       { type: "splitGrid", label: "Split Grid" },
       { type: "videoStitch", label: "Video Stitch" },
       { type: "videoTrim", label: "Video Trim" },

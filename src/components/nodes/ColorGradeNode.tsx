@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
+import { GpuEditorOverlay } from "./GpuEditorOverlay";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import {
@@ -345,8 +346,10 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
 
   const displayImage = nodeData.outputImage || nodeData.sourceImage;
   const identity = isIdentityGrade(params);
+  const [overlayOpen, setOverlayOpen] = useState(false);
 
   return (
+    <>
     <BaseNode
       id={id}
       selected={selected}
@@ -392,7 +395,11 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
       </div>
 
       {displayImage ? (
-        <div className="relative w-full flex-1 min-h-0">
+        <div
+          className="relative w-full flex-1 min-h-0 cursor-pointer"
+          onDoubleClick={() => setOverlayOpen(true)}
+          title="Double-click for full-screen editor"
+        >
           <img
             src={displayImage}
             alt="Graded"
@@ -417,5 +424,45 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
         </div>
       )}
     </BaseNode>
+
+    {overlayOpen && displayImage && (
+      <GpuEditorOverlay
+        title="Color Grade"
+        image={displayImage}
+        onClose={() => setOverlayOpen(false)}
+      >
+        {/* Re-use the same SLIDERS state; sliders write through to
+            nodeData, the existing effect re-runs the shader, and the
+            overlay image refreshes automatically. */}
+        <div className="nodrag nowheel max-h-[60vh] overflow-y-auto">
+          {SLIDERS.map((s) => {
+            const value = params[s.key];
+            const expanded = forceSplit[s.key] || !isMaster(value);
+            return (
+              <GradeRow
+                key={s.key}
+                def={s}
+                value={value}
+                expanded={expanded}
+                onChange={(next) => setParamValue(s.key, next)}
+                onToggleExpanded={() => toggleExpanded(s.key)}
+              />
+            );
+          })}
+        </div>
+        <button
+          onClick={resetAll}
+          disabled={identity}
+          className={`mt-2 text-[11px] py-1 px-3 rounded transition-colors ${
+            identity
+              ? "bg-neutral-800 text-neutral-600"
+              : "bg-neutral-700 text-neutral-200 hover:bg-neutral-600"
+          }`}
+        >
+          Reset all
+        </button>
+      </GpuEditorOverlay>
+    )}
+    </>
   );
 }
