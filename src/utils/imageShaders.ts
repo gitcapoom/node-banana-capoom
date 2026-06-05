@@ -107,12 +107,19 @@ uniform float u_contrast;     // 1.0 = unchanged. <1 = flatten, >1 = punch.
 uniform float u_rolloff;      // 0..1; 0 = hard clip, 1 = full sigmoid.
 uniform float u_pivot;        // 0..1; midpoint of the S-curve.
 
+// tanh isn't a WebGL-1 / GLSL-ES-1.0 builtin (only WebGL2 has it), so
+// implement it from exp. (exp(x) - exp(-x)) / (exp(x) + exp(-x)).
+float myTanh(float x) {
+  float e2x = exp(2.0 * x);
+  return (e2x - 1.0) / (e2x + 1.0);
+}
+
 float softCurve(float x, float k) {
   // tanh-based soft squash. k controls how soft the asymptote is:
   // smaller k = harder, larger k = softer. We pick k from rolloff so
   // 0 = linear (k -> infinity would be exact linear; we approximate by
   // lerping to identity at rolloff=0).
-  return 0.5 + 0.5 * tanh(k * (x - 0.5));
+  return 0.5 + 0.5 * myTanh(k * (x - 0.5));
 }
 
 void main() {
