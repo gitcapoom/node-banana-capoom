@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { processImageWithShader } from "@/utils/webglProcess";
+import { useGpuLivePreview, useGpuCommit } from "@/hooks/useGpuPreview";
 import { CONTRAST_SHADER } from "@/utils/imageShaders";
+import type { UniformValue } from "@/utils/webglProcess";
 import { GpuEditorOverlay } from "./GpuEditorOverlay";
 import type { ContrastAdjustNodeData } from "@/types";
 
@@ -38,8 +39,9 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
   const nodeData = data;
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const nodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Subscribe to live upstream output.
   const incomingImage = useWorkflowStore((state) => {
     const edge = state.edges.find((e) => e.target === id && e.targetHandle === "image");
     if (!edge) return null;
@@ -48,56 +50,33 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
     const out = getSourceOutput(sourceNode, edge.sourceHandle);
     return out.type === "image" ? out.value : null;
   });
-
   useEffect(() => {
     if (incomingImage !== nodeData.sourceImage) {
       updateNodeData(id, { sourceImage: incomingImage, sourceImageRef: undefined });
     }
   }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
 
-  const lastFingerprintRef = useRef<string>("");
-  useEffect(() => {
-    const src = nodeData.sourceImage;
-    if (!src) {
-      if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null });
-      lastFingerprintRef.current = "";
-      return;
-    }
-    if (isIdentity(nodeData)) {
-      if (nodeData.outputImage !== src) updateNodeData(id, { outputImage: src, outputImageRef: undefined });
-      lastFingerprintRef.current = `identity:${src.length}`;
-      return;
-    }
-    const fingerprint = `${src.length}|${nodeData.contrast}|${nodeData.rolloff}|${nodeData.pivot}`;
-    if (lastFingerprintRef.current === fingerprint) return;
-    lastFingerprintRef.current = fingerprint;
-
-    processImageWithShader(src, CONTRAST_SHADER, {
+  const uniforms: Record<string, UniformValue> = useMemo(
+    () => ({
       u_contrast: nodeData.contrast,
       u_rolloff: nodeData.rolloff,
       u_pivot: nodeData.pivot,
-    })
-      .then((output) => {
-        if (lastFingerprintRef.current !== fingerprint) return;
-        updateNodeData(id, { outputImage: output, outputImageRef: undefined });
-      })
-      .catch((err) => {
-        console.error("ContrastAdjustNode: shader failed", err);
-        updateNodeData(id, { outputImage: src, outputImageRef: undefined });
-      });
-  }, [id, nodeData, updateNodeData]);
+    }),
+    [nodeData.contrast, nodeData.rolloff, nodeData.pivot],
+  );
+  const identity = isIdentity(nodeData);
+
+  useGpuLivePreview(nodeCanvasRef, nodeData.sourceImage, CONTRAST_SHADER, uniforms);
+  useGpuLivePreview(overlayCanvasRef, nodeData.sourceImage, CONTRAST_SHADER, uniforms, overlayOpen);
+  useGpuCommit(id, nodeData.sourceImage, CONTRAST_SHADER, uniforms, identity);
 
   const handleSliderChange = useCallback(
-    (key: SliderDef["key"], v: number) => {
-      updateNodeData(id, { [key]: v });
-    },
+    (key: SliderDef["key"], v: number) => updateNodeData(id, { [key]: v }),
     [id, updateNodeData],
   );
-  const handleReset = useCallback(() => {
-    updateNodeData(id, DEFAULTS);
-  }, [id, updateNodeData]);
+  const handleReset = useCallback(() => updateNodeData(id, DEFAULTS), [id, updateNodeData]);
 
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  const hasImage = !!nodeData.sourceImage;
 
   return (
     <>
@@ -107,11 +86,11 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
 
         <div
           className="relative w-full aspect-square bg-neutral-900/60 rounded overflow-hidden cursor-pointer"
-          onDoubleClick={() => displayImage && setOverlayOpen(true)}
-          title={displayImage ? "Double-click to open full-screen editor" : "Connect an image"}
+          onDoubleClick={() => hasImage && setOverlayOpen(true)}
+          title={hasImage ? "Double-click to open full-screen editor" : "Connect an image"}
         >
-          {displayImage ? (
-            <img src={displayImage} alt="Contrast preview" className="w-full h-full object-contain" />
+          {hasImage ? (
+            <canvas ref={nodeCanvasRef} className="w-full h-full object-contain" />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-[10px] text-neutral-500">
               Connect an image
@@ -122,10 +101,10 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
         <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />
       </BaseNode>
 
-      {overlayOpen && displayImage && (
+      {overlayOpen && hasImage && (
         <GpuEditorOverlay
           title="Contrast Adjust"
-          image={displayImage}
+          canvasRef={overlayCanvasRef}
           onClose={() => setOverlayOpen(false)}
         >
           <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />

@@ -7,7 +7,6 @@ import { GpuEditorOverlay } from "./GpuEditorOverlay";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import {
-  applyGrade,
   channelToHex,
   coerceChannel,
   hexToChannel,
@@ -18,6 +17,9 @@ import {
   type GradeChannelValue,
   type GradeParams,
 } from "@/utils/colorGrade";
+import { useGpuLivePreview, useGpuCommit } from "@/hooks/useGpuPreview";
+import { GRADE_SHADER } from "@/utils/imageShaders";
+import type { UniformValue } from "@/utils/webglProcess";
 import type { ColorGradeNodeData } from "@/types";
 
 type ColorGradeNodeType = Node<ColorGradeNodeData, "colorGrade">;
@@ -293,60 +295,31 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
     });
   }, [id, updateNodeData]);
 
-  // Re-grade on source/params change.
-  const lastFingerprintRef = useRef<string>("");
-  const [busy, setBusy] = useState(false);
-  const fingerprint = useMemo(() => {
-    const src = nodeData.sourceImage;
-    if (!src) return "";
-    const ch = (v: GradeChannelValue) => `${v.r},${v.g},${v.b}`;
-    return [
-      src.length,
-      ch(params.blackpoint), ch(params.whitepoint),
-      ch(params.lift), ch(params.gain),
-      ch(params.multiply), ch(params.offset), ch(params.gamma),
-    ].join("|");
-  }, [nodeData.sourceImage, params]);
-
-  useEffect(() => {
-    const src = nodeData.sourceImage;
-
-    if (!src) {
-      if (nodeData.outputImage) updateNodeData(id, { outputImage: null });
-      lastFingerprintRef.current = "";
-      setBusy(false);
-      return;
-    }
-
-    if (isIdentityGrade(params)) {
-      if (nodeData.outputImage !== src) updateNodeData(id, { outputImage: src });
-      lastFingerprintRef.current = fingerprint;
-      setBusy(false);
-      return;
-    }
-
-    if (lastFingerprintRef.current === fingerprint) return;
-    lastFingerprintRef.current = fingerprint;
-
-    setBusy(true);
-    applyGrade(src, params)
-      .then((output) => {
-        if (lastFingerprintRef.current !== fingerprint) return;
-        updateNodeData(id, { outputImage: output, outputImageRef: undefined });
-        setBusy(false);
-      })
-      .catch((err) => {
-        if (lastFingerprintRef.current !== fingerprint) return;
-        console.error("ColorGradeNode: grade failed", err);
-        updateNodeData(id, { outputImage: src });
-        setBusy(false);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, fingerprint, updateNodeData]);
-
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  // GPU uniforms — each grade parameter is a vec3 (per-channel R/G/B).
+  const uniforms: Record<string, UniformValue> = useMemo(
+    () => ({
+      u_blackpoint: [params.blackpoint.r, params.blackpoint.g, params.blackpoint.b],
+      u_whitepoint: [params.whitepoint.r, params.whitepoint.g, params.whitepoint.b],
+      u_lift:       [params.lift.r,       params.lift.g,       params.lift.b],
+      u_gain:       [params.gain.r,       params.gain.g,       params.gain.b],
+      u_multiply:   [params.multiply.r,   params.multiply.g,   params.multiply.b],
+      u_offset:     [params.offset.r,     params.offset.g,     params.offset.b],
+      u_gamma:      [params.gamma.r,      params.gamma.g,      params.gamma.b],
+    }),
+    [params],
+  );
   const identity = isIdentityGrade(params);
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const nodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Live GPU preview (in-node always, overlay only while open) + a
+  // debounced commit of outputImage for downstream / save.
+  useGpuLivePreview(nodeCanvasRef, nodeData.sourceImage, GRADE_SHADER, uniforms);
+  useGpuLivePreview(overlayCanvasRef, nodeData.sourceImage, GRADE_SHADER, uniforms, overlayOpen);
+  useGpuCommit(id, nodeData.sourceImage, GRADE_SHADER, uniforms, identity);
+
+  const hasImage = !!nodeData.sourceImage;
 
   return (
     <>
@@ -394,24 +367,13 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
         )}
       </div>
 
-      {displayImage ? (
+      {hasImage ? (
         <div
           className="relative w-full flex-1 min-h-0 cursor-pointer"
           onDoubleClick={() => setOverlayOpen(true)}
           title="Double-click for full-screen editor"
         >
-          <img
-            src={displayImage}
-            alt="Graded"
-            className="w-full h-full object-contain"
-          />
-          {busy && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/30 pointer-events-none">
-              <span className="text-[10px] text-white/80 bg-black/60 px-2 py-0.5 rounded">
-                grading…
-              </span>
-            </div>
-          )}
+          <canvas ref={nodeCanvasRef} className="w-full h-full object-contain" />
         </div>
       ) : (
         <div className="w-full flex-1 min-h-0 bg-neutral-900/40 flex flex-col items-center justify-center">
@@ -425,15 +387,14 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
       )}
     </BaseNode>
 
-    {overlayOpen && displayImage && (
+    {overlayOpen && hasImage && (
       <GpuEditorOverlay
         title="Color Grade"
-        image={displayImage}
+        canvasRef={overlayCanvasRef}
         onClose={() => setOverlayOpen(false)}
       >
-        {/* Re-use the same SLIDERS state; sliders write through to
-            nodeData, the existing effect re-runs the shader, and the
-            overlay image refreshes automatically. */}
+        {/* Sliders write through to nodeData; the live GPU preview hook
+            re-renders the overlay canvas immediately on each change. */}
         <div className="nodrag nowheel max-h-[60vh] overflow-y-auto">
           {SLIDERS.map((s) => {
             const value = params[s.key];

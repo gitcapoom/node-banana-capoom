@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { processImageWithShader } from "@/utils/webglProcess";
+import { useGpuLivePreview, useGpuCommit } from "@/hooks/useGpuPreview";
 import { HSV_SHADER } from "@/utils/imageShaders";
+import type { UniformValue } from "@/utils/webglProcess";
 import { GpuEditorOverlay } from "./GpuEditorOverlay";
 import type { HsvCorrectNodeData } from "@/types";
 
@@ -38,8 +39,10 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
   const nodeData = data;
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const [overlayOpen, setOverlayOpen] = useState(false);
+  const nodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Subscribe live to upstream output so we re-render when it changes.
+  // Mirror upstream output into sourceImage.
   const incomingImage = useWorkflowStore((state) => {
     const edge = state.edges.find((e) => e.target === id && e.targetHandle === "image");
     if (!edge) return null;
@@ -48,58 +51,36 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
     const out = getSourceOutput(sourceNode, edge.sourceHandle);
     return out.type === "image" ? out.value : null;
   });
-
   useEffect(() => {
     if (incomingImage !== nodeData.sourceImage) {
       updateNodeData(id, { sourceImage: incomingImage, sourceImageRef: undefined });
     }
   }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
 
-  // Auto-process on slider change. Debounces via a single in-flight job
-  // ref + a stale-fingerprint guard so quick drags don't pile up.
-  const lastFingerprintRef = useRef<string>("");
-  useEffect(() => {
-    const src = nodeData.sourceImage;
-    if (!src) {
-      if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null });
-      lastFingerprintRef.current = "";
-      return;
-    }
-    if (isIdentityHsv(nodeData)) {
-      if (nodeData.outputImage !== src) updateNodeData(id, { outputImage: src, outputImageRef: undefined });
-      lastFingerprintRef.current = `identity:${src.length}`;
-      return;
-    }
-    const fingerprint = `${src.length}|${nodeData.hueShift}|${nodeData.saturation}|${nodeData.value}`;
-    if (lastFingerprintRef.current === fingerprint) return;
-    lastFingerprintRef.current = fingerprint;
-
-    processImageWithShader(src, HSV_SHADER, {
+  const uniforms: Record<string, UniformValue> = useMemo(
+    () => ({
       u_hueShift: nodeData.hueShift,
       u_saturation: nodeData.saturation,
       u_value: nodeData.value,
-    })
-      .then((output) => {
-        if (lastFingerprintRef.current !== fingerprint) return; // dropped by newer drag
-        updateNodeData(id, { outputImage: output, outputImageRef: undefined });
-      })
-      .catch((err) => {
-        console.error("HsvCorrectNode: shader failed", err);
-        updateNodeData(id, { outputImage: src, outputImageRef: undefined });
-      });
-  }, [id, nodeData, updateNodeData]);
+    }),
+    [nodeData.hueShift, nodeData.saturation, nodeData.value],
+  );
+  const identity = isIdentityHsv(nodeData);
+
+  // Live GPU preview into the in-node canvas (always) + overlay canvas
+  // (only while open). No store write, no encode — 60 fps slider drags.
+  useGpuLivePreview(nodeCanvasRef, nodeData.sourceImage, HSV_SHADER, uniforms);
+  useGpuLivePreview(overlayCanvasRef, nodeData.sourceImage, HSV_SHADER, uniforms, overlayOpen);
+  // Debounced commit of outputImage for downstream / save.
+  useGpuCommit(id, nodeData.sourceImage, HSV_SHADER, uniforms, identity);
 
   const handleSliderChange = useCallback(
-    (key: SliderDef["key"], v: number) => {
-      updateNodeData(id, { [key]: v });
-    },
+    (key: SliderDef["key"], v: number) => updateNodeData(id, { [key]: v }),
     [id, updateNodeData],
   );
-  const handleReset = useCallback(() => {
-    updateNodeData(id, DEFAULTS);
-  }, [id, updateNodeData]);
+  const handleReset = useCallback(() => updateNodeData(id, DEFAULTS), [id, updateNodeData]);
 
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  const hasImage = !!nodeData.sourceImage;
 
   return (
     <>
@@ -107,14 +88,13 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
         <Handle type="target" position={Position.Left} id="image" data-handletype="image" />
         <Handle type="source" position={Position.Right} id="image" data-handletype="image" />
 
-        {/* Tiny live preview — double-click to open the fullscreen editor */}
         <div
           className="relative w-full aspect-square bg-neutral-900/60 rounded overflow-hidden cursor-pointer"
-          onDoubleClick={() => displayImage && setOverlayOpen(true)}
-          title={displayImage ? "Double-click to open full-screen editor" : "Connect an image"}
+          onDoubleClick={() => hasImage && setOverlayOpen(true)}
+          title={hasImage ? "Double-click to open full-screen editor" : "Connect an image"}
         >
-          {displayImage ? (
-            <img src={displayImage} alt="HSV preview" className="w-full h-full object-contain" />
+          {hasImage ? (
+            <canvas ref={nodeCanvasRef} className="w-full h-full object-contain" />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-[10px] text-neutral-500">
               Connect an image
@@ -125,10 +105,10 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
         <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />
       </BaseNode>
 
-      {overlayOpen && displayImage && (
+      {overlayOpen && hasImage && (
         <GpuEditorOverlay
           title="HSV Color Correct"
-          image={displayImage}
+          canvasRef={overlayCanvasRef}
           onClose={() => setOverlayOpen(false)}
         >
           <SliderRows nodeData={nodeData} onSlider={handleSliderChange} onReset={handleReset} />

@@ -136,29 +136,21 @@ function getOrCompileProgram(gl: WebGLRenderingContext, fragSource: string): Web
   return cachedProgram;
 }
 
-// ─── Public API ───────────────────────────────────────────────────
+// ─── Core runner (leaves result in the shared GL canvas) ──────────
 
-/**
- * Run a fragment shader on a source image and return a PNG data URL.
- *
- * The shader must declare `uniform sampler2D u_tex;` and sample with
- * `varying vec2 v_uv;`. Additional uniforms are declared in the shader
- * body and provided via the `uniforms` map (numbers, vec2/3/4 tuples).
- */
-export async function processImageWithShader(
+/** Run the shader into the shared GL canvas. Returns its dimensions.
+ *  Both the data-URL and canvas-blit consumers build on this. */
+async function runShader(
   sourceUrl: string,
   fragShaderBody: string,
   uniforms: Record<string, UniformValue>,
-  options: ProcessOptions = {},
-): Promise<string> {
+): Promise<{ canvas: HTMLCanvasElement; w: number; h: number }> {
   const { canvas, gl, quadBuffer } = getSharedGL();
   const { tex, width: w, height: h } = await getOrUploadTexture(gl, sourceUrl);
   if (w === 0 || h === 0) {
-    throw new Error("processImageWithShader: source image has zero dimensions");
+    throw new Error("runShader: source image has zero dimensions");
   }
 
-  // Resize the canvas on each call — when the source dimensions match
-  // (typical) this is a no-op the browser will optimise out.
   if (canvas.width !== w) canvas.width = w;
   if (canvas.height !== h) canvas.height = h;
 
@@ -166,19 +158,15 @@ export async function processImageWithShader(
   const program = getOrCompileProgram(gl, fragSource);
   gl.useProgram(program);
 
-  // Quad bind (the buffer itself is shared / preloaded).
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
   const posLoc = gl.getAttribLocation(program, "a_pos");
   gl.enableVertexAttribArray(posLoc);
   gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-  // Texture bind.
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  const texLoc = gl.getUniformLocation(program, "u_tex");
-  gl.uniform1i(texLoc, 0);
+  gl.uniform1i(gl.getUniformLocation(program, "u_tex"), 0);
 
-  // User uniforms.
   for (const [name, value] of Object.entries(uniforms)) {
     const loc = gl.getUniformLocation(program, name);
     if (loc == null) continue;
@@ -196,13 +184,54 @@ export async function processImageWithShader(
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-  // Read back as data URL. The canvas-toDataURL round-trip is the
-  // dominant cost on small images (~5 ms for 1K, ~30 ms for 4K), but
-  // it's how we hand the result back to the rest of the app.
+  return { canvas, w, h };
+}
+
+// ─── Public API ───────────────────────────────────────────────────
+
+/**
+ * Run a fragment shader on a source image and return a PNG data URL.
+ *
+ * This includes the `toDataURL` encode (~5 ms @ 1K, ~30-80 ms @ 4K) and
+ * is the COMMIT path — call it when the user settles, not on every
+ * slider tick. For live preview use `renderShaderToCanvas`, which skips
+ * the encode entirely.
+ */
+export async function processImageWithShader(
+  sourceUrl: string,
+  fragShaderBody: string,
+  uniforms: Record<string, UniformValue>,
+  options: ProcessOptions = {},
+): Promise<string> {
+  const { canvas } = await runShader(sourceUrl, fragShaderBody, uniforms);
   return canvas.toDataURL(
     options.outputType ?? "image/png",
     options.outputQuality,
   );
+}
+
+/**
+ * Run a fragment shader and blit the result straight into a visible 2D
+ * canvas — no PNG encode, no data-URL string. This is the LIVE-PREVIEW
+ * path: ~3-8 ms end-to-end even at 4K, so it stays at 60 fps while the
+ * user drags sliders. The destination canvas is sized to match the
+ * source image.
+ */
+export async function renderShaderToCanvas(
+  sourceUrl: string,
+  fragShaderBody: string,
+  uniforms: Record<string, UniformValue>,
+  destCanvas: HTMLCanvasElement,
+): Promise<void> {
+  const { canvas: glCanvas, w, h } = await runShader(sourceUrl, fragShaderBody, uniforms);
+  if (destCanvas.width !== w) destCanvas.width = w;
+  if (destCanvas.height !== h) destCanvas.height = h;
+  const ctx = destCanvas.getContext("2d");
+  if (!ctx) throw new Error("renderShaderToCanvas: could not get 2D context on destination");
+  // drawImage of a (preserveDrawingBuffer:true) WebGL canvas is a fast
+  // GPU-backed copy — no readback to CPU.
+  ctx.clearRect(0, 0, w, h);
+  ctx.drawImage(glCanvas, 0, 0);
 }
 
 // ─── helpers ────────────────────────────────────────────────────

@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 /**
  * Shared full-screen viewer for the GPU-native image-processing nodes
- * (Color Grade / HSV Correct / Contrast Adjust). The image fills the
- * viewport; the node's slider controls float on top in a translucent
- * panel so the user can dial-in adjustments against a big preview.
+ * (Color Grade / HSV Correct / Contrast Adjust). The processed image
+ * fills the viewport via a <canvas> the host draws into with the live
+ * GPU preview (no data-URL round-trip), and the node's slider controls
+ * float on top in a translucent panel.
  *
- * The processed image is what the node already stores in
- * `nodeData.outputImage` — the node's existing effect re-runs the shader
- * on slider changes, and the overlay just re-renders the new data URL.
- * Escape or backdrop-click closes the overlay.
+ * The host node owns `canvasRef` and runs `useGpuLivePreview` against it
+ * while the overlay is open, so dragging sliders updates this big canvas
+ * at 60 fps. Escape / backdrop click / × closes.
  *
  * Portaled to document.body so it isn't bounded by React Flow's pan/zoom.
  */
@@ -20,16 +20,15 @@ import { createPortal } from "react-dom";
 interface GpuEditorOverlayProps {
   /** Header / accessible title (e.g. "Color Grade"). */
   title: string;
-  /** Current processed image (data URL or http URL). */
-  image: string;
+  /** Canvas the host draws the live GPU preview into. */
+  canvasRef: RefObject<HTMLCanvasElement | null>;
   /** Callback to close — wired to Escape, backdrop click, and the × button. */
   onClose: () => void;
   /** Slider controls (and anything else) the host node wants to render. */
   children: ReactNode;
 }
 
-export function GpuEditorOverlay({ title, image, onClose, children }: GpuEditorOverlayProps) {
-  // Esc to close.
+export function GpuEditorOverlay({ title, canvasRef, onClose, children }: GpuEditorOverlayProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -43,11 +42,11 @@ export function GpuEditorOverlay({ title, image, onClose, children }: GpuEditorO
       className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center select-none"
       onClick={onClose}
     >
-      {/* Background image — fills available space, aspect-preserved. */}
-      <img
-        src={image}
-        alt={title}
+      {/* Live GPU preview — fills available space, aspect-preserved. */}
+      <canvas
+        ref={canvasRef}
         className="max-w-[95vw] max-h-[95vh] object-contain shadow-2xl pointer-events-none"
+        style={{ imageRendering: "auto" }}
       />
 
       {/* Header bar */}
@@ -66,8 +65,7 @@ export function GpuEditorOverlay({ title, image, onClose, children }: GpuEditorO
         </button>
       </div>
 
-      {/* Floating controls panel — bottom-right, stays out of the way of
-          the image's bottom-left detail area. */}
+      {/* Floating controls panel — bottom-right. */}
       <div
         className="absolute bottom-6 right-6 w-[340px] max-w-[40vw] bg-neutral-900/80 backdrop-blur-md rounded-lg shadow-2xl p-4 border border-neutral-700/60"
         onClick={(e) => e.stopPropagation()}
