@@ -15,10 +15,11 @@ import { GenerateRequest, GenerateResponse, ModelType, SelectedModel, ProviderTy
 import { GenerationInput, GenerationOutput, ModelCapability } from "@/lib/providers/types";
 import { generateWithGemini, generateWithGeminiVideo } from "./providers/gemini";
 import { generateWithReplicate } from "./providers/replicate";
-import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFalQueue } from "./providers/fal";
+import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFalQueue, type FalStatusUpdate } from "./providers/fal";
 import { generateWithKie } from "./providers/kie";
 import { generateWithWaveSpeed } from "./providers/wavespeed";
 import { generateWithMuapi } from "./providers/muapi";
+import { wantsSSE, createSSEStream, SSE_HEADERS } from "./utils/sse";
 import { calculateGenerationCost } from "@/utils/costCalculator";
 import { compressAllImages } from "./utils/imageCompression";
 import { isImageSizeError } from "./utils/sizeErrorDetection";
@@ -314,6 +315,52 @@ export async function POST(request: NextRequest) {
         dynamicInputs: processedDynamicInputs,
       };
 
+      // ── SSE streaming path ──────────────────────────────────
+      // When the client sends `Accept: text/event-stream`, we stream the
+      // upstream provider's status updates back as the job moves through
+      // queue → running → downloading. Final result lands as an event:result.
+      if (wantsSSE(request)) {
+        const { stream, emit, finish } = createSSEStream();
+        const sseStart = Date.now();
+        const onStatus = (s: FalStatusUpdate) => {
+          emit("status", { ...s, elapsedMs: Date.now() - sseStart });
+        };
+        // Kick the async work off the stack so we return the response
+        // immediately and start flushing the stream.
+        void (async () => {
+          try {
+            onStatus({ phase: "submitting" });
+            const result = await retryWithCompressedImages(
+              requestId, processedImages, processedDynamicInputs,
+              (imgs, dynIn) => generateWithFalQueue(
+                requestId, falApiKey,
+                { ...genInput, images: imgs, dynamicInputs: dynIn },
+                onStatus,
+              ),
+            );
+            if (!result.success) {
+              finish("result", { success: false, error: result.error || "Generation failed" });
+              return;
+            }
+            const output = result.outputs?.[0];
+            if (!output?.data && !output?.url) {
+              finish("result", { success: false, error: "No output in generation result" });
+              return;
+            }
+            // Re-use buildMediaResponse's shape by extracting its body —
+            // we can't return its NextResponse from inside the stream, so
+            // construct the same JSON-shaped payload.
+            const mediaResponse = buildMediaResponse(output, result.outputs);
+            const body = await mediaResponse.clone().json();
+            finish("result", body);
+          } catch (err) {
+            finish("result", { success: false, error: err instanceof Error ? err.message : String(err) });
+          }
+        })();
+        return new Response(stream, { headers: SSE_HEADERS });
+      }
+
+      // ── Legacy blocking path (no Accept: text/event-stream) ────
       const result = await retryWithCompressedImages(
         requestId, processedImages, processedDynamicInputs,
         (imgs, dynIn) => generateWithFalQueue(requestId, falApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),

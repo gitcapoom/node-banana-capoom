@@ -406,6 +406,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
               active
               loadingStartedAt={nodeData.loadingStartedAt}
               loadingPhase=""
+              queuePosition={nodeData.queuePosition}
               className="ml-auto text-[10px] text-white/60 tabular-nums"
             />
           </div>

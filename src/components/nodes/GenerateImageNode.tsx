@@ -878,6 +878,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                   active
                   loadingStartedAt={nodeData.loadingStartedAt}
                   loadingPhase={nodeData.loadingPhase}
+                  queuePosition={nodeData.queuePosition}
                 />
                 <svg
                   className="w-6 h-6 animate-spin text-white"

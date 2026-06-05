@@ -22,6 +22,10 @@ export interface BaseNodeData extends Record<string, unknown> {
    *  during loading. Executors set this to "Queued…" / "Running…" /
    *  "Polling…" etc. as the job moves through phases. */
   loadingPhase?: string;
+  /** Provider-reported queue position (fal.ai exposes this; 0 = next).
+   *  null while running / downloading. Driven by the SSE status stream
+   *  from /api/generate when the provider supports it. */
+  queuePosition?: number | null;
 }
 
 // Shape type discriminator

@@ -7,6 +7,7 @@
 
 import type { GenerateVideoNodeData } from "@/types";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
+import { consumeGenerateSSE, isSSEResponse } from "@/utils/generateSSE";
 import type { NodeExecutionContext } from "./types";
 
 export interface GenerateVideoOptions {
@@ -100,9 +101,13 @@ export async function executeGenerateVideo(
   };
 
   try {
+    // SSE: server streams queue position / phase changes during the
+    // upstream provider's polling loop. Falls back to JSON automatically
+    // when the provider's branch hasn't been wired to SSE.
+    const sseHeaders = { ...headers, Accept: "text/event-stream" };
     const response = await fetch("/api/generate", {
       method: "POST",
-      headers,
+      headers: sseHeaders,
       body: JSON.stringify(requestPayload),
       ...(signal ? { signal } : {}),
     });
@@ -124,7 +129,25 @@ export async function executeGenerateVideo(
       throw new Error(errorMessage);
     }
 
-    const result = await response.json();
+    let result: { success?: boolean; error?: string; video?: string; videoUrl?: string; image?: string; cost?: number; [k: string]: unknown };
+    if (isSSEResponse(response)) {
+      result = await consumeGenerateSSE(response, (status) => {
+        const label =
+          status.phase === "queued"
+            ? (status.queuePosition != null ? `Queued · #${status.queuePosition + 1}` : "Queued…")
+            : status.phase === "running"
+              ? "Generating…"
+              : status.phase === "downloading"
+                ? "Downloading…"
+                : "Submitting…";
+        updateNodeData(node.id, {
+          loadingPhase: label,
+          ...(status.queuePosition != null ? { queuePosition: status.queuePosition } : { queuePosition: null }),
+        });
+      }) as typeof result;
+    } else {
+      result = await response.json();
+    }
 
     // Handle video response (video or videoUrl field)
     const videoData = result.video || result.videoUrl;

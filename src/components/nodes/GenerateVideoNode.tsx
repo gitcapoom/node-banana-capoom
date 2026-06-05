@@ -754,6 +754,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
                   active
                   loadingStartedAt={nodeData.loadingStartedAt}
                   loadingPhase={nodeData.loadingPhase}
+                  queuePosition={nodeData.queuePosition}
                 />
                 <svg className="w-6 h-6 animate-spin text-white" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />

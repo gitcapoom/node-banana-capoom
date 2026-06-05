@@ -7,6 +7,7 @@
 
 import type { Generate3DNodeData, Carousel3DItem } from "@/types";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
+import { consumeGenerateSSE, isSSEResponse } from "@/utils/generateSSE";
 import type { NodeExecutionContext } from "./types";
 
 export interface Generate3DOptions {
@@ -86,9 +87,10 @@ export async function executeGenerate3D(
   };
 
   try {
+    const sseHeaders = { ...headers, Accept: "text/event-stream" };
     const response = await fetch("/api/generate", {
       method: "POST",
-      headers,
+      headers: sseHeaders,
       body: JSON.stringify(requestPayload),
       ...(signal ? { signal } : {}),
     });
@@ -110,7 +112,25 @@ export async function executeGenerate3D(
       throw new Error(errorMessage);
     }
 
-    const result = await response.json();
+    let result: { success?: boolean; error?: string; model3dUrl?: string; cost?: number; [k: string]: unknown };
+    if (isSSEResponse(response)) {
+      result = await consumeGenerateSSE(response, (status) => {
+        const label =
+          status.phase === "queued"
+            ? (status.queuePosition != null ? `Queued · #${status.queuePosition + 1}` : "Queued…")
+            : status.phase === "running"
+              ? "Generating…"
+              : status.phase === "downloading"
+                ? "Downloading…"
+                : "Submitting…";
+        updateNodeData(node.id, {
+          loadingPhase: label,
+          ...(status.queuePosition != null ? { queuePosition: status.queuePosition } : { queuePosition: null }),
+        });
+      }) as typeof result;
+    } else {
+      result = await response.json();
+    }
 
     if (result.success && result.model3dUrl) {
       const timestamp = Date.now();

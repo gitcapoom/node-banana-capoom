@@ -268,16 +268,31 @@ export async function uploadImageToFal(base64DataUrl: string, apiKey: string | n
 }
 
 /**
+ * Status callback shape — when present, the executor emits queue
+ * position / phase updates on each poll iteration. See `utils/sse.ts`
+ * for the wire format and the route's SSE branch for plumbing.
+ */
+export interface FalStatusUpdate {
+  phase: "submitting" | "queued" | "running" | "downloading";
+  queuePosition?: number | null;
+}
+export type FalStatusCallback = (update: FalStatusUpdate) => void;
+
+/**
  * Generate using fal.ai Queue API
  * Uses async queue submission + polling (1s interval) instead of blocking fal.run.
  * Images are uploaded to fal CDN before submission to avoid payload size issues.
+ * Optional `onStatus` is called on every status transition (phase change or
+ * queue position update) so the route can stream SSE events back to the client.
  */
 export async function generateWithFalQueue(
   requestId: string,
   apiKey: string | null,
-  input: GenerationInput
+  input: GenerationInput,
+  onStatus?: FalStatusCallback
 ): Promise<GenerationOutput> {
   console.log(`[API:${requestId}] fal.ai queue generation - Model: ${input.model.id}, Images: ${input.images?.length || 0}, Prompt: ${input.prompt.length} chars`);
+  onStatus?.({ phase: "submitting" });
 
   const modelId = input.model.id;
   const hasDynamicInputs = input.dynamicInputs && Object.keys(input.dynamicInputs).length > 0;
@@ -508,13 +523,27 @@ export async function generateWithFalQueue(
 
     const statusResult = await statusResponse.json();
     const status = statusResult.status;
+    // fal.ai exposes `queue_position` on the status response when status
+    // is IN_QUEUE; absent / undefined once the worker picks up the job.
+    const queuePosition = typeof statusResult.queue_position === "number"
+      ? statusResult.queue_position
+      : null;
 
     if (status !== lastStatus) {
-      console.log(`[API:${requestId}] Queue status: ${status}`);
+      console.log(`[API:${requestId}] Queue status: ${status}${queuePosition != null ? ` (position ${queuePosition})` : ""}`);
       lastStatus = status;
+    }
+    // Emit on every poll — clients can throttle on their side. We send
+    // queuePosition even when it's null so the UI can flip from "Queued
+    // #3" → "Running…" smoothly without a stale position lingering.
+    if (status === "IN_QUEUE") {
+      onStatus?.({ phase: "queued", queuePosition });
+    } else if (status === "IN_PROGRESS") {
+      onStatus?.({ phase: "running", queuePosition: null });
     }
 
     if (status === "COMPLETED") {
+      onStatus?.({ phase: "downloading", queuePosition: null });
       // Fetch the result
       const resultResponse = await fetch(
         responseUrl,

@@ -7,6 +7,7 @@
 
 import type { GenerateAudioNodeData } from "@/types";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
+import { consumeGenerateSSE, isSSEResponse } from "@/utils/generateSSE";
 import type { NodeExecutionContext } from "./types";
 
 export interface GenerateAudioOptions {
@@ -95,9 +96,10 @@ export async function executeGenerateAudio(
   let errorHandled = false;
 
   try {
+    const sseHeaders = { ...headers, Accept: "text/event-stream" };
     const response = await fetch("/api/generate", {
       method: "POST",
-      headers,
+      headers: sseHeaders,
       body: JSON.stringify(requestPayload),
       ...(signal ? { signal } : {}),
     });
@@ -120,7 +122,25 @@ export async function executeGenerateAudio(
       throw new Error(errorMessage);
     }
 
-    const result = await response.json();
+    let result: { success?: boolean; error?: string; audio?: string; audioUrl?: string; [k: string]: unknown };
+    if (isSSEResponse(response)) {
+      result = await consumeGenerateSSE(response, (status) => {
+        const label =
+          status.phase === "queued"
+            ? (status.queuePosition != null ? `Queued · #${status.queuePosition + 1}` : "Queued…")
+            : status.phase === "running"
+              ? "Generating…"
+              : status.phase === "downloading"
+                ? "Downloading…"
+                : "Submitting…";
+        updateNodeData(node.id, {
+          loadingPhase: label,
+          ...(status.queuePosition != null ? { queuePosition: status.queuePosition } : { queuePosition: null }),
+        });
+      }) as typeof result;
+    } else {
+      result = await response.json();
+    }
 
     // Handle audio response (audio or audioUrl field)
     const audioData = result.audio || result.audioUrl;

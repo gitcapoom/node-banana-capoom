@@ -9,6 +9,7 @@ import type {
   NanoBananaNodeData,
 } from "@/types";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
+import { consumeGenerateSSE, isSSEResponse } from "@/utils/generateSSE";
 import type { NodeExecutionContext } from "./types";
 
 export interface NanoBananaOptions {
@@ -141,9 +142,13 @@ export async function executeNanoBanana(
       throw new Error(msg);
     }
 
+    // Ask the server for SSE streaming so we get live queue position
+    // updates while the upstream provider polls. The server falls back to
+    // JSON on its own for providers that haven't been wired to SSE yet.
+    const sseHeaders = { ...headers, Accept: "text/event-stream" };
     const response = await fetch("/api/generate", {
       method: "POST",
-      headers,
+      headers: sseHeaders,
       body,
       ...(signal ? { signal } : {}),
     });
@@ -165,7 +170,30 @@ export async function executeNanoBanana(
       throw new Error(errorMessage);
     }
 
-    const result = await response.json();
+    // Parse SSE stream when the server opted into it; status events
+    // become live loadingPhase / queuePosition updates on the node.
+    // Falls back to the legacy JSON path otherwise.
+    let result: { success?: boolean; error?: string; image?: string; images?: string[]; cost?: number; [k: string]: unknown };
+    if (isSSEResponse(response)) {
+      result = await consumeGenerateSSE(response, (status) => {
+        const label =
+          status.phase === "queued"
+            ? (status.queuePosition != null
+                ? `Queued · #${status.queuePosition + 1}`
+                : "Queued…")
+            : status.phase === "running"
+              ? "Generating…"
+              : status.phase === "downloading"
+                ? "Downloading…"
+                : "Submitting…";
+        updateNodeData(node.id, {
+          loadingPhase: label,
+          ...(status.queuePosition != null ? { queuePosition: status.queuePosition } : { queuePosition: null }),
+        });
+      }) as typeof result;
+    } else {
+      result = await response.json();
+    }
 
     if (result.success && result.image) {
       const timestamp = Date.now();
