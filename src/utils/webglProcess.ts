@@ -187,6 +187,31 @@ async function runShader(
   return { canvas, w, h };
 }
 
+// ─── Serialization lock ──────────────────────────────────────────
+//
+// There is exactly ONE shared WebGL context + canvas. Multiple callers
+// race on it: the in-node live preview and the full-screen overlay both
+// fire on every slider change, plus the debounced commit. Without
+// serialization, one call's canvas read (blit / toDataURL) can land
+// after a *different* call has already cleared + redrawn the shared
+// canvas — so you blit a half-drawn or transparent (black) frame.
+//
+// A simple promise-chain mutex holds the context for the full duration
+// of each render (including its internal awaits + the final read), so no
+// two renders ever interleave. Each call is only a few ms, and the
+// debounced commit keeps the queue short, so serializing doesn't hurt
+// throughput in practice.
+let glLock: Promise<unknown> = Promise.resolve();
+function withGlLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = glLock.then(fn);
+  // Keep the chain alive even if a render rejects.
+  glLock = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 // ─── Public API ───────────────────────────────────────────────────
 
 /**
@@ -197,17 +222,21 @@ async function runShader(
  * slider tick. For live preview use `renderShaderToCanvas`, which skips
  * the encode entirely.
  */
-export async function processImageWithShader(
+export function processImageWithShader(
   sourceUrl: string,
   fragShaderBody: string,
   uniforms: Record<string, UniformValue>,
   options: ProcessOptions = {},
 ): Promise<string> {
-  const { canvas } = await runShader(sourceUrl, fragShaderBody, uniforms);
-  return canvas.toDataURL(
-    options.outputType ?? "image/png",
-    options.outputQuality,
-  );
+  return withGlLock(async () => {
+    // runShader's draw and the toDataURL read happen with the lock held,
+    // so no other render can touch the shared canvas in between.
+    const { canvas } = await runShader(sourceUrl, fragShaderBody, uniforms);
+    return canvas.toDataURL(
+      options.outputType ?? "image/png",
+      options.outputQuality,
+    );
+  });
 }
 
 /**
@@ -217,21 +246,23 @@ export async function processImageWithShader(
  * user drags sliders. The destination canvas is sized to match the
  * source image.
  */
-export async function renderShaderToCanvas(
+export function renderShaderToCanvas(
   sourceUrl: string,
   fragShaderBody: string,
   uniforms: Record<string, UniformValue>,
   destCanvas: HTMLCanvasElement,
 ): Promise<void> {
-  const { canvas: glCanvas, w, h } = await runShader(sourceUrl, fragShaderBody, uniforms);
-  if (destCanvas.width !== w) destCanvas.width = w;
-  if (destCanvas.height !== h) destCanvas.height = h;
-  const ctx = destCanvas.getContext("2d");
-  if (!ctx) throw new Error("renderShaderToCanvas: could not get 2D context on destination");
-  // drawImage of a (preserveDrawingBuffer:true) WebGL canvas is a fast
-  // GPU-backed copy — no readback to CPU.
-  ctx.clearRect(0, 0, w, h);
-  ctx.drawImage(glCanvas, 0, 0);
+  return withGlLock(async () => {
+    const { canvas: glCanvas, w, h } = await runShader(sourceUrl, fragShaderBody, uniforms);
+    if (destCanvas.width !== w) destCanvas.width = w;
+    if (destCanvas.height !== h) destCanvas.height = h;
+    const ctx = destCanvas.getContext("2d");
+    if (!ctx) throw new Error("renderShaderToCanvas: could not get 2D context on destination");
+    // drawImage of a (preserveDrawingBuffer:true) WebGL canvas is a fast
+    // GPU-backed copy. Lock is held, so glCanvas still holds OUR draw.
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(glCanvas, 0, 0);
+  });
 }
 
 // ─── helpers ────────────────────────────────────────────────────
