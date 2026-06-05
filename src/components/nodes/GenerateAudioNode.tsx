@@ -2,7 +2,8 @@
 
 import React, { useCallback, useState, useEffect, useMemo } from "react";
 import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
-import { BaseNode } from "./BaseNode";
+import { BaseNode } from "./BaseNode"
+import { LoadingBadge } from "./LoadingBadge";
 import { ProviderBadge } from "./ProviderBadge";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore } from "@/store/workflowStore";
@@ -396,9 +397,17 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
 
         {/* Status indicators */}
         {nodeData.status === "loading" && (
-          <div className="flex items-center gap-2 mt-2">
+          <div className="relative flex items-center gap-2 mt-2">
             <div className="animate-spin w-3 h-3 border-2 border-violet-500 border-t-transparent rounded-full" />
-            <span className="text-xs text-neutral-400">Generating audio...</span>
+            <span className="text-xs text-neutral-400">
+              {nodeData.loadingPhase || "Generating audio…"}
+            </span>
+            <LoadingBadge
+              active
+              loadingStartedAt={nodeData.loadingStartedAt}
+              loadingPhase=""
+              className="ml-auto text-[10px] text-white/60 tabular-nums"
+            />
           </div>
         )}
 

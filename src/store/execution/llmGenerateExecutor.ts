@@ -113,6 +113,8 @@ export async function executeLlmGenerate(
     inputImages: images,
     ...(useConversation ? { conversation: persistedConversation } : {}),
     status: "loading",
+    loadingStartedAt: Date.now(),
+    loadingPhase: "Submitting…",
     error: null,
     lastGenerationCost: null,
   });

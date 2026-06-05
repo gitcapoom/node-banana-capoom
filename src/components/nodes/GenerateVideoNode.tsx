@@ -2,7 +2,8 @@
 
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
-import { BaseNode } from "./BaseNode";
+import { BaseNode } from "./BaseNode"
+import { LoadingBadge } from "./LoadingBadge";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
@@ -749,6 +750,11 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             {/* Loading overlay for generation */}
             {nodeData.status === "loading" && (
               <div className="absolute inset-0 bg-neutral-900/70 flex items-center justify-center">
+                <LoadingBadge
+                  active
+                  loadingStartedAt={nodeData.loadingStartedAt}
+                  loadingPhase={nodeData.loadingPhase}
+                />
                 <svg className="w-6 h-6 animate-spin text-white" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />

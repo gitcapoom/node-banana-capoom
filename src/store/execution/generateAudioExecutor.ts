@@ -75,6 +75,8 @@ export async function executeGenerateAudio(
   updateNodeData(node.id, {
     inputPrompt: text ?? nodeData.inputPrompt,
     status: "loading",
+    loadingStartedAt: Date.now(),
+    loadingPhase: "Submitting…",
     error: null,
   });
 

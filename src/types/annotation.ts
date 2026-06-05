@@ -13,6 +13,15 @@ export interface BaseNodeData extends Record<string, unknown> {
   label?: string;
   customTitle?: string;
   comment?: string;
+  /** ms epoch — set by executors when a node enters `status: "loading"`.
+   *  Used by the node UI to display an elapsed-time / queue-status badge
+   *  via `useElapsedTime`. Cleared (or stale) when status is anything
+   *  else; UI gates reads on the loading state. */
+  loadingStartedAt?: number;
+  /** Optional human label rendered alongside the elapsed-time counter
+   *  during loading. Executors set this to "Queued…" / "Running…" /
+   *  "Polling…" etc. as the job moves through phases. */
+  loadingPhase?: string;
 }
 
 // Shape type discriminator

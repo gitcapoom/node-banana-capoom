@@ -81,6 +81,8 @@ export async function executeNanoBanana(
     inputImages: images,
     inputPrompt: promptText,
     status: "loading",
+    loadingStartedAt: Date.now(),
+    loadingPhase: "Submitting…",
     error: null,
     lastGenerationCost: null,
   });

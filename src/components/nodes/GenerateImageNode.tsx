@@ -3,6 +3,7 @@
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
+import { LoadingBadge } from "./LoadingBadge";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, saveNanoBananaDefaults, useProviderApiKeys } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
@@ -873,6 +874,11 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
             {/* Loading overlay for generation */}
             {nodeData.status === "loading" && (
               <div className="absolute inset-0 bg-neutral-900/70 flex items-center justify-center">
+                <LoadingBadge
+                  active
+                  loadingStartedAt={nodeData.loadingStartedAt}
+                  loadingPhase={nodeData.loadingPhase}
+                />
                 <svg
                   className="w-6 h-6 animate-spin text-white"
                   fill="none"

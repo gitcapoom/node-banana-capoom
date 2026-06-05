@@ -81,6 +81,8 @@ export async function executeGenerateVideo(
     inputImages: images,
     inputPrompt: text,
     status: "loading",
+    loadingStartedAt: Date.now(),
+    loadingPhase: "Submitting…",
     error: null,
     lastGenerationCost: null,
   });

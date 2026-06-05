@@ -67,6 +67,8 @@ export async function executeGenerate3D(
     inputImages: images,
     inputPrompt: promptText,
     status: "loading",
+    loadingStartedAt: Date.now(),
+    loadingPhase: "Submitting…",
     error: null,
     lastGenerationCost: null,
   });
