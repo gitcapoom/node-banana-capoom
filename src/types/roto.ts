@@ -29,8 +29,16 @@ export interface RotoPoint {
   anchor: { x: number; y: number };
   inHandle: { x: number; y: number };
   outHandle: { x: number; y: number };
+  /** Feather control point + its own tangents (so the feather curve can be
+   *  shaped independently of the shape curve). Default = the matching shape
+   *  point (feather = anchor, featherIn = inHandle, featherOut = outHandle)
+   *  → the feather curve coincides with the shape curve → hard edge. */
   feather: { x: number; y: number };
+  featherIn: { x: number; y: number };
+  featherOut: { x: number; y: number };
   broken: boolean;
+  /** Feather tangents broken (independent) vs smooth (mirrored). */
+  featherBroken?: boolean;
 }
 
 export interface RotoShape {

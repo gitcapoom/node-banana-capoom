@@ -46,16 +46,16 @@ function cubicAt(p0: Pt, p1: Pt, p2: Pt, p3: Pt, t: number): Pt {
   };
 }
 
-/** Per-point feather offset (feather − anchor). */
-function off(p: RotoPoint): Pt {
-  return { x: p.feather.x - p.anchor.x, y: p.feather.y - p.anchor.y };
-}
+// Feather control points, falling back to the shape point for legacy data.
+const fAnchor = (p: RotoPoint): Pt => p.feather ?? p.anchor;
+const fIn = (p: RotoPoint): Pt => p.featherIn ?? p.inHandle;
+const fOut = (p: RotoPoint): Pt => p.featherOut ?? p.outHandle;
 
 /**
  * Sample a shape into two corresponding polylines: the main curve and the
- * feather curve (main curve translated per-point by the feather offset).
- * Index i lines up between the two so lerp(shape[i], feather[i], t) is the
- * interpolated boundary used for the feather ramp.
+ * feather curve (built from the per-point feather anchor + feather
+ * tangents). Index i lines up between the two so lerp(shape[i],
+ * feather[i], t) is the interpolated boundary used for the feather ramp.
  */
 function sampleShape(shape: RotoShape): { shapePoly: Pt[]; featherPoly: Pt[] } {
   const pts = shape.points;
@@ -66,15 +66,8 @@ function sampleShape(shape: RotoShape): { shapePoly: Pt[]; featherPoly: Pt[] } {
   for (let s = 0; s < segCount; s++) {
     const a = pts[s];
     const b = pts[(s + 1) % pts.length];
-    const oa = off(a);
-    const ob = off(b);
-    // Shape segment control points.
     const s0 = a.anchor, s1 = a.outHandle, s2 = b.inHandle, s3 = b.anchor;
-    // Feather segment = shape segment translated per endpoint by its offset.
-    const f0 = { x: a.anchor.x + oa.x, y: a.anchor.y + oa.y };
-    const f1 = { x: a.outHandle.x + oa.x, y: a.outHandle.y + oa.y };
-    const f2 = { x: b.inHandle.x + ob.x, y: b.inHandle.y + ob.y };
-    const f3 = { x: b.anchor.x + ob.x, y: b.anchor.y + ob.y };
+    const f0 = fAnchor(a), f1 = fOut(a), f2 = fIn(b), f3 = fAnchor(b);
     const last = s === segCount - 1 && !shape.closed ? SEG_SAMPLES : SEG_SAMPLES - 1;
     for (let k = 0; k <= last; k++) {
       const t = k / SEG_SAMPLES;

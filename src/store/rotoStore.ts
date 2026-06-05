@@ -45,6 +45,7 @@ interface RotoStore {
   replaceShape: (id: string, shape: RotoShape) => void;
   updateShape: (id: string, patch: Partial<RotoShape>) => void;
   deleteShape: (id: string) => void;
+  moveShape: (id: string, dir: -1 | 1) => void;
   clear: () => void;
 
   // History
@@ -120,6 +121,18 @@ export const useRotoStore = create<RotoStore>((set, get) => ({
         selectedShapeId: state.selectedShapeId === id ? (shapes[0]?.id ?? null) : state.selectedShapeId,
         selectedPointId: null,
       };
+    });
+  },
+
+  moveShape: (id, dir) => {
+    get().pushHistory();
+    set((state) => {
+      const idx = state.shapes.findIndex((s) => s.id === id);
+      const j = idx + dir;
+      if (idx < 0 || j < 0 || j >= state.shapes.length) return state;
+      const shapes = [...state.shapes];
+      [shapes[idx], shapes[j]] = [shapes[j], shapes[idx]];
+      return { shapes };
     });
   },
 
