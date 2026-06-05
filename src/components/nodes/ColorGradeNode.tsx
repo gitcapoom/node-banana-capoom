@@ -1,15 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { GpuEditorOverlay } from "./GpuEditorOverlay";
+import { ColorWheel } from "./ColorWheel";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import {
   channelToHex,
   coerceChannel,
-  hexToChannel,
   IDENTITY_GRADE,
   isIdentityGrade,
   isMaster,
@@ -17,6 +18,12 @@ import {
   type GradeChannelValue,
   type GradeParams,
 } from "@/utils/colorGrade";
+import {
+  channelLevel,
+  channelToWheel,
+  wheelToChannel,
+  type WheelPoint,
+} from "@/utils/gradeWheel";
 import { useColorNode } from "@/hooks/useGpuPreview";
 import { GRADE_SHADER } from "@/utils/imageShaders";
 import type { UniformValue } from "@/utils/webglProcess";
@@ -66,7 +73,6 @@ interface RowProps {
  */
 function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps) {
   const isDefault = value.r === def.defaultValue && value.g === def.defaultValue && value.b === def.defaultValue;
-  const colorInputRef = useRef<HTMLInputElement>(null);
 
   const setChannel = useCallback(
     (ch: "r" | "g" | "b", v: number) => {
@@ -86,18 +92,58 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
     onChange(masterValue(def.defaultValue));
   }, [def.defaultValue, onChange]);
 
-  const onColorPicked = useCallback(
-    (hex: string) => {
-      const picked = hexToChannel(hex);
-      const clamp = (n: number) => Math.max(def.min, Math.min(def.max, n));
-      onChange({
-        r: clamp(picked.r),
-        g: clamp(picked.g),
-        b: clamp(picked.b),
-      });
-    },
-    [def.min, def.max, onChange]
+  // ─── Colour wheel (balance) + level (master) ───────────────────
+  // Disk radius maps to ±(¼ of the row's range) of channel balance.
+  const strength = (def.max - def.min) * 0.25;
+  const clampCh = useCallback(
+    (n: number) => Math.max(def.min, Math.min(def.max, n)),
+    [def.min, def.max],
   );
+  const wheelPoint = channelToWheel(value, strength);
+  const level = channelLevel(value);
+
+  const onWheel = useCallback(
+    (pt: WheelPoint) => {
+      const nv = wheelToChannel(pt, channelLevel(value), strength);
+      onChange({ r: clampCh(nv.r), g: clampCh(nv.g), b: clampCh(nv.b) });
+    },
+    [value, strength, clampCh, onChange],
+  );
+  const onLevel = useCallback(
+    (newLevel: number) => {
+      const old = channelLevel(value);
+      const d = newLevel - old;
+      onChange({ r: clampCh(value.r + d), g: clampCh(value.g + d), b: clampCh(value.b + d) });
+    },
+    [value, clampCh, onChange],
+  );
+
+  // Wheel popover anchored to the swatch (portaled to body so it isn't
+  // clipped by the node's scroll container).
+  const swatchRef = useRef<HTMLButtonElement>(null);
+  const [wheelOpen, setWheelOpen] = useState(false);
+  const [popPos, setPopPos] = useState<{ left: number; top: number } | null>(null);
+  const openWheel = useCallback(() => {
+    const rect = swatchRef.current?.getBoundingClientRect();
+    if (rect) setPopPos({ left: rect.left, top: rect.bottom + 4 });
+    setWheelOpen(true);
+  }, []);
+  useEffect(() => {
+    if (!wheelOpen) return;
+    const close = (e: MouseEvent) => {
+      const pop = document.getElementById("grade-wheel-pop");
+      if (pop && pop.contains(e.target as HTMLElement)) return;
+      if (swatchRef.current?.contains(e.target as HTMLElement)) return;
+      setWheelOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setWheelOpen(false); };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [wheelOpen]);
 
   const swatchHex = channelToHex(value);
 
@@ -162,21 +208,55 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
           <span className="flex-1" />
         )}
 
-        {/* Colour swatch — opens native picker, assigns clamped RGB. */}
+        {/* Colour swatch — opens the grading colour-wheel popover. */}
         <button
+          ref={swatchRef}
           type="button"
-          onClick={() => colorInputRef.current?.click()}
+          onClick={() => (wheelOpen ? setWheelOpen(false) : openWheel())}
           className="w-4 h-4 shrink-0 rounded border border-neutral-600 cursor-pointer"
           style={{ backgroundColor: swatchHex }}
-          title="Pick a colour to set R/G/B"
+          title="Colour balance wheel"
         />
-        <input
-          ref={colorInputRef}
-          type="color"
-          value={swatchHex}
-          onChange={(e) => onColorPicked(e.target.value)}
-          className="hidden"
-        />
+        {wheelOpen && popPos && createPortal(
+          <div
+            id="grade-wheel-pop"
+            className="fixed z-[300] bg-neutral-900/95 border border-neutral-700 rounded-lg p-3 shadow-2xl backdrop-blur-sm"
+            style={{ left: popPos.left, top: popPos.top }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="text-[10px] text-neutral-400 mb-2">{def.label}</div>
+            <div className="flex items-start gap-2">
+              <ColorWheel point={wheelPoint} onChange={onWheel} onReset={reset} />
+              {/* Vertical level (master) slider */}
+              <div className="flex flex-col items-center gap-1 h-[130px]">
+                <input
+                  type="range"
+                  min={def.min}
+                  max={def.max}
+                  step={def.step}
+                  value={level}
+                  onChange={(e) => onLevel(parseFloat(e.target.value))}
+                  className="nodrag nopan accent-indigo-500 cursor-pointer"
+                  style={{ writingMode: "vertical-lr", direction: "rtl", height: "110px" }}
+                  title="Level (master)"
+                />
+                <span className="text-[9px] text-neutral-400 tabular-nums">{level.toFixed(2)}</span>
+              </div>
+            </div>
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-[9px] text-neutral-500 tabular-nums">
+                R{value.r.toFixed(2)} G{value.g.toFixed(2)} B{value.b.toFixed(2)}
+              </span>
+              <button
+                onClick={reset}
+                className="text-[9px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+              >
+                Reset
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
 
         {/* Master ⇄ split toggle */}
         <button
