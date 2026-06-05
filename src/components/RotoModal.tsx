@@ -126,11 +126,11 @@ export function RotoModal() {
         penDownRef.current = true;
         return;
       }
-      // Close if near the first anchor.
+      // Close if near the first anchor. Stay in Pen mode so the next click
+      // starts another shape (draw multiple shapes back-to-back).
       if (draft.points.length >= 2 && dist(pos, draft.points[0].anchor) * scale < 10) {
         addShape({ ...draft, closed: true });
         setDraft(null);
-        setTool("select");
         return;
       }
       setDraft({ ...draft, points: [...draft.points, newCorner(pos)] });
@@ -200,7 +200,7 @@ export function RotoModal() {
     const onKey = (e: KeyboardEvent) => {
       if (!isModalOpen) return;
       if (e.key === "Escape") { if (draft) setDraft(null); else closeModal(); }
-      if (e.key === "Enter" && draft && draft.points.length >= 2) { addShape({ ...draft, closed: true }); setDraft(null); setTool("select"); }
+      if (e.key === "Enter" && draft && draft.points.length >= 2) { addShape({ ...draft, closed: true }); setDraft(null); }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       if (e.key === "p" || e.key === "P") setTool("pen");
       if (e.key === "v" || e.key === "V") setTool("select");
@@ -442,6 +442,11 @@ export function RotoModal() {
             </button>
           ))}
           {work.length === 0 && <span className="text-[11px] text-neutral-600">— use Pen to draw</span>}
+          {currentTool === "pen" && (
+            <span className="text-[11px] text-sky-400/80 shrink-0 ml-2">
+              Pen: click to add points · drag for curves · click the green start point to close · keep drawing for more shapes
+            </span>
+          )}
         </div>
 
         {selShape && (
