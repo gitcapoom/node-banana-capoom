@@ -9,7 +9,7 @@ import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { renderCompToCanvas, floatNodeToDataUrl, renderComp } from "@/utils/colorChain";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPieces } from "@/utils/compTransform";
-import { COMP_OP_LABELS } from "@/types/comp";
+import { COMP_OP_LABELS, defaultCompTransform } from "@/types/comp";
 import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/types";
 
 type Pt = { x: number; y: number };
@@ -138,7 +138,10 @@ export function CompModal() {
 
   const TKEY = { bg: "bgTransform", bgAlpha: "bgAlphaTransform", fg: "fgTransform", fgAlpha: "fgAlphaTransform", matte: "matteTransform" } as const;
   const activeKey = TKEY[activeInput];
-  const activeTransform: CompTransform | undefined = data ? (data[activeKey] as CompTransform | undefined) : undefined;
+  // Merge against defaults so legacy/partial transforms always have every field.
+  const activeTransform: CompTransform | undefined = data
+    ? { ...defaultCompTransform(), ...((data[activeKey] as Partial<CompTransform> | undefined) ?? {}) }
+    : undefined;
   const activeSize = activeInput === "bg" ? sizes.bg : activeInput === "bgAlpha" ? sizes.bgAlpha : activeInput === "fg" ? sizes.fg : activeInput === "fgAlpha" ? sizes.fgAlpha : sizes.matte;
   // Which input does this one follow when its checkbox is off? (alpha pins)
   const followsLabel = activeInput === "bgAlpha" ? "BG" : activeInput === "fgAlpha" ? "FG" : null;
@@ -146,7 +149,7 @@ export function CompModal() {
   const patchTransform = useCallback(
     (patch: Partial<CompTransform>) => {
       if (!sourceNodeId || !data) return;
-      const cur = data[activeKey] as CompTransform;
+      const cur = { ...defaultCompTransform(), ...((data[activeKey] as Partial<CompTransform> | undefined) ?? {}) };
       updateNodeData(sourceNodeId, { [activeKey]: { ...cur, ...patch } } as Partial<CompNodeData>);
     },
     [sourceNodeId, data, activeKey, updateNodeData],
@@ -408,7 +411,7 @@ export function CompModal() {
               <div className="flex items-center gap-1.5 mt-1">
                 <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Reformat</label>
                 <select
-                  value={activeInput === "bgAlpha" ? data.bgAlphaReformat : activeInput === "fgAlpha" ? data.fgAlphaReformat : data.matteReformat}
+                  value={(activeInput === "bgAlpha" ? data.bgAlphaReformat : activeInput === "fgAlpha" ? data.fgAlphaReformat : data.matteReformat) ?? "none"}
                   onChange={(e) => {
                     if (!sourceNodeId) return;
                     const v = e.target.value as CompReformat;

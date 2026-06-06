@@ -44,13 +44,16 @@ export function buildCompInputs(urls: CompInputUrls, srcs: CompInputSrcs): CompR
 
 export function buildCompParams(data: CompNodeData): CompRenderParams {
   const idt = defaultCompTransform();
+  // Merge against defaults so a legacy/partial transform can't reach the shader
+  // with undefined fields (which would become NaN uniforms).
+  const T = (t?: Partial<import("@/types/comp").CompTransform>) => ({ ...idt, ...(t ?? {}) });
   return {
     op: COMP_OP_INDEX[data.mergeOp] ?? 0,
-    bgTransform: data.bgTransform ?? idt,
-    bgAlphaTransform: data.bgAlphaTransform ?? idt,
-    fgTransform: data.fgTransform ?? idt,
-    fgAlphaTransform: data.fgAlphaTransform ?? idt,
-    matteTransform: data.matteTransform ?? idt,
+    bgTransform: T(data.bgTransform),
+    bgAlphaTransform: T(data.bgAlphaTransform),
+    fgTransform: T(data.fgTransform),
+    fgAlphaTransform: T(data.fgAlphaTransform),
+    matteTransform: T(data.matteTransform),
     bgAlphaReformat: data.bgAlphaReformat ?? "none",
     fgAlphaReformat: data.fgAlphaReformat ?? "none",
     matteReformat: data.matteReformat ?? "none",
