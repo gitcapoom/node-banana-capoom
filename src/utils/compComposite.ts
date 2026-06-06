@@ -58,6 +58,7 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
     fgAlphaReformat: data.fgAlphaReformat ?? "none",
     matteReformat: data.matteReformat ?? "none",
     premultFg: data.premultiplyFg ?? false,
+    premultBg: data.premultiplyBg ?? false,
     bgBlackOutside: data.bgBlackOutside ?? true,
     fgBlackOutside: data.fgBlackOutside ?? true,
     swapBgFg: data.swapBgFg ?? false,

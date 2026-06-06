@@ -110,7 +110,7 @@ export function CompModal() {
 
   // Live preview into the offscreen canvas, rAF-coalesced.
   const previewSig = data
-    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
+    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
     : "";
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
@@ -286,6 +286,10 @@ export function CompModal() {
           <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer" title="Multiply the FG's RGB by its alpha before compositing">
             <input type="checkbox" checked={data.premultiplyFg ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { premultiplyFg: e.target.checked })} className="accent-teal-500" />
             Premultiply FG
+          </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer ml-2" title="Multiply the BG's RGB by its alpha before compositing">
+            <input type="checkbox" checked={data.premultiplyBg ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { premultiplyBg: e.target.checked })} className="accent-teal-500" />
+            Premultiply BG
           </label>
           <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer ml-2" title="Swap the BG and FG layers (and their alphas) in the merge">
             <input type="checkbox" checked={data.swapBgFg ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { swapBgFg: e.target.checked })} className="accent-teal-500" />

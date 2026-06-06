@@ -95,8 +95,9 @@ export interface CompNodeData extends BaseNodeData {
   fgAlphaReformat: CompReformat;   // matches FG
   matteReformat: CompReformat;     // matches BG
 
-  /** Multiply the FG's RGB by its (effective) alpha before compositing. */
+  /** Multiply the FG's / BG's RGB by its (effective) alpha before compositing. */
   premultiplyFg: boolean;
+  premultiplyBg: boolean;
 
   /** Black-outside (Nuke): where a transformed input doesn't cover, leave it
    *  transparent/black (true) vs. hold the edge pixels (false). */
@@ -151,6 +152,7 @@ export function defaultCompData(): CompNodeData {
     fgAlphaReformat: "none",
     matteReformat: "none",
     premultiplyFg: false,
+    premultiplyBg: false,
     bgBlackOutside: true,
     fgBlackOutside: true,
     swapBgFg: false,

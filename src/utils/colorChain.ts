@@ -415,6 +415,7 @@ export interface CompRenderParams {
   fgAlphaReformat: CompReformat;
   matteReformat: CompReformat;
   premultFg: boolean;     // multiply FG rgb by its alpha before the merge
+  premultBg: boolean;     // multiply BG rgb by its alpha before the merge
   bgBlackOutside: boolean; // transparent (true) vs edge-hold (false) outside BG
   fgBlackOutside: boolean;
   swapBgFg: boolean;       // swap BG/FG roles (+ their alphas) in the merge
@@ -437,7 +438,7 @@ uniform sampler2D u_ba;
 uniform sampler2D u_fg;
 uniform sampler2D u_fa;
 uniform sampler2D u_mt;
-uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_bg_bo, u_fg_bo, u_swap;
+uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_premultBg, u_bg_bo, u_fg_bo, u_swap;
 uniform vec2 u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size;
 uniform vec2 u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size;
 uniform vec2 u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size;
@@ -476,6 +477,7 @@ void main() {
     b = bAlphaOwn;
   }
   b *= bgCov;
+  if (u_premultBg > 0.5) Brgb = Brgb * b; // premultiply BG by its alpha
 
   // FG
   vec3 A = vec3(0.0);
@@ -584,6 +586,7 @@ function compUniforms(
     u_outSize: [outW, outH],
     u_op: params.op,
     u_premultFg: params.premultFg ? 1 : 0,
+    u_premultBg: params.premultBg ? 1 : 0,
     u_bg_bo: params.bgBlackOutside ? 1 : 0,
     u_fg_bo: params.fgBlackOutside ? 1 : 0,
     u_swap: params.swapBgFg ? 1 : 0,
