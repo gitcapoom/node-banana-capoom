@@ -128,6 +128,12 @@ export function RotoModal() {
   const [draft, setDraft] = useState<RotoShape | null>(null);
   const penDownRef = useRef(false);
 
+  // Discard an in-progress (uncommitted) draft when leaving the Pen tool, so
+  // half-drawn shapes don't linger as orphan points with no layer to delete.
+  useEffect(() => {
+    if (currentTool !== "pen") { setDraft(null); penDownRef.current = false; }
+  }, [currentTool]);
+
   const invert = sourceNodeId
     ? ((nodes.find((n) => n.id === sourceNodeId)?.data as { invert?: boolean })?.invert ?? false)
     : false;
@@ -395,7 +401,7 @@ export function RotoModal() {
                     listening={currentTool === "select"}
                   />
                 ))}
-                {draft && <KonvaShape listening={false} sceneFunc={(ctx, s) => { drawShapePath(ctx, draft); ctx.fillStrokeShape(s); }} fill="rgba(56,189,248,0.15)" />}
+                {currentTool === "pen" && draft && <KonvaShape listening={false} sceneFunc={(ctx, s) => { drawShapePath(ctx, draft); ctx.fillStrokeShape(s); }} fill="rgba(56,189,248,0.15)" />}
               </Layer>
             )}
 
@@ -404,11 +410,12 @@ export function RotoModal() {
               {selShape && (
                 <>
                   <KonvaShape listening={false} sceneFunc={(ctx, s) => { drawShapePath(ctx, selShape); ctx.strokeShape(s); }} stroke="#0ea5e9" strokeWidth={hpx(1.5)} />
-                  {editMode === "feather" && (
+                  {editMode === "feather" && currentTool === "select" && (
                     <KonvaShape listening={false} sceneFunc={(ctx, s) => { drawFeatherPath(ctx, selShape); ctx.strokeShape(s); }} stroke="#f59e0b" strokeWidth={hpx(1)} dash={[hpx(4), hpx(4)]} />
                   )}
 
-                  {selShape.points.map((p) => {
+                  {/* Edit handles only in Select mode — keep Pen clean. */}
+                  {currentTool === "select" && selShape.points.map((p) => {
                     if (editMode === "feather") {
                       return (
                         <Fragment key={p.id}>
@@ -453,7 +460,7 @@ export function RotoModal() {
                   })}
                 </>
               )}
-              {draft?.points.map((p, i) => (
+              {currentTool === "pen" && draft?.points.map((p, i) => (
                 <Circle key={p.id} x={p.anchor.x} y={p.anchor.y} radius={hpx(4)} fill={i === 0 ? "#22c55e" : "#ffffff"} stroke="#000" strokeWidth={hpx(0.5)} listening={false} />
               ))}
             </Layer>
