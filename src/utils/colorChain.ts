@@ -399,18 +399,24 @@ export function renderColorNodeToCanvas(
 export type CompResolvable = { url: string } | { floatNodeId: string };
 export interface CompRenderInputs {
   bg: CompResolvable | null;
+  bgAlpha: CompResolvable | null;
   fg: CompResolvable | null;
   fgAlpha: CompResolvable | null;
   matte: CompResolvable | null;
 }
 export interface CompRenderParams {
   op: number; // COMP_OP_INDEX value
+  bgTransform: CompTransform;
+  bgAlphaTransform: CompTransform;
   fgTransform: CompTransform;
   fgAlphaTransform: CompTransform;
   matteTransform: CompTransform;
+  bgAlphaReformat: CompReformat;
   fgAlphaReformat: CompReformat;
   matteReformat: CompReformat;
-  premultFg: boolean; // multiply FG rgb by its alpha before the merge
+  premultFg: boolean;     // multiply FG rgb by its alpha before the merge
+  bgBlackOutside: boolean; // transparent (true) vs edge-hold (false) outside BG
+  fgBlackOutside: boolean;
 }
 
 /**
@@ -425,10 +431,13 @@ export interface CompRenderParams {
 const COMP_FRAG = `
 uniform vec2 u_outSize;
 uniform sampler2D u_bg;
+uniform sampler2D u_ba;
 uniform sampler2D u_fg;
 uniform sampler2D u_fa;
 uniform sampler2D u_mt;
-uniform float u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg;
+uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_bg_bo, u_fg_bo;
+uniform vec2 u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size;
+uniform vec2 u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size;
 uniform vec2 u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size;
 uniform vec2 u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size;
 uniform vec2 u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size;
@@ -449,9 +458,24 @@ float sft(float b, float s){
 }
 void main() {
   vec2 O = vec2(v_uv.x * u_outSize.x, (1.0 - v_uv.y) * u_outSize.y);
-  vec4 B = texture2D(u_bg, v_uv);
-  float b = B.a;
 
+  // BG (transformed; default identity = passthrough). Black-outside controls
+  // whether outside the BG footprint is transparent (bo=1) or edge-held (bo=0).
+  vec3 rbg = invSample(O, u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size);
+  float bgCov = (u_bg_bo > 0.5) ? rbg.z : 1.0;
+  vec4 bgTex = texture2D(u_bg, rbg.xy);
+  vec3 Brgb = bgTex.rgb * bgCov;
+  float bAlphaOwn = bgTex.a;
+  float b;
+  if (u_ba_has > 0.5) {
+    vec3 rba = invSample(O, u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size);
+    b = dot(texture2D(u_ba, rba.xy).rgb, LUMA) * rba.z;
+  } else {
+    b = bAlphaOwn;
+  }
+  b *= bgCov;
+
+  // FG
   vec3 A = vec3(0.0);
   float fgInside = 0.0;
   float fgAlphaOwn = 1.0;
@@ -461,46 +485,48 @@ void main() {
     vec4 fgTex = texture2D(u_fg, r.xy);
     A = fgTex.rgb; fgAlphaOwn = fgTex.a;
   }
+  float fgCov = (u_fg_has > 0.5) ? ((u_fg_bo > 0.5) ? fgInside : 1.0) : 0.0;
   float a;
   if (u_fa_has > 0.5) {
     vec3 rfa = invSample(O, u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size);
-    a = dot(texture2D(u_fa, rfa.xy).rgb, LUMA) * rfa.z * fgInside;
+    a = dot(texture2D(u_fa, rfa.xy).rgb, LUMA) * rfa.z * fgCov;
   } else {
-    a = fgAlphaOwn * fgInside;
+    a = fgAlphaOwn * fgCov;
   }
   if (u_premultFg > 0.5) A = A * a; // premultiply FG by its alpha
+  A *= fgCov;                        // black-outside / no-coverage ⇒ no FG color
 
   vec3 outRgb; float outA;
   int op = int(u_op + 0.5);
-  if (op == 0)      { outRgb = A*a + B.rgb*(1.0-a);          outA = a + b*(1.0-a); }      // over
-  else if (op == 1) { outRgb = A*a + B.rgb;                  outA = clamp(a+b,0.0,1.0); } // add/plus
-  else if (op == 2 || op == 14) { outRgb = B.rgb - A;        outA = b; }                  // minus / from
-  else if (op == 3) { outRgb = abs(A - B.rgb);              outA = max(a,b); }            // difference
-  else if (op == 4) { outRgb = mix(B.rgb, A*B.rgb, a);      outA = b; }                   // multiply
-  else if (op == 5) { outRgb = mix(B.rgb, A+B.rgb-A*B.rgb, a); outA = a + b*(1.0-a); }    // screen
-  else if (op == 6) { outRgb = mix(B.rgb, vec3(ovl(B.r,A.r),ovl(B.g,A.g),ovl(B.b,A.b)), a); outA = a + b*(1.0-a); } // overlay
-  else if (op == 7) { outRgb = mix(B.rgb, vec3(sft(B.r,A.r),sft(B.g,A.g),sft(B.b,A.b)), a); outA = a + b*(1.0-a); } // softlight
-  else if (op == 8) { outRgb = mix(B.rgb, vec3(ovl(A.r,B.r),ovl(A.g,B.g),ovl(A.b,B.b)), a); outA = a + b*(1.0-a); } // hardlight
-  else if (op == 9) { outRgb = mix(B.rgb, max(A,B.rgb), a); outA = max(a,b); }            // lighten
-  else if (op == 10){ outRgb = mix(B.rgb, min(A,B.rgb), a); outA = b; }                   // darken
-  else if (op == 11){ outRgb = mix(B.rgb, B.rgb / max(A, vec3(1e-4)), a); outA = b; }     // divide
-  else if (op == 12){ outRgb = B.rgb - A*a;                 outA = b; }                   // subtract
-  else if (op == 13){ outRgb = mix(B.rgb, A + B.rgb - 2.0*A*B.rgb, a); outA = a + b*(1.0-a); } // exclusion
-  else if (op == 15){ outRgb = A;                           outA = a*b; }                 // in
-  else if (op == 16){ outRgb = A;                           outA = a*(1.0-b); }           // out
-  else if (op == 17){ outA = b; vec3 pm = A*a*b + B.rgb*b*(1.0-a); outRgb = (outA>1e-4)? pm/outA : vec3(0.0); } // atop
-  else if (op == 18){ outA = a*(1.0-b) + b*(1.0-a); vec3 pm = A*a*(1.0-b) + B.rgb*b*(1.0-a); outRgb = (outA>1e-4)? pm/outA : vec3(0.0); } // xor
-  else if (op == 19){ outRgb = B.rgb;                       outA = b*a; }                 // mask
-  else if (op == 20){ outRgb = B.rgb;                       outA = b*(1.0-a); }           // stencil
-  else if (op == 21){ outRgb = A;                           outA = a; }                   // copy
-  else              { outRgb = A*a + B.rgb*(1.0-a);         outA = a + b*(1.0-a); }       // default over
+  if (op == 0)      { outRgb = A*a + Brgb*(1.0-a);          outA = a + b*(1.0-a); }      // over
+  else if (op == 1) { outRgb = A*a + Brgb;                  outA = clamp(a+b,0.0,1.0); } // add/plus
+  else if (op == 2 || op == 14) { outRgb = Brgb - A;        outA = b; }                  // minus / from
+  else if (op == 3) { outRgb = abs(A - Brgb);              outA = max(a,b); }            // difference
+  else if (op == 4) { outRgb = mix(Brgb, A*Brgb, a);       outA = b; }                   // multiply
+  else if (op == 5) { outRgb = mix(Brgb, A+Brgb-A*Brgb, a); outA = a + b*(1.0-a); }      // screen
+  else if (op == 6) { outRgb = mix(Brgb, vec3(ovl(Brgb.r,A.r),ovl(Brgb.g,A.g),ovl(Brgb.b,A.b)), a); outA = a + b*(1.0-a); } // overlay
+  else if (op == 7) { outRgb = mix(Brgb, vec3(sft(Brgb.r,A.r),sft(Brgb.g,A.g),sft(Brgb.b,A.b)), a); outA = a + b*(1.0-a); } // softlight
+  else if (op == 8) { outRgb = mix(Brgb, vec3(ovl(A.r,Brgb.r),ovl(A.g,Brgb.g),ovl(A.b,Brgb.b)), a); outA = a + b*(1.0-a); } // hardlight
+  else if (op == 9) { outRgb = mix(Brgb, max(A,Brgb), a);  outA = max(a,b); }            // lighten
+  else if (op == 10){ outRgb = mix(Brgb, min(A,Brgb), a);  outA = b; }                   // darken
+  else if (op == 11){ outRgb = mix(Brgb, Brgb / max(A, vec3(1e-4)), a); outA = b; }      // divide
+  else if (op == 12){ outRgb = Brgb - A*a;                 outA = b; }                   // subtract
+  else if (op == 13){ outRgb = mix(Brgb, A + Brgb - 2.0*A*Brgb, a); outA = a + b*(1.0-a); } // exclusion
+  else if (op == 15){ outRgb = A;                          outA = a*b; }                 // in
+  else if (op == 16){ outRgb = A;                          outA = a*(1.0-b); }           // out
+  else if (op == 17){ outA = b; vec3 pm = A*a*b + Brgb*b*(1.0-a); outRgb = (outA>1e-4)? pm/outA : vec3(0.0); } // atop
+  else if (op == 18){ outA = a*(1.0-b) + b*(1.0-a); vec3 pm = A*a*(1.0-b) + Brgb*b*(1.0-a); outRgb = (outA>1e-4)? pm/outA : vec3(0.0); } // xor
+  else if (op == 19){ outRgb = Brgb;                       outA = b*a; }                 // mask
+  else if (op == 20){ outRgb = Brgb;                       outA = b*(1.0-a); }           // stencil
+  else if (op == 21){ outRgb = A;                          outA = a; }                   // copy
+  else              { outRgb = A*a + Brgb*(1.0-a);         outA = a + b*(1.0-a); }       // default over
 
   float m = 1.0;
   if (u_mt_has > 0.5) {
     vec3 rmt = invSample(O, u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size);
     m = dot(texture2D(u_mt, rmt.xy).rgb, LUMA) * rmt.z;
   }
-  gl_FragColor = vec4(mix(B.rgb, outRgb, m), mix(b, outA, m));
+  gl_FragColor = vec4(mix(Brgb, outRgb, m), mix(b, outA, m));
 }
 `;
 
@@ -547,16 +573,26 @@ async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | n
 
 function compUniforms(
   params: CompRenderParams, outW: number, outH: number,
-  fg: FloatTex | null, fa: FloatTex | null, mt: FloatTex | null,
+  bg: FloatTex, ba: FloatTex | null, fg: FloatTex | null, fa: FloatTex | null, mt: FloatTex | null,
 ): Record<string, UniformValue> {
   const u: Record<string, UniformValue> = {
     u_outSize: [outW, outH],
     u_op: params.op,
     u_premultFg: params.premultFg ? 1 : 0,
+    u_bg_bo: params.bgBlackOutside ? 1 : 0,
+    u_fg_bo: params.fgBlackOutside ? 1 : 0,
+    u_ba_has: ba ? 1 : 0,
     u_fg_has: fg ? 1 : 0,
     u_fa_has: fa ? 1 : 0,
     u_mt_has: mt ? 1 : 0,
   };
+  Object.assign(u, piecesToUniforms("u_bg", computePieces(params.bgTransform, "none", bg.w, bg.h, bg.w, bg.h)));
+  if (ba) {
+    const baPieces = params.bgAlphaTransform.enabled
+      ? computePieces(params.bgAlphaTransform, params.bgAlphaReformat, bg.w, bg.h, ba.w, ba.h)
+      : computeFollowPieces(params.bgTransform, bg.w, bg.h, params.bgAlphaReformat, ba.w, ba.h);
+    Object.assign(u, piecesToUniforms("u_ba", baPieces));
+  }
   if (fg) Object.assign(u, piecesToUniforms("u_fg", computePieces(params.fgTransform, "none", fg.w, fg.h, fg.w, fg.h)));
   if (fa) {
     const faPieces = params.fgAlphaTransform.enabled
@@ -574,6 +610,7 @@ async function renderCompUnlocked(c: Ctx, inputs: CompRenderInputs, params: Comp
   const bg = await resolveComp(gl, inputs.bg);
   if (!bg) return null;
   const w = bg.w, h = bg.h;
+  const ba = await resolveComp(gl, inputs.bgAlpha);
   const fg = await resolveComp(gl, inputs.fg);
   const fa = await resolveComp(gl, inputs.fgAlpha);
   const mt = await resolveComp(gl, inputs.matte);
@@ -609,8 +646,8 @@ async function renderCompUnlocked(c: Ctx, inputs: CompRenderInputs, params: Comp
     gl.bindTexture(gl.TEXTURE_2D, t ? t.tex : dummy);
     gl.uniform1i(gl.getUniformLocation(prog, name), unit);
   };
-  bind(0, bg, "u_bg"); bind(1, fg, "u_fg"); bind(2, fa, "u_fa"); bind(3, mt, "u_mt");
-  setUniforms(gl, prog, compUniforms(params, w, h, fg, fa, mt));
+  bind(0, bg, "u_bg"); bind(1, fg, "u_fg"); bind(2, fa, "u_fa"); bind(3, mt, "u_mt"); bind(4, ba, "u_ba");
+  setUniforms(gl, prog, compUniforms(params, w, h, bg, ba, fg, fa, mt));
   gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 0.0); // FBO: preserve orientation
   gl.viewport(0, 0, w, h);
   gl.clearColor(0, 0, 0, 0);

@@ -245,7 +245,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image"], outputs: ["image"] };
     case "comp":
       return {
-        inputs: ["image-comp_bg", "image-comp_fg", "image-comp_fg_alpha", "image-comp_matte"],
+        inputs: ["image-comp_bg", "image-comp_bg_alpha", "image-comp_fg", "image-comp_fg_alpha", "image-comp_matte"],
         outputs: ["image"],
       };
     case "videoInput":

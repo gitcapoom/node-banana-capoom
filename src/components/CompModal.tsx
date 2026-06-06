@@ -52,7 +52,7 @@ export function CompModal() {
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
-  const [sizes, setSizes] = useState<{ bg?: { w: number; h: number }; fg?: { w: number; h: number }; fgAlpha?: { w: number; h: number }; matte?: { w: number; h: number } }>({});
+  const [sizes, setSizes] = useState<{ bg?: { w: number; h: number }; bgAlpha?: { w: number; h: number }; fg?: { w: number; h: number }; fgAlpha?: { w: number; h: number }; matte?: { w: number; h: number } }>({});
   const [busy, setBusy] = useState(false);
 
   const data = node?.data as CompNodeData | undefined;
@@ -60,7 +60,7 @@ export function CompModal() {
   const outH = sizes.bg?.h ?? 0;
 
   const srcs = useMemo(() => {
-    const r = { bgSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null };
+    const r = { bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null };
     if (!sourceNodeId) return r;
     for (const e of edges) {
       if (e.target !== sourceNodeId) continue;
@@ -69,6 +69,7 @@ export function CompModal() {
       const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
       if (out.type !== "image" || !out.value) continue;
       if (e.targetHandle === "image-comp_bg") r.bgSrc = src.id;
+      else if (e.targetHandle === "image-comp_bg_alpha") r.baSrc = src.id;
       else if (e.targetHandle === "image-comp_fg") r.fgSrc = src.id;
       else if (e.targetHandle === "image-comp_fg_alpha") r.faSrc = src.id;
       else if (e.targetHandle === "image-comp_matte") r.mtSrc = src.id;
@@ -81,17 +82,18 @@ export function CompModal() {
     if (!isModalOpen || !data) return;
     let cancelled = false;
     (async () => {
-      const [bg, fg, fa, mt] = await Promise.all([
+      const [bg, ba, fg, fa, mt] = await Promise.all([
         data.bgImage ? loadSize(data.bgImage) : Promise.resolve(undefined),
+        data.bgAlphaImage ? loadSize(data.bgAlphaImage) : Promise.resolve(undefined),
         data.fgImage ? loadSize(data.fgImage) : Promise.resolve(undefined),
         data.fgAlphaImage ? loadSize(data.fgAlphaImage) : Promise.resolve(undefined),
         data.matteImage ? loadSize(data.matteImage) : Promise.resolve(undefined),
       ]);
       if (cancelled) return;
-      setSizes({ bg: bg ?? undefined, fg: fg ?? undefined, fgAlpha: fa ?? undefined, matte: mt ?? undefined });
+      setSizes({ bg: bg ?? undefined, bgAlpha: ba ?? undefined, fg: fg ?? undefined, fgAlpha: fa ?? undefined, matte: mt ?? undefined });
     })();
     return () => { cancelled = true; };
-  }, [isModalOpen, data?.bgImage, data?.fgImage, data?.fgAlphaImage, data?.matteImage]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isModalOpen, data?.bgImage, data?.bgAlphaImage, data?.fgImage, data?.fgAlphaImage, data?.matteImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Zoom-to-fit when BG size known / container ready.
   useEffect(() => {
@@ -106,12 +108,12 @@ export function CompModal() {
 
   // Live preview into the offscreen canvas, rAF-coalesced.
   const previewSig = data
-    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
+    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, bo: [data.bgBlackOutside, data.fgBlackOutside], bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
     : "";
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
     let cancelled = false;
-    const urls = { bg: data.bgImage, fg: data.fgImage, fgAlpha: data.fgAlphaImage, matte: data.matteImage };
+    const urls = { bg: data.bgImage, bgAlpha: data.bgAlphaImage, fg: data.fgImage, fgAlpha: data.fgAlphaImage, matte: data.matteImage };
     const run = async () => {
       if (!urls.bg) return;
       const ok = await renderCompToCanvas(buildCompInputs(urls, srcs), buildCompParams(data), sourceNodeId, offscreen);
@@ -132,9 +134,12 @@ export function CompModal() {
     setScale((s) => Math.min(Math.max(e.evt.deltaY > 0 ? s / by : s * by, 0.05), 8));
   }, []);
 
-  const activeKey = activeInput === "fg" ? "fgTransform" : activeInput === "fgAlpha" ? "fgAlphaTransform" : "matteTransform";
-  const activeTransform: CompTransform | undefined = data ? (data[activeKey] as CompTransform) : undefined;
-  const activeSize = activeInput === "fg" ? sizes.fg : activeInput === "fgAlpha" ? sizes.fgAlpha : sizes.matte;
+  const TKEY = { bg: "bgTransform", bgAlpha: "bgAlphaTransform", fg: "fgTransform", fgAlpha: "fgAlphaTransform", matte: "matteTransform" } as const;
+  const activeKey = TKEY[activeInput];
+  const activeTransform: CompTransform | undefined = data ? (data[activeKey] as CompTransform | undefined) : undefined;
+  const activeSize = activeInput === "bg" ? sizes.bg : activeInput === "bgAlpha" ? sizes.bgAlpha : activeInput === "fg" ? sizes.fg : activeInput === "fgAlpha" ? sizes.fgAlpha : sizes.matte;
+  // Which input does this one follow when its checkbox is off? (alpha pins)
+  const followsLabel = activeInput === "bgAlpha" ? "BG" : activeInput === "fgAlpha" ? "FG" : null;
 
   const patchTransform = useCallback(
     (patch: Partial<CompTransform>) => {
@@ -149,20 +154,25 @@ export function CompModal() {
   const showHandles = !!(activeTransform?.enabled && activeSize && outW && outH);
   const pieces: CompPieces | null = useMemo(() => {
     if (!showHandles || !data || !activeTransform || !activeSize) return null;
-    if (activeInput === "fg") return computePieces(activeTransform, "none", activeSize.w, activeSize.h, activeSize.w, activeSize.h);
+    if (activeInput === "bg" || activeInput === "fg") return computePieces(activeTransform, "none", activeSize.w, activeSize.h, activeSize.w, activeSize.h);
     if (activeInput === "fgAlpha") {
       const rw = sizes.fg?.w ?? activeSize.w, rh = sizes.fg?.h ?? activeSize.h;
       return computePieces(activeTransform, data.fgAlphaReformat, rw, rh, activeSize.w, activeSize.h);
     }
+    if (activeInput === "bgAlpha") {
+      const rw = sizes.bg?.w ?? activeSize.w, rh = sizes.bg?.h ?? activeSize.h;
+      return computePieces(activeTransform, data.bgAlphaReformat, rw, rh, activeSize.w, activeSize.h);
+    }
     return computePieces(activeTransform, data.matteReformat, outW, outH, activeSize.w, activeSize.h);
-  }, [showHandles, data, activeTransform, activeSize, activeInput, sizes.fg, outW, outH]);
+  }, [showHandles, data, activeTransform, activeSize, activeInput, sizes.fg, sizes.bg, outW, outH]);
 
   const sx0sy0 = useMemo<[number, number]>(() => {
     if (!data || !activeSize) return [1, 1];
-    if (activeInput === "fg") return [1, 1];
+    if (activeInput === "bg" || activeInput === "fg") return [1, 1];
     if (activeInput === "fgAlpha") return reformatScale(data.fgAlphaReformat, sizes.fg?.w ?? activeSize.w, sizes.fg?.h ?? activeSize.h, activeSize.w, activeSize.h);
+    if (activeInput === "bgAlpha") return reformatScale(data.bgAlphaReformat, sizes.bg?.w ?? activeSize.w, sizes.bg?.h ?? activeSize.h, activeSize.w, activeSize.h);
     return reformatScale(data.matteReformat, outW, outH, activeSize.w, activeSize.h);
-  }, [data, activeSize, activeInput, sizes.fg, outW, outH]);
+  }, [data, activeSize, activeInput, sizes.fg, sizes.bg, outW, outH]);
 
   // konva (top-left) <-> output bottom-left
   const toKonva = (o: Pt): Pt => ({ x: o.x, y: outH - o.y });
@@ -181,7 +191,7 @@ export function CompModal() {
     if (!sourceNodeId || !data || !data.bgImage) { closeModal(); return; }
     setBusy(true);
     try {
-      const urls = { bg: data.bgImage, fg: data.fgImage, fgAlpha: data.fgAlphaImage, matte: data.matteImage };
+      const urls = { bg: data.bgImage, bgAlpha: data.bgAlphaImage, fg: data.fgImage, fgAlpha: data.fgAlphaImage, matte: data.matteImage };
       const res = await renderComp(buildCompInputs(urls, srcs), buildCompParams(data), sourceNodeId);
       if (res) {
         const url = (await floatNodeToDataUrl(sourceNodeId)) ?? data.bgImage;
@@ -304,20 +314,33 @@ export function CompModal() {
 
         <div className="w-72 shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col overflow-y-auto">
           <div className="flex border-b border-neutral-800">
-            {(["fg", "fgAlpha", "matte"] as CompActiveInput[]).map((t) => (
-              <button key={t} onClick={() => setActiveInput(t)} className={`flex-1 py-2 text-[11px] font-medium ${activeInput === t ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
-                {t === "fg" ? "FG" : t === "fgAlpha" ? "FG α" : "Matte"}
+            {(["bg", "bgAlpha", "fg", "fgAlpha", "matte"] as CompActiveInput[]).map((t) => (
+              <button key={t} onClick={() => setActiveInput(t)} className={`flex-1 py-2 text-[10px] font-medium ${activeInput === t ? "bg-neutral-800 text-white" : "text-neutral-400 hover:text-white"}`}>
+                {t === "bg" ? "BG" : t === "bgAlpha" ? "BG α" : t === "fg" ? "FG" : t === "fgAlpha" ? "FG α" : "Matte"}
               </button>
             ))}
           </div>
 
           <div className="p-3 flex flex-col gap-2.5">
+            {/* Black outside — BG & FG only */}
+            {(activeInput === "bg" || activeInput === "fg") && (
+              <label className="flex items-center gap-2 text-[11px] text-neutral-300 cursor-pointer" title="Transparent (on) vs. hold edge pixels (off) outside the transformed image">
+                <input
+                  type="checkbox"
+                  checked={(activeInput === "bg" ? data.bgBlackOutside : data.fgBlackOutside) ?? true}
+                  onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, activeInput === "bg" ? { bgBlackOutside: e.target.checked } : { fgBlackOutside: e.target.checked })}
+                  className="accent-teal-500"
+                />
+                Black outside
+              </label>
+            )}
+
             <label className="flex items-center gap-2 text-[11px] text-neutral-300 cursor-pointer">
               <input type="checkbox" checked={activeTransform?.enabled ?? false} onChange={(e) => patchTransform({ enabled: e.target.checked })} className="accent-teal-500" />
-              {activeInput === "fgAlpha" ? (activeTransform?.enabled ? "Transform independently" : "Follow FG") : "Enable transform"}
+              {followsLabel ? (activeTransform?.enabled ? "Transform independently" : `Follow ${followsLabel}`) : "Enable transform"}
             </label>
-            {activeInput === "fgAlpha" && !activeTransform?.enabled && (
-              <div className="text-[10px] text-neutral-500 leading-snug">Following the FG transform. Enable to move the alpha independently.</div>
+            {followsLabel && !activeTransform?.enabled && (
+              <div className="text-[10px] text-neutral-500 leading-snug">Following the {followsLabel} transform. Enable to move it independently.</div>
             )}
 
             <div className={`flex flex-col gap-1.5 ${activeTransform?.enabled ? "" : "opacity-50 pointer-events-none"}`}>
@@ -348,17 +371,25 @@ export function CompModal() {
               )}
             </div>
 
-            {activeInput !== "fg" && (
+            {(activeInput === "bgAlpha" || activeInput === "fgAlpha" || activeInput === "matte") && (
               <div className="flex items-center gap-1.5 mt-1">
                 <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Reformat</label>
-                <select value={activeInput === "fgAlpha" ? data.fgAlphaReformat : data.matteReformat} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, activeInput === "fgAlpha" ? { fgAlphaReformat: e.target.value as CompReformat } : { matteReformat: e.target.value as CompReformat })} className="nodrag flex-1 min-w-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700">
+                <select
+                  value={activeInput === "bgAlpha" ? data.bgAlphaReformat : activeInput === "fgAlpha" ? data.fgAlphaReformat : data.matteReformat}
+                  onChange={(e) => {
+                    if (!sourceNodeId) return;
+                    const v = e.target.value as CompReformat;
+                    updateNodeData(sourceNodeId, activeInput === "bgAlpha" ? { bgAlphaReformat: v } : activeInput === "fgAlpha" ? { fgAlphaReformat: v } : { matteReformat: v });
+                  }}
+                  className="nodrag flex-1 min-w-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700"
+                >
                   {REFORMATS.map((r) => <option key={r.v} value={r.v}>{r.label}</option>)}
                 </select>
               </div>
             )}
             <div className="text-[10px] text-neutral-600 leading-snug mt-1">
               Drag the box to move · corner = scale both · edge dots = scale X/Y · amber = rotate · center dot = pivot (double-click = auto). (0,0) = bottom-left.
-              {activeInput === "fgAlpha" ? " Reformat matches FG." : activeInput === "matte" ? " Reformat matches BG; matte limits the merge." : ""}
+              {activeInput === "bgAlpha" ? " Reformat matches BG." : activeInput === "fgAlpha" ? " Reformat matches FG." : activeInput === "matte" ? " Reformat matches BG; matte limits the merge." : ""}
             </div>
           </div>
         </div>

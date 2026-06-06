@@ -14,10 +14,11 @@ import type { CompNodeData } from "@/types";
 type CompNodeType = Node<CompNodeData, "comp">;
 
 const INPUT_HANDLES: Array<{ id: string; label: string; top: string; color: string }> = [
-  { id: "image-comp_bg", label: "BG", top: "22%", color: "#2dd4bf" },
-  { id: "image-comp_fg", label: "FG", top: "42%", color: "#38bdf8" },
-  { id: "image-comp_fg_alpha", label: "FG α", top: "62%", color: "#a3a3a3" },
-  { id: "image-comp_matte", label: "Matte", top: "82%", color: "#a3a3a3" },
+  { id: "image-comp_bg", label: "BG", top: "16%", color: "#2dd4bf" },
+  { id: "image-comp_bg_alpha", label: "BG α", top: "32%", color: "#a3a3a3" },
+  { id: "image-comp_fg", label: "FG", top: "50%", color: "#38bdf8" },
+  { id: "image-comp_fg_alpha", label: "FG α", top: "68%", color: "#a3a3a3" },
+  { id: "image-comp_matte", label: "Matte", top: "84%", color: "#a3a3a3" },
 ];
 
 export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
@@ -31,8 +32,8 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   const incoming = useWorkflowStore(
     useShallow((state) => {
       const r = {
-        bg: null as string | null, fg: null as string | null, fgAlpha: null as string | null, matte: null as string | null,
-        bgSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null,
+        bg: null as string | null, bgAlpha: null as string | null, fg: null as string | null, fgAlpha: null as string | null, matte: null as string | null,
+        bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null,
       };
       for (const e of state.edges) {
         if (e.target !== id) continue;
@@ -41,6 +42,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
         if (out.type !== "image" || !out.value) continue;
         if (e.targetHandle === "image-comp_bg") { r.bg = out.value; r.bgSrc = src.id; }
+        else if (e.targetHandle === "image-comp_bg_alpha") { r.bgAlpha = out.value; r.baSrc = src.id; }
         else if (e.targetHandle === "image-comp_fg") { r.fg = out.value; r.fgSrc = src.id; }
         else if (e.targetHandle === "image-comp_fg_alpha") { r.fgAlpha = out.value; r.faSrc = src.id; }
         else if (e.targetHandle === "image-comp_matte") { r.matte = out.value; r.mtSrc = src.id; }
@@ -53,26 +55,27 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   useEffect(() => {
     const patch: Partial<CompNodeData> = {};
     if (incoming.bg !== nodeData.bgImage) { patch.bgImage = incoming.bg; patch.bgImageRef = undefined; }
+    if (incoming.bgAlpha !== nodeData.bgAlphaImage) { patch.bgAlphaImage = incoming.bgAlpha; patch.bgAlphaImageRef = undefined; }
     if (incoming.fg !== nodeData.fgImage) { patch.fgImage = incoming.fg; patch.fgImageRef = undefined; }
     if (incoming.fgAlpha !== nodeData.fgAlphaImage) { patch.fgAlphaImage = incoming.fgAlpha; patch.fgAlphaImageRef = undefined; }
     if (incoming.matte !== nodeData.matteImage) { patch.matteImage = incoming.matte; patch.matteImageRef = undefined; }
     if (Object.keys(patch).length) updateNodeData(id, patch);
-  }, [incoming, nodeData.bgImage, nodeData.fgImage, nodeData.fgAlphaImage, nodeData.matteImage, id, updateNodeData]);
+  }, [incoming, nodeData.bgImage, nodeData.bgAlphaImage, nodeData.fgImage, nodeData.fgAlphaImage, nodeData.matteImage, id, updateNodeData]);
 
   // Live preview + commit whenever inputs/params change.
   const sig = JSON.stringify({
-    bgSrc: incoming.bgSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc,
-    op: nodeData.mergeOp, pm: nodeData.premultiplyFg,
-    fgT: nodeData.fgTransform, faT: nodeData.fgAlphaTransform, mtT: nodeData.matteTransform,
-    far: nodeData.fgAlphaReformat, mtr: nodeData.matteReformat,
-    bgUrl: incoming.bg, fgUrl: incoming.fg, faUrl: incoming.fgAlpha, mtUrl: incoming.matte,
+    bgSrc: incoming.bgSrc, baSrc: incoming.baSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc,
+    op: nodeData.mergeOp, pm: nodeData.premultiplyFg, bo: [nodeData.bgBlackOutside, nodeData.fgBlackOutside],
+    bgT: nodeData.bgTransform, baT: nodeData.bgAlphaTransform, fgT: nodeData.fgTransform, faT: nodeData.fgAlphaTransform, mtT: nodeData.matteTransform,
+    bar: nodeData.bgAlphaReformat, far: nodeData.fgAlphaReformat, mtr: nodeData.matteReformat,
+    bgUrl: incoming.bg, baUrl: incoming.bgAlpha, fgUrl: incoming.fg, faUrl: incoming.fgAlpha, mtUrl: incoming.matte,
   });
 
   useEffect(() => {
     if (modalOpenForThis) return; // editor owns rendering while open
     let cancelled = false;
-    const urls = { bg: incoming.bg, fg: incoming.fg, fgAlpha: incoming.fgAlpha, matte: incoming.matte };
-    const srcs = { bgSrc: incoming.bgSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc };
+    const urls = { bg: incoming.bg, bgAlpha: incoming.bgAlpha, fg: incoming.fg, fgAlpha: incoming.fgAlpha, matte: incoming.matte };
+    const srcs = { bgSrc: incoming.bgSrc, baSrc: incoming.baSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc };
     const run = async () => {
       if (!urls.bg) {
         if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null, outputImageRef: undefined });

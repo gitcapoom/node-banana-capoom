@@ -9,7 +9,7 @@
  */
 
 import type { CompNodeData } from "@/types";
-import { COMP_OP_INDEX } from "@/types/comp";
+import { COMP_OP_INDEX, defaultCompTransform } from "@/types/comp";
 import {
   renderComp,
   floatNodeToDataUrl,
@@ -29,12 +29,13 @@ export function resolveInputRef(url: string | null, srcNodeId: string | null): C
   return null;
 }
 
-export interface CompInputUrls { bg: string | null; fg: string | null; fgAlpha: string | null; matte: string | null }
-export interface CompInputSrcs { bgSrc: string | null; fgSrc: string | null; faSrc: string | null; mtSrc: string | null }
+export interface CompInputUrls { bg: string | null; bgAlpha: string | null; fg: string | null; fgAlpha: string | null; matte: string | null }
+export interface CompInputSrcs { bgSrc: string | null; baSrc: string | null; fgSrc: string | null; faSrc: string | null; mtSrc: string | null }
 
 export function buildCompInputs(urls: CompInputUrls, srcs: CompInputSrcs): CompRenderInputs {
   return {
     bg: resolveInputRef(urls.bg, srcs.bgSrc),
+    bgAlpha: resolveInputRef(urls.bgAlpha, srcs.baSrc),
     fg: resolveInputRef(urls.fg, srcs.fgSrc),
     fgAlpha: resolveInputRef(urls.fgAlpha, srcs.faSrc),
     matte: resolveInputRef(urls.matte, srcs.mtSrc),
@@ -42,14 +43,20 @@ export function buildCompInputs(urls: CompInputUrls, srcs: CompInputSrcs): CompR
 }
 
 export function buildCompParams(data: CompNodeData): CompRenderParams {
+  const idt = defaultCompTransform();
   return {
     op: COMP_OP_INDEX[data.mergeOp] ?? 0,
-    fgTransform: data.fgTransform,
-    fgAlphaTransform: data.fgAlphaTransform,
-    matteTransform: data.matteTransform,
-    fgAlphaReformat: data.fgAlphaReformat,
-    matteReformat: data.matteReformat,
+    bgTransform: data.bgTransform ?? idt,
+    bgAlphaTransform: data.bgAlphaTransform ?? idt,
+    fgTransform: data.fgTransform ?? idt,
+    fgAlphaTransform: data.fgAlphaTransform ?? idt,
+    matteTransform: data.matteTransform ?? idt,
+    bgAlphaReformat: data.bgAlphaReformat ?? "none",
+    fgAlphaReformat: data.fgAlphaReformat ?? "none",
+    matteReformat: data.matteReformat ?? "none",
     premultFg: data.premultiplyFg ?? false,
+    bgBlackOutside: data.bgBlackOutside ?? true,
+    fgBlackOutside: data.fgBlackOutside ?? true,
   };
 }
 

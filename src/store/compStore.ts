@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /** Which input's transform the CompModal is currently editing. */
-export type CompActiveInput = "fg" | "fgAlpha" | "matte";
+export type CompActiveInput = "bg" | "bgAlpha" | "fg" | "fgAlpha" | "matte";
 
 interface CompStore {
   isModalOpen: boolean;

@@ -70,10 +70,13 @@ export interface CompTransform {
 export interface CompNodeData extends BaseNodeData {
   mergeOp: CompMergeOp;
 
-  // Input mirrors — resolved reactively from the 4 input handles by the node
-  // component and the executor (routed by targetHandle).
+  // Input mirrors — resolved reactively from the input handles by the node
+  // component and the executor (routed by targetHandle). BG still sets the
+  // output resolution/format; it can now also be transformed.
   bgImage: string | null;
   bgImageRef?: string;
+  bgAlphaImage: string | null;
+  bgAlphaImageRef?: string;
   fgImage: string | null;
   fgImageRef?: string;
   fgAlphaImage: string | null;
@@ -81,16 +84,24 @@ export interface CompNodeData extends BaseNodeData {
   matteImage: string | null;
   matteImageRef?: string;
 
-  // Per-input transforms (NOT BG).
+  // Per-input transforms.
+  bgTransform: CompTransform;
+  bgAlphaTransform: CompTransform; // enabled=false ⇒ follow BG
   fgTransform: CompTransform;
   fgAlphaTransform: CompTransform; // enabled=false ⇒ follow FG
   matteTransform: CompTransform;   // independent whenever enabled
 
+  bgAlphaReformat: CompReformat;   // matches BG
   fgAlphaReformat: CompReformat;   // matches FG
   matteReformat: CompReformat;     // matches BG
 
   /** Multiply the FG's RGB by its (effective) alpha before compositing. */
   premultiplyFg: boolean;
+
+  /** Black-outside (Nuke): where a transformed input doesn't cover, leave it
+   *  transparent/black (true) vs. hold the edge pixels (false). */
+  bgBlackOutside: boolean;
+  fgBlackOutside: boolean;
 
   // Output: 8-bit PNG for display / persistence / 8-bit consumers. The float
   // result lives in the colorChain registry keyed by this node's id.
@@ -120,15 +131,21 @@ export function defaultCompData(): CompNodeData {
   return {
     mergeOp: "over",
     bgImage: null,
+    bgAlphaImage: null,
     fgImage: null,
     fgAlphaImage: null,
     matteImage: null,
+    bgTransform: defaultCompTransform(false),
+    bgAlphaTransform: defaultCompTransform(false),
     fgTransform: defaultCompTransform(false),
     fgAlphaTransform: defaultCompTransform(false),
     matteTransform: defaultCompTransform(false),
+    bgAlphaReformat: "none",
     fgAlphaReformat: "none",
     matteReformat: "none",
     premultiplyFg: false,
+    bgBlackOutside: true,
+    fgBlackOutside: true,
     outputImage: null,
     error: null,
   };
