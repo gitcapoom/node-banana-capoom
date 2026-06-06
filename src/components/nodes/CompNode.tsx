@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type CSSProperties } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { useShallow } from "zustand/react/shallow";
 import { BaseNode } from "./BaseNode";
@@ -12,6 +12,14 @@ import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/ut
 import type { CompNodeData } from "@/types";
 
 type CompNodeType = Node<CompNodeData, "comp">;
+
+const CHECKER_STYLE: CSSProperties = {
+  backgroundColor: "#454545",
+  backgroundImage:
+    "linear-gradient(45deg, #5e5e5e 25%, transparent 25%, transparent 75%, #5e5e5e 75%, #5e5e5e), linear-gradient(45deg, #5e5e5e 25%, transparent 25%, transparent 75%, #5e5e5e 75%, #5e5e5e)",
+  backgroundSize: "16px 16px",
+  backgroundPosition: "0 0, 8px 8px",
+};
 
 const INPUT_HANDLES: Array<{ id: string; label: string; top: string; color: string }> = [
   { id: "image-comp_bg", label: "BG", top: "16%", color: "#2dd4bf" },
@@ -143,7 +151,8 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" style={{ top: "50%", width: 11, height: 11, background: "#2dd4bf", border: "1px solid #0008" }} />
 
       <div
-        className="group absolute inset-0 overflow-hidden rounded-lg bg-neutral-900/60 cursor-pointer"
+        className="group absolute inset-0 overflow-hidden rounded-lg cursor-pointer"
+        style={nodeData.checkerboard ? CHECKER_STYLE : { backgroundColor: "#000" }}
         onDoubleClick={() => hasBg && handleEdit()}
         title={hasBg ? "Double-click to open the comp editor" : "Connect a BG image"}
       >

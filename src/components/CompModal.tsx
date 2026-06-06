@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Stage, Layer, Image as KonvaImage, Line, Circle } from "react-konva";
+import { Stage, Layer, Image as KonvaImage, Line, Circle, Rect } from "react-konva";
 import Konva from "konva";
 import { useCompStore, type CompActiveInput } from "@/store/compStore";
 import { useWorkflowStore } from "@/store/workflowStore";
@@ -49,6 +49,15 @@ export function CompModal() {
   const containerRef = useRef<HTMLDivElement>(null);
   const translateRef = useRef<{ startPL: { x: number; y: number }; startH: number; startV: number } | null>(null);
   const offscreen = useMemo(() => (typeof document !== "undefined" ? document.createElement("canvas") : null), []);
+  // Checkerboard tile for visualizing transparency behind the composite.
+  const checkerTile = useMemo(() => {
+    if (typeof document === "undefined") return null;
+    const cell = 8, c = document.createElement("canvas");
+    c.width = cell * 2; c.height = cell * 2;
+    const cx = c.getContext("2d");
+    if (cx) { cx.fillStyle = "#454545"; cx.fillRect(0, 0, cell * 2, cell * 2); cx.fillStyle = "#5e5e5e"; cx.fillRect(0, 0, cell, cell); cx.fillRect(cell, cell, cell, cell); }
+    return c;
+  }, []);
   const [, setPreviewTick] = useState(0);
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -309,6 +318,11 @@ export function CompModal() {
               <option value="fg">FG</option>
             </select>
           </label>
+          <div className="w-px h-6 bg-neutral-700 mx-2" />
+          <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer" title="Show transparent pixels as a checkerboard instead of black">
+            <input type="checkbox" checked={data.checkerboard ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { checkerboard: e.target.checked })} className="accent-teal-500" />
+            Checkerboard
+          </label>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={closeModal} className="px-4 py-1.5 text-xs font-medium text-neutral-400 hover:text-white">Cancel</button>
@@ -320,7 +334,11 @@ export function CompModal() {
         <div ref={containerRef} className="flex-1 overflow-hidden bg-neutral-900">
           {data.bgImage && offscreen ? (
             <Stage ref={stageRef} width={stageSize.width} height={stageSize.height} scaleX={scale} scaleY={scale} x={position.x} y={position.y} onWheel={handleWheel} onMouseMove={onStageMove} onMouseUp={endTranslate} onMouseLeave={endTranslate}>
-              <Layer>
+              <Layer listening={false}>
+                {/* transparency backdrop: solid black, or checkerboard if enabled */}
+                {data.checkerboard && checkerTile
+                  ? <Rect x={0} y={0} width={outW} height={outH} fillPatternImage={checkerTile as unknown as HTMLImageElement} fillPatternRepeat="repeat" />
+                  : <Rect x={0} y={0} width={outW} height={outH} fill="#000" />}
                 <KonvaImage ref={imageNodeRef} image={offscreen} width={outW} height={outH} />
               </Layer>
               <Layer>

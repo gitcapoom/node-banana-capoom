@@ -112,6 +112,10 @@ export interface CompNodeData extends BaseNodeData {
   /** Which input's native size defines the output resolution. */
   outputResolution: "bg" | "fg";
 
+  /** Display only: show transparent (non-occupied) pixels as a checkerboard
+   *  (true) instead of solid black (false). Does not affect the output. */
+  checkerboard: boolean;
+
   // Output: 8-bit PNG for display / persistence / 8-bit consumers. The float
   // result lives in the colorChain registry keyed by this node's id.
   outputImage: string | null;
@@ -159,6 +163,7 @@ export function defaultCompData(): CompNodeData {
     fgBlackOutside: true,
     swapBgFg: false,
     outputResolution: "bg",
+    checkerboard: false,
     outputImage: null,
     error: null,
   };
