@@ -1,5 +1,5 @@
 import { WorkflowFile } from "@/store/workflowStore";
-import { NodeType, WorkflowNodeData } from "@/types";
+import { NodeType, WorkflowNodeData, defaultCompData } from "@/types";
 
 interface ValidationError {
   path: string;
@@ -45,6 +45,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "panoEditor",
   "maskPainter",
   "roto",
+  "comp",
   "imageCrop",
   "mirror",
   "cubemapEquirect",
@@ -90,6 +91,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   panoEditor: { width: 300, height: 300 },
   maskPainter: { width: 260, height: 300 },
   roto: { width: 260, height: 300 },
+  comp: { width: 320, height: 360 },
   imageCrop: { width: 300, height: 280 },
   mirror: { width: 300, height: 300 },
   cubemapEquirect: { width: 320, height: 320 },
@@ -551,6 +553,8 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         outputMask: null,
         invert: false,
       };
+    case "comp":
+      return defaultCompData();
     case "imageCrop":
       return {
         sourceImage: null,

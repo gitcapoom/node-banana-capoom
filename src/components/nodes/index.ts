@@ -29,6 +29,7 @@ export { PanoViewerNode } from "./PanoViewerNode";
 export { PanoEditorNode } from "./PanoEditorNode";
 export { MaskPainterNode } from "./MaskPainterNode";
 export { RotoNode } from "./RotoNode";
+export { CompNode } from "./CompNode";
 export { VideoInputNode } from "./VideoInputNode";
 export { ImageCropNode } from "./ImageCropNode";
 export { MirrorNode } from "./MirrorNode";

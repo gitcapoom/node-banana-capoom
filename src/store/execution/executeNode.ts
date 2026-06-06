@@ -12,6 +12,7 @@ import {
   executeArray,
   executeMaskPainter,
   executeRoto,
+  executeComp,
   executePrompt,
   executePromptConstructor,
   executeOutput,
@@ -140,6 +141,9 @@ export async function executeNode(
       break;
     case "roto":
       await executeRoto(ctx);
+      break;
+    case "comp":
+      await executeComp(ctx);
       break;
     case "generateAudio":
       await executeGenerateAudio(ctx, regenOpts);

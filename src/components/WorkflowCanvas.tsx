@@ -50,6 +50,7 @@ import {
   PanoEditorNode,
   MaskPainterNode,
   RotoNode,
+  CompNode,
   VideoTrimNode,
   VideoFrameGrabNode,
   RouterNode,
@@ -128,6 +129,7 @@ const nodeTypes: NodeTypes = {
   panoEditor: PanoEditorNode,
   maskPainter: MaskPainterNode,
   roto: RotoNode,
+  comp: CompNode,
   videoInput: VideoInputNode,
   imageCrop: ImageCropNode,
   mirror: MirrorNode,
@@ -241,6 +243,11 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image"], outputs: ["image"] };
     case "roto":
       return { inputs: ["image"], outputs: ["image"] };
+    case "comp":
+      return {
+        inputs: ["image-comp_bg", "image-comp_fg", "image-comp_fg_alpha", "image-comp_matte"],
+        outputs: ["image"],
+      };
     case "videoInput":
       return { inputs: ["video"], outputs: ["video"] };
     case "imageCrop":
@@ -551,6 +558,7 @@ export function WorkflowCanvas() {
     panoEditor: 'Pano Editor',
     maskPainter: 'Mask Painter',
     roto: 'Roto',
+    comp: 'Composite',
     videoInput: 'Video Input',
     glbViewer: '3D Viewer',
     imageCrop: 'Image Crop',
@@ -1774,6 +1782,7 @@ export function WorkflowCanvas() {
             panoEditor: { width: 300, height: 300 },
             maskPainter: { width: 260, height: 300 },
             roto: { width: 260, height: 300 },
+            comp: { width: 320, height: 360 },
             videoInput: { width: 320, height: 300 },
             imageCrop: { width: 300, height: 280 },
             mirror: { width: 300, height: 300 },
@@ -2512,6 +2521,8 @@ export function WorkflowCanvas() {
                 return "#a3a3a3"; // neutral-400 (mask painting)
               case "roto":
                 return "#38bdf8"; // sky-400 (roto shapes)
+              case "comp":
+                return "#2dd4bf"; // teal-400 (composite / float)
               case "videoInput":
                 return "#8b5cf6"; // violet-600 (video input)
               default:

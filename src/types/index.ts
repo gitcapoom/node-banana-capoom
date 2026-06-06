@@ -9,6 +9,7 @@
 export * from "./annotation";
 export * from "./maskPainter";
 export * from "./roto";
+export * from "./comp";
 export * from "./nodes";
 export * from "./providers";
 export * from "./models";

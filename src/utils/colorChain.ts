@@ -28,11 +28,15 @@
 
 import { DISPLAY_CLAMP_SHADER } from "./imageShaders";
 import { processImageWithShader, type UniformValue } from "./webglProcess";
+import type { CompTransform, CompReformat } from "@/types/comp";
+import { computePieces, computeFollowPieces, piecesToUniforms } from "./compTransform";
 
 export type ShaderInput = { url: string } | { floatNodeId: string };
 
-/** Node types that participate in the float color chain. */
-export const COLOR_NODE_TYPES = new Set<string>(["colorGrade", "hsvCorrect", "contrastAdjust"]);
+/** Node types that participate in the float color chain. `comp` joins so its
+ *  inputs read upstream float textures and its output is published as a float
+ *  texture (see renderComp below). */
+export const COLOR_NODE_TYPES = new Set<string>(["colorGrade", "hsvCorrect", "contrastAdjust", "comp"]);
 
 // u_flipY: 1.0 for canvas-targeted passes (the browser presents the
 // default framebuffer top-left, and uploaded images are GL bottom-left,
@@ -387,5 +391,279 @@ export function renderColorNodeToCanvas(
     dctx.clearRect(0, 0, w, h);
     dctx.drawImage(canvas, 0, 0);
     return true;
+  });
+}
+
+// ─── Comp (Nuke Merge clone) — multi-input float compositor ───────────────
+
+export type CompResolvable = { url: string } | { floatNodeId: string };
+export interface CompRenderInputs {
+  bg: CompResolvable | null;
+  fg: CompResolvable | null;
+  fgAlpha: CompResolvable | null;
+  matte: CompResolvable | null;
+}
+export interface CompRenderParams {
+  op: number; // COMP_OP_INDEX value
+  fgTransform: CompTransform;
+  fgAlphaTransform: CompTransform;
+  matteTransform: CompTransform;
+  fgAlphaReformat: CompReformat;
+  matteReformat: CompReformat;
+}
+
+/**
+ * Comp fragment shader. Samples BG at v_uv (passthrough orientation, so the
+ * output float texture is interchangeable with image/chain textures); maps
+ * each transformed input via inverse affine (bottom-left origin); selects FG
+ * alpha (FG_Alpha luminance overrides FG's own); applies the merge op; then
+ * lerps the whole merge by the matte. Straight alpha; `over` kept straight,
+ * compositing ops use guarded premult round-trips. (FRAG_HEADER already
+ * declares `precision`, `varying v_uv`, and an unused `u_tex`.)
+ */
+const COMP_FRAG = `
+uniform vec2 u_outSize;
+uniform sampler2D u_bg;
+uniform sampler2D u_fg;
+uniform sampler2D u_fa;
+uniform sampler2D u_mt;
+uniform float u_fg_has, u_fa_has, u_mt_has, u_op;
+uniform vec2 u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size;
+uniform vec2 u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size;
+uniform vec2 u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+// output bottom-left px O -> input uv (top-left); .z = inside flag
+vec3 invSample(vec2 O, vec2 rot, vec2 c, vec2 t, vec2 invs, vec2 size) {
+  vec2 d = O - c;
+  vec2 p = vec2(rot.x * d.x + rot.y * d.y, -rot.y * d.x + rot.x * d.y) + c - t;
+  vec2 s = p * invs;
+  float inside = (s.x >= 0.0 && s.x <= size.x && s.y >= 0.0 && s.y <= size.y) ? 1.0 : 0.0;
+  return vec3(s.x / size.x, 1.0 - s.y / size.y, inside);
+}
+float ovl(float b, float a){ return b < 0.5 ? 2.0*a*b : 1.0 - 2.0*(1.0-a)*(1.0-b); }
+float sft(float b, float s){
+  float d = (b < 0.25) ? ((16.0*b - 12.0)*b + 4.0)*b : sqrt(b);
+  return (s < 0.5) ? b - (1.0 - 2.0*s)*b*(1.0 - b) : b + (2.0*s - 1.0)*(d - b);
+}
+void main() {
+  vec2 O = vec2(v_uv.x * u_outSize.x, (1.0 - v_uv.y) * u_outSize.y);
+  vec4 B = texture2D(u_bg, v_uv);
+  float b = B.a;
+
+  vec3 A = vec3(0.0);
+  float fgInside = 0.0;
+  float fgAlphaOwn = 1.0;
+  if (u_fg_has > 0.5) {
+    vec3 r = invSample(O, u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size);
+    fgInside = r.z;
+    vec4 fgTex = texture2D(u_fg, r.xy);
+    A = fgTex.rgb; fgAlphaOwn = fgTex.a;
+  }
+  float a;
+  if (u_fa_has > 0.5) {
+    vec3 rfa = invSample(O, u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size);
+    a = dot(texture2D(u_fa, rfa.xy).rgb, LUMA) * rfa.z * fgInside;
+  } else {
+    a = fgAlphaOwn * fgInside;
+  }
+
+  vec3 outRgb; float outA;
+  int op = int(u_op + 0.5);
+  if (op == 0)      { outRgb = A*a + B.rgb*(1.0-a);          outA = a + b*(1.0-a); }      // over
+  else if (op == 1) { outRgb = A*a + B.rgb;                  outA = clamp(a+b,0.0,1.0); } // add/plus
+  else if (op == 2 || op == 14) { outRgb = B.rgb - A;        outA = b; }                  // minus / from
+  else if (op == 3) { outRgb = abs(A - B.rgb);              outA = max(a,b); }            // difference
+  else if (op == 4) { outRgb = mix(B.rgb, A*B.rgb, a);      outA = b; }                   // multiply
+  else if (op == 5) { outRgb = mix(B.rgb, A+B.rgb-A*B.rgb, a); outA = a + b*(1.0-a); }    // screen
+  else if (op == 6) { outRgb = mix(B.rgb, vec3(ovl(B.r,A.r),ovl(B.g,A.g),ovl(B.b,A.b)), a); outA = a + b*(1.0-a); } // overlay
+  else if (op == 7) { outRgb = mix(B.rgb, vec3(sft(B.r,A.r),sft(B.g,A.g),sft(B.b,A.b)), a); outA = a + b*(1.0-a); } // softlight
+  else if (op == 8) { outRgb = mix(B.rgb, vec3(ovl(A.r,B.r),ovl(A.g,B.g),ovl(A.b,B.b)), a); outA = a + b*(1.0-a); } // hardlight
+  else if (op == 9) { outRgb = mix(B.rgb, max(A,B.rgb), a); outA = max(a,b); }            // lighten
+  else if (op == 10){ outRgb = mix(B.rgb, min(A,B.rgb), a); outA = b; }                   // darken
+  else if (op == 11){ outRgb = mix(B.rgb, B.rgb / max(A, vec3(1e-4)), a); outA = b; }     // divide
+  else if (op == 12){ outRgb = B.rgb - A*a;                 outA = b; }                   // subtract
+  else if (op == 13){ outRgb = mix(B.rgb, A + B.rgb - 2.0*A*B.rgb, a); outA = a + b*(1.0-a); } // exclusion
+  else if (op == 15){ outRgb = A;                           outA = a*b; }                 // in
+  else if (op == 16){ outRgb = A;                           outA = a*(1.0-b); }           // out
+  else if (op == 17){ outA = b; vec3 pm = A*a*b + B.rgb*b*(1.0-a); outRgb = (outA>1e-4)? pm/outA : vec3(0.0); } // atop
+  else if (op == 18){ outA = a*(1.0-b) + b*(1.0-a); vec3 pm = A*a*(1.0-b) + B.rgb*b*(1.0-a); outRgb = (outA>1e-4)? pm/outA : vec3(0.0); } // xor
+  else if (op == 19){ outRgb = B.rgb;                       outA = b*a; }                 // mask
+  else if (op == 20){ outRgb = B.rgb;                       outA = b*(1.0-a); }           // stencil
+  else if (op == 21){ outRgb = A;                           outA = a; }                   // copy
+  else              { outRgb = A*a + B.rgb*(1.0-a);         outA = a + b*(1.0-a); }       // default over
+
+  float m = 1.0;
+  if (u_mt_has > 0.5) {
+    vec3 rmt = invSample(O, u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size);
+    m = dot(texture2D(u_mt, rmt.xy).rgb, LUMA) * rmt.z;
+  }
+  gl_FragColor = vec4(mix(B.rgb, outRgb, m), mix(b, outA, m));
+}
+`;
+
+// Multi-slot URL texture cache for comp inputs (the single urlTexCache can't
+// hold 4 distinct inputs at once). Keyed by url; capped to avoid leaks.
+const compUrlCache = new Map<string, FloatTex>();
+let dummyTex: WebGLTexture | null = null;
+
+function getDummyTex(gl: WebGL2RenderingContext): WebGLTexture {
+  if (dummyTex) return dummyTex;
+  const tex = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
+  dummyTex = tex;
+  return tex;
+}
+
+async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | null): Promise<FloatTex | null> {
+  if (!input) return null;
+  if ("floatNodeId" in input) return floatRegistry.get(input.floatNodeId) ?? null;
+  const hit = compUrlCache.get(input.url);
+  if (hit) return hit;
+  const img = await loadImage(input.url);
+  const tex = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  const entry = { tex, w: img.naturalWidth, h: img.naturalHeight };
+  compUrlCache.set(input.url, entry);
+  // Evict oldest beyond a small cap.
+  if (compUrlCache.size > 12) {
+    const firstKey = compUrlCache.keys().next().value as string | undefined;
+    if (firstKey && firstKey !== input.url) {
+      const old = compUrlCache.get(firstKey);
+      if (old) gl.deleteTexture(old.tex);
+      compUrlCache.delete(firstKey);
+    }
+  }
+  return entry;
+}
+
+function compUniforms(
+  params: CompRenderParams, outW: number, outH: number,
+  fg: FloatTex | null, fa: FloatTex | null, mt: FloatTex | null,
+): Record<string, UniformValue> {
+  const u: Record<string, UniformValue> = {
+    u_outSize: [outW, outH],
+    u_op: params.op,
+    u_fg_has: fg ? 1 : 0,
+    u_fa_has: fa ? 1 : 0,
+    u_mt_has: mt ? 1 : 0,
+  };
+  if (fg) Object.assign(u, piecesToUniforms("u_fg", computePieces(params.fgTransform, "none", fg.w, fg.h, fg.w, fg.h)));
+  if (fa) {
+    const faPieces = params.fgAlphaTransform.enabled
+      ? computePieces(params.fgAlphaTransform, params.fgAlphaReformat, fg?.w ?? fa.w, fg?.h ?? fa.h, fa.w, fa.h)
+      : computeFollowPieces(params.fgTransform, fg?.w ?? fa.w, fg?.h ?? fa.h, params.fgAlphaReformat, fa.w, fa.h);
+    Object.assign(u, piecesToUniforms("u_fa", faPieces));
+  }
+  if (mt) Object.assign(u, piecesToUniforms("u_mt", computePieces(params.matteTransform, params.matteReformat, outW, outH, mt.w, mt.h)));
+  return u;
+}
+
+/** Internal (no lock): render the comp into destNodeId's float texture. */
+async function renderCompUnlocked(c: Ctx, inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string): Promise<{ w: number; h: number } | null> {
+  const { gl, quad } = c;
+  const bg = await resolveComp(gl, inputs.bg);
+  if (!bg) return null;
+  const w = bg.w, h = bg.h;
+  const fg = await resolveComp(gl, inputs.fg);
+  const fa = await resolveComp(gl, inputs.fgAlpha);
+  const mt = await resolveComp(gl, inputs.matte);
+
+  const prev = floatRegistry.get(destNodeId);
+  let outTex = prev?.tex;
+  if (!outTex || prev!.w !== w || prev!.h !== h) {
+    if (outTex) gl.deleteTexture(outTex);
+    outTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, outTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  }
+  floatRegistry.set(destNodeId, { tex: outTex, w, h });
+
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outTex, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteFramebuffer(fbo);
+    floatRegistry.delete(destNodeId); gl.deleteTexture(outTex);
+    return null;
+  }
+  const prog = getProgram(gl, COMP_FRAG);
+  gl.useProgram(prog);
+  bindQuad(gl, prog, quad);
+  const dummy = getDummyTex(gl);
+  const bind = (unit: number, t: FloatTex | null, name: string) => {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t ? t.tex : dummy);
+    gl.uniform1i(gl.getUniformLocation(prog, name), unit);
+  };
+  bind(0, bg, "u_bg"); bind(1, fg, "u_fg"); bind(2, fa, "u_fa"); bind(3, mt, "u_mt");
+  setUniforms(gl, prog, compUniforms(params, w, h, fg, fa, mt));
+  gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 0.0); // FBO: preserve orientation
+  gl.viewport(0, 0, w, h);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  return { w, h };
+}
+
+/** Display-clamp a float texture to a visible 2D canvas (no lock). */
+function blitFloatToCanvasUnlocked(c: Ctx, nodeId: string, destCanvas: HTMLCanvasElement): boolean {
+  const { gl, quad, canvas } = c;
+  const entry = floatRegistry.get(nodeId);
+  if (!entry) return false;
+  const { tex, w, h } = entry;
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  const prog = getProgram(gl, DISPLAY_CLAMP_SHADER);
+  gl.useProgram(prog);
+  bindQuad(gl, prog, quad);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
+  gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 1.0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, w, h);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  if (destCanvas.width !== w) destCanvas.width = w;
+  if (destCanvas.height !== h) destCanvas.height = h;
+  const dctx = destCanvas.getContext("2d");
+  if (!dctx) return false;
+  dctx.clearRect(0, 0, w, h);
+  dctx.drawImage(canvas, 0, 0);
+  return true;
+}
+
+/** Render the comp into destNodeId's float texture (for the chain). null ⇒
+ *  float unsupported / no BG (caller falls back). */
+export function renderComp(inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string): Promise<{ w: number; h: number } | null> {
+  return withLock(async () => {
+    const c = getCtx();
+    if (!c || !c.floatOK) return null;
+    return renderCompUnlocked(c, inputs, params, destNodeId);
+  });
+}
+
+/** Render the comp and blit the display-clamped result to a visible canvas. */
+export function renderCompToCanvas(inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string, destCanvas: HTMLCanvasElement): Promise<boolean> {
+  return withLock(async () => {
+    const c = getCtx();
+    if (!c || !c.floatOK) return false;
+    const res = await renderCompUnlocked(c, inputs, params, destNodeId);
+    if (!res) return false;
+    return blitFloatToCanvasUnlocked(c, destNodeId, destCanvas);
   });
 }

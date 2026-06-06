@@ -509,6 +509,56 @@ export async function executeRoto(ctx: NodeExecutionContext): Promise<void> {
 }
 
 /**
+ * Comp (Nuke Merge clone). Routes the 4 input handles by targetHandle, mirrors
+ * them into node data, and composites FG over BG (with FG_Alpha, matte, per-input
+ * transforms, merge op) at BG resolution via the float color chain. Output is a
+ * float texture (registry, keyed by node id) + an 8-bit PNG in outputImage.
+ */
+export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
+  const { node, updateNodeData, getEdges, getNodes } = ctx;
+  try {
+    const data = node.data as import("@/types").CompNodeData;
+    const edges = getEdges();
+    const nodes = getNodes();
+    let bg: string | null = null, fg: string | null = null, fa: string | null = null, mt: string | null = null;
+    let bgSrc: string | null = null, fgSrc: string | null = null, faSrc: string | null = null, mtSrc: string | null = null;
+    for (const e of edges) {
+      if (e.target !== node.id) continue;
+      const src = nodes.find((n) => n.id === e.source);
+      if (!src) continue;
+      const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+      if (out.type !== "image" || !out.value) continue;
+      if (e.targetHandle === "image-comp_bg") { bg = out.value; bgSrc = src.id; }
+      else if (e.targetHandle === "image-comp_fg") { fg = out.value; fgSrc = src.id; }
+      else if (e.targetHandle === "image-comp_fg_alpha") { fa = out.value; faSrc = src.id; }
+      else if (e.targetHandle === "image-comp_matte") { mt = out.value; mtSrc = src.id; }
+    }
+    updateNodeData(node.id, {
+      bgImage: bg, bgImageRef: undefined, fgImage: fg, fgImageRef: undefined,
+      fgAlphaImage: fa, fgAlphaImageRef: undefined, matteImage: mt, matteImageRef: undefined,
+    });
+    if (!bg) {
+      if (data.outputImage !== null) updateNodeData(node.id, { outputImage: null, outputImageRef: undefined });
+      return;
+    }
+    const { compositeCompForExecutor } = await import("@/utils/compComposite");
+    const { dataUrl, outW, outH } = await compositeCompForExecutor(
+      { bg, fg, fgAlpha: fa, matte: mt },
+      { bgSrc, fgSrc, faSrc, mtSrc },
+      data,
+      node.id,
+    );
+    updateNodeData(node.id, {
+      outputImage: dataUrl, outputImageRef: undefined, outputWidth: outW, outputHeight: outH, error: null,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Comp node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
  * Image Crop node: receives upstream image and applies the persisted crop region.
  * If no region is defined, passes the image through unchanged.
  * Crop region uses relative (0-1) coordinates so it adapts to any input resolution.

@@ -32,6 +32,7 @@ import {
   PanoEditorNodeData,
   MaskPainterNodeData,
   RotoNodeData,
+  CompNodeData,
   VideoInputNodeData,
   ImageCropNodeData,
   MirrorNodeData,
@@ -45,6 +46,7 @@ import {
   GroupColor,
   SelectedModel,
   MODEL_DISPLAY_NAMES,
+  defaultCompData,
 } from "@/types";
 import { loadGenerateImageDefaults, loadNodeDefaults } from "./localStorage";
 
@@ -85,6 +87,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   panoEditor: { width: 300, height: 300 },
   maskPainter: { width: 260, height: 300 },
   roto: { width: 260, height: 300 },
+  comp: { width: 320, height: 360 },
   videoInput: { width: 320, height: 300 },
   imageCrop: { width: 300, height: 280 },
   mirror: { width: 300, height: 300 },
@@ -468,6 +471,8 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         outputMask: null,
         invert: false,
       } as RotoNodeData;
+    case "comp":
+      return defaultCompData() as CompNodeData;
     case "videoInput":
       return {
         videoFile: null,

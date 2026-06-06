@@ -8,6 +8,7 @@ import { FloatingActionBar } from "@/components/FloatingActionBar";
 import { AnnotationModal } from "@/components/AnnotationModal";
 import { MaskPainterModal } from "@/components/MaskPainterModal";
 import { RotoModal } from "@/components/RotoModal";
+import { CompModal } from "@/components/CompModal";
 import { useWorkflowStore } from "@/store/workflowStore";
 
 export default function Home() {
@@ -40,6 +41,7 @@ export default function Home() {
         <AnnotationModal />
         <MaskPainterModal />
         <RotoModal />
+        <CompModal />
       </div>
     </ReactFlowProvider>
   );
