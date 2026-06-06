@@ -4,6 +4,7 @@ import React, { useCallback, useState, useEffect, useMemo, useRef } from "react"
 import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { BaseNode } from "./BaseNode"
 import { LoadingBadge } from "./LoadingBadge";
+import { SplitGenerationButton } from "./SplitGenerationButton";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
@@ -716,6 +717,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       </div>
 
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
+        <SplitGenerationButton id={id} count={nodeData.videoHistory?.length ?? 0} />
         {/* Preview area */}
         {hasVideoOutput ? (
           <>

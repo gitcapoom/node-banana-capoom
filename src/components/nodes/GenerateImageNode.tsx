@@ -4,6 +4,7 @@ import React, { useCallback, useState, useEffect, useMemo, useRef } from "react"
 import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { LoadingBadge } from "./LoadingBadge";
+import { SplitGenerationButton } from "./SplitGenerationButton";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, saveNanoBananaDefaults, useProviderApiKeys } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
@@ -862,6 +863,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       </div>
 
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
+        <SplitGenerationButton id={id} count={nodeData.imageHistory?.length ?? 0} />
         {/* Preview area */}
         {nodeData.outputImage ? (
           <>

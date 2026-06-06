@@ -4,6 +4,7 @@ import React, { useCallback, useState, useEffect, useMemo } from "react";
 import { Handle, Position, NodeProps, Node, useReactFlow } from "@xyflow/react";
 import { BaseNode } from "./BaseNode"
 import { LoadingBadge } from "./LoadingBadge";
+import { SplitGenerationButton } from "./SplitGenerationButton";
 import { ProviderBadge } from "./ProviderBadge";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore } from "@/store/workflowStore";
@@ -376,6 +377,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
                   </button>
                 </>
               )}
+              <SplitGenerationButton id={id} count={nodeData.audioHistory?.length ?? 0} className="shrink-0" />
             </div>
 
             {/* Clear button */}

@@ -4,6 +4,7 @@ import React, { useCallback, useState, useEffect, useMemo, useRef } from "react"
 import { Handle, Position, NodeProps, Node, useReactFlow, useUpdateNodeInternals } from "@xyflow/react";
 import { BaseNode } from "./BaseNode"
 import { LoadingBadge } from "./LoadingBadge";
+import { SplitGenerationButton } from "./SplitGenerationButton";
 import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
@@ -674,6 +675,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
             className="relative w-full flex-1 min-h-[80px] flex flex-col items-center justify-center bg-neutral-800 rounded border border-neutral-700 overflow-hidden cursor-pointer"
             onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}
           >
+            <SplitGenerationButton id={id} count={nodeData.model3dHistory?.length ?? 0} />
             {/* Show thumbnail image if available, otherwise 3D icon */}
             {nodeData.thumbnailImage ? (
               <img
