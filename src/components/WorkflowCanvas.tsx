@@ -59,6 +59,7 @@ import {
   VideoInputNode,
   ImageCropNode,
   MirrorNode,
+  ReformatNode,
   CubemapEquirectNode,
   CubemapFacesNode,
   ColorGradeNode,
@@ -133,6 +134,7 @@ const nodeTypes: NodeTypes = {
   videoInput: VideoInputNode,
   imageCrop: ImageCropNode,
   mirror: MirrorNode,
+  reformat: ReformatNode,
   cubemapEquirect: CubemapEquirectNode,
   cubemapFaces: CubemapFacesNode,
   colorGrade: ColorGradeNode,
@@ -253,6 +255,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "imageCrop":
       return { inputs: ["image"], outputs: ["image"] };
     case "mirror":
+      return { inputs: ["image"], outputs: ["image"] };
+    case "reformat":
       return { inputs: ["image"], outputs: ["image"] };
     case "cubemapEquirect":
       return { inputs: ["image"], outputs: ["image"] };
@@ -563,6 +567,7 @@ export function WorkflowCanvas() {
     glbViewer: '3D Viewer',
     imageCrop: 'Image Crop',
     mirror: 'Mirror',
+    reformat: 'Reformat',
     cubemapEquirect: 'Cube ⇄ Pano',
     cubemapFaces: 'Cube ⇄ Faces',
     colorGrade: 'Color Grade',
@@ -1786,6 +1791,7 @@ export function WorkflowCanvas() {
             videoInput: { width: 320, height: 300 },
             imageCrop: { width: 300, height: 280 },
             mirror: { width: 300, height: 300 },
+            reformat: { width: 280, height: 300 },
             cubemapEquirect: { width: 320, height: 320 },
             cubemapFaces: { width: 340, height: 360 },
             colorGrade: { width: 340, height: 460 },

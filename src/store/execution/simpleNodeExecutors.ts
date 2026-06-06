@@ -650,6 +650,30 @@ export async function executeMirror(ctx: NodeExecutionContext): Promise<void> {
   }
 }
 
+/** Reformat: resize the input image into the node's H×V resolution. */
+export async function executeReformat(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const incoming = images[0] || null;
+    const nodeData = node.data as import("@/types").ReformatNodeData;
+    if (!incoming) {
+      if (nodeData.outputImage !== null) updateNodeData(node.id, { outputImage: null, sourceImage: null });
+      return;
+    }
+    if (incoming !== nodeData.sourceImage) {
+      updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
+    }
+    const { reformatImage } = await import("@/utils/reformatImage");
+    const out = await reformatImage(incoming, nodeData.width || 1, nodeData.height || 1, nodeData.mode ?? "fill");
+    updateNodeData(node.id, { outputImage: out, outputImageRef: undefined });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Reformat node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
 /**
  * Cubemap ⇄ Equirectangular conversion executor.
  *   - cubeToEquirect: input is a 4×3 cube cross, output is 2:1 equirect.

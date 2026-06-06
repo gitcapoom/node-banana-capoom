@@ -47,6 +47,7 @@ const ALL_NODES_CATEGORIES: { label: string; nodes: { type: NodeType; label: str
       { type: "comp", label: "Composite" },
       { type: "imageCrop", label: "Image Crop" },
       { type: "mirror", label: "Mirror" },
+      { type: "reformat", label: "Reformat" },
       { type: "cubemapEquirect", label: "Cube ⇄ Pano" },
       { type: "cubemapFaces", label: "Cube ⇄ Faces" },
       { type: "panoShift", label: "Pano Shift" },

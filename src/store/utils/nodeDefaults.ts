@@ -36,6 +36,7 @@ import {
   VideoInputNodeData,
   ImageCropNodeData,
   MirrorNodeData,
+  ReformatNodeData,
   CubemapEquirectNodeData,
   CubemapFacesNodeData,
   ColorGradeNodeData,
@@ -91,6 +92,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   videoInput: { width: 320, height: 300 },
   imageCrop: { width: 300, height: 280 },
   mirror: { width: 300, height: 300 },
+  reformat: { width: 280, height: 300 },
   cubemapEquirect: { width: 320, height: 320 },
   cubemapFaces: { width: 340, height: 360 },
   colorGrade: { width: 340, height: 460 },
@@ -494,6 +496,14 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         flipVertical: false,
         outputImage: null,
       } as MirrorNodeData;
+    case "reformat":
+      return {
+        sourceImage: null,
+        width: 1920,
+        height: 1080,
+        mode: "fill",
+        outputImage: null,
+      } as ReformatNodeData;
     case "cubemapEquirect":
       return {
         sourceImage: null,

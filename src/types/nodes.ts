@@ -65,6 +65,7 @@ export type NodeType =
   | "videoInput"
   | "imageCrop"
   | "mirror"
+  | "reformat"
   | "cubemapEquirect"
   | "cubemapFaces"
   | "colorGrade"
@@ -145,6 +146,16 @@ export interface MirrorNodeData extends BaseNodeData {
   sourceImageRef?: string;
   flipHorizontal: boolean;
   flipVertical: boolean;
+  outputImage: string | null;
+  outputImageRef?: string;
+}
+
+export interface ReformatNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  width: number;   // H (horizontal) output resolution
+  height: number;  // V (vertical) output resolution
+  mode: "fill" | "fitH" | "fitV";
   outputImage: string | null;
   outputImageRef?: string;
 }
@@ -878,6 +889,7 @@ export type WorkflowNodeData =
   | VideoInputNodeData
   | ImageCropNodeData
   | MirrorNodeData
+  | ReformatNodeData
   | CubemapEquirectNodeData
   | CubemapFacesNodeData
   | ColorGradeNodeData

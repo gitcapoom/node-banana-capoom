@@ -48,6 +48,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "comp",
   "imageCrop",
   "mirror",
+  "reformat",
   "cubemapEquirect",
   "cubemapFaces",
   "colorGrade",
@@ -94,6 +95,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   comp: { width: 320, height: 360 },
   imageCrop: { width: 300, height: 280 },
   mirror: { width: 300, height: 300 },
+  reformat: { width: 280, height: 300 },
   cubemapEquirect: { width: 320, height: 320 },
   cubemapFaces: { width: 340, height: 360 },
   colorGrade: { width: 340, height: 460 },
@@ -567,6 +569,14 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         sourceImage: null,
         flipHorizontal: false,
         flipVertical: false,
+        outputImage: null,
+      };
+    case "reformat":
+      return {
+        sourceImage: null,
+        width: 1920,
+        height: 1080,
+        mode: "fill",
         outputImage: null,
       };
     case "cubemapEquirect":

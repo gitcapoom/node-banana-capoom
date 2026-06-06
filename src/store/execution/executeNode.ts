@@ -23,6 +23,7 @@ import {
   executeSpzViewer,
   executeImageCrop,
   executeMirror,
+  executeReformat,
   executeCubemapEquirect,
   executeCubemapFaces,
   executeColorGrade,
@@ -156,6 +157,9 @@ export async function executeNode(
       break;
     case "mirror":
       await executeMirror(ctx);
+      break;
+    case "reformat":
+      await executeReformat(ctx);
       break;
     case "cubemapEquirect":
       await executeCubemapEquirect(ctx);
