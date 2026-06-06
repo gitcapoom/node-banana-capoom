@@ -128,10 +128,23 @@ export function RotoModal() {
   const [draft, setDraft] = useState<RotoShape | null>(null);
   const penDownRef = useRef(false);
 
+  // Multi-point selection (anchor ids) for moving several points + their
+  // feathers together. selectedPointId (store) stays the single "active" point.
+  const [selectedPointIds, setSelectedPointIds] = useState<string[]>([]);
+  const selectedIdsRef = useRef<string[]>([]);
+  useEffect(() => { selectedIdsRef.current = selectedPointIds; }, [selectedPointIds]);
+  // Rubber-band box select on empty canvas (select mode).
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const selectDragRef = useRef<{ start: Pt; cur: Pt; moved: boolean } | null>(null);
+
+  // Switching shapes drops the multi-selection.
+  useEffect(() => { setSelectedPointIds([]); }, [selectedShapeId]);
+
   // Discard an in-progress (uncommitted) draft when leaving the Pen tool, so
   // half-drawn shapes don't linger as orphan points with no layer to delete.
   useEffect(() => {
     if (currentTool !== "pen") { setDraft(null); penDownRef.current = false; }
+    else setSelectedPointIds([]);
   }, [currentTool]);
 
   const invert = sourceNodeId
@@ -196,6 +209,27 @@ export function RotoModal() {
     if (s) replaceShape(shapeId, s);
   }, [replaceShape]);
 
+  /** Translate the dragged anchor to `na`, carrying every selected point's
+   *  whole bundle (anchor + tangents + feather) by the same delta. When the
+   *  dragged point isn't part of the multi-selection, only it moves. */
+  const moveSelectedAnchors = useCallback((shapeId: string, draggedId: string, na: Pt) => {
+    setWork((ws) => ws.map((s) => {
+      if (s.id !== shapeId) return s;
+      const dragged = s.points.find((p) => p.id === draggedId);
+      if (!dragged) return s;
+      const dx = na.x - dragged.anchor.x, dy = na.y - dragged.anchor.y;
+      const sel = selectedIdsRef.current;
+      const ids = sel.includes(draggedId) ? sel : [draggedId];
+      const tr = (q: Pt): Pt => ({ x: q.x + dx, y: q.y + dy });
+      return {
+        ...s,
+        points: s.points.map((pp) => (ids.includes(pp.id)
+          ? { ...pp, anchor: tr(pp.anchor), inHandle: tr(pp.inHandle), outHandle: tr(pp.outHandle), feather: tr(pp.feather), featherIn: tr(pp.featherIn), featherOut: tr(pp.featherOut) }
+          : pp)),
+      };
+    }));
+  }, []);
+
   // Double-click an anchor → smooth (auto tangents, unbroken); Alt → corner.
   const toggleSmooth = useCallback((shapeId: string, pointId: string, toCorner: boolean) => {
     const s = workRef.current.find((x) => x.id === shapeId);
@@ -230,41 +264,11 @@ export function RotoModal() {
     replaceShape(shapeId, { ...s, points: s.points.map((q) => (q.id === pointId ? next : q)) });
   }, [replaceShape]);
 
-  // ─── Pen ─────────────────────────────────────────────────────────
-  const onStageMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (e.target !== e.target.getStage() && e.target.name() !== "imagebg" && e.target.name() !== "fill") return;
-    const pos = getPos();
-    if (currentTool === "pen") {
-      if (!draft) { setDraft({ id: uid(), points: [newCorner(pos)], closed: false, op: "union", opacity: 1 }); penDownRef.current = true; return; }
-      if (draft.points.length >= 2 && dist(pos, draft.points[0].anchor) * scale < 10) {
-        addShape({ ...draft, closed: true }); setDraft(null); return;
-      }
-      setDraft({ ...draft, points: [...draft.points, newCorner(pos)] }); penDownRef.current = true; return;
-    }
-    if (currentTool === "select") {
-      if (e.target.name() === "fill") { setSelectedShape(e.target.attrs.shapeId); return; }
-      if (selShape) tryInsertPoint(pos);
-    }
-  }, [currentTool, draft, getPos, scale, addShape, selShape, setSelectedShape]);
-
-  const onStageMouseMove = useCallback(() => {
-    if (currentTool === "pen" && draft && penDownRef.current) {
-      const pos = getPos();
-      setDraft((d) => {
-        if (!d) return d;
-        const pts = [...d.points];
-        const i = pts.length - 1;
-        const a = pts[i].anchor;
-        const inH = mirror(a, pos);
-        pts[i] = { ...pts[i], outHandle: { ...pos }, inHandle: inH, feather: { ...a }, featherIn: { ...inH }, featherOut: { ...pos } };
-        return { ...d, points: pts };
-      });
-    }
-  }, [currentTool, draft, getPos]);
-  const onStageMouseUp = useCallback(() => { penDownRef.current = false; }, []);
-
-  const tryInsertPoint = useCallback((click: Pt) => {
-    if (!selShape) return;
+  // Insert a point on the selected shape's nearest segment (within threshold).
+  // Returns true if a point was inserted. Defined before the stage handlers so
+  // onStageMouseUp can depend on it without a TDZ in its dependency array.
+  const tryInsertPoint = useCallback((click: Pt): boolean => {
+    if (!selShape) return false;
     const pts = selShape.points;
     const segCount = selShape.closed ? pts.length : pts.length - 1;
     let best = { d: Infinity, seg: -1, t: 0 };
@@ -277,7 +281,7 @@ export function RotoModal() {
         if (d < best.d) best = { d, seg: s, t };
       }
     }
-    if (best.seg < 0 || best.d * scale > 8) return;
+    if (best.seg < 0 || best.d * scale > 8) return false;
     const a = pts[best.seg], b = pts[(best.seg + 1) % pts.length];
     const t = best.t;
     const split = (P0: Pt, P1: Pt, P2: Pt, P3: Pt) => {
@@ -297,7 +301,78 @@ export function RotoModal() {
     newPts.splice(best.seg + 1, 0, inserted);
     replaceShape(selShape.id, { ...selShape, points: newPts });
     setSelectedPoint(inserted.id);
+    setSelectedPointIds([inserted.id]);
+    return true;
   }, [selShape, scale, replaceShape, setSelectedPoint]);
+
+  // ─── Pen draw / Select interaction ───────────────────────────────
+  const onStageMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+    const onEmpty = e.target === e.target.getStage() || e.target.name() === "imagebg";
+    const onFill = e.target.name() === "fill";
+    if (!onEmpty && !onFill) return; // a handle was clicked — it manages itself
+    const pos = getPos();
+
+    if (currentTool === "pen") {
+      if (!draft) { setDraft({ id: uid(), points: [newCorner(pos)], closed: false, op: "union", opacity: 1 }); penDownRef.current = true; return; }
+      if (draft.points.length >= 2 && dist(pos, draft.points[0].anchor) * scale < 10) {
+        // Close the shape and return to Select — one shape per Pen session, so
+        // clicking empty canvas never spawns a stray new layer. Use ＋ New for more.
+        addShape({ ...draft, closed: true }); setDraft(null); setTool("select"); return;
+      }
+      setDraft({ ...draft, points: [...draft.points, newCorner(pos)] }); penDownRef.current = true; return;
+    }
+
+    // ── select mode ──
+    if (onFill) { setSelectedShape(e.target.attrs.shapeId as string); setSelectedPointIds([]); return; }
+    // empty canvas: start a marquee (or a plain click), resolved on mouse-up.
+    selectDragRef.current = { start: pos, cur: pos, moved: false };
+    setMarquee(null);
+  }, [currentTool, draft, getPos, scale, addShape, setTool, setSelectedShape]);
+
+  const onStageMouseMove = useCallback(() => {
+    if (currentTool === "pen" && draft && penDownRef.current) {
+      const pos = getPos();
+      setDraft((d) => {
+        if (!d) return d;
+        const pts = [...d.points];
+        const i = pts.length - 1;
+        const a = pts[i].anchor;
+        const inH = mirror(a, pos);
+        pts[i] = { ...pts[i], outHandle: { ...pos }, inHandle: inH, feather: { ...a }, featherIn: { ...inH }, featherOut: { ...pos } };
+        return { ...d, points: pts };
+      });
+      return;
+    }
+    if (currentTool === "select" && selectDragRef.current) {
+      const pos = getPos();
+      const d = selectDragRef.current;
+      d.cur = pos;
+      if (!d.moved && dist(pos, d.start) * scale > 4) d.moved = true;
+      if (d.moved) setMarquee({ x0: d.start.x, y0: d.start.y, x1: pos.x, y1: pos.y });
+    }
+  }, [currentTool, draft, getPos, scale]);
+
+  const onStageMouseUp = useCallback(() => {
+    penDownRef.current = false;
+    if (currentTool !== "select") return;
+    const d = selectDragRef.current;
+    selectDragRef.current = null;
+    setMarquee(null);
+    if (!d) return;
+    if (d.moved && selShape) {
+      // Box select: the selected shape's anchors inside the rubber-band.
+      const xmin = Math.min(d.start.x, d.cur.x), xmax = Math.max(d.start.x, d.cur.x);
+      const ymin = Math.min(d.start.y, d.cur.y), ymax = Math.max(d.start.y, d.cur.y);
+      const ids = selShape.points.filter((p) => p.anchor.x >= xmin && p.anchor.x <= xmax && p.anchor.y >= ymin && p.anchor.y <= ymax).map((p) => p.id);
+      setSelectedPointIds(ids);
+      setSelectedPoint(ids.length === 1 ? ids[0] : null);
+      return;
+    }
+    // Plain click on empty canvas: insert a point if near a segment, else clear.
+    if (selShape && editMode === "points" && tryInsertPoint(d.start)) return;
+    setSelectedPointIds([]);
+    setSelectedPoint(null);
+  }, [currentTool, selShape, editMode, tryInsertPoint, setSelectedPoint]);
 
   // ─── Keyboard ────────────────────────────────────────────────────
   useEffect(() => {
@@ -306,20 +381,23 @@ export function RotoModal() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (e.key === "Escape") { if (draft) setDraft(null); else closeModal(); }
-      if (e.key === "Enter" && draft && draft.points.length >= 2) { addShape({ ...draft, closed: true }); setDraft(null); }
+      if (e.key === "Enter" && draft && draft.points.length >= 2) { addShape({ ...draft, closed: true }); setDraft(null); setTool("select"); }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       if (e.key === "p" || e.key === "P") setTool("pen");
       if (e.key === "v" || e.key === "V") setTool("select");
       if ((e.key === "Delete" || e.key === "Backspace") && currentTool === "select" && selShape) {
-        if (selectedPointId && selShape.points.length > 2) {
-          replaceShape(selShape.id, { ...selShape, points: selShape.points.filter((p) => p.id !== selectedPointId) });
-          setSelectedPoint(null);
+        // Delete every selected point (single or multi); if too few would
+        // remain to form a shape (<2), drop the whole layer instead.
+        const del = selectedPointIds.length ? selectedPointIds : (selectedPointId ? [selectedPointId] : []);
+        if (del.length && selShape.points.length - del.length >= 2) {
+          replaceShape(selShape.id, { ...selShape, points: selShape.points.filter((p) => !del.includes(p.id)) });
+          setSelectedPoint(null); setSelectedPointIds([]);
         } else { deleteShape(selShape.id); }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isModalOpen, draft, currentTool, selShape, selectedPointId, closeModal, addShape, setTool, undo, redo, replaceShape, deleteShape, setSelectedPoint]);
+  }, [isModalOpen, draft, currentTool, selShape, selectedPointId, selectedPointIds, closeModal, addShape, setTool, undo, redo, replaceShape, deleteShape, setSelectedPoint]);
 
   const handleDone = useCallback(() => {
     if (!sourceNodeId || !image) return;
@@ -416,44 +494,59 @@ export function RotoModal() {
 
                   {/* Edit handles only in Select mode — keep Pen clean. */}
                   {currentTool === "select" && selShape.points.map((p) => {
+                    const isSel = p.id === selectedPointId || selectedPointIds.includes(p.id);
                     if (editMode === "feather") {
                       return (
                         <Fragment key={p.id}>
-                          <Line points={[p.feather.x, p.feather.y, p.featherIn.x, p.featherIn.y]} stroke="#b45309" strokeWidth={hpx(0.75)} listening={false} />
-                          <Line points={[p.feather.x, p.feather.y, p.featherOut.x, p.featherOut.y]} stroke="#b45309" strokeWidth={hpx(0.75)} listening={false} />
-                          <Rect x={p.featherIn.x - hpx(3)} y={p.featherIn.y - hpx(3)} width={hpx(6)} height={hpx(6)} fill="#fbbf24" draggable
-                            onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
-                            onDragMove={(e) => { const np = { x: e.target.x() + hpx(3), y: e.target.y() + hpx(3) }; const broken = p.featherBroken || e.evt.altKey || e.evt.ctrlKey; editPoint(selShape.id, p.id, (pp) => ({ ...pp, featherIn: np, featherBroken: broken, featherOut: broken ? pp.featherOut : mirror(pp.feather, np) })); }}
-                            onDragEnd={() => commitShape(selShape.id)} />
-                          <Rect x={p.featherOut.x - hpx(3)} y={p.featherOut.y - hpx(3)} width={hpx(6)} height={hpx(6)} fill="#fbbf24" draggable
-                            onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
-                            onDragMove={(e) => { const np = { x: e.target.x() + hpx(3), y: e.target.y() + hpx(3) }; const broken = p.featherBroken || e.evt.altKey || e.evt.ctrlKey; editPoint(selShape.id, p.id, (pp) => ({ ...pp, featherOut: np, featherBroken: broken, featherIn: broken ? pp.featherIn : mirror(pp.feather, np) })); }}
-                            onDragEnd={() => commitShape(selShape.id)} />
-                          <Circle x={p.feather.x} y={p.feather.y} radius={hpx(5)} fill="#f59e0b" stroke="#000" strokeWidth={hpx(0.5)} draggable
-                            onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
+                          {isSel && (
+                            <>
+                              <Line points={[p.feather.x, p.feather.y, p.featherIn.x, p.featherIn.y]} stroke="#b45309" strokeWidth={hpx(0.75)} listening={false} />
+                              <Line points={[p.feather.x, p.feather.y, p.featherOut.x, p.featherOut.y]} stroke="#b45309" strokeWidth={hpx(0.75)} listening={false} />
+                              <Rect x={p.featherIn.x - hpx(3)} y={p.featherIn.y - hpx(3)} width={hpx(6)} height={hpx(6)} fill="#fbbf24" draggable
+                                onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
+                                onDragMove={(e) => { const np = { x: e.target.x() + hpx(3), y: e.target.y() + hpx(3) }; const broken = p.featherBroken || e.evt.altKey || e.evt.ctrlKey; editPoint(selShape.id, p.id, (pp) => ({ ...pp, featherIn: np, featherBroken: broken, featherOut: broken ? pp.featherOut : mirror(pp.feather, np) })); }}
+                                onDragEnd={() => commitShape(selShape.id)} />
+                              <Rect x={p.featherOut.x - hpx(3)} y={p.featherOut.y - hpx(3)} width={hpx(6)} height={hpx(6)} fill="#fbbf24" draggable
+                                onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
+                                onDragMove={(e) => { const np = { x: e.target.x() + hpx(3), y: e.target.y() + hpx(3) }; const broken = p.featherBroken || e.evt.altKey || e.evt.ctrlKey; editPoint(selShape.id, p.id, (pp) => ({ ...pp, featherOut: np, featherBroken: broken, featherIn: broken ? pp.featherIn : mirror(pp.feather, np) })); }}
+                                onDragEnd={() => commitShape(selShape.id)} />
+                            </>
+                          )}
+                          <Circle x={p.feather.x} y={p.feather.y} radius={hpx(5)} fill={isSel ? "#f59e0b" : "#fcd34d"} stroke="#000" strokeWidth={hpx(0.5)} draggable
+                            onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); setSelectedPointIds([p.id]); }}
                             onDblClick={(e) => { e.cancelBubble = true; toggleFeatherSmooth(selShape.id, p.id, e.evt.altKey); }}
                             onDragMove={(e) => { const nf = { x: e.target.x(), y: e.target.y() }; editPoint(selShape.id, p.id, (pp) => { const dx = nf.x - pp.feather.x, dy = nf.y - pp.feather.y; return { ...pp, feather: nf, featherIn: { x: pp.featherIn.x + dx, y: pp.featherIn.y + dy }, featherOut: { x: pp.featherOut.x + dx, y: pp.featherOut.y + dy } }; }); }}
                             onDragEnd={() => commitShape(selShape.id)} />
                         </Fragment>
                       );
                     }
-                    const isSel = p.id === selectedPointId;
                     return (
                       <Fragment key={p.id}>
-                        <Line points={[p.anchor.x, p.anchor.y, p.inHandle.x, p.inHandle.y]} stroke="#64748b" strokeWidth={hpx(0.75)} listening={false} />
-                        <Line points={[p.anchor.x, p.anchor.y, p.outHandle.x, p.outHandle.y]} stroke="#64748b" strokeWidth={hpx(0.75)} listening={false} />
-                        <Rect x={p.inHandle.x - hpx(3)} y={p.inHandle.y - hpx(3)} width={hpx(6)} height={hpx(6)} fill="#94a3b8" draggable
-                          onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
-                          onDragMove={(e) => { const np = { x: e.target.x() + hpx(3), y: e.target.y() + hpx(3) }; const broken = p.broken || e.evt.altKey || e.evt.ctrlKey; editPoint(selShape.id, p.id, (pp) => ({ ...pp, inHandle: np, broken, outHandle: broken ? pp.outHandle : mirror(pp.anchor, np) })); }}
-                          onDragEnd={() => commitShape(selShape.id)} />
-                        <Rect x={p.outHandle.x - hpx(3)} y={p.outHandle.y - hpx(3)} width={hpx(6)} height={hpx(6)} fill="#94a3b8" draggable
-                          onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
-                          onDragMove={(e) => { const np = { x: e.target.x() + hpx(3), y: e.target.y() + hpx(3) }; const broken = p.broken || e.evt.altKey || e.evt.ctrlKey; editPoint(selShape.id, p.id, (pp) => ({ ...pp, outHandle: np, broken, inHandle: broken ? pp.inHandle : mirror(pp.anchor, np) })); }}
-                          onDragEnd={() => commitShape(selShape.id)} />
+                        {/* Tangents only on the selected point(s) — unselected points
+                            stay clean dots so anchors are always clearly visible. */}
+                        {isSel && (
+                          <>
+                            <Line points={[p.anchor.x, p.anchor.y, p.inHandle.x, p.inHandle.y]} stroke="#64748b" strokeWidth={hpx(0.75)} listening={false} />
+                            <Line points={[p.anchor.x, p.anchor.y, p.outHandle.x, p.outHandle.y]} stroke="#64748b" strokeWidth={hpx(0.75)} listening={false} />
+                            <Rect x={p.inHandle.x - hpx(3)} y={p.inHandle.y - hpx(3)} width={hpx(6)} height={hpx(6)} fill="#94a3b8" draggable
+                              onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
+                              onDragMove={(e) => { const np = { x: e.target.x() + hpx(3), y: e.target.y() + hpx(3) }; const broken = p.broken || e.evt.altKey || e.evt.ctrlKey; editPoint(selShape.id, p.id, (pp) => ({ ...pp, inHandle: np, broken, outHandle: broken ? pp.outHandle : mirror(pp.anchor, np) })); }}
+                              onDragEnd={() => commitShape(selShape.id)} />
+                            <Rect x={p.outHandle.x - hpx(3)} y={p.outHandle.y - hpx(3)} width={hpx(6)} height={hpx(6)} fill="#94a3b8" draggable
+                              onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
+                              onDragMove={(e) => { const np = { x: e.target.x() + hpx(3), y: e.target.y() + hpx(3) }; const broken = p.broken || e.evt.altKey || e.evt.ctrlKey; editPoint(selShape.id, p.id, (pp) => ({ ...pp, outHandle: np, broken, inHandle: broken ? pp.inHandle : mirror(pp.anchor, np) })); }}
+                              onDragEnd={() => commitShape(selShape.id)} />
+                          </>
+                        )}
                         <Circle x={p.anchor.x} y={p.anchor.y} radius={hpx(5)} fill={isSel ? "#0ea5e9" : "#ffffff"} stroke="#0369a1" strokeWidth={hpx(1)} draggable
-                          onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); }}
+                          onMouseDown={(e) => {
+                            e.cancelBubble = true;
+                            if (e.evt.shiftKey) { setSelectedPointIds((ids) => (ids.includes(p.id) ? ids.filter((x) => x !== p.id) : [...ids, p.id])); }
+                            else if (!selectedIdsRef.current.includes(p.id)) { setSelectedPointIds([p.id]); }
+                            setSelectedPoint(p.id);
+                          }}
                           onDblClick={(e) => { e.cancelBubble = true; toggleSmooth(selShape.id, p.id, e.evt.altKey); }}
-                          onDragMove={(e) => { const na = { x: e.target.x(), y: e.target.y() }; editPoint(selShape.id, p.id, (pp) => { const dx = na.x - pp.anchor.x, dy = na.y - pp.anchor.y; const tr = (q: Pt) => ({ x: q.x + dx, y: q.y + dy }); return { ...pp, anchor: na, inHandle: tr(pp.inHandle), outHandle: tr(pp.outHandle), feather: tr(pp.feather), featherIn: tr(pp.featherIn), featherOut: tr(pp.featherOut) }; }); }}
+                          onDragMove={(e) => { const na = { x: e.target.x(), y: e.target.y() }; moveSelectedAnchors(selShape.id, p.id, na); }}
                           onDragEnd={() => commitShape(selShape.id)} />
                       </Fragment>
                     );
@@ -463,6 +556,13 @@ export function RotoModal() {
               {currentTool === "pen" && draft?.points.map((p, i) => (
                 <Circle key={p.id} x={p.anchor.x} y={p.anchor.y} radius={hpx(4)} fill={i === 0 ? "#22c55e" : "#ffffff"} stroke="#000" strokeWidth={hpx(0.5)} listening={false} />
               ))}
+              {marquee && (
+                <Rect
+                  x={Math.min(marquee.x0, marquee.x1)} y={Math.min(marquee.y0, marquee.y1)}
+                  width={Math.abs(marquee.x1 - marquee.x0)} height={Math.abs(marquee.y1 - marquee.y0)}
+                  fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" strokeWidth={hpx(1)} dash={[hpx(4), hpx(4)]} listening={false}
+                />
+              )}
             </Layer>
           </Stage>
         </div>
@@ -499,12 +599,12 @@ export function RotoModal() {
           </div>
           {currentTool === "pen" && (
             <div className="px-3 py-2 border-t border-neutral-800 text-[10px] text-sky-400/80 leading-snug">
-              Pen: click to add points · drag for curves · click the green start point to close · keep drawing for more shapes.
+              Pen: click to add points · drag for curves · click the green start point (or Enter) to close. The shape finishes and returns to Select — use ＋ New for another.
             </div>
           )}
           {currentTool === "select" && selShape && (
             <div className="px-3 py-2 border-t border-neutral-800 text-[10px] text-neutral-500 leading-snug">
-              Drag points/handles. Double-click a point to add/smooth tangents (Alt+double-click = corner). {editMode === "feather" ? "Drag the amber feather points + handles." : "Switch to Feather to edit softness."} Del removes a point.
+              Click a point to select (Shift+click or drag a box for several). Drag to move the selection — feathers move with it. Double-click = add/smooth tangents (Alt = corner). Click a segment to insert a point. Del removes. {editMode === "feather" ? "Drag the amber feather points + handles." : "Switch to Feather to edit softness."}
             </div>
           )}
         </div>
