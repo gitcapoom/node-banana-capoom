@@ -1,14 +1,14 @@
 /**
  * Reformat (resize) an image into a target H×V resolution.
  *
- *  - "fill" : scale uniformly to COVER the output (max scale), centered;
- *             overflow is cropped.
- *  - "fitH" : scale so the WIDTH matches the output (scale = W/srcW), centered.
- *  - "fitV" : scale so the HEIGHT matches the output (scale = H/srcH), centered.
+ *  - "fill" : DISTORT — stretch the source non-uniformly to fill the whole
+ *             W×H output exactly (aspect ratio is not preserved).
+ *  - "fitH" : scale uniformly so the WIDTH matches the output (W/srcW), centered.
+ *  - "fitV" : scale uniformly so the HEIGHT matches the output (H/srcH), centered.
  *
- * The source is always scaled uniformly (no distortion) and centered in the
- * W×H canvas; uncovered area stays transparent. Pure function — shared by the
- * node's live preview and the headless executor.
+ * The fit modes preserve aspect ratio and center the result (uncovered area
+ * stays transparent). Pure function — shared by the node's live preview and
+ * the headless executor.
  */
 
 export type ReformatMode = "fill" | "fitH" | "fitV";
@@ -22,10 +22,16 @@ export function reformatImage(src: string, width: number, height: number, mode: 
     img.onload = () => {
       const sw = img.naturalWidth, sh = img.naturalHeight;
       if (!sw || !sh) { resolve(src); return; }
-      const sx = W / sw, sy = H / sh;
-      const scale = mode === "fill" ? Math.max(sx, sy) : mode === "fitH" ? sx : sy;
-      const dw = sw * scale, dh = sh * scale;
-      const dx = (W - dw) / 2, dy = (H - dh) / 2;
+      let dw: number, dh: number, dx: number, dy: number;
+      if (mode === "fill") {
+        // Distort: stretch to fill the whole output exactly.
+        dw = W; dh = H; dx = 0; dy = 0;
+      } else {
+        // Fit width / height uniformly, centered.
+        const scale = mode === "fitH" ? W / sw : H / sh;
+        dw = sw * scale; dh = sh * scale;
+        dx = (W - dw) / 2; dy = (H - dh) / 2;
+      }
       const canvas = document.createElement("canvas");
       canvas.width = W;
       canvas.height = H;
