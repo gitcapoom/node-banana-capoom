@@ -57,6 +57,8 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
     premultFg: data.premultiplyFg ?? false,
     bgBlackOutside: data.bgBlackOutside ?? true,
     fgBlackOutside: data.fgBlackOutside ?? true,
+    swapBgFg: data.swapBgFg ?? false,
+    outputResolution: data.outputResolution ?? "bg",
   };
 }
 

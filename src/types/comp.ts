@@ -103,6 +103,13 @@ export interface CompNodeData extends BaseNodeData {
   bgBlackOutside: boolean;
   fgBlackOutside: boolean;
 
+  /** Swap the BG and FG roles in the merge (their alphas swap too). Pins and
+   *  per-input transforms stay attached to their slots. */
+  swapBgFg: boolean;
+
+  /** Which input's native size defines the output resolution. */
+  outputResolution: "bg" | "fg";
+
   // Output: 8-bit PNG for display / persistence / 8-bit consumers. The float
   // result lives in the colorChain registry keyed by this node's id.
   outputImage: string | null;
@@ -146,6 +153,8 @@ export function defaultCompData(): CompNodeData {
     premultiplyFg: false,
     bgBlackOutside: true,
     fgBlackOutside: true,
+    swapBgFg: false,
+    outputResolution: "bg",
     outputImage: null,
     error: null,
   };

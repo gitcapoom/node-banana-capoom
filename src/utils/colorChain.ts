@@ -417,6 +417,8 @@ export interface CompRenderParams {
   premultFg: boolean;     // multiply FG rgb by its alpha before the merge
   bgBlackOutside: boolean; // transparent (true) vs edge-hold (false) outside BG
   fgBlackOutside: boolean;
+  swapBgFg: boolean;       // swap BG/FG roles (+ their alphas) in the merge
+  outputResolution: "bg" | "fg"; // which input's size defines the output
 }
 
 /**
@@ -435,7 +437,7 @@ uniform sampler2D u_ba;
 uniform sampler2D u_fg;
 uniform sampler2D u_fa;
 uniform sampler2D u_mt;
-uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_bg_bo, u_fg_bo;
+uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_bg_bo, u_fg_bo, u_swap;
 uniform vec2 u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size;
 uniform vec2 u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size;
 uniform vec2 u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size;
@@ -495,6 +497,9 @@ void main() {
   }
   if (u_premultFg > 0.5) A = A * a; // premultiply FG by its alpha
   A *= fgCov;                        // black-outside / no-coverage ⇒ no FG color
+
+  // Swap BG/FG roles (and their alphas) for the merge.
+  if (u_swap > 0.5) { vec3 tc = A; A = Brgb; Brgb = tc; float ta = a; a = b; b = ta; }
 
   vec3 outRgb; float outA;
   int op = int(u_op + 0.5);
@@ -581,6 +586,7 @@ function compUniforms(
     u_premultFg: params.premultFg ? 1 : 0,
     u_bg_bo: params.bgBlackOutside ? 1 : 0,
     u_fg_bo: params.fgBlackOutside ? 1 : 0,
+    u_swap: params.swapBgFg ? 1 : 0,
     u_ba_has: ba ? 1 : 0,
     u_fg_has: fg ? 1 : 0,
     u_fa_has: fa ? 1 : 0,
@@ -600,7 +606,7 @@ function compUniforms(
       : computeFollowPieces(params.fgTransform, fg?.w ?? fa.w, fg?.h ?? fa.h, params.fgAlphaReformat, fa.w, fa.h);
     Object.assign(u, piecesToUniforms("u_fa", faPieces));
   }
-  if (mt) Object.assign(u, piecesToUniforms("u_mt", computePieces(params.matteTransform, params.matteReformat, outW, outH, mt.w, mt.h)));
+  if (mt) Object.assign(u, piecesToUniforms("u_mt", computePieces(params.matteTransform, params.matteReformat, bg.w, bg.h, mt.w, mt.h)));
   return u;
 }
 
@@ -609,11 +615,13 @@ async function renderCompUnlocked(c: Ctx, inputs: CompRenderInputs, params: Comp
   const { gl, quad } = c;
   const bg = await resolveComp(gl, inputs.bg);
   if (!bg) return null;
-  const w = bg.w, h = bg.h;
   const ba = await resolveComp(gl, inputs.bgAlpha);
   const fg = await resolveComp(gl, inputs.fg);
   const fa = await resolveComp(gl, inputs.fgAlpha);
   const mt = await resolveComp(gl, inputs.matte);
+  // Output resolution from BG (default) or FG.
+  const sizeSrc = params.outputResolution === "fg" && fg ? fg : bg;
+  const w = sizeSrc.w, h = sizeSrc.h;
 
   const prev = floatRegistry.get(destNodeId);
   let outTex = prev?.tex;

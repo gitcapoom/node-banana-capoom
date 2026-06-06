@@ -47,6 +47,7 @@ export function CompModal() {
   const stageRef = useRef<Konva.Stage>(null);
   const imageNodeRef = useRef<Konva.Image>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const translateRef = useRef<{ startPL: { x: number; y: number }; startH: number; startV: number } | null>(null);
   const offscreen = useMemo(() => (typeof document !== "undefined" ? document.createElement("canvas") : null), []);
   const [, setPreviewTick] = useState(0);
   const [scale, setScale] = useState(1);
@@ -56,8 +57,9 @@ export function CompModal() {
   const [busy, setBusy] = useState(false);
 
   const data = node?.data as CompNodeData | undefined;
-  const outW = sizes.bg?.w ?? 0;
-  const outH = sizes.bg?.h ?? 0;
+  const resSrc = data?.outputResolution === "fg" && sizes.fg ? sizes.fg : sizes.bg;
+  const outW = resSrc?.w ?? 0;
+  const outH = resSrc?.h ?? 0;
 
   const srcs = useMemo(() => {
     const r = { bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null };
@@ -108,7 +110,7 @@ export function CompModal() {
 
   // Live preview into the offscreen canvas, rAF-coalesced.
   const previewSig = data
-    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, bo: [data.bgBlackOutside, data.fgBlackOutside], bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
+    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
     : "";
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
@@ -163,7 +165,8 @@ export function CompModal() {
       const rw = sizes.bg?.w ?? activeSize.w, rh = sizes.bg?.h ?? activeSize.h;
       return computePieces(activeTransform, data.bgAlphaReformat, rw, rh, activeSize.w, activeSize.h);
     }
-    return computePieces(activeTransform, data.matteReformat, outW, outH, activeSize.w, activeSize.h);
+    const mrw = sizes.bg?.w ?? outW, mrh = sizes.bg?.h ?? outH;
+    return computePieces(activeTransform, data.matteReformat, mrw, mrh, activeSize.w, activeSize.h);
   }, [showHandles, data, activeTransform, activeSize, activeInput, sizes.fg, sizes.bg, outW, outH]);
 
   const sx0sy0 = useMemo<[number, number]>(() => {
@@ -171,12 +174,29 @@ export function CompModal() {
     if (activeInput === "bg" || activeInput === "fg") return [1, 1];
     if (activeInput === "fgAlpha") return reformatScale(data.fgAlphaReformat, sizes.fg?.w ?? activeSize.w, sizes.fg?.h ?? activeSize.h, activeSize.w, activeSize.h);
     if (activeInput === "bgAlpha") return reformatScale(data.bgAlphaReformat, sizes.bg?.w ?? activeSize.w, sizes.bg?.h ?? activeSize.h, activeSize.w, activeSize.h);
-    return reformatScale(data.matteReformat, outW, outH, activeSize.w, activeSize.h);
+    return reformatScale(data.matteReformat, sizes.bg?.w ?? outW, sizes.bg?.h ?? outH, activeSize.w, activeSize.h);
   }, [data, activeSize, activeInput, sizes.fg, sizes.bg, outW, outH]);
 
   // konva (top-left) <-> output bottom-left
   const toKonva = (o: Pt): Pt => ({ x: o.x, y: outH - o.y });
   const targetBL = (e: Konva.KonvaEventObject<DragEvent>): Pt => ({ x: e.target.x(), y: outH - e.target.y() });
+  // Stage pointer → output bottom-left px (for live box translate).
+  const stagePosBL = (): Pt => {
+    const stage = stageRef.current;
+    if (!stage) return { x: 0, y: 0 };
+    const t = stage.getAbsoluteTransform().copy().invert();
+    const pos = stage.getPointerPosition();
+    if (!pos) return { x: 0, y: 0 };
+    const p = t.point(pos);
+    return { x: p.x, y: outH - p.y };
+  };
+  const onStageMove = () => {
+    const d = translateRef.current;
+    if (!d) return;
+    const p = stagePosBL();
+    patchTransform({ hPos: d.startH + (p.x - d.startPL.x), vPos: d.startV + (p.y - d.startPL.y) });
+  };
+  const endTranslate = () => { translateRef.current = null; };
   // Inverse rotation Rᵀ applied to a vector
   const invRot = (p: Pt, c: Pt): Pt => {
     if (!pieces) return p;
@@ -264,6 +284,18 @@ export function CompModal() {
             <input type="checkbox" checked={data.premultiplyFg ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { premultiplyFg: e.target.checked })} className="accent-teal-500" />
             Premultiply FG
           </label>
+          <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer ml-2" title="Swap the BG and FG layers (and their alphas) in the merge">
+            <input type="checkbox" checked={data.swapBgFg ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { swapBgFg: e.target.checked })} className="accent-teal-500" />
+            Swap BG/FG
+          </label>
+          <div className="w-px h-6 bg-neutral-700 mx-2" />
+          <label className="flex items-center gap-1.5 text-[11px] text-neutral-400" title="Which input's resolution defines the output">
+            Output res
+            <select value={data.outputResolution ?? "bg"} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { outputResolution: e.target.value as "bg" | "fg" })} className="bg-neutral-800 text-white text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700">
+              <option value="bg">BG</option>
+              <option value="fg">FG</option>
+            </select>
+          </label>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={closeModal} className="px-4 py-1.5 text-xs font-medium text-neutral-400 hover:text-white">Cancel</button>
@@ -274,19 +306,20 @@ export function CompModal() {
       <div className="flex-1 flex min-h-0">
         <div ref={containerRef} className="flex-1 overflow-hidden bg-neutral-900">
           {data.bgImage && offscreen ? (
-            <Stage ref={stageRef} width={stageSize.width} height={stageSize.height} scaleX={scale} scaleY={scale} x={position.x} y={position.y} onWheel={handleWheel}>
+            <Stage ref={stageRef} width={stageSize.width} height={stageSize.height} scaleX={scale} scaleY={scale} x={position.x} y={position.y} onWheel={handleWheel} onMouseMove={onStageMove} onMouseUp={endTranslate} onMouseLeave={endTranslate}>
               <Layer>
                 <KonvaImage ref={imageNodeRef} image={offscreen} width={outW} height={outH} />
               </Layer>
               <Layer>
                 {showHandles && pieces && (
                   <>
-                    {/* bounding box — draggable body = translate (commit on release
-                        so a points-based Line doesn't double-offset mid-drag) */}
+                    {/* bounding box — press + drag the body to translate live
+                        (stage-pointer tracked, so the composite updates in realtime) */}
                     <Line
                       points={corners.flatMap((p) => [p.x, p.y])}
-                      closed stroke={HANDLE} strokeWidth={hpx(1.5)} dash={[hpx(5), hpx(4)]} draggable
-                      onDragEnd={(e) => { const dx = e.target.x(), dy = e.target.y(); e.target.position({ x: 0, y: 0 }); patchTransform({ hPos: activeTransform!.hPos + dx, vPos: activeTransform!.vPos - dy }); }}
+                      closed stroke={HANDLE} strokeWidth={hpx(1.5)} dash={[hpx(5), hpx(4)]}
+                      fill="rgba(45,212,191,0.06)" hitStrokeWidth={hpx(10)}
+                      onMouseDown={(e) => { e.cancelBubble = true; if (activeTransform) translateRef.current = { startPL: stagePosBL(), startH: activeTransform.hPos, startV: activeTransform.vPos }; }}
                     />
                     {/* right-edge: scale X */}
                     <Circle x={rightMid.x} y={rightMid.y} radius={hpx(5)} fill="#fff" stroke={HANDLE} strokeWidth={hpx(1.5)} draggable onDragMove={(e) => applyScaleAxis(targetBL(e), "x")} onDragEnd={(e) => e.target.position({ x: rightMid.x, y: rightMid.y })} />
