@@ -25,6 +25,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const openModal = useCompStore((s) => s.openModal);
+  const modalOpenForThis = useCompStore((s) => s.isModalOpen && s.sourceNodeId === id);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Resolve the 4 inputs (url + producing node id) by targetHandle.
@@ -69,6 +70,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   });
 
   useEffect(() => {
+    if (modalOpenForThis) return; // editor owns rendering while open
     let cancelled = false;
     const urls = { bg: incoming.bg, fg: incoming.fg, fgAlpha: incoming.fgAlpha, matte: incoming.matte };
     const srcs = { bgSrc: incoming.bgSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc };
@@ -101,7 +103,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     const t = setTimeout(run, 80);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig]);
+  }, [sig, modalOpenForThis]);
 
   // Free the float texture when the node is removed.
   useEffect(() => () => releaseColorNode(id), [id]);

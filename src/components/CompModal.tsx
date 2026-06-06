@@ -266,11 +266,12 @@ export function CompModal() {
               <Layer>
                 {showHandles && pieces && (
                   <>
-                    {/* bounding box — draggable body = translate */}
+                    {/* bounding box — draggable body = translate (commit on release
+                        so a points-based Line doesn't double-offset mid-drag) */}
                     <Line
                       points={corners.flatMap((p) => [p.x, p.y])}
                       closed stroke={HANDLE} strokeWidth={hpx(1.5)} dash={[hpx(5), hpx(4)]} draggable
-                      onDragMove={(e) => { const dx = e.target.x(), dy = e.target.y(); patchTransform({ hPos: activeTransform!.hPos + dx, vPos: activeTransform!.vPos - dy }); e.target.position({ x: 0, y: 0 }); }}
+                      onDragEnd={(e) => { const dx = e.target.x(), dy = e.target.y(); e.target.position({ x: 0, y: 0 }); patchTransform({ hPos: activeTransform!.hPos + dx, vPos: activeTransform!.vPos - dy }); }}
                     />
                     {/* right-edge: scale X */}
                     <Circle x={rightMid.x} y={rightMid.y} radius={hpx(5)} fill="#fff" stroke={HANDLE} strokeWidth={hpx(1.5)} draggable onDragMove={(e) => applyScaleAxis(targetBL(e), "x")} onDragEnd={(e) => e.target.position({ x: rightMid.x, y: rightMid.y })} />
