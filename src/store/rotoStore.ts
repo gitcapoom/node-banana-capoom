@@ -43,6 +43,9 @@ interface RotoStore {
   // Shape mutators
   addShape: (shape: RotoShape) => void;
   replaceShape: (id: string, shape: RotoShape) => void;
+  /** Replace several shapes at once under a SINGLE history entry — used when a
+   *  cross-layer point selection is dragged so undo reverts the whole move. */
+  replaceShapes: (updated: RotoShape[]) => void;
   updateShape: (id: string, patch: Partial<RotoShape>) => void;
   deleteShape: (id: string) => void;
   moveShape: (id: string, dir: -1 | 1) => void;
@@ -105,6 +108,15 @@ export const useRotoStore = create<RotoStore>((set, get) => ({
   replaceShape: (id, shape) => {
     get().pushHistory();
     set((state) => ({ shapes: state.shapes.map((s) => (s.id === id ? shape : s)) }));
+  },
+
+  replaceShapes: (updated) => {
+    if (updated.length === 0) return;
+    get().pushHistory();
+    set((state) => {
+      const map = new Map(updated.map((s) => [s.id, s]));
+      return { shapes: state.shapes.map((s) => map.get(s.id) ?? s) };
+    });
   },
 
   updateShape: (id, patch) => {

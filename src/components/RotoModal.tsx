@@ -104,7 +104,7 @@ function drawFeatherPath(ctx: Konva.Context, shape: RotoShape) {
 export function RotoModal() {
   const {
     isModalOpen, sourceNodeId, sourceImage, shapes, selectedShapeId, selectedPointId,
-    currentTool, closeModal, addShape, replaceShape, updateShape, deleteShape, moveShape,
+    currentTool, closeModal, addShape, replaceShape, replaceShapes, updateShape, deleteShape, moveShape,
     setTool, setSelectedShape, setSelectedPoint, undo, redo,
   } = useRotoStore();
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
@@ -133,9 +133,12 @@ export function RotoModal() {
   const [selectedPointIds, setSelectedPointIds] = useState<string[]>([]);
   const selectedIdsRef = useRef<string[]>([]);
   useEffect(() => { selectedIdsRef.current = selectedPointIds; }, [selectedPointIds]);
-  // Rubber-band box select on empty canvas (select mode).
+  // Rubber-band box select on empty canvas (select mode). `crossLayer` (Alt)
+  // gathers points from every layer; `additive` (Shift) adds to the selection.
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
-  const selectDragRef = useRef<{ start: Pt; cur: Pt; moved: boolean } | null>(null);
+  const selectDragRef = useRef<{ start: Pt; cur: Pt; moved: boolean; crossLayer: boolean; additive: boolean } | null>(null);
+  // Dragging the selection's bounding box (move all selected points together).
+  const bboxDragRef = useRef<{ last: Pt } | null>(null);
 
   // Switching shapes drops the multi-selection.
   useEffect(() => { setSelectedPointIds([]); }, [selectedShapeId]);
@@ -209,26 +212,45 @@ export function RotoModal() {
     if (s) replaceShape(shapeId, s);
   }, [replaceShape]);
 
-  /** Translate the dragged anchor to `na`, carrying every selected point's
-   *  whole bundle (anchor + tangents + feather) by the same delta. When the
-   *  dragged point isn't part of the multi-selection, only it moves. */
-  const moveSelectedAnchors = useCallback((shapeId: string, draggedId: string, na: Pt) => {
-    setWork((ws) => ws.map((s) => {
-      if (s.id !== shapeId) return s;
-      const dragged = s.points.find((p) => p.id === draggedId);
-      if (!dragged) return s;
-      const dx = na.x - dragged.anchor.x, dy = na.y - dragged.anchor.y;
-      const sel = selectedIdsRef.current;
-      const ids = sel.includes(draggedId) ? sel : [draggedId];
-      const tr = (q: Pt): Pt => ({ x: q.x + dx, y: q.y + dy });
-      return {
-        ...s,
-        points: s.points.map((pp) => (ids.includes(pp.id)
+  /** Translate every selected point (across ALL layers) by (dx,dy), moving each
+   *  point's whole bundle: anchor + tangents + feather. */
+  const translateSelection = useCallback((dx: number, dy: number, extraId?: string) => {
+    const ids = new Set(selectedIdsRef.current);
+    if (extraId) ids.add(extraId);
+    if (ids.size === 0) return;
+    const tr = (q: Pt): Pt => ({ x: q.x + dx, y: q.y + dy });
+    setWork((ws) => ws.map((s) => (s.points.some((p) => ids.has(p.id))
+      ? { ...s, points: s.points.map((pp) => (ids.has(pp.id)
           ? { ...pp, anchor: tr(pp.anchor), inHandle: tr(pp.inHandle), outHandle: tr(pp.outHandle), feather: tr(pp.feather), featherIn: tr(pp.featherIn), featherOut: tr(pp.featherOut) }
-          : pp)),
-      };
-    }));
+          : pp)) }
+      : s)));
   }, []);
+
+  /** Drag one anchor to `na`, carrying the whole selection by the same delta.
+   *  The dragged point is always included even if selection state lags. */
+  const dragAnchor = useCallback((pointId: string, na: Pt) => {
+    setWork((ws) => {
+      let dragged: RotoPoint | undefined;
+      for (const s of ws) { const p = s.points.find((q) => q.id === pointId); if (p) { dragged = p; break; } }
+      if (!dragged) return ws;
+      const dx = na.x - dragged.anchor.x, dy = na.y - dragged.anchor.y;
+      const ids = new Set(selectedIdsRef.current); ids.add(pointId);
+      const tr = (q: Pt): Pt => ({ x: q.x + dx, y: q.y + dy });
+      return ws.map((s) => (s.points.some((p) => ids.has(p.id))
+        ? { ...s, points: s.points.map((pp) => (ids.has(pp.id)
+            ? { ...pp, anchor: tr(pp.anchor), inHandle: tr(pp.inHandle), outHandle: tr(pp.outHandle), feather: tr(pp.feather), featherIn: tr(pp.featherIn), featherOut: tr(pp.featherOut) }
+            : pp)) }
+        : s));
+    });
+  }, []);
+
+  /** Commit every layer that holds a selected point as ONE history entry. */
+  const commitSelection = useCallback((extraId?: string) => {
+    const ids = new Set(selectedIdsRef.current);
+    if (extraId) ids.add(extraId);
+    const affected = workRef.current.filter((s) => s.points.some((p) => ids.has(p.id)));
+    replaceShapes(affected);
+  }, [replaceShapes]);
 
   // Double-click an anchor → smooth (auto tangents, unbroken); Alt → corner.
   const toggleSmooth = useCallback((shapeId: string, pointId: string, toCorner: boolean) => {
@@ -323,13 +345,14 @@ export function RotoModal() {
     }
 
     // ── select mode ──
-    if (onFill) { setSelectedShape(e.target.attrs.shapeId as string); setSelectedPointIds([]); return; }
-    // empty canvas: start a marquee (or a plain click), resolved on mouse-up.
-    selectDragRef.current = { start: pos, cur: pos, moved: false };
+    if (onFill && !e.evt.altKey) { setSelectedShape(e.target.attrs.shapeId as string); setSelectedPointIds([]); return; }
+    // empty canvas (or Alt over a fill): start a marquee / plain click, resolved
+    // on mouse-up. Alt → select across all layers; Shift → add to selection.
+    selectDragRef.current = { start: pos, cur: pos, moved: false, crossLayer: e.evt.altKey, additive: e.evt.shiftKey };
     setMarquee(null);
   }, [currentTool, draft, getPos, scale, addShape, setTool, setSelectedShape]);
 
-  const onStageMouseMove = useCallback(() => {
+  const onStageMouseMove = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     if (currentTool === "pen" && draft && penDownRef.current) {
       const pos = getPos();
       setDraft((d) => {
@@ -343,6 +366,15 @@ export function RotoModal() {
       });
       return;
     }
+    if (currentTool === "select" && bboxDragRef.current) {
+      // Mouse released off-canvas (button no longer down) → end + commit.
+      if ((e.evt.buttons & 1) === 0) { bboxDragRef.current = null; commitSelection(); return; }
+      const pos = getPos();
+      const { last } = bboxDragRef.current;
+      translateSelection(pos.x - last.x, pos.y - last.y);
+      bboxDragRef.current.last = pos;
+      return;
+    }
     if (currentTool === "select" && selectDragRef.current) {
       const pos = getPos();
       const d = selectDragRef.current;
@@ -350,29 +382,33 @@ export function RotoModal() {
       if (!d.moved && dist(pos, d.start) * scale > 4) d.moved = true;
       if (d.moved) setMarquee({ x0: d.start.x, y0: d.start.y, x1: pos.x, y1: pos.y });
     }
-  }, [currentTool, draft, getPos, scale]);
+  }, [currentTool, draft, getPos, scale, translateSelection, commitSelection]);
 
   const onStageMouseUp = useCallback(() => {
     penDownRef.current = false;
     if (currentTool !== "select") return;
+    if (bboxDragRef.current) { bboxDragRef.current = null; commitSelection(); return; }
     const d = selectDragRef.current;
     selectDragRef.current = null;
     setMarquee(null);
     if (!d) return;
-    if (d.moved && selShape) {
-      // Box select: the selected shape's anchors inside the rubber-band.
+    if (d.moved) {
+      // Box select. Alt → anchors from every layer; otherwise only the selected
+      // shape. Shift → add to the existing selection.
       const xmin = Math.min(d.start.x, d.cur.x), xmax = Math.max(d.start.x, d.cur.x);
       const ymin = Math.min(d.start.y, d.cur.y), ymax = Math.max(d.start.y, d.cur.y);
-      const ids = selShape.points.filter((p) => p.anchor.x >= xmin && p.anchor.x <= xmax && p.anchor.y >= ymin && p.anchor.y <= ymax).map((p) => p.id);
-      setSelectedPointIds(ids);
-      setSelectedPoint(ids.length === 1 ? ids[0] : null);
+      const pool = d.crossLayer ? work.flatMap((s) => s.points) : (selShape ? selShape.points : []);
+      const hit = pool.filter((p) => p.anchor.x >= xmin && p.anchor.x <= xmax && p.anchor.y >= ymin && p.anchor.y <= ymax).map((p) => p.id);
+      const next = d.additive ? Array.from(new Set([...selectedIdsRef.current, ...hit])) : hit;
+      setSelectedPointIds(next);
+      setSelectedPoint(next.length === 1 ? next[0] : null);
       return;
     }
     // Plain click on empty canvas: insert a point if near a segment, else clear.
     if (selShape && editMode === "points" && tryInsertPoint(d.start)) return;
     setSelectedPointIds([]);
     setSelectedPoint(null);
-  }, [currentTool, selShape, editMode, tryInsertPoint, setSelectedPoint]);
+  }, [currentTool, selShape, work, editMode, tryInsertPoint, setSelectedPoint, commitSelection]);
 
   // ─── Keyboard ────────────────────────────────────────────────────
   useEffect(() => {
@@ -408,6 +444,18 @@ export function RotoModal() {
 
   if (!isModalOpen) return null;
   const hpx = (v: number) => v / scale;
+
+  // Bounding box of the current multi-selection (across all layers). Shown when
+  // 2+ points are selected; its interior is a drag handle for the whole group.
+  const selSet = new Set(selectedPointIds);
+  const selAnchors: Pt[] = [];
+  for (const s of work) for (const p of s.points) if (selSet.has(p.id)) selAnchors.push(p.anchor);
+  const bbox = selAnchors.length >= 2
+    ? {
+        minX: Math.min(...selAnchors.map((a) => a.x)), minY: Math.min(...selAnchors.map((a) => a.y)),
+        maxX: Math.max(...selAnchors.map((a) => a.x)), maxY: Math.max(...selAnchors.map((a) => a.y)),
+      }
+    : null;
 
   return (
     <div className="fixed inset-0 z-[100] bg-neutral-950 flex flex-col">
@@ -485,6 +533,27 @@ export function RotoModal() {
 
             {/* selected shape outline + handles */}
             <Layer>
+              {/* Selection bounding box — drawn UNDER the point handles so anchors
+                  inside it stay grabbable; its interior drags the whole group.
+                  Alt+press starts a cross-layer marquee instead of a move. */}
+              {currentTool === "select" && bbox && (
+                <Rect
+                  x={bbox.minX - hpx(7)} y={bbox.minY - hpx(7)}
+                  width={(bbox.maxX - bbox.minX) + hpx(14)} height={(bbox.maxY - bbox.minY) + hpx(14)}
+                  stroke="#0ea5e9" strokeWidth={hpx(1)} dash={[hpx(5), hpx(3)]} fill="rgba(14,165,233,0.07)"
+                  onMouseEnter={(e) => { const st = e.target.getStage(); if (st) st.container().style.cursor = "move"; }}
+                  onMouseLeave={(e) => { const st = e.target.getStage(); if (st) st.container().style.cursor = "default"; }}
+                  onMouseDown={(e) => {
+                    if (e.evt.altKey) { e.cancelBubble = true; const pos = getPos(); selectDragRef.current = { start: pos, cur: pos, moved: false, crossLayer: true, additive: e.evt.shiftKey }; setMarquee(null); return; }
+                    e.cancelBubble = true; bboxDragRef.current = { last: getPos() };
+                  }}
+                />
+              )}
+              {/* Cross-layer selected points that aren't on the active shape —
+                  shown as dots so a multi-layer selection is visible. */}
+              {currentTool === "select" && work.flatMap((s) => (s.id === selectedShapeId ? [] : s.points.filter((p) => selSet.has(p.id)).map((p) => (
+                <Circle key={`xl-${p.id}`} x={p.anchor.x} y={p.anchor.y} radius={hpx(4)} fill="#0ea5e9" stroke="#0369a1" strokeWidth={hpx(1)} listening={false} />
+              ))))}
               {selShape && (
                 <>
                   <KonvaShape listening={false} sceneFunc={(ctx, s) => { drawShapePath(ctx, selShape); ctx.strokeShape(s); }} stroke="#0ea5e9" strokeWidth={hpx(1.5)} />
@@ -513,7 +582,7 @@ export function RotoModal() {
                             </>
                           )}
                           <Circle x={p.feather.x} y={p.feather.y} radius={hpx(5)} fill={isSel ? "#f59e0b" : "#fcd34d"} stroke="#000" strokeWidth={hpx(0.5)} draggable
-                            onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); setSelectedPointIds([p.id]); }}
+                            onMouseDown={(e) => { e.cancelBubble = true; setSelectedPoint(p.id); selectedIdsRef.current = [p.id]; setSelectedPointIds([p.id]); }}
                             onDblClick={(e) => { e.cancelBubble = true; toggleFeatherSmooth(selShape.id, p.id, e.evt.altKey); }}
                             onDragMove={(e) => { const nf = { x: e.target.x(), y: e.target.y() }; editPoint(selShape.id, p.id, (pp) => { const dx = nf.x - pp.feather.x, dy = nf.y - pp.feather.y; return { ...pp, feather: nf, featherIn: { x: pp.featherIn.x + dx, y: pp.featherIn.y + dy }, featherOut: { x: pp.featherOut.x + dx, y: pp.featherOut.y + dy } }; }); }}
                             onDragEnd={() => commitShape(selShape.id)} />
@@ -541,13 +610,19 @@ export function RotoModal() {
                         <Circle x={p.anchor.x} y={p.anchor.y} radius={hpx(5)} fill={isSel ? "#0ea5e9" : "#ffffff"} stroke="#0369a1" strokeWidth={hpx(1)} draggable
                           onMouseDown={(e) => {
                             e.cancelBubble = true;
-                            if (e.evt.shiftKey) { setSelectedPointIds((ids) => (ids.includes(p.id) ? ids.filter((x) => x !== p.id) : [...ids, p.id])); }
-                            else if (!selectedIdsRef.current.includes(p.id)) { setSelectedPointIds([p.id]); }
+                            const cur = selectedIdsRef.current;
+                            // Shift toggles; plain click keeps an existing multi-selection
+                            // (to drag it) or resets to just this point.
+                            const next = e.evt.shiftKey
+                              ? (cur.includes(p.id) ? cur.filter((x) => x !== p.id) : [...cur, p.id])
+                              : (cur.includes(p.id) ? cur : [p.id]);
+                            selectedIdsRef.current = next; // sync so dragAnchor reads it immediately
+                            setSelectedPointIds(next);
                             setSelectedPoint(p.id);
                           }}
                           onDblClick={(e) => { e.cancelBubble = true; toggleSmooth(selShape.id, p.id, e.evt.altKey); }}
-                          onDragMove={(e) => { const na = { x: e.target.x(), y: e.target.y() }; moveSelectedAnchors(selShape.id, p.id, na); }}
-                          onDragEnd={() => commitShape(selShape.id)} />
+                          onDragMove={(e) => { const na = { x: e.target.x(), y: e.target.y() }; dragAnchor(p.id, na); }}
+                          onDragEnd={() => commitSelection(p.id)} />
                       </Fragment>
                     );
                   })}
@@ -604,7 +679,7 @@ export function RotoModal() {
           )}
           {currentTool === "select" && selShape && (
             <div className="px-3 py-2 border-t border-neutral-800 text-[10px] text-neutral-500 leading-snug">
-              Click a point to select (Shift+click or drag a box for several). Drag to move the selection — feathers move with it. Double-click = add/smooth tangents (Alt = corner). Click a segment to insert a point. Del removes. {editMode === "feather" ? "Drag the amber feather points + handles." : "Switch to Feather to edit softness."}
+              Click a point to select (Shift+click or drag a box for several). Drag a point or the selection box to move them — feathers move too. Alt+drag a box selects across all layers. Double-click = add/smooth tangents (Alt = corner). Click a segment to insert a point. Del removes. {editMode === "feather" ? "Drag the amber feather points + handles." : "Switch to Feather to edit softness."}
             </div>
           )}
         </div>
