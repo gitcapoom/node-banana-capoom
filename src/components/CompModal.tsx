@@ -150,7 +150,13 @@ export function CompModal() {
     (patch: Partial<CompTransform>) => {
       if (!sourceNodeId || !data) return;
       const cur = { ...defaultCompTransform(), ...((data[activeKey] as Partial<CompTransform> | undefined) ?? {}) };
-      updateNodeData(sourceNodeId, { [activeKey]: { ...cur, ...patch } } as Partial<CompNodeData>);
+      const next = { ...cur, ...patch };
+      // Scale lock: Scale Y follows Scale X (a Y-only edit drives X, then Y mirrors X).
+      if (next.scaleLock) {
+        if ("scaleY" in patch && !("scaleX" in patch)) next.scaleX = next.scaleY;
+        next.scaleY = next.scaleX;
+      }
+      updateNodeData(sourceNodeId, { [activeKey]: next } as Partial<CompNodeData>);
     },
     [sourceNodeId, data, activeKey, updateNodeData],
   );
@@ -384,12 +390,21 @@ export function CompModal() {
             )}
 
             <div className={`flex flex-col gap-1.5 ${activeTransform?.enabled ? "" : "opacity-50 pointer-events-none"}`}>
-              {NUM_FIELDS.map((f) => (
-                <div key={f.key} className="flex items-center gap-1.5">
-                  <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">{f.label}</label>
-                  <input type="number" step={f.step} value={activeTransform ? Number(activeTransform[f.key].toFixed(4)) : 0} onChange={(e) => patchTransform({ [f.key]: parseFloat(e.target.value) || 0 } as Partial<CompTransform>)} className="nodrag flex-1 min-w-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700" />
-                </div>
-              ))}
+              {NUM_FIELDS.map((f) => {
+                const locked = !!activeTransform?.scaleLock;
+                const yLocked = f.key === "scaleY" && locked;
+                const val = activeTransform ? (yLocked ? activeTransform.scaleX : activeTransform[f.key]) : 0;
+                return (
+                  <div key={f.key} className="flex items-center gap-1.5">
+                    <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">{f.label}</label>
+                    <input type="number" step={f.step} disabled={yLocked} value={Number(val.toFixed(4))} onChange={(e) => patchTransform({ [f.key]: parseFloat(e.target.value) || 0 } as Partial<CompTransform>)} className={`nodrag flex-1 min-w-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700 ${yLocked ? "opacity-50" : ""}`} />
+                  </div>
+                );
+              })}
+              <label className="flex items-center gap-2 text-[10px] text-neutral-400 cursor-pointer">
+                <input type="checkbox" checked={!!activeTransform?.scaleLock} onChange={(e) => patchTransform({ scaleLock: e.target.checked })} className="accent-teal-500" />
+                Lock scale (Y follows X)
+              </label>
               <div className="flex items-center gap-1.5 mt-1">
                 <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Center</label>
                 <label className="flex items-center gap-1 text-[10px] text-neutral-400">

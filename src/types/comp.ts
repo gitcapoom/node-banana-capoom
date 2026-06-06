@@ -62,6 +62,7 @@ export interface CompTransform {
   rotation: number;  // deg, CCW
   scaleX: number;
   scaleY: number;
+  scaleLock: boolean;  // Scale Y follows Scale X (uniform scale)
   centerAuto: boolean; // true ⇒ center = image center (from decoded pixel size)
   centerX: number;     // bottom-left output px, used when centerAuto=false
   centerY: number;
@@ -129,6 +130,7 @@ export function defaultCompTransform(enabled = false): CompTransform {
     rotation: 0,
     scaleX: 1,
     scaleY: 1,
+    scaleLock: false,
     centerAuto: true,
     centerX: 0,
     centerY: 0,
