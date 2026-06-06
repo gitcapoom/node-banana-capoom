@@ -410,6 +410,7 @@ export interface CompRenderParams {
   matteTransform: CompTransform;
   fgAlphaReformat: CompReformat;
   matteReformat: CompReformat;
+  premultFg: boolean; // multiply FG rgb by its alpha before the merge
 }
 
 /**
@@ -427,7 +428,7 @@ uniform sampler2D u_bg;
 uniform sampler2D u_fg;
 uniform sampler2D u_fa;
 uniform sampler2D u_mt;
-uniform float u_fg_has, u_fa_has, u_mt_has, u_op;
+uniform float u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg;
 uniform vec2 u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size;
 uniform vec2 u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size;
 uniform vec2 u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size;
@@ -467,6 +468,7 @@ void main() {
   } else {
     a = fgAlphaOwn * fgInside;
   }
+  if (u_premultFg > 0.5) A = A * a; // premultiply FG by its alpha
 
   vec3 outRgb; float outA;
   int op = int(u_op + 0.5);
@@ -550,6 +552,7 @@ function compUniforms(
   const u: Record<string, UniformValue> = {
     u_outSize: [outW, outH],
     u_op: params.op,
+    u_premultFg: params.premultFg ? 1 : 0,
     u_fg_has: fg ? 1 : 0,
     u_fa_has: fa ? 1 : 0,
     u_mt_has: mt ? 1 : 0,

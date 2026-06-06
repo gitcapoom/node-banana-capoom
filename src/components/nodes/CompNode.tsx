@@ -62,7 +62,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   // Live preview + commit whenever inputs/params change.
   const sig = JSON.stringify({
     bgSrc: incoming.bgSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc,
-    op: nodeData.mergeOp,
+    op: nodeData.mergeOp, pm: nodeData.premultiplyFg,
     fgT: nodeData.fgTransform, faT: nodeData.fgAlphaTransform, mtT: nodeData.matteTransform,
     far: nodeData.fgAlphaReformat, mtr: nodeData.matteReformat,
     bgUrl: incoming.bg, fgUrl: incoming.fg, faUrl: incoming.fgAlpha, mtUrl: incoming.matte,

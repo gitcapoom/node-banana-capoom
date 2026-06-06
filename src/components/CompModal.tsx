@@ -106,7 +106,7 @@ export function CompModal() {
 
   // Live preview into the offscreen canvas, rAF-coalesced.
   const previewSig = data
-    ? JSON.stringify({ op: data.mergeOp, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
+    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
     : "";
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
@@ -248,6 +248,11 @@ export function CompModal() {
             <select value={data.mergeOp} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { mergeOp: e.target.value as CompMergeOp })} className="bg-neutral-800 text-white text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700">
               {COMP_OP_LABELS.map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}
             </select>
+          </label>
+          <div className="w-px h-6 bg-neutral-700 mx-2" />
+          <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer" title="Multiply the FG's RGB by its alpha before compositing">
+            <input type="checkbox" checked={data.premultiplyFg ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { premultiplyFg: e.target.checked })} className="accent-teal-500" />
+            Premultiply FG
           </label>
         </div>
         <div className="flex items-center gap-3">

@@ -49,6 +49,7 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
     matteTransform: data.matteTransform,
     fgAlphaReformat: data.fgAlphaReformat,
     matteReformat: data.matteReformat,
+    premultFg: data.premultiplyFg ?? false,
   };
 }
 
