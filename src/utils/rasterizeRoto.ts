@@ -23,16 +23,33 @@
  * subtract = multiply the accumulator by (1 − coverage).
  */
 
-import type { RotoShape, RotoPoint } from "@/types";
+import type { RotoShape, RotoPoint, RotoFeatherFalloff } from "@/types";
 
 export interface RasterizeRotoOptions {
   invert?: boolean;
 }
 
-const RAMP_STEPS = 48;     // feather ramp resolution
+const RAMP_STEPS = 64;     // feather ramp resolution
 const SEG_SAMPLES = 24;    // polyline samples per Bezier segment
 
 type Pt = { x: number; y: number };
+
+/**
+ * Coverage profile across the feather band: `t` runs 0 (shape edge, fully
+ * covered) → 1 (feather edge, uncovered); returns coverage in [0,1].
+ * "linear" reproduces the original ramp; the others reshape the falloff.
+ */
+type FeatherProfile = (t: number) => number;
+function featherProfile(kind: RotoFeatherFalloff | undefined): FeatherProfile {
+  switch (kind) {
+    case "smooth":   return (t) => 1 - t * t * (3 - 2 * t);                 // smoothstep
+    case "smoother": return (t) => 1 - t * t * t * (t * (t * 6 - 15) + 10); // smootherstep
+    case "easeIn":   return (t) => 1 - t * t;                              // solid → quick drop
+    case "easeOut":  return (t) => (1 - t) * (1 - t);                      // quick drop → eased
+    case "linear":
+    default:         return (t) => 1 - t;
+  }
+}
 
 function cubicAt(p0: Pt, p1: Pt, p2: Pt, p3: Pt, t: number): Pt {
   const mt = 1 - t;
@@ -126,25 +143,28 @@ function renderShapeCoverage(shape: RotoShape, width: number, height: number): H
     return canvas;
   }
 
-  // Additive ramp: stack interpolated polygons shape→feather. A pixel
-  // covered by k nested layers ends at grayscale k/STEPS * opacity.
-  ctx.globalCompositeOperation = "lighter";
-  const layerVal = Math.max(1, Math.round((255 * opacity) / RAMP_STEPS));
-  ctx.fillStyle = `rgb(${layerVal},${layerVal},${layerVal})`;
-  for (let g = 1; g <= RAMP_STEPS; g++) {
-    const t = g / RAMP_STEPS; // 0 = shape curve, 1 = feather curve
-    const poly = shapePoly.map((sp, i) => ({
+  // Soft edge. Draw nested polygons from the feather curve (t=1, coverage 0)
+  // INWARD to the shape curve (t=0, coverage 1), each filled opaquely with the
+  // falloff profile's coverage for that band. Because we paint outside→in with
+  // source-over, every pixel keeps the value of the innermost (smallest-t)
+  // polygon that contains it, giving an exact ramp that follows `profile`
+  // precisely — no additive rounding drift — and a brighter-over-darker draw
+  // order means anti-aliased band edges blend cleanly (no seams). The t=0 pass
+  // fills the solid interior, so no separate core pin is needed.
+  const profile = featherProfile(shape.featherFalloff);
+  ctx.globalCompositeOperation = "source-over";
+  for (let g = RAMP_STEPS; g >= 0; g--) {
+    const t = g / RAMP_STEPS; // 1 = feather curve, 0 = shape curve
+    const cov = profile(t) * opacity;
+    if (cov <= 0) continue; // fully-uncovered bands are no-ops over black
+    const v = Math.round(255 * cov);
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    const poly = t === 0 ? shapePoly : shapePoly.map((sp, i) => ({
       x: sp.x + (featherPoly[i].x - sp.x) * t,
       y: sp.y + (featherPoly[i].y - sp.y) * t,
     }));
     fillPolygon(ctx, poly);
   }
-  // Pin the solid core (inside the shape curve) to full opacity so additive
-  // rounding never leaves the interior below the intended level.
-  ctx.globalCompositeOperation = "source-over";
-  const coreV = Math.round(255 * opacity);
-  ctx.fillStyle = `rgb(${coreV},${coreV},${coreV})`;
-  fillPolygon(ctx, shapePoly);
 
   return canvas;
 }

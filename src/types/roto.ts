@@ -13,6 +13,16 @@ import type { BaseNodeData } from "./annotation";
 export type RotoBooleanOp = "union" | "subtract";
 
 /**
+ * Falloff profile for a shape's feather — how coverage ramps from the shape
+ * edge (1) to the feather edge (0). "linear" is the historical default.
+ *  - smooth   : smoothstep S-curve (eases at both ends)
+ *  - smoother : smootherstep (Perlin) — even gentler ends
+ *  - easeIn   : holds solid near the shape, falls off fast near the feather
+ *  - easeOut  : falls off fast near the shape, eases out near the feather
+ */
+export type RotoFeatherFalloff = "linear" | "smooth" | "smoother" | "easeIn" | "easeOut";
+
+/**
  * One control point of a cubic-Bezier roto shape.
  *  - anchor:    on-curve point
  *  - inHandle:  cubic control point for the segment ARRIVING at this anchor
@@ -47,6 +57,8 @@ export interface RotoShape {
   closed: boolean;
   op: RotoBooleanOp;
   opacity: number; // 0–1, default 1
+  /** Feather edge falloff profile. Default "linear". */
+  featherFalloff?: RotoFeatherFalloff;
 }
 
 export interface RotoNodeData extends BaseNodeData {

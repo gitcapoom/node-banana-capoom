@@ -6,7 +6,7 @@ import Konva from "konva";
 import { useRotoStore } from "@/store/rotoStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { rasterizeRoto } from "@/utils/rasterizeRoto";
-import type { RotoShape, RotoPoint } from "@/types";
+import type { RotoShape, RotoPoint, RotoFeatherFalloff } from "@/types";
 
 type Pt = { x: number; y: number };
 const uid = () => `${Date.now().toString(36)}-${Math.floor(performance.now() % 1e6).toString(36)}`;
@@ -475,6 +475,22 @@ export function RotoModal() {
                   {m === "points" ? "Points" : "Feather"}
                 </button>
               ))}
+              {editMode === "feather" && selShape && (
+                <label className="flex items-center gap-1.5 text-[11px] text-neutral-400 ml-1" title="Feather edge falloff for this shape">
+                  Falloff
+                  <select
+                    value={selShape.featherFalloff ?? "linear"}
+                    onChange={(e) => updateShape(selShape.id, { featherFalloff: e.target.value as RotoFeatherFalloff })}
+                    className="bg-neutral-800 text-white text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700"
+                  >
+                    <option value="linear">Linear</option>
+                    <option value="smooth">Smooth</option>
+                    <option value="smoother">Smoother</option>
+                    <option value="easeIn">Ease In</option>
+                    <option value="easeOut">Ease Out</option>
+                  </select>
+                </label>
+              )}
             </>
           )}
           <div className="w-px h-6 bg-neutral-700 mx-2" />
