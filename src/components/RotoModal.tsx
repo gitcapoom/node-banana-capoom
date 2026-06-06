@@ -64,11 +64,14 @@ function normalizeShape(s: RotoShape): RotoShape {
   return { ...s, points: s.points.map(normalizePoint) };
 }
 
-/** Multiply every coordinate of every shape by s (for downscaled preview). */
+/** Multiply every coordinate (and pixel-valued size) of every shape by s — for
+ *  the downscaled matte preview. */
 function scaleShapes(shapes: RotoShape[], s: number): RotoShape[] {
   const sp = (p: Pt) => ({ x: p.x * s, y: p.y * s });
   return shapes.map((sh) => ({
     ...sh,
+    globalFeather: (sh.globalFeather ?? 0) * s,
+    strokeWidth: (sh.strokeWidth ?? 8) * s,
     points: sh.points.map((p) => ({
       ...p, anchor: sp(p.anchor), inHandle: sp(p.inHandle), outHandle: sp(p.outHandle),
       feather: sp(p.feather), featherIn: sp(p.featherIn), featherOut: sp(p.featherOut),
@@ -417,7 +420,9 @@ export function RotoModal() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
       if (e.key === "Escape") { if (draft) setDraft(null); else closeModal(); }
-      if (e.key === "Enter" && draft && draft.points.length >= 2) { addShape({ ...draft, closed: true }); setDraft(null); setTool("select"); }
+      // Enter finishes the spline OPEN as an edge stroke (closing via the start
+      // point makes a filled shape instead).
+      if (e.key === "Enter" && draft && draft.points.length >= 2) { addShape({ ...draft, closed: false, renderMode: "edge", strokeWidth: 8 }); setDraft(null); setTool("select"); }
       if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       if (e.key === "p" || e.key === "P") setTool("pen");
       if (e.key === "v" || e.key === "V") setTool("select");
@@ -491,6 +496,35 @@ export function RotoModal() {
                   </select>
                 </label>
               )}
+              {selShape && (
+                <>
+                  <div className="w-px h-6 bg-neutral-700 mx-1.5" />
+                  <label className="flex items-center gap-1 text-[11px] text-neutral-400" title="Uniform feather for this layer — adds to the per-point feather">
+                    Feather
+                    <input type="range" min={0} max={200} step={1} value={selShape.globalFeather ?? 0}
+                      onChange={(e) => updateShape(selShape.id, { globalFeather: parseFloat(e.target.value) })}
+                      className="w-20 accent-white" />
+                    <span className="w-6 tabular-nums text-right text-neutral-300">{Math.round(selShape.globalFeather ?? 0)}</span>
+                  </label>
+                  <div className="w-px h-6 bg-neutral-700 mx-1.5" />
+                  <button
+                    onClick={() => updateShape(selShape.id, { renderMode: (selShape.renderMode ?? "fill") === "edge" ? "fill" : "edge" })}
+                    className={`px-3 py-1.5 text-xs rounded ${(selShape.renderMode ?? "fill") === "edge" ? "bg-amber-600 text-white" : "text-neutral-400 hover:text-white"}`}
+                    title="Stroke the spline edge (open splines allowed) instead of filling the area"
+                  >
+                    Edge
+                  </button>
+                  {(selShape.renderMode ?? "fill") === "edge" && (
+                    <label className="flex items-center gap-1 text-[11px] text-neutral-400" title="Edge stroke thickness (px)">
+                      Width
+                      <input type="range" min={0} max={300} step={1} value={selShape.strokeWidth ?? 8}
+                        onChange={(e) => updateShape(selShape.id, { strokeWidth: parseFloat(e.target.value) })}
+                        className="w-20 accent-white" />
+                      <span className="w-7 tabular-nums text-right text-neutral-300">{Math.round(selShape.strokeWidth ?? 8)}</span>
+                    </label>
+                  )}
+                </>
+              )}
             </>
           )}
           <div className="w-px h-6 bg-neutral-700 mx-2" />
@@ -535,14 +569,22 @@ export function RotoModal() {
             {/* translucent fills (hidden in matte preview) */}
             {!mattePreview && (
               <Layer listening={currentTool === "select"}>
-                {work.map((shape) => (
-                  <KonvaShape
-                    key={shape.id} name="fill" shapeId={shape.id}
-                    sceneFunc={(ctx, s) => { drawShapePath(ctx, shape); ctx.fillStrokeShape(s); }}
-                    fill={shape.op === "subtract" ? "rgba(239,68,68,0.22)" : "rgba(56,189,248,0.18)"}
-                    listening={currentTool === "select"}
-                  />
-                ))}
+                {work.map((shape) => {
+                  const edge = (shape.renderMode ?? "fill") === "edge";
+                  const color = shape.op === "subtract" ? "rgba(239,68,68,0.5)" : "rgba(56,189,248,0.45)";
+                  return (
+                    <KonvaShape
+                      key={shape.id} name="fill" shapeId={shape.id}
+                      sceneFunc={(ctx, s) => { drawShapePath(ctx, shape); ctx.fillStrokeShape(s); }}
+                      fill={edge ? undefined : (shape.op === "subtract" ? "rgba(239,68,68,0.22)" : "rgba(56,189,248,0.18)")}
+                      stroke={edge ? color : undefined}
+                      strokeWidth={edge ? (shape.strokeWidth ?? 8) : undefined}
+                      lineCap="round" lineJoin="round"
+                      hitStrokeWidth={edge ? Math.max(shape.strokeWidth ?? 8, hpx(12)) : undefined}
+                      listening={currentTool === "select"}
+                    />
+                  );
+                })}
                 {currentTool === "pen" && draft && <KonvaShape listening={false} sceneFunc={(ctx, s) => { drawShapePath(ctx, draft); ctx.fillStrokeShape(s); }} fill="rgba(56,189,248,0.15)" />}
               </Layer>
             )}
@@ -690,7 +732,7 @@ export function RotoModal() {
           </div>
           {currentTool === "pen" && (
             <div className="px-3 py-2 border-t border-neutral-800 text-[10px] text-sky-400/80 leading-snug">
-              Pen: click to add points · drag for curves · click the green start point (or Enter) to close. The shape finishes and returns to Select — use ＋ New for another.
+              Pen: click to add points · drag for curves · click the green start point to close (filled), or press Enter to finish open (edge stroke). Returns to Select — use ＋ New for another.
             </div>
           )}
           {currentTool === "select" && selShape && (

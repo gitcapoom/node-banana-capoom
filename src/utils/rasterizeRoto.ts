@@ -104,6 +104,63 @@ function fillPolygon(ctx: CanvasRenderingContext2D, poly: Pt[]): void {
   ctx.fill();
 }
 
+/** Unit tangent at polyline vertex i (uses neighbours; clamps for open ends). */
+function tangentAt(poly: Pt[], i: number, closed: boolean): Pt {
+  const n = poly.length;
+  const prev = closed ? poly[(i - 1 + n) % n] : poly[Math.max(0, i - 1)];
+  const next = closed ? poly[(i + 1) % n] : poly[Math.min(n - 1, i + 1)];
+  const dx = next.x - prev.x, dy = next.y - prev.y;
+  const len = Math.hypot(dx, dy) || 1;
+  return { x: dx / len, y: dy / len };
+}
+
+/** Per-vertex unit normals with a globally-consistent outward orientation
+ *  (anchored at the leftmost — always convex — vertex). For an open polyline
+ *  the sign is arbitrary but consistent, which is all the stroke ribbon needs. */
+function outwardNormals(poly: Pt[], closed: boolean): Pt[] {
+  const n = poly.length;
+  if (n === 0) return [];
+  let cx = 0, cy = 0;
+  for (const p of poly) { cx += p.x; cy += p.y; }
+  cx /= n; cy /= n;
+  let ex = 0;
+  for (let i = 1; i < n; i++) if (poly[i].x < poly[ex].x) ex = i;
+  const te = tangentAt(poly, ex, closed);
+  const sign = (te.y * (poly[ex].x - cx) + -te.x * (poly[ex].y - cy)) >= 0 ? 1 : -1;
+  const normals: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = tangentAt(poly, i, closed);
+    normals.push({ x: sign * t.y, y: -sign * t.x });
+  }
+  return normals;
+}
+
+/** Fill a symmetric ribbon of per-vertex half-width `hw(i)` around centerline
+ *  `C` (offset ±hw along normal `N`). Closed → an annulus (even-odd); open → a
+ *  strip with butt caps. */
+function fillRibbon(ctx: CanvasRenderingContext2D, C: Pt[], N: Pt[], hw: (i: number) => number, closed: boolean): void {
+  const n = C.length;
+  if (n < 2) return;
+  const out = (i: number): Pt => ({ x: C[i].x + hw(i) * N[i].x, y: C[i].y + hw(i) * N[i].y });
+  const inn = (i: number): Pt => ({ x: C[i].x - hw(i) * N[i].x, y: C[i].y - hw(i) * N[i].y });
+  ctx.beginPath();
+  if (closed) {
+    const o0 = out(0); ctx.moveTo(o0.x, o0.y);
+    for (let i = 1; i < n; i++) { const p = out(i); ctx.lineTo(p.x, p.y); }
+    ctx.closePath();
+    const iN = inn(n - 1); ctx.moveTo(iN.x, iN.y);
+    for (let i = n - 2; i >= 0; i--) { const p = inn(i); ctx.lineTo(p.x, p.y); }
+    ctx.closePath();
+    ctx.fill("evenodd");
+  } else {
+    const o0 = out(0); ctx.moveTo(o0.x, o0.y);
+    for (let i = 1; i < n; i++) { const p = out(i); ctx.lineTo(p.x, p.y); }
+    for (let i = n - 1; i >= 0; i--) { const p = inn(i); ctx.lineTo(p.x, p.y); }
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
 /** Trace a shape's main Bezier into a 2D context path (no fill). Exported
  *  for the editor's lightweight preview. */
 export function traceRotoPath(ctx: CanvasRenderingContext2D, shape: RotoShape): void {
@@ -130,10 +187,48 @@ function renderShapeCoverage(shape: RotoShape, width: number, height: number): H
   ctx.fillRect(0, 0, width, height);
 
   const { shapePoly, featherPoly } = sampleShape(shape);
+  const opacity = shape.opacity ?? 1;
+  const gf = shape.globalFeather ?? 0;
+  const profile = featherProfile(shape.featherFalloff);
+
+  // ── Edge mode: stroke the spline, feathered on BOTH sides ──────────────
+  if ((shape.renderMode ?? "fill") === "edge") {
+    if (shapePoly.length < 2) return canvas;
+    const half = Math.max(0, (shape.strokeWidth ?? 8) / 2);
+    const N = outwardNormals(shapePoly, shape.closed);
+    // Per-sample feather width = per-point feather magnitude + global feather.
+    const featherW = featherPoly.map((f, i) => Math.max(0, Math.hypot(f.x - shapePoly[i].x, f.y - shapePoly[i].y) + gf));
+    const anyFeather = featherW.some((w) => w > 0.01);
+    if (!anyFeather) {
+      const v = Math.round(255 * opacity);
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      fillRibbon(ctx, shapePoly, N, () => half, shape.closed);
+      return canvas;
+    }
+    // Outside-in nested ribbons: half-width half + featherW*t, coverage profile(t).
+    ctx.globalCompositeOperation = "source-over";
+    for (let g = RAMP_STEPS; g >= 0; g--) {
+      const t = g / RAMP_STEPS;
+      const cov = profile(t) * opacity;
+      if (cov <= 0) continue;
+      const v = Math.round(255 * cov);
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      fillRibbon(ctx, shapePoly, N, (i) => half + featherW[i] * t, shape.closed);
+    }
+    return canvas;
+  }
+
+  // ── Fill mode ──────────────────────────────────────────────────────────
   if (shapePoly.length < 3) return canvas;
 
-  const opacity = shape.opacity ?? 1;
-  const hasFeather = featherPoly.some((f, i) => f.x !== shapePoly[i].x || f.y !== shapePoly[i].y);
+  // Effective feather curve = per-point feather, expanded outward by the
+  // global feather along the normal (so the two work together).
+  let effFeather = featherPoly;
+  if (gf !== 0) {
+    const N = outwardNormals(shapePoly, shape.closed);
+    effFeather = featherPoly.map((f, i) => ({ x: f.x + gf * N[i].x, y: f.y + gf * N[i].y }));
+  }
+  const hasFeather = effFeather.some((f, i) => f.x !== shapePoly[i].x || f.y !== shapePoly[i].y);
 
   if (!hasFeather) {
     // Hard edge — single solid fill at the shape's opacity.
@@ -145,13 +240,8 @@ function renderShapeCoverage(shape: RotoShape, width: number, height: number): H
 
   // Soft edge. Draw nested polygons from the feather curve (t=1, coverage 0)
   // INWARD to the shape curve (t=0, coverage 1), each filled opaquely with the
-  // falloff profile's coverage for that band. Because we paint outside→in with
-  // source-over, every pixel keeps the value of the innermost (smallest-t)
-  // polygon that contains it, giving an exact ramp that follows `profile`
-  // precisely — no additive rounding drift — and a brighter-over-darker draw
-  // order means anti-aliased band edges blend cleanly (no seams). The t=0 pass
-  // fills the solid interior, so no separate core pin is needed.
-  const profile = featherProfile(shape.featherFalloff);
+  // falloff profile's coverage for that band. Outside→in source-over keeps the
+  // innermost (smallest-t) polygon's value at each pixel → an exact ramp.
   ctx.globalCompositeOperation = "source-over";
   for (let g = RAMP_STEPS; g >= 0; g--) {
     const t = g / RAMP_STEPS; // 1 = feather curve, 0 = shape curve
@@ -160,8 +250,8 @@ function renderShapeCoverage(shape: RotoShape, width: number, height: number): H
     const v = Math.round(255 * cov);
     ctx.fillStyle = `rgb(${v},${v},${v})`;
     const poly = t === 0 ? shapePoly : shapePoly.map((sp, i) => ({
-      x: sp.x + (featherPoly[i].x - sp.x) * t,
-      y: sp.y + (featherPoly[i].y - sp.y) * t,
+      x: sp.x + (effFeather[i].x - sp.x) * t,
+      y: sp.y + (effFeather[i].y - sp.y) * t,
     }));
     fillPolygon(ctx, poly);
   }

@@ -23,6 +23,14 @@ export type RotoBooleanOp = "union" | "subtract";
 export type RotoFeatherFalloff = "linear" | "smooth" | "smoother" | "easeIn" | "easeOut";
 
 /**
+ * How a shape rasterizes:
+ *  - "fill" : the closed area is the matte (default).
+ *  - "edge" : the spline is stroked with a thickness, feathered on BOTH sides.
+ *             Open (unclosed) splines are allowed in this mode.
+ */
+export type RotoRenderMode = "fill" | "edge";
+
+/**
  * One control point of a cubic-Bezier roto shape.
  *  - anchor:    on-curve point
  *  - inHandle:  cubic control point for the segment ARRIVING at this anchor
@@ -59,6 +67,14 @@ export interface RotoShape {
   opacity: number; // 0–1, default 1
   /** Feather edge falloff profile. Default "linear". */
   featherFalloff?: RotoFeatherFalloff;
+  /** Uniform feather (px) added to every point's feather, along the outward
+   *  normal. Works TOGETHER with the per-point feather, not instead of it.
+   *  Default 0. Negative pulls the feather inward. */
+  globalFeather?: number;
+  /** Fill the area (default) or stroke the spline edge. */
+  renderMode?: RotoRenderMode;
+  /** Edge mode: stroke thickness in px. Default 8. */
+  strokeWidth?: number;
 }
 
 export interface RotoNodeData extends BaseNodeData {
