@@ -139,9 +139,11 @@ async function buildInputData(inputType: NodeType, item: HistItem, url: string):
       return { audioFile: url, duration, format: mime, filename: `${name}.${extOf(mime, "mp3")}` } as Partial<WorkflowNodeData>;
     }
     case "glbViewer": {
-      const blobUrl = dataUrlToBlobUrl(url);
-      if (!blobUrl) return null;
-      return { glbUrl: blobUrl, filename: `${name}.glb` } as Partial<WorkflowNodeData>;
+      // Disk loads arrive as data URLs (convert to a blob URL the viewer wants);
+      // the live output may already be a blob:/http URL — use it as-is.
+      const glbUrl = url.startsWith("data:") ? dataUrlToBlobUrl(url) : url;
+      if (!glbUrl) return null;
+      return { glbUrl, filename: `${name}.glb` } as Partial<WorkflowNodeData>;
     }
     default:
       return null;
@@ -186,4 +188,29 @@ export async function splitGeneration(node: SplitNodeLike, ctx: SplitGenerationC
     created++;
   }
   return { created, total: hist.length };
+}
+
+/**
+ * Create a single input node from the generation currently shown on the node.
+ * Prefers the inline `output*` data URL (already in memory, so this works even
+ * for an unsaved workflow); falls back to loading the selected history item by
+ * id. Returns true if a node was created.
+ */
+export async function splitCurrentGeneration(node: SplitNodeLike, ctx: SplitGenerationCtx): Promise<boolean> {
+  const m = getSplitMapping(node.type);
+  if (!m) return false;
+  const hist = (node.data[m.historyField] as HistItem[] | undefined) ?? [];
+
+  const rawIdx = typeof node.data[m.selectedField] === "number" ? (node.data[m.selectedField] as number) : hist.length - 1;
+  const selectedIdx = rawIdx >= 0 && rawIdx < hist.length ? rawIdx : hist.length - 1;
+  const item: HistItem = hist[selectedIdx] ?? { id: node.id };
+
+  let url = typeof node.data[m.outputField] === "string" ? (node.data[m.outputField] as string) : null;
+  if (!url && ctx.generationsPath && item.id) url = await loadGenerationUrl(ctx.generationsPath, item.id);
+  if (!url) return false;
+
+  const data = await buildInputData(m.inputType, item, url);
+  if (!data) return false;
+  ctx.addNode(m.inputType, { x: node.position.x + 380, y: node.position.y }, data);
+  return true;
 }

@@ -297,6 +297,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
         {/* Output audio player */}
         {nodeData.outputAudio && (
           <div className="relative group mt-2" onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}>
+            <SplitGenerationButton id={id} count={nodeData.audioHistory?.length ?? 0} />
             {/* Waveform visualization */}
             {isLoadingWaveform ? (
               <div className="flex items-center justify-center bg-neutral-900/50 rounded h-16">
@@ -377,7 +378,6 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
                   </button>
                 </>
               )}
-              <SplitGenerationButton id={id} count={nodeData.audioHistory?.length ?? 0} className="shrink-0" />
             </div>
 
             {/* Clear button */}
