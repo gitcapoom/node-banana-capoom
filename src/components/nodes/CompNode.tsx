@@ -9,8 +9,7 @@ import { useCompStore } from "@/store/compStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { releaseColorNode, renderCompToCanvas, floatNodeToDataUrl } from "@/utils/colorChain";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
-import { COMP_OP_LABELS } from "@/types/comp";
-import type { CompNodeData, CompMergeOp } from "@/types";
+import type { CompNodeData } from "@/types";
 
 type CompNodeType = Node<CompNodeData, "comp">;
 
@@ -113,15 +112,12 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     openModal(id);
   }, [id, nodeData.bgImage, openModal]);
 
-  const handleOpChange = useCallback(
-    (op: CompMergeOp) => updateNodeData(id, { mergeOp: op }),
-    [id, updateNodeData],
-  );
-
   const hasBg = !!nodeData.bgImage;
 
+  // Whole node = the GPU-rendered composite (full-bleed), sized to the output.
+  // No controls live on the node — double-click opens the editor for everything.
   return (
-    <BaseNode id={id} selected={selected} contentClassName="flex flex-col gap-1 p-2">
+    <BaseNode id={id} selected={selected} fullBleed aspectFitMedia={nodeData.outputImage}>
       {INPUT_HANDLES.map((h) => (
         <Handle
           key={h.id}
@@ -135,8 +131,8 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       {INPUT_HANDLES.map((h) => (
         <div
           key={`lbl-${h.id}`}
-          className="absolute text-[9px] text-neutral-400 font-medium"
-          style={{ left: 6, top: h.top, transform: "translateY(-50%)", pointerEvents: "none" }}
+          className="absolute z-10 text-[9px] text-white/80 font-medium drop-shadow"
+          style={{ left: 5, top: h.top, transform: "translateY(-50%)", pointerEvents: "none" }}
         >
           {h.label}
         </div>
@@ -144,20 +140,15 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" style={{ top: "50%", width: 11, height: 11, background: "#2dd4bf", border: "1px solid #0008" }} />
 
       <div
-        className="relative w-full aspect-square bg-neutral-900/60 rounded overflow-hidden cursor-pointer"
+        className="group absolute inset-0 overflow-hidden rounded-lg bg-neutral-900/60 cursor-pointer"
         onDoubleClick={() => hasBg && handleEdit()}
         title={hasBg ? "Double-click to open the comp editor" : "Connect a BG image"}
       >
         {hasBg ? (
           <>
             <canvas ref={canvasRef} className="w-full h-full object-contain" />
-            <div className="absolute inset-0 bg-black/0 hover:bg-black/10 transition-colors flex items-center justify-center pointer-events-none">
-              <button
-                onClick={(e) => { e.stopPropagation(); handleEdit(); }}
-                className="nodrag nopan text-[10px] font-medium text-white opacity-0 hover:opacity-100 bg-black/50 px-2 py-1 rounded pointer-events-auto cursor-pointer"
-              >
-                Edit comp
-              </button>
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center pointer-events-none">
+              <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 bg-black/50 px-2 py-1 rounded">Double-click to edit</span>
             </div>
           </>
         ) : (
@@ -165,19 +156,6 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
             Connect a BG image
           </div>
         )}
-      </div>
-
-      <div className="flex items-center gap-1.5">
-        <label className="text-[10px] text-neutral-400 shrink-0">Op</label>
-        <select
-          value={nodeData.mergeOp}
-          onChange={(e) => handleOpChange(e.target.value as CompMergeOp)}
-          className="nodrag nopan flex-1 min-w-0 text-[10px] py-0.5 px-1 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700"
-        >
-          {COMP_OP_LABELS.map((o) => (
-            <option key={o.op} value={o.op}>{o.label}</option>
-          ))}
-        </select>
       </div>
     </BaseNode>
   );
