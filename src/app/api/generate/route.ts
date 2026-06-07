@@ -676,13 +676,13 @@ export async function POST(request: NextRequest) {
 
     // Gemini returns NextResponse directly — handle retry manually
     try {
-      return await generateWithGemini(requestId, geminiApiKey, resolvedPrompt, images || [], geminiModel, aspectRatio, resolution, useGoogleSearch, useImageSearch);
+      return await generateWithGemini(requestId, geminiApiKey, resolvedPrompt, images || [], geminiModel, aspectRatio, resolution, useGoogleSearch, useImageSearch, parameters);
     } catch (geminiError) {
       const msg = geminiError instanceof Error ? geminiError.message : String(geminiError);
       if (isImageSizeError(msg) && images && images.length > 0) {
         console.log(`[API:${requestId}] Gemini size error: "${msg.substring(0, 100)}". Compressing images and retrying...`);
         const compressed = await compressAllImages(images, undefined);
-        return await generateWithGemini(requestId, geminiApiKey, resolvedPrompt, compressed.images, geminiModel, aspectRatio, resolution, useGoogleSearch, useImageSearch);
+        return await generateWithGemini(requestId, geminiApiKey, resolvedPrompt, compressed.images, geminiModel, aspectRatio, resolution, useGoogleSearch, useImageSearch, parameters);
       }
       throw geminiError;
     }

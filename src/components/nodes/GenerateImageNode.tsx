@@ -285,6 +285,14 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     [id, updateNodeData]
   );
 
+  // Merge a single Gemini advanced parameter into nodeData.parameters.
+  const setGeminiParam = useCallback(
+    (key: string, value: unknown) => {
+      updateNodeData(id, { parameters: { ...(nodeData.parameters || {}), [key]: value } });
+    },
+    [id, nodeData.parameters, updateNodeData]
+  );
+
   // Handle inputs loaded from schema
   const handleInputsLoaded = useCallback(
     (inputs: ModelInputDef[]) => {
@@ -482,10 +490,12 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   const hasCarouselImages = (nodeData.imageHistory || []).length > 1;
 
   // Count visible Gemini controls to match ModelParameters grid/max-width rules
+  const supportsAdvanced = currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2";
   const geminiControlCount = 2 // Model + Aspect Ratio (always)
     + (supportsResolution ? 1 : 0)
     + (currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2" ? 1 : 0)
-    + (currentModelId === "nano-banana-2" ? 1 : 0);
+    + (currentModelId === "nano-banana-2" ? 1 : 0)
+    + (supportsAdvanced ? 4 : 0); // Seed, Images, Safety, Thinking
   const useGeminiGrid = geminiControlCount > 4;
   const geminiGridRef = useRef<HTMLDivElement>(null);
   const [geminiColCount, setGeminiColCount] = useState(1);
@@ -650,20 +660,81 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
               );
             }
 
+            if (supportsAdvanced) {
+              const params = nodeData.parameters || {};
+              const inputCls = "nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white";
+              controls.push(
+                <div key="seed" className="flex items-center gap-2">
+                  <label className="text-[11px] text-neutral-400 shrink-0">Seed</label>
+                  <input
+                    type="number"
+                    placeholder="random"
+                    value={(params.seed as number | string | undefined) ?? ""}
+                    onChange={(e) => setGeminiParam("seed", e.target.value === "" ? "" : Number(e.target.value))}
+                    className={inputCls}
+                  />
+                </div>,
+                <div key="num-images" className="flex items-center gap-2">
+                  <label className="text-[11px] text-neutral-400 shrink-0">Images</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={4}
+                    value={(params.numImages as number | undefined) ?? 1}
+                    onChange={(e) => setGeminiParam("numImages", Math.min(4, Math.max(1, Math.round(Number(e.target.value) || 1))))}
+                    className={inputCls}
+                    title="Number of images to generate (1–4)"
+                  />
+                </div>,
+                <div key="safety" className="flex items-center gap-2">
+                  <label className="text-[11px] text-neutral-400 shrink-0">Safety</label>
+                  <select value={(params.safety as string | undefined) ?? "default"} onChange={(e) => setGeminiParam("safety", e.target.value)} className={inputCls} title="Content-moderation thresholds">
+                    <option value="default">Default</option>
+                    <option value="none">Block none</option>
+                    <option value="high">Block few (high only)</option>
+                    <option value="medium">Block some (medium+)</option>
+                    <option value="low">Block most (low+)</option>
+                  </select>
+                </div>,
+                <div key="thinking" className="flex items-center gap-2">
+                  <label className="text-[11px] text-neutral-400 shrink-0">Thinking</label>
+                  <select value={(params.thinkingLevel as string | undefined) ?? "default"} onChange={(e) => setGeminiParam("thinkingLevel", e.target.value)} className={inputCls} title="Reasoning effort (model-dependent)">
+                    <option value="default">Default</option>
+                    <option value="low">Low</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+              );
+            }
+
             const display = useGeminiGrid && geminiColCount > 1
               ? reorderColumnFirst(controls, geminiColCount)
               : controls;
 
             return (
-              <div
-                ref={geminiGridRef}
-                className={useGeminiGrid
-                  ? "grid grid-cols-[repeat(auto-fill,minmax(min(180px,100%),1fr))] max-w-[420px] gap-x-6 gap-y-1.5"
-                  : "space-y-1.5 max-w-[280px]"
-                }
-              >
-                {display}
-              </div>
+              <>
+                <div
+                  ref={geminiGridRef}
+                  className={useGeminiGrid
+                    ? "grid grid-cols-[repeat(auto-fill,minmax(min(180px,100%),1fr))] max-w-[420px] gap-x-6 gap-y-1.5"
+                    : "space-y-1.5 max-w-[280px]"
+                  }
+                >
+                  {display}
+                </div>
+                {supportsAdvanced && (
+                  <div className="mt-1.5 max-w-[420px]">
+                    <label className="text-[11px] text-neutral-400 block mb-0.5">System Prompt</label>
+                    <textarea
+                      value={(nodeData.parameters?.systemPrompt as string | undefined) ?? ""}
+                      onChange={(e) => setGeminiParam("systemPrompt", e.target.value)}
+                      placeholder="Optional system instruction…"
+                      rows={2}
+                      className="nodrag nopan nowheel w-full text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white resize-y"
+                    />
+                  </div>
+                )}
+              </>
             );
           })()}
 
