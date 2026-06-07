@@ -633,7 +633,13 @@ async function externalizeNodeImages(
       break;
     }
 
-    case "colorGrade": {
+    // colorGrade / hsvCorrect / contrastAdjust / reformat all share the same
+    // sourceImage + outputImage shape — externalize both to files. ( ...d keeps
+    // every other field, e.g. reformat's width/height/mode, hsv params.)
+    case "colorGrade":
+    case "hsvCorrect":
+    case "contrastAdjust":
+    case "reformat": {
       const d = data as import("@/types").ColorGradeNodeData;
       let sourceImageRef = d.sourceImageRef;
       let outputImageRef = d.outputImageRef;
@@ -655,6 +661,31 @@ async function externalizeNodeImages(
       }
 
       newData = { ...d, sourceImage, sourceImageRef, outputImage, outputImageRef };
+      break;
+    }
+
+    case "comp": {
+      // Comp mirrors up to 5 input images + an output, all big data URLs.
+      // Externalize them all (content-hash dedup means a mirrored input that
+      // equals its upstream's output shares one file, no duplication).
+      const d = data as import("@/types").CompNodeData;
+      const next: Record<string, unknown> = { ...d };
+      const ext = async (rawKey: keyof import("@/types").CompNodeData, refKey: keyof import("@/types").CompNodeData) => {
+        const raw = d[rawKey] as string | null | undefined;
+        const existingRef = d[refKey] as string | undefined;
+        if (existingRef && isBase64DataUrl(raw)) next[rawKey] = null;
+        else if (isBase64DataUrl(raw)) {
+          next[refKey] = await saveImageAndGetId(raw!, workflowPath, savedImageIds, "inputs");
+          next[rawKey] = null;
+        }
+      };
+      await ext("bgImage", "bgImageRef");
+      await ext("bgAlphaImage", "bgAlphaImageRef");
+      await ext("fgImage", "fgImageRef");
+      await ext("fgAlphaImage", "fgAlphaImageRef");
+      await ext("matteImage", "matteImageRef");
+      await ext("outputImage", "outputImageRef");
+      newData = next as import("@/types").CompNodeData;
       break;
     }
 
@@ -1200,7 +1231,10 @@ async function hydrateNodeImages(
       break;
     }
 
-    case "colorGrade": {
+    case "colorGrade":
+    case "hsvCorrect":
+    case "contrastAdjust":
+    case "reformat": {
       const d = data as import("@/types").ColorGradeNodeData;
       let sourceImage = d.sourceImage;
       let outputImage = d.outputImage;
@@ -1213,6 +1247,24 @@ async function hydrateNodeImages(
       }
 
       newData = { ...d, sourceImage, outputImage };
+      break;
+    }
+
+    case "comp": {
+      const d = data as import("@/types").CompNodeData;
+      const next: Record<string, unknown> = { ...d };
+      const hyd = async (rawKey: keyof import("@/types").CompNodeData, refKey: keyof import("@/types").CompNodeData) => {
+        if (d[refKey] && !d[rawKey]) {
+          next[rawKey] = await loadImageById(d[refKey] as string, workflowPath, loadedImages, "inputs");
+        }
+      };
+      await hyd("bgImage", "bgImageRef");
+      await hyd("bgAlphaImage", "bgAlphaImageRef");
+      await hyd("fgImage", "fgImageRef");
+      await hyd("fgAlphaImage", "fgAlphaImageRef");
+      await hyd("matteImage", "matteImageRef");
+      await hyd("outputImage", "outputImageRef");
+      newData = next as import("@/types").CompNodeData;
       break;
     }
 
