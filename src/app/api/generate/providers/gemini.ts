@@ -83,9 +83,10 @@ export async function generateWithGemini(
     responseModalities: ["IMAGE", "TEXT"],
   };
 
-  // Add imageConfig for both models (both support aspect ratio). "auto" ⇒ omit
-  // the constraint and let the model pick the aspect ratio from the prompt.
-  if (aspectRatio && aspectRatio !== "auto") {
+  // Add imageConfig for both models (both support aspect ratio). "auto" is sent
+  // explicitly so the model picks the aspect ratio from the prompt (the same
+  // value fal passes to the underlying model).
+  if (aspectRatio) {
     config.imageConfig = {
       aspectRatio,
     };
