@@ -822,13 +822,14 @@ export async function hydrateWorkflowImages(
   workflow: WorkflowFile,
   workflowPath: string
 ): Promise<WorkflowFile> {
-  const hydratedNodes: WorkflowNode[] = [];
   const loadedImages = new Map<string, string>(); // imageId -> base64 (for caching)
 
-  for (const node of workflow.nodes) {
-    const newNode = await hydrateNodeImages(node, workflowPath, loadedImages);
-    hydratedNodes.push(newNode);
-  }
+  // Hydrate all nodes in parallel — the browser caps concurrent connections to
+  // the same host (~6), so this naturally throttles while being far faster than
+  // loading every image serially. Shared image ids dedup via inFlightLoads.
+  const hydratedNodes = await Promise.all(
+    workflow.nodes.map((node) => hydrateNodeImages(node, workflowPath, loadedImages)),
+  );
 
   return {
     ...workflow,
@@ -1298,6 +1299,10 @@ async function hydrateNodeImages(
  * Load an image by ID (with caching)
  * @param folder - Optional hint for which folder to check first
  */
+// In-flight loads guard so parallel hydration doesn't fetch the same id twice
+// (content-hash dedup means several nodes can reference one image file).
+const inFlightLoads = new Map<string, Promise<string>>();
+
 async function loadImageById(
   imageId: string,
   workflowPath: string,
@@ -1308,24 +1313,28 @@ async function loadImageById(
     return loadedImages.get(imageId)!;
   }
 
-  const params = new URLSearchParams({
-    workflowPath,
-    imageId,
-  });
-  if (folder) {
-    params.set("folder", folder);
-  }
+  const key = `${workflowPath}::${folder ?? ""}::${imageId}`;
+  const existing = inFlightLoads.get(key);
+  if (existing) return existing;
 
-  const response = await fetch(`/api/workflow-images?${params.toString()}`);
+  const promise = (async (): Promise<string> => {
+    try {
+      const params = new URLSearchParams({ workflowPath, imageId });
+      if (folder) params.set("folder", folder);
+      const response = await fetch(`/api/workflow-images?${params.toString()}`);
+      const result = await response.json();
+      if (!result.success) {
+        // Missing images are expected when refs point to deleted/moved files
+        console.log(`Image not found: ${imageId}`);
+        return ""; // Return empty string to avoid breaking the workflow
+      }
+      loadedImages.set(imageId, result.image);
+      return result.image;
+    } finally {
+      inFlightLoads.delete(key);
+    }
+  })();
 
-  const result = await response.json();
-
-  if (!result.success) {
-    // Missing images are expected when refs point to deleted/moved files
-    console.log(`Image not found: ${imageId}`);
-    return ""; // Return empty string to avoid breaking the workflow
-  }
-
-  loadedImages.set(imageId, result.image);
-  return result.image;
+  inFlightLoads.set(key, promise);
+  return promise;
 }
