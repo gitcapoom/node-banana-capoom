@@ -10,7 +10,6 @@ import { renderCompToCanvas, floatNodeToDataUrl, renderComp } from "@/utils/colo
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPieces } from "@/utils/compTransform";
 import { COMP_OP_LABELS, defaultCompTransform } from "@/types/comp";
-import { RESAMPLE_FILTER_LABELS, type ResampleFilter } from "@/utils/resampleFilters";
 import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/types";
 
 type Pt = { x: number; y: number };
@@ -120,7 +119,7 @@ export function CompModal() {
 
   // Live preview into the offscreen canvas, rAF-coalesced.
   const previewSig = data
-    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, flt: data.compFilter, bo: [data.bgBlackOutside, data.fgBlackOutside], bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
+    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
     : "";
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
@@ -317,12 +316,6 @@ export function CompModal() {
             <select value={data.outputResolution ?? "bg"} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { outputResolution: e.target.value as "bg" | "fg" })} className="bg-neutral-800 text-white text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700">
               <option value="bg">BG</option>
               <option value="fg">FG</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5 text-[11px] text-neutral-400 ml-2" title="Interpolation filter for the transformed inputs (Nuke-style). Impulse/Bilinear are fastest for realtime dragging.">
-            Filter
-            <select value={data.compFilter ?? "cubic"} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { compFilter: e.target.value as ResampleFilter })} className="bg-neutral-800 text-white text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700">
-              {RESAMPLE_FILTER_LABELS.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
             </select>
           </label>
           <div className="w-px h-6 bg-neutral-700 mx-2" />

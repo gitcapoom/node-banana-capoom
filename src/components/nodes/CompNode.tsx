@@ -74,7 +74,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   // Live preview + commit whenever inputs/params change.
   const sig = JSON.stringify({
     bgSrc: incoming.bgSrc, baSrc: incoming.baSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc,
-    op: nodeData.mergeOp, pm: nodeData.premultiplyFg, pmb: nodeData.premultiplyBg, sw: nodeData.swapBgFg, res: nodeData.outputResolution, flt: nodeData.compFilter, bo: [nodeData.bgBlackOutside, nodeData.fgBlackOutside],
+    op: nodeData.mergeOp, pm: nodeData.premultiplyFg, pmb: nodeData.premultiplyBg, sw: nodeData.swapBgFg, res: nodeData.outputResolution, bo: [nodeData.bgBlackOutside, nodeData.fgBlackOutside],
     bgT: nodeData.bgTransform, baT: nodeData.bgAlphaTransform, fgT: nodeData.fgTransform, faT: nodeData.fgAlphaTransform, mtT: nodeData.matteTransform,
     bar: nodeData.bgAlphaReformat, far: nodeData.fgAlphaReformat, mtr: nodeData.matteReformat,
     bgUrl: incoming.bg, baUrl: incoming.bgAlpha, fgUrl: incoming.fg, faUrl: incoming.fgAlpha, mtUrl: incoming.matte,
