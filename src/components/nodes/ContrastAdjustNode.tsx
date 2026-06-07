@@ -39,6 +39,7 @@ function isIdentity(d: Pick<ContrastAdjustNodeData, "contrast">): boolean {
 export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdjustNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
+  const loadNodeFullResInputs = useWorkflowStore((s) => s.loadNodeFullResInputs);
   const [overlayOpen, setOverlayOpen] = useState(false);
   const nodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -93,7 +94,14 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
     [id, updateNodeData],
   );
 
-  const hasImage = !!nodeData.sourceImage;
+  // Live GPU preview needs the full-res source (lazily null on open) → show the
+  // saved thumb until the editor opens / a run loads it. No WebGL work on open.
+  const hasFullRes = !!nodeData.sourceImage;
+  const thumb = nodeData.outputImageThumb;
+  const handleOpenEditor = useCallback(() => {
+    setOverlayOpen(true);
+    void loadNodeFullResInputs(id);
+  }, [id, loadNodeFullResInputs]);
 
   const controls = (
     <>
@@ -114,11 +122,13 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
 
         <div
           className="relative w-full aspect-square bg-neutral-900/60 rounded overflow-hidden cursor-pointer"
-          onDoubleClick={() => hasImage && setOverlayOpen(true)}
-          title={hasImage ? "Double-click to open full-screen editor" : "Connect an image"}
+          onDoubleClick={handleOpenEditor}
+          title={hasFullRes || thumb ? "Double-click to open full-screen editor" : "Connect an image"}
         >
-          {hasImage ? (
+          {hasFullRes ? (
             <canvas ref={nodeCanvasRef} className="w-full h-full object-contain" />
+          ) : thumb ? (
+            <img src={thumb} alt="Contrast adjust" className="w-full h-full object-contain" />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-[10px] text-neutral-500">
               Connect an image
@@ -129,7 +139,7 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
         {controls}
       </BaseNode>
 
-      {overlayOpen && hasImage && (
+      {overlayOpen && hasFullRes && (
         <GpuEditorOverlay title="Contrast Adjust" canvasRef={overlayCanvasRef} onClose={() => setOverlayOpen(false)}>
           {controls}
         </GpuEditorOverlay>

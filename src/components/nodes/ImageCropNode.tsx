@@ -15,6 +15,7 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
   const nodeData = data;
   const openModal = useImageCropStore((state) => state.openModal);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const loadNodeFullResInputs = useWorkflowStore((state) => state.loadNodeFullResInputs);
 
   // Subscribe to live upstream output via a store selector so this node
   // re-renders when the upstream's outputImage changes — `edges` alone
@@ -62,7 +63,8 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     cropImageToDataUrl(src, region)
       .then((cropped) => {
         if (lastFingerprintRef.current !== fingerprint) return;
-        updateNodeData(id, { outputImage: cropped });
+        // Clear the stale ref so the new crop is (re)saved + re-thumbed on save.
+        updateNodeData(id, { outputImage: cropped, outputImageRef: undefined });
       })
       .catch((err) => {
         console.error("ImageCropNode: crop failed", err);
@@ -72,13 +74,21 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, nodeData.sourceImage, nodeData.cropRegion, updateNodeData]);
 
-  const handleEdit = useCallback(() => {
-    if (!nodeData.sourceImage) {
+  const handleEdit = useCallback(async () => {
+    // The source mirrors upstream; on reopen it's lazily null. Load the
+    // upstream full-res, then read the freshly-mirrored input. (We can't just
+    // load this node's own stored sourceImage — the mirror effect would null it
+    // back when the upstream is empty.)
+    await loadNodeFullResInputs(id);
+    const s = useWorkflowStore.getState();
+    const ins = getConnectedInputsPure(id, s.nodes, s.edges, undefined, s.dimmedNodeIds);
+    const src = ins.images[0] || nodeData.sourceImage || null;
+    if (!src) {
       alert("No image available. Connect an image input.");
       return;
     }
-    openModal(id, nodeData.sourceImage, nodeData.cropRegion ?? null, nodeData.aspectLock ?? "free");
-  }, [id, nodeData.sourceImage, nodeData.cropRegion, nodeData.aspectLock, openModal]);
+    openModal(id, src, nodeData.cropRegion ?? null, nodeData.aspectLock ?? "free");
+  }, [id, loadNodeFullResInputs, nodeData.sourceImage, nodeData.cropRegion, nodeData.aspectLock, openModal]);
 
   const handleReset = useCallback(() => {
     updateNodeData(id, {
@@ -97,14 +107,15 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     });
   }, [id, updateNodeData]);
 
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  const displayImage =
+    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
 
   return (
     <BaseNode
       id={id}
       selected={selected}
       contentClassName="flex-1 min-h-0 overflow-clip"
-      aspectFitMedia={nodeData.outputImage}
+      aspectFitMedia={nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImageThumb}
     >
       <Handle
         type="target"

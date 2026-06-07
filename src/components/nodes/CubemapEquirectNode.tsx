@@ -93,7 +93,8 @@ export function CubemapEquirectNode({ id, data, selected }: NodeProps<CubemapEqu
     [id, nodeData.outputSize, updateNodeData]
   );
 
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  const displayImage =
+    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
   const sizeLabel = nodeData.mode === "cubeToEquirect" ? "Equirect width" : "Face size";
 
   return (
@@ -101,7 +102,7 @@ export function CubemapEquirectNode({ id, data, selected }: NodeProps<CubemapEqu
       id={id}
       selected={selected}
       contentClassName="flex-1 min-h-0 overflow-clip flex flex-col"
-      aspectFitMedia={nodeData.outputImage}
+      aspectFitMedia={nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImageThumb}
     >
       <Handle type="target" position={Position.Left} id="image" data-handletype="image" />
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" />

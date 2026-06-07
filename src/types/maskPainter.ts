@@ -59,6 +59,7 @@ export interface MaskPainterNodeData extends BaseNodeData {
   strokes: MaskElement[];
   outputMask: string | null;       // White-on-black mask data URL
   outputMaskRef?: string;          // ref to externalized mask
+  outputMaskThumb?: string;        // Inline small PNG preview (alpha-preserving)
   brushSize: number;               // Default 30
   blurRadius: number;              // Post-blur in pixels, default 0
   invertMask: boolean;             // Default false

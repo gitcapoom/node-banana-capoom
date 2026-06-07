@@ -78,7 +78,8 @@ export function MirrorNode({ id, data, selected }: NodeProps<MirrorNodeType>) {
     updateNodeData(id, { flipVertical: !nodeData.flipVertical });
   }, [id, nodeData.flipVertical, updateNodeData]);
 
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  const displayImage =
+    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
   const activeLabel =
     nodeData.flipHorizontal && nodeData.flipVertical
       ? "Horizontal + Vertical"
@@ -93,7 +94,7 @@ export function MirrorNode({ id, data, selected }: NodeProps<MirrorNodeType>) {
       id={id}
       selected={selected}
       contentClassName="flex-1 min-h-0 overflow-clip flex flex-col"
-      aspectFitMedia={nodeData.outputImage}
+      aspectFitMedia={nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImageThumb}
     >
       <Handle
         type="target"

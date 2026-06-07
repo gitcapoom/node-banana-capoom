@@ -1,5 +1,6 @@
 import { WorkflowNode, WorkflowNodeData } from "@/types";
 import { WorkflowFile } from "@/store/workflowStore";
+import { createImageThumbnail } from "./createImageThumbnail";
 import crypto from "crypto";
 
 /**
@@ -59,6 +60,69 @@ function isBase64DataUrl(str: string | null | undefined): str is string {
 }
 
 /**
+ * Externalize a NON-displayed image field: full-res data URL → file ref, no
+ * thumbnail. For fields not shown in a node preview (color/mask/roto
+ * `sourceImage`, comp's input mirrors). Mutates `next`.
+ */
+async function externalizeRefField(
+  d: Record<string, unknown>,
+  next: Record<string, unknown>,
+  rawKey: string,
+  refKey: string,
+  workflowPath: string,
+  savedImageIds: Map<string, string>,
+  folder: "inputs" | "generations" = "inputs",
+): Promise<void> {
+  const raw = d[rawKey] as string | null | undefined;
+  const existingRef = d[refKey] as string | undefined;
+  if (existingRef && isBase64DataUrl(raw)) {
+    next[rawKey] = null;
+  } else if (isBase64DataUrl(raw)) {
+    next[refKey] = await saveImageAndGetId(raw, workflowPath, savedImageIds, folder);
+    next[rawKey] = null;
+  }
+}
+
+/**
+ * Externalize a DISPLAYED image field: full-res → file ref AND generate a small
+ * inline thumbnail (kept in the JSON so opening the workflow shows a preview
+ * without loading full-res). Mutates `next` (raw → null, ref + thumb set).
+ *
+ * `isBase64DataUrl(raw)` reliably means "raw is full-res" because hydrate never
+ * writes a thumb into the raw field — so we always (re)generate the thumb from
+ * the current full-res. When `raw` is null (the on-open lazy state) we leave the
+ * existing thumb + ref untouched.
+ */
+async function externalizeDisplayField(
+  d: Record<string, unknown>,
+  next: Record<string, unknown>,
+  rawKey: string,
+  refKey: string,
+  thumbKey: string,
+  workflowPath: string,
+  savedImageIds: Map<string, string>,
+  folder: "inputs" | "generations" = "inputs",
+  thumbFormat: "jpeg" | "png" = "jpeg",
+): Promise<void> {
+  const raw = d[rawKey] as string | null | undefined;
+  const existingRef = d[refKey] as string | undefined;
+  if (existingRef && isBase64DataUrl(raw)) {
+    // Hydrated/loaded full-res that already has a matching ref — keep the ref,
+    // just make sure a thumb exists, then drop the heavy inline data.
+    if (!d[thumbKey]) {
+      try { next[thumbKey] = await createImageThumbnail(raw, 384, 0.72, thumbFormat); } catch { /* leave thumb unset */ }
+    }
+    next[rawKey] = null;
+  } else if (isBase64DataUrl(raw)) {
+    // New / changed full-res — (re)generate the thumb and save a fresh ref.
+    try { next[thumbKey] = await createImageThumbnail(raw, 384, 0.72, thumbFormat); } catch { /* leave thumb unset */ }
+    next[refKey] = await saveImageAndGetId(raw, workflowPath, savedImageIds, folder);
+    next[rawKey] = null;
+  }
+  // raw == null → nothing to do (lazy on-open state).
+}
+
+/**
  * Extract and save all images from a workflow, replacing base64 data with refs
  * Returns a new workflow object with image refs instead of base64 data
  */
@@ -106,65 +170,31 @@ async function externalizeNodeImages(
   switch (node.type) {
     case "imageInput": {
       const d = data as import("@/types").ImageInputNodeData;
-      let image = d.image;
-      let imageRef = d.imageRef;
-      let outputImage = d.outputImage ?? null;
-      let outputImageRef = d.outputImageRef;
+      const next: Record<string, unknown> = { ...d };
 
-      // Skip if already has a valid imageRef (prevents duplicates on re-save after hydration)
-      if (d.imageRef && isBase64DataUrl(d.image)) {
-        image = null;
-      } else if (isBase64DataUrl(d.image)) {
-        imageRef = await saveImageAndGetId(d.image, workflowPath, savedImageIds, "inputs");
-        image = null;
-      }
+      await externalizeDisplayField(d, next, "image", "imageRef", "imageThumb", workflowPath, savedImageIds, "inputs");
 
-      // outputImage is a pre-rendered mirror — only persist if a flip is
-      // active (otherwise it's redundant).
+      // outputImage is a pre-rendered mirror — only persist if a flip is active
+      // (otherwise it's redundant; drop it and its thumb).
       const flipActive = !!d.flipHorizontal || !!d.flipVertical;
       if (!flipActive) {
-        outputImage = null;
-        outputImageRef = undefined;
-      } else if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
-        outputImage = null;
-      } else if (isBase64DataUrl(d.outputImage)) {
-        outputImageRef = await saveImageAndGetId(d.outputImage!, workflowPath, savedImageIds, "inputs");
-        outputImage = null;
+        next.outputImage = null;
+        next.outputImageRef = undefined;
+        next.outputImageThumb = undefined;
+      } else {
+        await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs");
       }
 
-      newData = { ...d, image, imageRef, outputImage, outputImageRef };
+      newData = next as import("@/types").ImageInputNodeData;
       break;
     }
 
     case "annotation": {
       const d = data as import("@/types").AnnotationNodeData;
-      let sourceImageRef = d.sourceImageRef;
-      let outputImageRef = d.outputImageRef;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      // Annotation images are user-created, save to inputs
-      // Skip if already has ref (prevents duplicates on re-save after hydration)
-      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
-        sourceImage = null;
-      } else if (isBase64DataUrl(d.sourceImage)) {
-        sourceImageRef = await saveImageAndGetId(d.sourceImage, workflowPath, savedImageIds, "inputs");
-        sourceImage = null;
-      }
-      if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
-        outputImage = null;
-      } else if (isBase64DataUrl(d.outputImage)) {
-        outputImageRef = await saveImageAndGetId(d.outputImage, workflowPath, savedImageIds, "inputs");
-        outputImage = null;
-      }
-
-      newData = {
-        ...d,
-        sourceImage,
-        sourceImageRef,
-        outputImage,
-        outputImageRef,
-      };
+      const next: Record<string, unknown> = { ...d };
+      await externalizeDisplayField(d, next, "sourceImage", "sourceImageRef", "sourceImageThumb", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs");
+      newData = next as import("@/types").AnnotationNodeData;
       break;
     }
 
@@ -473,132 +503,52 @@ async function externalizeNodeImages(
     }
 
     case "maskPainter": {
+      // sourceImage isn't shown in the preview (the matte is) → ref only.
+      // outputMask is the displayed field → ref + inline PNG thumb (alpha).
       const d = data as import("@/types").MaskPainterNodeData;
-      let sourceImageRef = d.sourceImageRef;
-      let sourceImage = d.sourceImage;
-      let outputMaskRef = d.outputMaskRef;
-      let outputMask = d.outputMask;
-
-      // Externalize source image
-      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
-        sourceImage = null;
-      } else if (isBase64DataUrl(d.sourceImage)) {
-        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
-        sourceImage = null;
-      }
-
-      // Externalize output mask
-      if (d.outputMaskRef && isBase64DataUrl(d.outputMask)) {
-        outputMask = null;
-      } else if (isBase64DataUrl(d.outputMask)) {
-        outputMaskRef = await saveImageAndGetId(d.outputMask!, workflowPath, savedImageIds, "inputs");
-        outputMask = null;
-      }
-
-      newData = { ...d, sourceImage, sourceImageRef, outputMask, outputMaskRef };
+      const next: Record<string, unknown> = { ...d };
+      await externalizeRefField(d, next, "sourceImage", "sourceImageRef", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputMask", "outputMaskRef", "outputMaskThumb", workflowPath, savedImageIds, "inputs", "png");
+      newData = next as import("@/types").MaskPainterNodeData;
       break;
     }
 
     case "roto": {
-      // Externalize the (large) source image + output matte to files, exactly
-      // like maskPainter. The vector `shapes` stay inline (small) and are the
-      // real source of truth — `...d` preserves them and every other field.
+      // Externalize the (large) source image + output matte to files. The vector
+      // `shapes` stay inline (small) and are the real source of truth — `...d`
+      // preserves them and every other field. The matte gets a PNG thumb.
       const d = data as import("@/types").RotoNodeData;
-      let sourceImageRef = d.sourceImageRef;
-      let sourceImage = d.sourceImage;
-      let outputMaskRef = d.outputMaskRef;
-      let outputMask = d.outputMask;
-
-      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
-        sourceImage = null;
-      } else if (isBase64DataUrl(d.sourceImage)) {
-        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
-        sourceImage = null;
-      }
-
-      if (d.outputMaskRef && isBase64DataUrl(d.outputMask)) {
-        outputMask = null;
-      } else if (isBase64DataUrl(d.outputMask)) {
-        outputMaskRef = await saveImageAndGetId(d.outputMask!, workflowPath, savedImageIds, "inputs");
-        outputMask = null;
-      }
-
-      newData = { ...d, sourceImage, sourceImageRef, outputMask, outputMaskRef };
+      const next: Record<string, unknown> = { ...d };
+      await externalizeRefField(d, next, "sourceImage", "sourceImageRef", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputMask", "outputMaskRef", "outputMaskThumb", workflowPath, savedImageIds, "inputs", "png");
+      newData = next as import("@/types").RotoNodeData;
       break;
     }
 
     case "imageCrop": {
       const d = data as import("@/types").ImageCropNodeData;
-      let sourceImageRef = d.sourceImageRef;
-      let outputImageRef = d.outputImageRef;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
-        sourceImage = null;
-      } else if (isBase64DataUrl(d.sourceImage)) {
-        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
-        sourceImage = null;
-      }
-
-      if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
-        outputImage = null;
-      } else if (isBase64DataUrl(d.outputImage)) {
-        outputImageRef = await saveImageAndGetId(d.outputImage!, workflowPath, savedImageIds, "inputs");
-        outputImage = null;
-      }
-
-      newData = { ...d, sourceImage, sourceImageRef, outputImage, outputImageRef };
+      const next: Record<string, unknown> = { ...d };
+      await externalizeDisplayField(d, next, "sourceImage", "sourceImageRef", "sourceImageThumb", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs");
+      newData = next as import("@/types").ImageCropNodeData;
       break;
     }
 
     case "mirror": {
       const d = data as import("@/types").MirrorNodeData;
-      let sourceImageRef = d.sourceImageRef;
-      let outputImageRef = d.outputImageRef;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
-        sourceImage = null;
-      } else if (isBase64DataUrl(d.sourceImage)) {
-        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
-        sourceImage = null;
-      }
-
-      if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
-        outputImage = null;
-      } else if (isBase64DataUrl(d.outputImage)) {
-        outputImageRef = await saveImageAndGetId(d.outputImage!, workflowPath, savedImageIds, "inputs");
-        outputImage = null;
-      }
-
-      newData = { ...d, sourceImage, sourceImageRef, outputImage, outputImageRef };
+      const next: Record<string, unknown> = { ...d };
+      await externalizeDisplayField(d, next, "sourceImage", "sourceImageRef", "sourceImageThumb", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs");
+      newData = next as import("@/types").MirrorNodeData;
       break;
     }
 
     case "cubemapEquirect": {
       const d = data as import("@/types").CubemapEquirectNodeData;
-      let sourceImageRef = d.sourceImageRef;
-      let outputImageRef = d.outputImageRef;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
-        sourceImage = null;
-      } else if (isBase64DataUrl(d.sourceImage)) {
-        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
-        sourceImage = null;
-      }
-
-      if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
-        outputImage = null;
-      } else if (isBase64DataUrl(d.outputImage)) {
-        outputImageRef = await saveImageAndGetId(d.outputImage!, workflowPath, savedImageIds, "inputs");
-        outputImage = null;
-      }
-
-      newData = { ...d, sourceImage, sourceImageRef, outputImage, outputImageRef };
+      const next: Record<string, unknown> = { ...d };
+      await externalizeDisplayField(d, next, "sourceImage", "sourceImageRef", "sourceImageThumb", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs");
+      newData = next as import("@/types").CubemapEquirectNodeData;
       break;
     }
 
@@ -633,34 +583,28 @@ async function externalizeNodeImages(
       break;
     }
 
-    // colorGrade / hsvCorrect / contrastAdjust / reformat all share the same
-    // sourceImage + outputImage shape — externalize both to files. ( ...d keeps
-    // every other field, e.g. reformat's width/height/mode, hsv params.)
+    // colorGrade / hsvCorrect / contrastAdjust: the node preview shows the
+    // committed `outputImage` (thumbed); `sourceImage` is never displayed → ref
+    // only. ( ...d keeps every other field, e.g. hsv params, grade channels.)
     case "colorGrade":
     case "hsvCorrect":
-    case "contrastAdjust":
-    case "reformat": {
+    case "contrastAdjust": {
       const d = data as import("@/types").ColorGradeNodeData;
-      let sourceImageRef = d.sourceImageRef;
-      let outputImageRef = d.outputImageRef;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
+      const next: Record<string, unknown> = { ...d };
+      await externalizeRefField(d, next, "sourceImage", "sourceImageRef", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs");
+      newData = next as import("@/types").ColorGradeNodeData;
+      break;
+    }
 
-      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
-        sourceImage = null;
-      } else if (isBase64DataUrl(d.sourceImage)) {
-        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
-        sourceImage = null;
-      }
-
-      if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
-        outputImage = null;
-      } else if (isBase64DataUrl(d.outputImage)) {
-        outputImageRef = await saveImageAndGetId(d.outputImage!, workflowPath, savedImageIds, "inputs");
-        outputImage = null;
-      }
-
-      newData = { ...d, sourceImage, sourceImageRef, outputImage, outputImageRef };
+    // reformat is a transform node — it shows the source as a fallback before
+    // it has computed output, so both fields are thumbed.
+    case "reformat": {
+      const d = data as import("@/types").ReformatNodeData;
+      const next: Record<string, unknown> = { ...d };
+      await externalizeDisplayField(d, next, "sourceImage", "sourceImageRef", "sourceImageThumb", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs");
+      newData = next as import("@/types").ReformatNodeData;
       break;
     }
 
@@ -670,47 +614,25 @@ async function externalizeNodeImages(
       // equals its upstream's output shares one file, no duplication).
       const d = data as import("@/types").CompNodeData;
       const next: Record<string, unknown> = { ...d };
-      const ext = async (rawKey: keyof import("@/types").CompNodeData, refKey: keyof import("@/types").CompNodeData) => {
-        const raw = d[rawKey] as string | null | undefined;
-        const existingRef = d[refKey] as string | undefined;
-        if (existingRef && isBase64DataUrl(raw)) next[rawKey] = null;
-        else if (isBase64DataUrl(raw)) {
-          next[refKey] = await saveImageAndGetId(raw!, workflowPath, savedImageIds, "inputs");
-          next[rawKey] = null;
-        }
-      };
-      await ext("bgImage", "bgImageRef");
-      await ext("bgAlphaImage", "bgAlphaImageRef");
-      await ext("fgImage", "fgImageRef");
-      await ext("fgAlphaImage", "fgAlphaImageRef");
-      await ext("matteImage", "matteImageRef");
-      await ext("outputImage", "outputImageRef");
+      // The 5 input mirrors aren't shown in the preview (re-derived from upstream
+      // on open/run) → ref only. The composited output is the displayed field →
+      // ref + inline PNG thumb (alpha-preserving).
+      await externalizeRefField(d, next, "bgImage", "bgImageRef", workflowPath, savedImageIds, "inputs");
+      await externalizeRefField(d, next, "bgAlphaImage", "bgAlphaImageRef", workflowPath, savedImageIds, "inputs");
+      await externalizeRefField(d, next, "fgImage", "fgImageRef", workflowPath, savedImageIds, "inputs");
+      await externalizeRefField(d, next, "fgAlphaImage", "fgAlphaImageRef", workflowPath, savedImageIds, "inputs");
+      await externalizeRefField(d, next, "matteImage", "matteImageRef", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs", "png");
       newData = next as import("@/types").CompNodeData;
       break;
     }
 
     case "panoShift": {
       const d = data as import("@/types").PanoShiftNodeData;
-      let sourceImageRef = d.sourceImageRef;
-      let outputImageRef = d.outputImageRef;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
-        sourceImage = null;
-      } else if (isBase64DataUrl(d.sourceImage)) {
-        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
-        sourceImage = null;
-      }
-
-      if (d.outputImageRef && isBase64DataUrl(d.outputImage)) {
-        outputImage = null;
-      } else if (isBase64DataUrl(d.outputImage)) {
-        outputImageRef = await saveImageAndGetId(d.outputImage!, workflowPath, savedImageIds, "inputs");
-        outputImage = null;
-      }
-
-      newData = { ...d, sourceImage, sourceImageRef, outputImage, outputImageRef };
+      const next: Record<string, unknown> = { ...d };
+      await externalizeDisplayField(d, next, "sourceImage", "sourceImageRef", "sourceImageThumb", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs");
+      newData = next as import("@/types").PanoShiftNodeData;
       break;
     }
 
@@ -849,39 +771,12 @@ async function hydrateNodeImages(
   let newData: WorkflowNodeData;
 
   switch (node.type) {
-    case "imageInput": {
-      const d = data as import("@/types").ImageInputNodeData;
-      let image = d.image;
-      let outputImage = d.outputImage ?? null;
-
-      if (d.imageRef && !d.image) {
-        image = await loadImageById(d.imageRef, workflowPath, loadedImages, "inputs");
-      }
-      if (d.outputImageRef && !d.outputImage) {
-        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = { ...d, image, outputImage };
-      break;
-    }
-
+    // Lazy full-res: image fields are NOT loaded on open. The inline thumb
+    // (image/outputImage…Thumb) drives the preview; full-res loads on demand
+    // (double-click / run) via useFullResField + the execution pre-pass.
+    case "imageInput":
     case "annotation": {
-      const d = data as import("@/types").AnnotationNodeData;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && !d.sourceImage) {
-        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
-      }
-      if (d.outputImageRef && !d.outputImage) {
-        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = {
-        ...d,
-        sourceImage,
-        outputImage,
-      };
+      newData = data;
       break;
     }
 
@@ -1088,39 +983,11 @@ async function hydrateNodeImages(
       break;
     }
 
-    case "maskPainter": {
-      const d = data as import("@/types").MaskPainterNodeData;
-      let sourceImage = d.sourceImage;
-      let outputMask = d.outputMask;
-
-      if (d.sourceImageRef && !d.sourceImage) {
-        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
-      }
-      if (d.outputMaskRef && !d.outputMask) {
-        outputMask = await loadImageById(d.outputMaskRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = {
-        ...d,
-        sourceImage,
-        outputMask,
-      };
-      break;
-    }
-
+    // Lazy: matte preview comes from outputMaskThumb; sourceImage + full-res
+    // matte load on demand (editor open / run).
+    case "maskPainter":
     case "roto": {
-      const d = data as import("@/types").RotoNodeData;
-      let sourceImage = d.sourceImage;
-      let outputMask = d.outputMask;
-
-      if (d.sourceImageRef && !d.sourceImage) {
-        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
-      }
-      if (d.outputMaskRef && !d.outputMask) {
-        outputMask = await loadImageById(d.outputMaskRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = { ...d, sourceImage, outputMask };
+      newData = data;
       break;
     }
 
@@ -1144,63 +1011,11 @@ async function hydrateNodeImages(
       break;
     }
 
-    case "imageCrop": {
-      const d = data as import("@/types").ImageCropNodeData;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && !d.sourceImage) {
-        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
-      }
-      if (d.outputImageRef && !d.outputImage) {
-        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = {
-        ...d,
-        sourceImage,
-        outputImage,
-      };
-      break;
-    }
-
-    case "mirror": {
-      const d = data as import("@/types").MirrorNodeData;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && !d.sourceImage) {
-        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
-      }
-      if (d.outputImageRef && !d.outputImage) {
-        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = {
-        ...d,
-        sourceImage,
-        outputImage,
-      };
-      break;
-    }
-
+    // Lazy: source/output thumbs drive the preview; full-res on demand.
+    case "imageCrop":
+    case "mirror":
     case "cubemapEquirect": {
-      const d = data as import("@/types").CubemapEquirectNodeData;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && !d.sourceImage) {
-        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
-      }
-      if (d.outputImageRef && !d.outputImage) {
-        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = {
-        ...d,
-        sourceImage,
-        outputImage,
-      };
+      newData = data;
       break;
     }
 
@@ -1232,56 +1047,15 @@ async function hydrateNodeImages(
       break;
     }
 
+    // Lazy: color nodes show outputImageThumb; comp shows outputImageThumb and
+    // re-derives its inputs from upstream. Full-res loads on edit / run.
     case "colorGrade":
     case "hsvCorrect":
     case "contrastAdjust":
-    case "reformat": {
-      const d = data as import("@/types").ColorGradeNodeData;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && !d.sourceImage) {
-        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
-      }
-      if (d.outputImageRef && !d.outputImage) {
-        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = { ...d, sourceImage, outputImage };
-      break;
-    }
-
-    case "comp": {
-      const d = data as import("@/types").CompNodeData;
-      const next: Record<string, unknown> = { ...d };
-      const hyd = async (rawKey: keyof import("@/types").CompNodeData, refKey: keyof import("@/types").CompNodeData) => {
-        if (d[refKey] && !d[rawKey]) {
-          next[rawKey] = await loadImageById(d[refKey] as string, workflowPath, loadedImages, "inputs");
-        }
-      };
-      await hyd("bgImage", "bgImageRef");
-      await hyd("bgAlphaImage", "bgAlphaImageRef");
-      await hyd("fgImage", "fgImageRef");
-      await hyd("fgAlphaImage", "fgAlphaImageRef");
-      await hyd("matteImage", "matteImageRef");
-      await hyd("outputImage", "outputImageRef");
-      newData = next as import("@/types").CompNodeData;
-      break;
-    }
-
+    case "reformat":
+    case "comp":
     case "panoShift": {
-      const d = data as import("@/types").PanoShiftNodeData;
-      let sourceImage = d.sourceImage;
-      let outputImage = d.outputImage;
-
-      if (d.sourceImageRef && !d.sourceImage) {
-        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
-      }
-      if (d.outputImageRef && !d.outputImage) {
-        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "inputs");
-      }
-
-      newData = { ...d, sourceImage, outputImage };
+      newData = data;
       break;
     }
 

@@ -391,6 +391,7 @@ function GradeRow({ def, value, expanded, onChange, onToggleExpanded }: RowProps
 export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const loadNodeFullResInputs = useWorkflowStore((state) => state.loadNodeFullResInputs);
   // Scoped selector that returns just the incoming image string. Zustand
   // bails out when the result is === across renders, so this node only
   // re-renders when its upstream image actually changes — NOT on every
@@ -515,7 +516,15 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
     [id, updateNodeData],
   );
 
-  const hasImage = !!nodeData.sourceImage;
+  // Live GPU preview needs the full-res source. On open it's lazily null, so we
+  // show the saved thumbnail (no WebGL work) until the editor is opened or a run
+  // loads the source. Double-click loads full-res inputs, then shows the editor.
+  const hasFullRes = !!nodeData.sourceImage;
+  const thumb = nodeData.outputImageThumb;
+  const handleOpenEditor = useCallback(() => {
+    setOverlayOpen(true);
+    void loadNodeFullResInputs(id);
+  }, [id, loadNodeFullResInputs]);
 
   return (
     <>
@@ -523,7 +532,7 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
       id={id}
       selected={selected}
       contentClassName="flex-1 min-h-0 overflow-clip flex flex-col"
-      aspectFitMedia={nodeData.outputImage}
+      aspectFitMedia={nodeData.outputImage ?? thumb}
     >
       <Handle type="target" position={Position.Left} id="image" data-handletype="image" />
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" />
@@ -571,13 +580,21 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
         />
       </div>
 
-      {hasImage ? (
+      {hasFullRes ? (
         <div
           className="relative w-full flex-1 min-h-0 cursor-pointer"
-          onDoubleClick={() => setOverlayOpen(true)}
+          onDoubleClick={handleOpenEditor}
           title="Double-click for full-screen editor"
         >
           <canvas ref={nodeCanvasRef} className="w-full h-full object-contain" />
+        </div>
+      ) : thumb ? (
+        <div
+          className="relative w-full flex-1 min-h-0 cursor-pointer"
+          onDoubleClick={handleOpenEditor}
+          title="Double-click for full-screen editor"
+        >
+          <img src={thumb} alt="Color grade" className="w-full h-full object-contain" />
         </div>
       ) : (
         <div className="w-full flex-1 min-h-0 bg-neutral-900/40 flex flex-col items-center justify-center">
@@ -591,7 +608,7 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
       )}
     </BaseNode>
 
-    {overlayOpen && hasImage && (
+    {overlayOpen && hasFullRes && (
       <GpuEditorOverlay
         title="Color Grade"
         canvasRef={overlayCanvasRef}

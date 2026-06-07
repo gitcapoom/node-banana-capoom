@@ -120,6 +120,7 @@ export interface CompNodeData extends BaseNodeData {
   // result lives in the colorChain registry keyed by this node's id.
   outputImage: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string; // Inline small PNG preview (alpha-preserving)
   outputWidth?: number;   // = BG dims
   outputHeight?: number;
 

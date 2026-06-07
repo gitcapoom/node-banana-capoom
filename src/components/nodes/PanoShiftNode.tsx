@@ -100,7 +100,8 @@ export function PanoShiftNode({ id, data, selected }: NodeProps<PanoShiftNodeTyp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, fingerprint, updateNodeData]);
 
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  const displayImage =
+    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
   const isIdentity = shiftX === 0;
 
   return (
@@ -108,7 +109,7 @@ export function PanoShiftNode({ id, data, selected }: NodeProps<PanoShiftNodeTyp
       id={id}
       selected={selected}
       contentClassName="flex-1 min-h-0 overflow-clip flex flex-col"
-      aspectFitMedia={nodeData.outputImage}
+      aspectFitMedia={nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImageThumb}
     >
       <Handle type="target" position={Position.Left} id="image" data-handletype="image" />
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" />

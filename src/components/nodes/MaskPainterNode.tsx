@@ -5,6 +5,7 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useMaskPainterStore } from "@/store/maskPainterStore";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useFullResField } from "@/hooks/useFullResField";
 import { MaskPainterNodeData } from "@/types";
 
 type MaskPainterNodeType = Node<MaskPainterNodeData, "maskPainter">;
@@ -15,6 +16,7 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
   const edges = useWorkflowStore((state) => state.edges);
+  const { ensure } = useFullResField();
 
   // Reactively update sourceImage when an edge is connected
   useEffect(() => {
@@ -24,14 +26,15 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
     }
   }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
 
-  const handleEdit = useCallback(() => {
-    const imageToEdit = nodeData.sourceImage;
+  const handleEdit = useCallback(async () => {
+    // Load full-res source on demand — it's lazily null after reopening.
+    const imageToEdit = await ensure({ id, field: "sourceImage", ref: nodeData.sourceImageRef, current: nodeData.sourceImage, folder: "inputs" });
     if (!imageToEdit) {
       alert("No image available. Connect an image input.");
       return;
     }
     openModal(id, imageToEdit, nodeData.strokes);
-  }, [id, nodeData, openModal]);
+  }, [id, ensure, nodeData.sourceImage, nodeData.sourceImageRef, nodeData.strokes, openModal]);
 
   const handleRemove = useCallback(() => {
     updateNodeData(id, {
@@ -41,8 +44,9 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
     });
   }, [id, updateNodeData]);
 
-  // Only show the painted mask output — sourceImage is the reference for the modal, not the node preview
-  const displayImage = nodeData.outputMask;
+  // Only show the painted mask output — sourceImage is the reference for the modal, not the node preview.
+  // Falls back to the inline thumb when full-res isn't loaded (lazy on open).
+  const displayImage = nodeData.outputMask ?? nodeData.outputMaskThumb;
 
   return (
     <BaseNode

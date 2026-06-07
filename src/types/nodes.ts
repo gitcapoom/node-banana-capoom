@@ -84,6 +84,7 @@ export type NodeStatus = "idle" | "loading" | "complete" | "error";
 export interface ImageInputNodeData extends BaseNodeData {
   image: string | null;
   imageRef?: string; // External image reference for storage optimization
+  imageThumb?: string; // Inline small preview; shown on open when full-res not loaded
   filename: string | null;
   dimensions: { width: number; height: number } | null;
   /** When true, the output image is flipped horizontally before downstream use. */
@@ -96,6 +97,7 @@ export interface ImageInputNodeData extends BaseNodeData {
    */
   outputImage?: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string;
 }
 
 /**
@@ -130,11 +132,13 @@ export type ImageCropAspectLock = "free" | "1:1" | "16:9" | "9:16" | "4:3" | "3:
 export interface ImageCropNodeData extends BaseNodeData {
   sourceImage: string | null;
   sourceImageRef?: string;
+  sourceImageThumb?: string;
   /** Crop region in relative coordinates (0-1 range) */
   cropRegion: { x: number; y: number; width: number; height: number } | null;
   aspectLock: ImageCropAspectLock;
   outputImage: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string;
 }
 
 /**
@@ -144,20 +148,24 @@ export interface ImageCropNodeData extends BaseNodeData {
 export interface MirrorNodeData extends BaseNodeData {
   sourceImage: string | null;
   sourceImageRef?: string;
+  sourceImageThumb?: string;
   flipHorizontal: boolean;
   flipVertical: boolean;
   outputImage: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string;
 }
 
 export interface ReformatNodeData extends BaseNodeData {
   sourceImage: string | null;
   sourceImageRef?: string;
+  sourceImageThumb?: string;
   width: number;   // H (horizontal) output resolution
   height: number;  // V (vertical) output resolution
   mode: "fill" | "fitH" | "fitV";
   outputImage: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string;
 }
 
 /**
@@ -172,11 +180,13 @@ export type CubemapEquirectMode = "cubeToEquirect" | "equirectToCube";
 export interface CubemapEquirectNodeData extends BaseNodeData {
   sourceImage: string | null;
   sourceImageRef?: string;
+  sourceImageThumb?: string;
   mode: CubemapEquirectMode;
   /** Equirect width (cube→pano) or face size (pano→cube). */
   outputSize: number;
   outputImage: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string;
 }
 
 /**
@@ -212,6 +222,7 @@ export interface ColorGradeNodeData extends BaseNodeData {
   clampWhites?: boolean;
   outputImage: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string;
 }
 
 /**
@@ -231,6 +242,7 @@ export interface HsvCorrectNodeData extends BaseNodeData {
   clampWhites?: boolean;
   outputImage: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string;
 }
 
 /**
@@ -251,6 +263,7 @@ export interface ContrastAdjustNodeData extends BaseNodeData {
   clampWhites?: boolean;
   outputImage: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string;
 }
 
 /**
@@ -260,10 +273,12 @@ export interface ContrastAdjustNodeData extends BaseNodeData {
 export interface PanoShiftNodeData extends BaseNodeData {
   sourceImage: string | null;
   sourceImageRef?: string;
+  sourceImageThumb?: string;
   /** Pixels to shift right (positive) or left (negative). */
   shiftX: number;
   outputImage: string | null;
   outputImageRef?: string;
+  outputImageThumb?: string;
 }
 
 /**

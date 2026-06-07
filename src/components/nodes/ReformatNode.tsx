@@ -60,10 +60,11 @@ export function ReformatNode({ id, data, selected }: NodeProps<ReformatNodeType>
     [id, updateNodeData],
   );
 
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  const displayImage =
+    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
 
   return (
-    <BaseNode id={id} selected={selected} contentClassName="flex-1 min-h-0 overflow-clip flex flex-col" aspectFitMedia={nodeData.outputImage}>
+    <BaseNode id={id} selected={selected} contentClassName="flex-1 min-h-0 overflow-clip flex flex-col" aspectFitMedia={nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImageThumb}>
       <Handle type="target" position={Position.Left} id="image" data-handletype="image" />
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" />
 

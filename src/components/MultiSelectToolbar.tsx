@@ -14,7 +14,7 @@ import type {
 const STACK_GAP = 20;
 
 export function MultiSelectToolbar() {
-  const { nodes, onNodesChange, createGroup, removeNodesFromGroup } = useWorkflowStore();
+  const { nodes, onNodesChange, createGroup, removeNodesFromGroup, loadNodeFullResInputs } = useWorkflowStore();
   const { getViewport } = useReactFlow();
 
   const selectedNodes = useMemo(
@@ -164,10 +164,16 @@ export function MultiSelectToolbar() {
   };
 
   const handleDownloadImages = useCallback(async () => {
+    // Full-res image fields are lazily null on open — load them before zipping
+    // so the download isn't silently missing un-opened nodes.
+    await Promise.all(selectedNodes.map((n) => loadNodeFullResInputs(n.id)));
+    const freshNodes = useWorkflowStore.getState().nodes;
+
     // Extract images from selected nodes based on node type
     const images: { data: string; name: string }[] = [];
 
-    selectedNodes.forEach((node, index) => {
+    selectedNodes.forEach((sel, index) => {
+      const node = freshNodes.find((n) => n.id === sel.id) ?? sel;
       let imageData: string | null = null;
 
       switch (node.type) {
@@ -213,7 +219,7 @@ export function MultiSelectToolbar() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [selectedNodes]);
+  }, [selectedNodes, loadNodeFullResInputs]);
 
   if (!toolbarPosition || selectedNodes.length < 2) return null;
 

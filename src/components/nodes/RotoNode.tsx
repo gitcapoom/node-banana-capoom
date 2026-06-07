@@ -5,6 +5,7 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useRotoStore } from "@/store/rotoStore";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useFullResField } from "@/hooks/useFullResField";
 import { rasterizeRoto } from "@/utils/rasterizeRoto";
 import { RotoNodeData } from "@/types";
 
@@ -16,6 +17,7 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
   const edges = useWorkflowStore((state) => state.edges);
+  const { ensure } = useFullResField();
 
   // Reactively mirror the upstream image into sourceImage.
   useEffect(() => {
@@ -25,12 +27,14 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
     }
   }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
 
-  // Safety net: if the matte is missing (e.g. a stale/lost ref on reload) but
-  // the shapes are intact, regenerate it — the shapes are the source of truth.
+  // Safety net: if the matte is genuinely lost (no full-res AND no inline thumb,
+  // e.g. a stale/lost ref on reload) but the shapes are intact, regenerate it —
+  // the shapes are the source of truth. A present thumb means the matte is just
+  // lazily unloaded (not lost), so we leave it alone and let the thumb preview.
   const regenRef = useRef(false);
   useEffect(() => {
     if (regenRef.current) return;
-    if (nodeData.outputMask) return;
+    if (nodeData.outputMask || nodeData.outputMaskThumb) return;
     const shapes = nodeData.shapes;
     const w = nodeData.imageWidth ?? 0;
     const h = nodeData.imageHeight ?? 0;
@@ -42,22 +46,23 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
     } catch (e) {
       console.error("RotoNode: failed to regenerate matte from shapes", e);
     }
-  }, [id, nodeData.outputMask, nodeData.shapes, nodeData.imageWidth, nodeData.imageHeight, nodeData.invert, updateNodeData]);
+  }, [id, nodeData.outputMask, nodeData.outputMaskThumb, nodeData.shapes, nodeData.imageWidth, nodeData.imageHeight, nodeData.invert, updateNodeData]);
 
-  const handleEdit = useCallback(() => {
-    const imageToEdit = nodeData.sourceImage;
+  const handleEdit = useCallback(async () => {
+    // Load full-res source on demand — it's lazily null after reopening.
+    const imageToEdit = await ensure({ id, field: "sourceImage", ref: nodeData.sourceImageRef, current: nodeData.sourceImage, folder: "inputs" });
     if (!imageToEdit) {
       alert("No image available. Connect an image input.");
       return;
     }
     openModal(id, imageToEdit, nodeData.shapes);
-  }, [id, nodeData, openModal]);
+  }, [id, ensure, nodeData.sourceImage, nodeData.sourceImageRef, nodeData.shapes, openModal]);
 
   const handleRemove = useCallback(() => {
     updateNodeData(id, { sourceImage: null, shapes: [], outputMask: null });
   }, [id, updateNodeData]);
 
-  const displayImage = nodeData.outputMask;
+  const displayImage = nodeData.outputMask ?? nodeData.outputMaskThumb;
   const shapeCount = nodeData.shapes?.length ?? 0;
 
   return (

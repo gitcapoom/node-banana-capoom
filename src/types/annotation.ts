@@ -106,9 +106,11 @@ export type AnnotationShape =
 export interface AnnotationNodeData extends BaseNodeData {
   sourceImage: string | null;
   sourceImageRef?: string; // External image reference for storage optimization
+  sourceImageThumb?: string; // Inline small preview
   annotations: AnnotationShape[];
   outputImage: string | null;
   outputImageRef?: string; // External image reference for storage optimization
+  outputImageThumb?: string; // Inline small preview
 }
 
 // Tool type for annotation editor

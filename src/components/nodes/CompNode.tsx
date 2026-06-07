@@ -32,6 +32,7 @@ const INPUT_HANDLES: Array<{ id: string; label: string; top: string; color: stri
 export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
+  const loadNodeFullResInputs = useWorkflowStore((s) => s.loadNodeFullResInputs);
   const openModal = useCompStore((s) => s.openModal);
   const modalOpenForThis = useCompStore((s) => s.isModalOpen && s.sourceNodeId === id);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -118,17 +119,22 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   // Free the float texture when the node is removed.
   useEffect(() => () => releaseColorNode(id), [id]);
 
+  // Open the editor, then load full-res inputs from disk (lazy on open). The
+  // modal reads node data reactively, so inputs stream in as they arrive.
   const handleEdit = useCallback(() => {
-    if (!nodeData.bgImage) { return; }
     openModal(id);
-  }, [id, nodeData.bgImage, openModal]);
+    void loadNodeFullResInputs(id);
+  }, [id, openModal, loadNodeFullResInputs]);
 
+  // Live composite needs the BG input (lazily null on open) → show the saved
+  // thumbnail until the editor opens / a run loads the inputs.
   const hasBg = !!nodeData.bgImage;
+  const thumb = nodeData.outputImageThumb;
 
   // Whole node = the GPU-rendered composite (full-bleed), sized to the output.
   // No controls live on the node — double-click opens the editor for everything.
   return (
-    <BaseNode id={id} selected={selected} fullBleed aspectFitMedia={nodeData.outputImage}>
+    <BaseNode id={id} selected={selected} fullBleed aspectFitMedia={nodeData.outputImage ?? thumb}>
       {INPUT_HANDLES.map((h) => (
         <Handle
           key={h.id}
@@ -153,12 +159,19 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       <div
         className="group absolute inset-0 overflow-hidden rounded-lg cursor-pointer"
         style={nodeData.checkerboard ? CHECKER_STYLE : { backgroundColor: "#000" }}
-        onDoubleClick={() => hasBg && handleEdit()}
-        title={hasBg ? "Double-click to open the comp editor" : "Connect a BG image"}
+        onDoubleClick={handleEdit}
+        title={hasBg || thumb ? "Double-click to open the comp editor" : "Connect a BG image"}
       >
         {hasBg ? (
           <>
             <canvas ref={canvasRef} className="w-full h-full object-contain" />
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center pointer-events-none">
+              <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 bg-black/50 px-2 py-1 rounded">Double-click to edit</span>
+            </div>
+          </>
+        ) : thumb ? (
+          <>
+            <img src={thumb} alt="Comp" className="w-full h-full object-contain" />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center pointer-events-none">
               <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 bg-black/50 px-2 py-1 rounded">Double-click to edit</span>
             </div>

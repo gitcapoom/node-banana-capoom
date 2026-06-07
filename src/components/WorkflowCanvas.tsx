@@ -93,6 +93,7 @@ import { AnnotationModal } from "./AnnotationModal";
 import { ImageCropModal } from "./ImageCropModal";
 import { browseRegistry } from "@/utils/browseRegistry";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { useThumbBackfill } from "@/hooks/useThumbBackfill";
 import { SplitGridSettingsModal } from "./SplitGridSettingsModal";
 import { createPortal } from "react-dom";
 import { useAnnotationStore } from "@/store/annotationStore";
@@ -376,6 +377,9 @@ export function WorkflowCanvas() {
       canvasNavigationSettings: state.canvasNavigationSettings,
       dimmedNodeIds: state.dimmedNodeIds,
     })));
+  // One-time migration: backfill inline thumbnails for workflows saved before
+  // they existed (loads each full-res once, stores only the thumb).
+  useThumbBackfill(nodes);
   const onNodesChange = useWorkflowStore((state) => state.onNodesChange);
   const onEdgesChange = useWorkflowStore((state) => state.onEdgesChange);
   const onConnect = useWorkflowStore((state) => state.onConnect);
@@ -394,6 +398,7 @@ export function WorkflowCanvas() {
   const setWorkflowMetadata = useWorkflowStore((state) => state.setWorkflowMetadata);
   const setShortcutsDialogOpen = useWorkflowStore((state) => state.setShortcutsDialogOpen);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const loadNodeFullResInputs = useWorkflowStore((state) => state.loadNodeFullResInputs);
   const clearWorkflow = useWorkflowStore((state) => state.clearWorkflow);
   const setHoveredNodeId = useWorkflowStore((state) => state.setHoveredNodeId);
   const undo = useWorkflowStore((state) => state.undo);
@@ -613,8 +618,10 @@ export function WorkflowCanvas() {
   const { inlineParametersEnabled } = useInlineParameters();
 
   // Stable callback for expanding a node from its header
-  const handleExpandNode = useCallback((nodeId: string, nodeType: string) => {
+  const handleExpandNode = useCallback(async (nodeId: string, nodeType: string) => {
     if (nodeType === 'annotation') {
+      // Full-res is lazily null on open — load it before opening the editor.
+      await loadNodeFullResInputs(nodeId);
       const node = getNodeById(nodeId);
       if (!node) return;
       const imageToEdit = (node.data as any)?.outputImage || (node.data as any)?.image;
@@ -623,7 +630,7 @@ export function WorkflowCanvas() {
     } else {
       setExpandingNode({ id: nodeId, type: nodeType });
     }
-  }, [getNodeById, openAnnotationModal]);
+  }, [getNodeById, openAnnotationModal, loadNodeFullResInputs]);
 
 
   // Check if a node was dropped into a group and add it to that group
@@ -1173,6 +1180,10 @@ export function WorkflowCanvas() {
   // Handle the splitGrid action - uses automated grid detection
   const handleSplitGridAction = useCallback(
     async (sourceNodeId: string, flowPosition: { x: number; y: number }) => {
+      if (!getNodeById(sourceNodeId)) return;
+
+      // Full-res is lazily null on open — load it before reading.
+      await loadNodeFullResInputs(sourceNodeId);
       const sourceNode = getNodeById(sourceNodeId);
       if (!sourceNode) return;
 
@@ -1250,7 +1261,7 @@ export function WorkflowCanvas() {
         setIsSplitting(false);
       }
     },
-    [getNodeById, addNode, updateNodeData, addToGlobalHistory]
+    [getNodeById, addNode, updateNodeData, addToGlobalHistory, loadNodeFullResInputs]
   );
 
   // Helper to get image from a node
@@ -1370,6 +1381,10 @@ export function WorkflowCanvas() {
             // Annotation: set both sourceImage and outputImage (annotation passes through the image)
             updateNodeData(newNodeId, { sourceImage, outputImage: sourceImage });
           }
+        } else {
+          // Source full-res is lazily null on open — load it; the new node's
+          // edge connect effect then mirrors it into sourceImage reactively.
+          void loadNodeFullResInputs(sourceNodeId);
         }
       }
 
@@ -1570,7 +1585,7 @@ export function WorkflowCanvas() {
 
       setConnectionDrop(null);
     },
-    [connectionDrop, addNode, onConnect, nodes, handleSplitGridAction, getImageFromNode, updateNodeData]
+    [connectionDrop, addNode, onConnect, nodes, handleSplitGridAction, getImageFromNode, updateNodeData, loadNodeFullResInputs]
   );
 
   const handleCloseDropMenu = useCallback(() => {

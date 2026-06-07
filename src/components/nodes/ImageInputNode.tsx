@@ -9,6 +9,7 @@ import { ImageInputNodeData } from "@/types";
 import { MediaOverlay } from "../MediaOverlay";
 import { deriveAutoTitle } from "@/utils/nodeTitleFromFilename";
 import { mirrorImage } from "@/utils/mirrorImage";
+import { useFullResField } from "@/hooks/useFullResField";
 
 type ImageInputNodeType = Node<ImageInputNodeData, "imageInput">;
 
@@ -18,6 +19,7 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
+  const { ensure, loading: loadingFullRes } = useFullResField();
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -144,13 +146,27 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
     };
   }, [id, nodeData.image, nodeData.flipHorizontal, nodeData.flipVertical, nodeData.outputImage, updateNodeData]);
 
-  const displayImage =
-    (nodeData.flipHorizontal || nodeData.flipVertical) && nodeData.outputImage
-      ? nodeData.outputImage
-      : nodeData.image;
+  const flipActive = !!(nodeData.flipHorizontal || nodeData.flipVertical);
+  // Full-res (null on open until loaded) and thumb display values, picking the
+  // mirrored copy when a flip is active. Display = full-res ?? thumb.
+  const displayFull = flipActive && nodeData.outputImage ? nodeData.outputImage : nodeData.image;
+  const displayThumb = flipActive && nodeData.outputImageThumb ? nodeData.outputImageThumb : nodeData.imageThumb;
+  const displayImage = displayFull ?? displayThumb;
+  const hasImage = !!(nodeData.image || nodeData.imageThumb);
 
   // No-op handlers for overlay (single image, no carousel)
   const noop = useCallback(() => {}, []);
+
+  // Double-click to view: load the full-res from disk on demand (the mirror
+  // effect re-derives the flipped output once `image` is full-res), then show.
+  const handleView = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setShowOverlay(true);
+      void ensure({ id, field: "image", ref: nodeData.imageRef, current: nodeData.image, folder: "inputs" });
+    },
+    [id, ensure, nodeData.imageRef, nodeData.image]
+  );
 
   return (
     <>
@@ -158,7 +174,7 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
       id={id}
       selected={selected}
       contentClassName="flex-1 min-h-0 overflow-clip"
-      aspectFitMedia={nodeData.image}
+      aspectFitMedia={nodeData.image ?? nodeData.imageThumb}
       fullBleed
     >
       {/* Reference input handle for visual links from Split Grid node */}
@@ -178,13 +194,13 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
         className="hidden"
       />
 
-      {nodeData.image ? (
+      {hasImage ? (
         <div className="relative group w-full h-full">
           <img
-            src={displayImage || nodeData.image}
+            src={displayImage || ""}
             alt={nodeData.filename || "Uploaded image"}
             className="w-full h-full object-contain cursor-pointer"
-            onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}
+            onDoubleClick={handleView}
           />
           {/* Mirror toggles — bottom-left, fade in on hover */}
           <div className="absolute bottom-2 left-2 flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity nodrag">
@@ -266,10 +282,11 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
       />
     </BaseNode>
 
-    {showOverlay && nodeData.image && (
+    {showOverlay && hasImage && (
       <MediaOverlay
-        content={displayImage || nodeData.image}
+        content={displayFull ?? displayImage ?? null}
         mediaType="image"
+        isLoading={loadingFullRes && !displayFull}
         currentIndex={0}
         totalCount={1}
         onPrevious={noop}

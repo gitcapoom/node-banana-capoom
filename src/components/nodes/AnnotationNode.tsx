@@ -5,6 +5,7 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useAnnotationStore } from "@/store/annotationStore";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useFullResField } from "@/hooks/useFullResField";
 import { AnnotationNodeData } from "@/types";
 
 type AnnotationNodeType = Node<AnnotationNodeData, "annotation">;
@@ -15,6 +16,7 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
   const edges = useWorkflowStore((state) => state.edges);
+  const { ensure } = useFullResField();
 
   // Reactively update sourceImage when an edge is connected
   useEffect(() => {
@@ -24,14 +26,20 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
     }
   }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
 
-  const handleEdit = useCallback(() => {
-    const imageToEdit = nodeData.sourceImage || nodeData.outputImage;
+  const handleEdit = useCallback(async () => {
+    // Load full-res on demand — source/output are lazily null after reopening.
+    let imageToEdit = nodeData.sourceImage || nodeData.outputImage;
+    if (!imageToEdit) {
+      imageToEdit =
+        (await ensure({ id, field: "sourceImage", ref: nodeData.sourceImageRef, current: nodeData.sourceImage, folder: "inputs" })) ||
+        (await ensure({ id, field: "outputImage", ref: nodeData.outputImageRef, current: nodeData.outputImage, folder: "inputs" }));
+    }
     if (!imageToEdit) {
       alert("No image available. Connect an image input.");
       return;
     }
     openModal(id, imageToEdit, nodeData.annotations);
-  }, [id, nodeData, openModal]);
+  }, [id, ensure, nodeData.sourceImage, nodeData.sourceImageRef, nodeData.outputImage, nodeData.outputImageRef, nodeData.annotations, openModal]);
 
   const handleRemove = useCallback(() => {
     updateNodeData(id, {
@@ -43,14 +51,15 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
     });
   }, [id, updateNodeData]);
 
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  const displayImage =
+    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
 
   return (
     <BaseNode
       id={id}
       selected={selected}
       contentClassName="flex-1 min-h-0 overflow-clip"
-      aspectFitMedia={nodeData.outputImage}
+      aspectFitMedia={nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImageThumb}
     >
       <Handle
         type="target"

@@ -83,6 +83,7 @@ export interface RotoNodeData extends BaseNodeData {
   shapes: RotoShape[];
   outputMask: string | null; // white-on-black matte data URL
   outputMaskRef?: string;
+  outputMaskThumb?: string;  // Inline small PNG preview (alpha-preserving)
   invert: boolean; // default false
   /** Resolution the shapes were authored at — used by the executor to
    *  rasterize headlessly and by a future migration to rescale. */

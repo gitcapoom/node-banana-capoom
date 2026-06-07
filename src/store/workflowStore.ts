@@ -62,6 +62,7 @@ import {
   clearNodeImageRefs,
 } from "./utils/executionUtils";
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
+import { ensureFullResForNodes } from "./execution/hydrateForRun";
 import { evaluateRule } from "./utils/ruleEvaluation";
 import { computeDimmedNodes } from "./utils/dimmingUtils";
 import { getRunBlocker } from "./utils/runGating";
@@ -474,6 +475,9 @@ interface WorkflowStore {
   _buildExecutionContext: (node: WorkflowNode, signal?: AbortSignal) => NodeExecutionContext;
   executeWorkflow: (startFromNodeId?: string) => Promise<void>;
   regenerateNode: (nodeId: string) => Promise<void>;
+  /** Load full-res for a node + its upstream from disk (lazy on open). Used by
+   *  GPU editors (color / comp) to populate the live preview on double-click. */
+  loadNodeFullResInputs: (nodeId: string) => Promise<void>;
   executeSelectedNodes: (nodeIds: string[]) => Promise<void>;
   stopWorkflow: () => void;
   setMaxConcurrentCalls: (value: number) => void;
@@ -1377,6 +1381,16 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       if (foundLevel !== -1) startLevel = foundLevel;
     }
 
+    // Lazy full-res pre-pass: displayed images are NULL on open. Load full-res
+    // for the nodes that will run (+ their upstream producers) so executors read
+    // real pixels instead of empty fields. No-ops on already-loaded images.
+    try {
+      const execIds = levels.slice(startLevel).flatMap((l) => l.nodeIds);
+      await ensureFullResForNodes(execIds, get().nodes, get().edges, get().updateNodeData, get().saveDirectoryPath);
+    } catch (err) {
+      logger.warn('workflow.start', 'Full-res pre-pass failed (continuing)', { error: String(err) });
+    }
+
     // Helper to execute a single node - returns true if successful, throws on error
     const executeSingleNode = async (node: WorkflowNode, signal: AbortSignal): Promise<void> => {
       // Check for abort before starting
@@ -1678,6 +1692,14 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     });
 
     try {
+      // Lazy full-res pre-pass: load full-res for this node + its upstream so
+      // the executor reads real pixels (connected inputs or stored fallback).
+      try {
+        await ensureFullResForNodes([nodeId], get().nodes, get().edges, get().updateNodeData, get().saveDirectoryPath);
+      } catch (err) {
+        logger.warn('node.execution', 'Full-res pre-pass failed (continuing)', { nodeId, error: String(err) });
+      }
+
       const executionCtx = get()._buildExecutionContext(node);
 
       const regenOptions = { useStoredFallback: true };
@@ -1788,6 +1810,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
       saveLogSession();
       await logger.endSession();
+    }
+  },
+
+  loadNodeFullResInputs: async (nodeId: string) => {
+    const { nodes, edges, updateNodeData, saveDirectoryPath } = get();
+    try {
+      await ensureFullResForNodes([nodeId], nodes, edges, updateNodeData, saveDirectoryPath);
+    } catch (err) {
+      logger.warn('node.execution', 'loadNodeFullResInputs failed', { nodeId, error: String(err) });
     }
   },
 
@@ -1922,6 +1953,14 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     };
 
     try {
+      // Lazy full-res pre-pass: load full-res for the selected nodes + their
+      // upstream (across the full graph) so executors read real pixels.
+      try {
+        await ensureFullResForNodes(nodeIds, get().nodes, get().edges, get().updateNodeData, get().saveDirectoryPath);
+      } catch (err) {
+        logger.warn('node.execution', 'Full-res pre-pass failed (continuing)', { error: String(err) });
+      }
+
       // Filter edges to only those within the selected set for topological sort
       const selectedEdges = edges.filter(
         (e) => selectedSet.has(e.source) && selectedSet.has(e.target)
