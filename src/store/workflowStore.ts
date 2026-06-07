@@ -2288,7 +2288,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       workflowId: workflow.id || null,
       workflowName: workflow.name,
       saveDirectoryPath: directoryPath || null,
-      generationsPath: savedConfig?.generationsPath || null,
+      // Derive the generations folder from THIS file's own directory rather than
+      // the saved config. The config is keyed by workflow id, so every copy of a
+      // template (which all share the baked-in id) would otherwise read one
+      // shared generations path — causing images generated in one copy to be
+      // written into a sibling copy's folder. Generations always live alongside
+      // the workflow (see setWorkflowMetadata / Header "auto-derived").
+      generationsPath: directoryPath
+        ? `${directoryPath.replace(/\\/g, "/")}/generations`
+        : (savedConfig?.generationsPath || null),
       lastSavedAt: savedConfig?.lastSavedAt || null,
       hasUnsavedChanges: false,
       // Restore cost data
@@ -2694,14 +2702,30 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         (imageRefBasePath === null && hasExistingRefs)
       );
 
-      if (isNewDirectory) {
-        // Generate new workflow ID for the duplicate - prevents localStorage collision
-        // This ensures the new project has independent config and preserves the original
+      // A copied template keeps the original's baked-in workflow id, so its
+      // localStorage config (paths, cost, settings) collides with every sibling
+      // copy. Detect that: a saved config exists for this id but is registered
+      // to a DIFFERENT directory than where we're saving now. (Empty templates
+      // have no image refs, so the ref-based check above misses them.)
+      const normalizeDir = (p: string | null | undefined) =>
+        (p ? p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() : "");
+      const existingConfigForId = loadSaveConfigs()[workflowId];
+      const idRegisteredToOtherDir =
+        !!existingConfigForId?.directoryPath &&
+        normalizeDir(existingConfigForId.directoryPath) !== normalizeDir(saveDirectoryPath);
+
+      if (isNewDirectory || idRegisteredToOtherDir) {
+        // Give the copy its own id so its config is independent of the original
+        // (otherwise they'd share one generations path, cost tally, etc.).
         const newWorkflowId = generateWorkflowId();
         workflowId = newWorkflowId;
 
-        // Clear refs so images get saved to new location
-        currentNodes = clearNodeImageRefs(currentNodes);
+        // Only clear refs when the images genuinely came from another directory.
+        // A config-only mismatch must NOT discard refs that already point at
+        // this folder (that would needlessly re-save the images).
+        if (isNewDirectory) {
+          currentNodes = clearNodeImageRefs(currentNodes);
+        }
         set({
           nodes: currentNodes,
           workflowId: newWorkflowId,
