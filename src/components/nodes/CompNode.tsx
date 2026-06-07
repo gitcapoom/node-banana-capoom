@@ -43,9 +43,17 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       const r = {
         bg: null as string | null, bgAlpha: null as string | null, fg: null as string | null, fgAlpha: null as string | null, matte: null as string | null,
         bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null,
+        // Whether each pin has an incoming EDGE (independent of whether the
+        // upstream value is loaded yet — lazy inputs are null until loaded).
+        bgConn: false, baConn: false, fgConn: false, faConn: false, mtConn: false,
       };
       for (const e of state.edges) {
         if (e.target !== id) continue;
+        if (e.targetHandle === "image-comp_bg") r.bgConn = true;
+        else if (e.targetHandle === "image-comp_bg_alpha") r.baConn = true;
+        else if (e.targetHandle === "image-comp_fg") r.fgConn = true;
+        else if (e.targetHandle === "image-comp_fg_alpha") r.faConn = true;
+        else if (e.targetHandle === "image-comp_matte") r.mtConn = true;
         const src = state.nodes.find((n) => n.id === e.source);
         if (!src) continue;
         const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
@@ -59,6 +67,16 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       return r;
     }),
   );
+
+  // Every CONNECTED pin must have a loaded value before we render/commit. Else a
+  // lazily-unloaded matte / alpha pin (e.g. a roto matte) would be silently
+  // dropped and the composite would come out opaque.
+  const allInputsResolved =
+    (!incoming.bgConn || !!incoming.bg) &&
+    (!incoming.baConn || !!incoming.bgAlpha) &&
+    (!incoming.fgConn || !!incoming.fg) &&
+    (!incoming.faConn || !!incoming.fgAlpha) &&
+    (!incoming.mtConn || !!incoming.matte);
 
   // Mirror resolved inputs into node data (guarded against loops).
   useEffect(() => {
@@ -88,6 +106,12 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     const run = async () => {
       if (!urls.bg) {
         if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null, outputImageRef: undefined });
+        return;
+      }
+      if (!allInputsResolved) {
+        // A connected matte / alpha pin is lazily unloaded — load the inputs and
+        // wait. Rendering now would drop it and flatten the output to opaque.
+        void loadNodeFullResInputs(id);
         return;
       }
       const canvas = canvasRef.current;
@@ -162,7 +186,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         onDoubleClick={handleEdit}
         title={hasBg || thumb ? "Double-click to open the comp editor" : "Connect a BG image"}
       >
-        {hasBg ? (
+        {hasBg && allInputsResolved ? (
           <>
             <canvas ref={canvasRef} className="w-full h-full object-contain" />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center pointer-events-none">
