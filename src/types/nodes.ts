@@ -640,6 +640,8 @@ export interface OutputNodeData extends BaseNodeData {
   model3d?: string | null; // 3D model URL (GLB, SPZ, etc.)
   contentType?: "image" | "video" | "audio" | "3d"; // Explicit content type hint
   outputFilename?: string; // Custom filename for saved outputs (without extension)
+  /** When true, "Output Now" saves only the media file — no sidecar workflow .json. */
+  skipJsonSidecar?: boolean;
 }
 
 /**

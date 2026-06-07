@@ -227,25 +227,28 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
         throw new Error(saveResult.error || "Failed to save output file");
       }
 
-      // 2. Save the sidecar JSON (upstream workflow with embedded images)
-      const sidecarWorkflow = extractUpstreamWorkflow(
-        id,
-        nodes,
-        edges,
-        edgeStyle,
-        filename
-      );
+      // 2. Save the sidecar JSON (upstream workflow with embedded images),
+      //    unless the user disabled it via the "Don't save JSON" checkbox.
+      if (!nodeData.skipJsonSidecar) {
+        const sidecarWorkflow = extractUpstreamWorkflow(
+          id,
+          nodes,
+          edges,
+          edgeStyle,
+          filename
+        );
 
-      await fetch("/api/save-file", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          directoryPath,
-          filename,
-          content: sidecarWorkflow,
-          createDirectory: true,
-        }),
-      });
+        await fetch("/api/save-file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            directoryPath,
+            filename,
+            content: sidecarWorkflow,
+            createDirectory: true,
+          }),
+        });
+      }
 
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
@@ -254,7 +257,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
       setSaveStatus("error");
       setTimeout(() => setSaveStatus("idle"), 3000);
     }
-  }, [id, contentSrc, isAudio, isVideo, isModel3d, nodes, edges, edgeStyle]);
+  }, [id, contentSrc, isAudio, isVideo, isModel3d, nodes, edges, edgeStyle, nodeData.skipJsonSidecar]);
 
   const handleDownload = useCallback(async () => {
     if (!contentSrc) return;
@@ -330,10 +333,24 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
 
   // Output Now button component (shared across all content types)
   const outputNowButton = (
-    <button
-      onClick={(e) => { e.stopPropagation(); handleOutputNow(); }}
-      disabled={saveStatus === "saving"}
-      className={`absolute bottom-2 left-2 right-2 z-10 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded shadow-lg transition-colors ${
+    <div className="absolute bottom-2 left-2 right-2 z-10 flex flex-col gap-1.5">
+      <label
+        className="self-start flex items-center gap-1.5 text-[10px] text-white/90 bg-black/55 backdrop-blur-sm px-1.5 py-0.5 rounded cursor-pointer select-none"
+        onClick={(e) => e.stopPropagation()}
+        title="Skip the sidecar workflow .json saved next to the output file"
+      >
+        <input
+          type="checkbox"
+          checked={nodeData.skipJsonSidecar ?? false}
+          onChange={(e) => updateNodeData(id, { skipJsonSidecar: e.target.checked })}
+          className="w-3 h-3 accent-blue-500"
+        />
+        Don&apos;t save JSON
+      </label>
+      <button
+        onClick={(e) => { e.stopPropagation(); handleOutputNow(); }}
+        disabled={saveStatus === "saving"}
+        className={`w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded shadow-lg transition-colors ${
         saveStatus === "saved"
           ? "bg-green-600 text-white"
           : saveStatus === "error"
@@ -365,7 +382,8 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
           Output Now
         </>
       )}
-    </button>
+      </button>
+    </div>
   );
 
   return (
