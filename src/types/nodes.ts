@@ -163,6 +163,8 @@ export interface ReformatNodeData extends BaseNodeData {
   width: number;   // H (horizontal) output resolution
   height: number;  // V (vertical) output resolution
   mode: "fill" | "fitH" | "fitV";
+  /** Interpolation filter (Nuke-style). Defaults to "cubic". */
+  filter?: import("@/utils/resampleFilters").ResampleFilter;
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;

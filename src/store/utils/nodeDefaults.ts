@@ -502,6 +502,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         width: 1920,
         height: 1080,
         mode: "fill",
+        filter: "cubic",
         outputImage: null,
       } as ReformatNodeData;
     case "cubemapEquirect":

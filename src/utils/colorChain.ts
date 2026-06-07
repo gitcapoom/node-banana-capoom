@@ -30,6 +30,7 @@ import { DISPLAY_CLAMP_SHADER } from "./imageShaders";
 import { processImageWithShader, type UniformValue } from "./webglProcess";
 import type { CompTransform, CompReformat } from "@/types/comp";
 import { computePieces, computeFollowPieces, piecesToUniforms } from "./compTransform";
+import { RESAMPLE_GLSL } from "./resampleFilters";
 
 export type ShaderInput = { url: string } | { floatNodeId: string };
 
@@ -420,6 +421,7 @@ export interface CompRenderParams {
   fgBlackOutside: boolean;
   swapBgFg: boolean;       // swap BG/FG roles (+ their alphas) in the merge
   outputResolution: "bg" | "fg"; // which input's size defines the output
+  filter: number;          // RESAMPLE_FILTER_INDEX — input interpolation
 }
 
 /**
@@ -438,14 +440,14 @@ uniform sampler2D u_ba;
 uniform sampler2D u_fg;
 uniform sampler2D u_fa;
 uniform sampler2D u_mt;
-uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_premultBg, u_bg_bo, u_fg_bo, u_swap;
+uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_premultBg, u_bg_bo, u_fg_bo, u_swap, u_filter;
 uniform vec2 u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size;
 uniform vec2 u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size;
 uniform vec2 u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size;
 uniform vec2 u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size;
 uniform vec2 u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
-
+${RESAMPLE_GLSL}
 // output bottom-left px O -> input uv (top-left); .z = inside flag
 vec3 invSample(vec2 O, vec2 rot, vec2 c, vec2 t, vec2 invs, vec2 size) {
   vec2 d = O - c;
@@ -461,18 +463,19 @@ float sft(float b, float s){
 }
 void main() {
   vec2 O = vec2(v_uv.x * u_outSize.x, (1.0 - v_uv.y) * u_outSize.y);
+  int fmode = int(u_filter + 0.5);
 
   // BG (transformed; default identity = passthrough). Black-outside controls
   // whether outside the BG footprint is transparent (bo=1) or edge-held (bo=0).
   vec3 rbg = invSample(O, u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size);
   float bgCov = (u_bg_bo > 0.5) ? rbg.z : 1.0;
-  vec4 bgTex = texture2D(u_bg, rbg.xy);
+  vec4 bgTex = filterSample(u_bg, rbg.xy, u_bg_size, fmode);
   vec3 Brgb = bgTex.rgb * bgCov;
   float bAlphaOwn = bgTex.a;
   float b;
   if (u_ba_has > 0.5) {
     vec3 rba = invSample(O, u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size);
-    b = dot(texture2D(u_ba, rba.xy).rgb, LUMA) * rba.z;
+    b = dot(filterSample(u_ba, rba.xy, u_ba_size, fmode).rgb, LUMA) * rba.z;
   } else {
     b = bAlphaOwn;
   }
@@ -486,14 +489,14 @@ void main() {
   if (u_fg_has > 0.5) {
     vec3 r = invSample(O, u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size);
     fgInside = r.z;
-    vec4 fgTex = texture2D(u_fg, r.xy);
+    vec4 fgTex = filterSample(u_fg, r.xy, u_fg_size, fmode);
     A = fgTex.rgb; fgAlphaOwn = fgTex.a;
   }
   float fgCov = (u_fg_has > 0.5) ? ((u_fg_bo > 0.5) ? fgInside : 1.0) : 0.0;
   float a;
   if (u_fa_has > 0.5) {
     vec3 rfa = invSample(O, u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size);
-    a = dot(texture2D(u_fa, rfa.xy).rgb, LUMA) * rfa.z * fgCov;
+    a = dot(filterSample(u_fa, rfa.xy, u_fa_size, fmode).rgb, LUMA) * rfa.z * fgCov;
   } else {
     a = fgAlphaOwn * fgCov;
   }
@@ -531,7 +534,7 @@ void main() {
   float m = 1.0;
   if (u_mt_has > 0.5) {
     vec3 rmt = invSample(O, u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size);
-    m = dot(texture2D(u_mt, rmt.xy).rgb, LUMA) * rmt.z;
+    m = dot(filterSample(u_mt, rmt.xy, u_mt_size, fmode).rgb, LUMA) * rmt.z;
   }
   gl_FragColor = vec4(mix(Brgb, outRgb, m), mix(b, outA, m));
 }
@@ -585,6 +588,7 @@ function compUniforms(
   const u: Record<string, UniformValue> = {
     u_outSize: [outW, outH],
     u_op: params.op,
+    u_filter: params.filter,
     u_premultFg: params.premultFg ? 1 : 0,
     u_premultBg: params.premultBg ? 1 : 0,
     u_bg_bo: params.bgBlackOutside ? 1 : 0,
@@ -704,7 +708,14 @@ export function renderComp(inputs: CompRenderInputs, params: CompRenderParams, d
   return withLock(async () => {
     const c = getCtx();
     if (!c || !c.floatOK) return null;
-    return renderCompUnlocked(c, inputs, params, destNodeId);
+    try {
+      return await renderCompUnlocked(c, inputs, params, destNodeId);
+    } catch (err) {
+      // Any GPU error (e.g. shader compile/link on an unusual driver) → null so
+      // callers fall back to the Canvas2D compositor instead of erroring.
+      console.warn("renderComp failed, falling back", err);
+      return null;
+    }
   });
 }
 
@@ -713,8 +724,13 @@ export function renderCompToCanvas(inputs: CompRenderInputs, params: CompRenderP
   return withLock(async () => {
     const c = getCtx();
     if (!c || !c.floatOK) return false;
-    const res = await renderCompUnlocked(c, inputs, params, destNodeId);
-    if (!res) return false;
-    return blitFloatToCanvasUnlocked(c, destNodeId, destCanvas);
+    try {
+      const res = await renderCompUnlocked(c, inputs, params, destNodeId);
+      if (!res) return false;
+      return blitFloatToCanvasUnlocked(c, destNodeId, destCanvas);
+    } catch (err) {
+      console.warn("renderCompToCanvas failed, falling back", err);
+      return false;
+    }
   });
 }

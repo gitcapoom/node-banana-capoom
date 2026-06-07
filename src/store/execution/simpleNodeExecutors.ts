@@ -665,7 +665,7 @@ export async function executeReformat(ctx: NodeExecutionContext): Promise<void> 
       updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
     }
     const { reformatImage } = await import("@/utils/reformatImage");
-    const out = await reformatImage(incoming, nodeData.width || 1, nodeData.height || 1, nodeData.mode ?? "fill");
+    const out = await reformatImage(incoming, nodeData.width || 1, nodeData.height || 1, nodeData.mode ?? "fill", nodeData.filter ?? "cubic");
     updateNodeData(node.id, { outputImage: out, outputImageRef: undefined });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

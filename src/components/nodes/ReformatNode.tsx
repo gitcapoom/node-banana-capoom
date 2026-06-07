@@ -6,6 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { reformatImage } from "@/utils/reformatImage";
+import { RESAMPLE_FILTER_LABELS, type ResampleFilter } from "@/utils/resampleFilters";
 import type { ReformatNodeData } from "@/types";
 
 type ReformatNodeType = Node<ReformatNodeData, "reformat">;
@@ -38,22 +39,23 @@ export function ReformatNode({ id, data, selected }: NodeProps<ReformatNodeType>
     const W = Math.max(1, Math.round(nodeData.width || 0));
     const H = Math.max(1, Math.round(nodeData.height || 0));
     const mode = nodeData.mode ?? "fill";
+    const filter = nodeData.filter ?? "cubic";
     if (!src) {
       if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null });
       fpRef.current = "";
       return;
     }
-    const fp = `${src.length}|${W}x${H}|${mode}`;
+    const fp = `${src.length}|${W}x${H}|${mode}|${filter}`;
     if (fpRef.current === fp) return;
     fpRef.current = fp;
     const t = setTimeout(() => {
-      reformatImage(src, W, H, mode)
+      reformatImage(src, W, H, mode, filter)
         .then((out) => { if (fpRef.current === fp) updateNodeData(id, { outputImage: out, outputImageRef: undefined }); })
         .catch((err) => { console.error("ReformatNode: reformat failed", err); if (fpRef.current === fp) updateNodeData(id, { outputImage: src }); });
     }, 120);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, nodeData.sourceImage, nodeData.width, nodeData.height, nodeData.mode, updateNodeData]);
+  }, [id, nodeData.sourceImage, nodeData.width, nodeData.height, nodeData.mode, nodeData.filter, updateNodeData]);
 
   const setNum = useCallback(
     (key: "width" | "height", v: number) => updateNodeData(id, { [key]: Math.max(1, Math.round(v || 0)) }),
@@ -84,6 +86,14 @@ export function ReformatNode({ id, data, selected }: NodeProps<ReformatNodeType>
         <select value={nodeData.mode ?? "fill"} onChange={(e) => updateNodeData(id, { mode: e.target.value as ReformatNodeData["mode"] })}
           className="w-full text-[10px] py-0.5 px-1 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700">
           {MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
+        </select>
+      </div>
+      <div className="px-1 mb-1 nodrag nopan flex items-center gap-1">
+        <span className="text-[10px] text-neutral-400 shrink-0" title="Interpolation filter (Nuke-style)">Filter</span>
+        <select value={nodeData.filter ?? "cubic"} onChange={(e) => updateNodeData(id, { filter: e.target.value as ResampleFilter })}
+          className="flex-1 min-w-0 text-[10px] py-0.5 px-1 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700"
+          title="Interpolation filter. Impulse/Bilinear are fastest; Cubic/Lanczos are higher quality.">
+          {RESAMPLE_FILTER_LABELS.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
         </select>
       </div>
 

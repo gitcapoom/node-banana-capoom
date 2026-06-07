@@ -18,6 +18,7 @@
  */
 
 import type { BaseNodeData } from "./annotation";
+import type { ResampleFilter } from "@/utils/resampleFilters";
 
 /** Merge operations. Order is mirrored by COMP_OP_INDEX (the shader selector). */
 export type CompMergeOp =
@@ -112,6 +113,10 @@ export interface CompNodeData extends BaseNodeData {
   /** Which input's native size defines the output resolution. */
   outputResolution: "bg" | "fg";
 
+  /** Interpolation filter applied when sampling the (transformed) inputs.
+   *  Nuke-style; defaults to "cubic". */
+  compFilter?: ResampleFilter;
+
   /** Display only: show transparent (non-occupied) pixels as a checkerboard
    *  (true) instead of solid black (false). Does not affect the output. */
   checkerboard: boolean;
@@ -164,6 +169,7 @@ export function defaultCompData(): CompNodeData {
     fgBlackOutside: true,
     swapBgFg: false,
     outputResolution: "bg",
+    compFilter: "cubic",
     checkerboard: false,
     outputImage: null,
     error: null,

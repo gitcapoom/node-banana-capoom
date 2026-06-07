@@ -10,6 +10,7 @@
 
 import type { CompNodeData } from "@/types";
 import { COMP_OP_INDEX, defaultCompTransform } from "@/types/comp";
+import { RESAMPLE_FILTER_INDEX } from "./resampleFilters";
 import {
   renderComp,
   floatNodeToDataUrl,
@@ -63,6 +64,7 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
     fgBlackOutside: data.fgBlackOutside ?? true,
     swapBgFg: data.swapBgFg ?? false,
     outputResolution: data.outputResolution ?? "bg",
+    filter: RESAMPLE_FILTER_INDEX[data.compFilter ?? "cubic"],
   };
 }
 
