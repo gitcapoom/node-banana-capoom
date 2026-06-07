@@ -291,7 +291,11 @@ function GenerateComboButton() {
 
 function AllNodesMenu() {
   const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const activeRef = useRef<HTMLButtonElement>(null);
   const addNode = useWorkflowStore((state) => state.addNode);
   const { screenToFlowPosition } = useReactFlow();
 
@@ -311,6 +315,43 @@ function AllNodesMenu() {
     };
   }, [isOpen]);
 
+  // Reset the search and focus the box each time the menu opens.
+  useEffect(() => {
+    if (isOpen) {
+      setQuery("");
+      setHighlight(0);
+      inputRef.current?.focus();
+    }
+  }, [isOpen]);
+
+  // Keep the highlighted item scrolled into view.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [highlight]);
+
+  // Filter by substring match anywhere within the node label.
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return ALL_NODES_CATEGORIES;
+    return ALL_NODES_CATEGORIES.map((cat) => ({
+      label: cat.label,
+      nodes: cat.nodes.filter((n) => n.label.toLowerCase().includes(q)),
+    })).filter((cat) => cat.nodes.length > 0);
+  }, [query]);
+
+  const flatNodes = useMemo(() => groups.flatMap((g) => g.nodes), [groups]);
+
+  const indexByType = useMemo(() => {
+    const m = new Map<string, number>();
+    flatNodes.forEach((n, i) => m.set(n.type, i));
+    return m;
+  }, [flatNodes]);
+
+  // Keep the highlight within range when the filtered set changes.
+  useEffect(() => {
+    setHighlight((h) => (flatNodes.length === 0 ? 0 : Math.min(h, flatNodes.length - 1)));
+  }, [flatNodes.length]);
+
   const handleAddNode = useCallback((type: NodeType) => {
     const center = getPaneCenter();
     const position = screenToFlowPosition({
@@ -327,6 +368,27 @@ function AllNodesMenu() {
     event.dataTransfer.effectAllowed = "copy";
     setIsOpen(false);
   }, []);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        if (flatNodes.length) setHighlight((h) => (h + 1) % flatNodes.length);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        if (flatNodes.length) setHighlight((h) => (h - 1 + flatNodes.length) % flatNodes.length);
+        break;
+      case "Enter":
+        e.preventDefault();
+        if (flatNodes[highlight]) handleAddNode(flatNodes[highlight].type);
+        break;
+      case "Escape":
+        e.preventDefault();
+        setIsOpen(false);
+        break;
+    }
+  }, [flatNodes, highlight, handleAddNode]);
 
   return (
     <div className="relative" ref={menuRef}>
@@ -347,26 +409,58 @@ function AllNodesMenu() {
       </button>
 
       {isOpen && (
-        <div className="absolute bottom-full left-0 mb-2 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl overflow-hidden min-w-[180px] max-h-[400px] overflow-y-auto">
-          {ALL_NODES_CATEGORIES.map((category, catIndex) => (
-            <div key={category.label}>
-              <div className={`px-3 py-1 text-[10px] text-neutral-500 uppercase tracking-wide${catIndex > 0 ? " border-t border-neutral-700" : ""}`}>
-                {category.label}
-              </div>
-              {category.nodes.map((node) => (
-                <button
-                  key={node.type}
-                  onClick={() => handleAddNode(node.type)}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, node.type)}
-                  className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing"
-                >
-                  {node.label}
-                </button>
-              ))}
-            </div>
-          ))}
+        <div
+          onKeyDown={handleKeyDown}
+          className="absolute bottom-full left-0 mb-2 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl overflow-hidden min-w-[200px] max-h-[420px] flex flex-col"
+        >
+          {/* Search box */}
+          <div className="p-1.5 border-b border-neutral-700">
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setHighlight(0); }}
+              placeholder="Search nodes"
+              spellCheck={false}
+              autoComplete="off"
+              className="w-full px-2 py-1.5 text-[12px] bg-neutral-900 text-neutral-100 placeholder-neutral-500 rounded border border-neutral-700 focus:border-neutral-500 outline-none"
+            />
+          </div>
 
+          {/* List */}
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {flatNodes.length === 0 ? (
+              <div className="px-3 py-3 text-[11px] text-neutral-500 text-center">No matching nodes</div>
+            ) : (
+              groups.map((category, catIndex) => (
+                <div key={category.label}>
+                  <div className={`px-3 py-1 text-[10px] text-neutral-500 uppercase tracking-wide${catIndex > 0 ? " border-t border-neutral-700" : ""}`}>
+                    {category.label}
+                  </div>
+                  {category.nodes.map((node) => {
+                    const idx = indexByType.get(node.type) ?? -1;
+                    const isActive = idx === highlight;
+                    return (
+                      <button
+                        key={node.type}
+                        ref={isActive ? activeRef : undefined}
+                        onClick={() => handleAddNode(node.type)}
+                        onMouseEnter={() => setHighlight(idx)}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, node.type)}
+                        className={`w-full px-3 py-2 text-left text-[11px] font-medium transition-colors flex items-center gap-2 cursor-grab active:cursor-grabbing ${
+                          isActive
+                            ? "bg-neutral-700 text-neutral-100"
+                            : "text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100"
+                        }`}
+                      >
+                        {node.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>
