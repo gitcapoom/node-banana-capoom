@@ -86,6 +86,9 @@ export async function compositeCompForExecutor(
       return { dataUrl, outW: res.w, outH: res.h };
     }
   }
+  // Canvas2D fallback: now honours matte + alpha pins, but transforms/ops are
+  // approximate. Warn so we can tell when the GPU path didn't run.
+  console.warn("[comp] GPU float render unavailable — using Canvas2D fallback", { nodeId });
   return compositeFallback(urls, data);
 }
 
@@ -120,6 +123,42 @@ function loadImg(src: string): Promise<HTMLImageElement> {
   });
 }
 
+/**
+ * Build a canvas whose ALPHA equals the luminance of `url` (rgb set to white),
+ * sized W×H (stretched to fit). Used to apply an external alpha (Matte /
+ * BG_Alpha / FG_Alpha pin) to a layer via "destination-in".
+ */
+async function lumToAlphaCanvas(url: string, W: number, H: number): Promise<HTMLCanvasElement | null> {
+  try {
+    const img = await loadImg(url);
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    const cx = c.getContext("2d", { willReadFrequently: true });
+    if (!cx) return null;
+    cx.drawImage(img, 0, 0, W, H);
+    const id = cx.getImageData(0, 0, W, H);
+    const d = id.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      d[i] = 255; d[i + 1] = 255; d[i + 2] = 255;
+      d[i + 3] = Math.round((lum * d[i + 3]) / 255);
+    }
+    cx.putImageData(id, 0, 0);
+    return c;
+  } catch {
+    return null;
+  }
+}
+
+/** Multiply a canvas's alpha by a luminance mask (Matte / Alpha pin). */
+function applyAlphaMask(ctx: CanvasRenderingContext2D, mask: HTMLCanvasElement | null) {
+  if (!mask) return;
+  ctx.save();
+  ctx.globalCompositeOperation = "destination-in";
+  ctx.drawImage(mask, 0, 0);
+  ctx.restore();
+}
+
 async function compositeFallback(urls: CompInputUrls, data: CompNodeData): Promise<{ dataUrl: string; outW: number; outH: number }> {
   const bgDims = await getImageDimensions(urls.bg!);
   if (!bgDims) return { dataUrl: urls.bg!, outW: 0, outH: 0 };
@@ -128,26 +167,40 @@ async function compositeFallback(urls: CompInputUrls, data: CompNodeData): Promi
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext("2d");
   if (!ctx) return { dataUrl: urls.bg!, outW: W, outH: H };
+
+  // BG, then its external alpha pin (BG_Alpha) if present.
   const bg = await loadImg(urls.bg!);
   ctx.drawImage(bg, 0, 0, W, H);
+  if (urls.bgAlpha) applyAlphaMask(ctx, await lumToAlphaCanvas(urls.bgAlpha, W, H));
+
+  // FG composited at its own size (with FG_Alpha applied), then drawn transformed.
   if (urls.fg) {
     try {
       const fg = await loadImg(urls.fg);
       const iw = fg.naturalWidth, ih = fg.naturalHeight;
-      const p = computePieces(data.fgTransform, "none", iw, ih, iw, ih);
-      // Forward corners (output bottom-left) → canvas top-left (y = H - y).
-      const c = forwardCorners(p).map((o) => ({ x: o.x, y: H - o.y }));
-      // Image top-left source points for BL, BR, TR, TL corners.
-      const srcTL = [{ x: 0, y: ih }, { x: iw, y: ih }, { x: iw, y: 0 }];
-      const dst = [c[0], c[1], c[2]];
-      const m = solveAffine(srcTL, dst);
-      if (m) {
-        ctx.save();
-        ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
-        ctx.drawImage(fg, 0, 0);
-        ctx.restore();
+      const fgCanvas = document.createElement("canvas");
+      fgCanvas.width = iw; fgCanvas.height = ih;
+      const fctx = fgCanvas.getContext("2d");
+      if (fctx) {
+        fctx.drawImage(fg, 0, 0);
+        if (urls.fgAlpha) applyAlphaMask(fctx, await lumToAlphaCanvas(urls.fgAlpha, iw, ih));
+        const p = computePieces(data.fgTransform, "none", iw, ih, iw, ih);
+        // Forward corners (output bottom-left) → canvas top-left (y = H - y).
+        const c = forwardCorners(p).map((o) => ({ x: o.x, y: H - o.y }));
+        const srcTL = [{ x: 0, y: ih }, { x: iw, y: ih }, { x: iw, y: 0 }];
+        const m = solveAffine(srcTL, [c[0], c[1], c[2]]);
+        if (m) {
+          ctx.save();
+          ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+          ctx.drawImage(fgCanvas, 0, 0);
+          ctx.restore();
+        }
       }
     } catch { /* ignore FG fallback errors — keep BG */ }
   }
+
+  // Matte limits the whole result's alpha by its luminance.
+  if (urls.matte) applyAlphaMask(ctx, await lumToAlphaCanvas(urls.matte, W, H));
+
   return { dataUrl: canvas.toDataURL("image/png"), outW: W, outH: H };
 }

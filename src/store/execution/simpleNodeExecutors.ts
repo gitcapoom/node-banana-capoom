@@ -33,6 +33,7 @@ import { applyCubemapEquirect, splitCubemap, combineCubemap, CUBE_FACES, type Cu
 import { coerceChannel } from "@/utils/colorGrade";
 import { shiftImageX } from "@/utils/panoShift";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
+import { ensureFullResForNodes } from "@/store/execution/hydrateForRun";
 
 /**
  * Annotation node: receives upstream image as source, passes through if no annotations.
@@ -515,9 +516,15 @@ export async function executeRoto(ctx: NodeExecutionContext): Promise<void> {
  * float texture (registry, keyed by node id) + an 8-bit PNG in outputImage.
  */
 export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
-  const { node, updateNodeData, getEdges, getNodes } = ctx;
+  const { node, updateNodeData, getEdges, getNodes, saveDirectoryPath } = ctx;
   try {
     const data = node.data as import("@/types").CompNodeData;
+    // Ensure upstream pin inputs (BG_Alpha / FG_Alpha / Matte) are full-res
+    // before reading them — they're lazily null on open, and a missing matte /
+    // alpha pin would silently flatten the output alpha to opaque.
+    try {
+      await ensureFullResForNodes([node.id], getNodes(), getEdges(), updateNodeData, saveDirectoryPath);
+    } catch { /* best-effort */ }
     const edges = getEdges();
     const nodes = getNodes();
     let bg: string | null = null, ba: string | null = null, fg: string | null = null, fa: string | null = null, mt: string | null = null;
