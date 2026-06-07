@@ -47,7 +47,10 @@ function pieces(
       ? [centerOverride.hPos + centerOverride.baseW / 2, centerOverride.vPos + centerOverride.baseH / 2]
       : [centerOverride.cx, centerOverride.cy];
   } else {
-    const bw = iw * sx0, bh = ih * sy0;
+    // Auto center = the PLACED image center. Must use the full scale (sX/sY,
+    // which includes the user scale), not the base reformat size — otherwise the
+    // pivot lands off-centre whenever the image is scaled.
+    const bw = iw * sX, bh = ih * sY;
     c = tr.centerAuto ? [tr.hPos + bw / 2, tr.vPos + bh / 2] : [tr.centerX, tr.centerY];
   }
   return { rot: [Math.cos(ang), Math.sin(ang)], c, t: [tr.hPos, tr.vPos], sX, sY, iw, ih };
@@ -70,9 +73,11 @@ export function computeFollowPieces(
   fg: CompTransform, fgW: number, fgH: number, faReformat: CompReformat, faW: number, faH: number,
 ): CompPieces {
   const [sx0, sy0] = reformatScale(faReformat, fgW, fgH, faW, faH);
-  // Center = FG's center (FG has no reformat ⇒ base rect = fgW×fgH).
+  // Center = FG's center (FG has no reformat ⇒ base rect = fgW×fgH, scaled by
+  // the FG's user scale to match the placed image center).
   return pieces(fg, sx0, sy0, faW, faH, {
-    auto: fg.centerAuto, hPos: fg.hPos, vPos: fg.vPos, cx: fg.centerX, cy: fg.centerY, baseW: fgW, baseH: fgH,
+    auto: fg.centerAuto, hPos: fg.hPos, vPos: fg.vPos, cx: fg.centerX, cy: fg.centerY,
+    baseW: fgW * fg.scaleX, baseH: fgH * fg.scaleY,
   });
 }
 
