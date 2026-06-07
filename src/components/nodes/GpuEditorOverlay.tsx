@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { ZoomPanView } from "@/components/ZoomPanView";
 
 /**
  * Shared full-screen viewer for the GPU-native image-processing nodes
@@ -42,12 +43,20 @@ export function GpuEditorOverlay({ title, canvasRef, onClose, children }: GpuEdi
       className="fixed inset-0 bg-black/90 z-[200] flex items-center justify-center select-none"
       onClick={onClose}
     >
-      {/* Live GPU preview — fills available space, aspect-preserved. */}
-      <canvas
-        ref={canvasRef}
-        className="max-w-[95vw] max-h-[95vh] object-contain shadow-2xl pointer-events-none"
-        style={{ imageRendering: "auto" }}
-      />
+      {/* Live GPU preview (full-res canvas) — wheel to zoom, drag to pan, 0 to
+          reset. Zooming reveals full resolution. */}
+      <div className="w-[96vw] h-[94vh]" onClick={(e) => e.stopPropagation()}>
+        <ZoomPanView className="w-full h-full" panMode="free" hint="Scroll to zoom · drag to pan · 0 to reset">
+          <div className="w-full h-full flex items-center justify-center">
+            <canvas
+              ref={canvasRef}
+              className="max-w-full max-h-full object-contain shadow-2xl"
+              style={{ imageRendering: "auto" }}
+              draggable={false}
+            />
+          </div>
+        </ZoomPanView>
+      </div>
 
       {/* Header bar */}
       <div className="absolute top-4 left-4 right-4 flex items-center justify-between text-white pointer-events-none">
