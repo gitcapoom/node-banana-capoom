@@ -71,7 +71,8 @@ import {
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
 const GLBViewerNode = dynamic(() => import("./nodes/GLBViewerNode").then(mod => ({ default: mod.GLBViewerNode })), { ssr: false });
 import { EditableEdge, ReferenceEdge, SharedEdgeGradients } from "./edges";
-import { ConnectionDropMenu, MenuAction } from "./ConnectionDropMenu";
+import { MenuAction } from "./ConnectionDropMenu";
+import { NodeSearchPalette } from "./NodeSearchPalette";
 import { MultiSelectToolbar } from "./MultiSelectToolbar";
 import { EdgeToolbar } from "./EdgeToolbar";
 import { GlobalImageHistory } from "./GlobalImageHistory";
@@ -409,6 +410,8 @@ export function WorkflowCanvas() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [dropType, setDropType] = useState<"image" | "audio" | "workflow" | "node" | null>(null);
   const [connectionDrop, setConnectionDrop] = useState<ConnectionDropState | null>(null);
+  // Screen position of the Tab-triggered node search palette (null = closed).
+  const [tabPalette, setTabPalette] = useState<{ x: number; y: number } | null>(null);
   const [isSplitting, setIsSplitting] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isBuildingWorkflow, setIsBuildingWorkflow] = useState(false);
@@ -1684,6 +1687,16 @@ export function WorkflowCanvas() {
       return;
     }
 
+    // Tab — open (or close) the searchable node palette at the cursor
+    if (event.key === "Tab") {
+      event.preventDefault();
+      if (isModalOpen) return;
+      const sx = lastMouseScreenPos.x || window.innerWidth / 2;
+      const sy = lastMouseScreenPos.y || window.innerHeight / 2;
+      setTabPalette((prev) => (prev ? null : { x: sx, y: sy }));
+      return;
+    }
+
     // Handle keyboard shortcuts dialog (? key)
     if (event.key === "?" && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
@@ -2015,7 +2028,7 @@ export function WorkflowCanvas() {
           ]);
         });
       }
-  }, [nodes, onNodesChange, copySelectedNodes, pasteNodes, pasteNodesWithInputs, clearClipboard, clipboard, getViewport, addNode, updateNodeData, executeWorkflow, setShortcutsDialogOpen, undo, redo]);
+  }, [nodes, onNodesChange, copySelectedNodes, pasteNodes, pasteNodesWithInputs, clearClipboard, clipboard, getViewport, addNode, updateNodeData, executeWorkflow, setShortcutsDialogOpen, undo, redo, isModalOpen]);
 
   useEffect(() => {
     const trackMouse = (e: MouseEvent) => {
@@ -2600,13 +2613,26 @@ export function WorkflowCanvas() {
         </ViewportPortal>
       </ReactFlow>
 
-      {/* Connection drop menu */}
+      {/* Node search palette — Tab on the canvas */}
+      {tabPalette && (
+        <NodeSearchPalette
+          position={tabPalette}
+          title="Search nodes"
+          onSelect={(type) => {
+            const pos = screenToFlowPosition({ x: tabPalette.x, y: tabPalette.y });
+            addNode(type, pos);
+            setTabPalette(null);
+          }}
+          onClose={() => setTabPalette(null)}
+        />
+      )}
+
+      {/* Node search palette — edge dragged out and released on empty canvas */}
       {connectionDrop && connectionDrop.handleType && (
-        <ConnectionDropMenu
+        <NodeSearchPalette
           position={connectionDrop.position}
-          handleType={connectionDrop.handleType}
-          connectionType={connectionDrop.connectionType}
-          onSelect={handleMenuSelect}
+          title={`Add ${connectionDrop.handleType} node`}
+          onSelect={(type) => handleMenuSelect({ type, isAction: false })}
           onClose={handleCloseDropMenu}
         />
       )}
