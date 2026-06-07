@@ -364,7 +364,13 @@ export function CompModal() {
                     {/* center / pivot handle */}
                     <Circle
                       x={center.x} y={center.y} radius={hpx(6)} fill="rgba(45,212,191,0.3)" stroke={HANDLE} strokeWidth={hpx(1.5)} draggable
-                      onDragMove={(e) => { const P = targetBL(e); patchTransform({ centerAuto: false, centerX: P.x, centerY: P.y }); }}
+                      onDragMove={(e) => {
+                        if (!pieces || !pieces.sX || !pieces.sY) return;
+                        const P = targetBL(e);
+                        // Store the SOURCE pixel under the handle so the pivot
+                        // locks to it as the image moves/scales.
+                        patchTransform({ centerAuto: false, centerX: (P.x - pieces.t[0]) / pieces.sX, centerY: (P.y - pieces.t[1]) / pieces.sY });
+                      }}
                       onDblClick={(e) => { e.cancelBubble = true; patchTransform({ centerAuto: true }); }}
                     />
                   </>
@@ -426,7 +432,12 @@ export function CompModal() {
               <div className="flex items-center gap-1.5 mt-1">
                 <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Center</label>
                 <label className="flex items-center gap-1 text-[10px] text-neutral-400">
-                  <input type="checkbox" checked={activeTransform?.centerAuto ?? true} onChange={(e) => patchTransform({ centerAuto: e.target.checked })} className="accent-teal-500" />
+                  <input type="checkbox" checked={activeTransform?.centerAuto ?? true} onChange={(e) => {
+              if (e.target.checked) patchTransform({ centerAuto: true });
+              // Seed the manual pivot at the image centre (source px) so toggling
+              // off doesn't jump it to a stale/corner value.
+              else patchTransform({ centerAuto: false, centerX: (activeSize?.w ?? 0) / 2, centerY: (activeSize?.h ?? 0) / 2 });
+            }} className="accent-teal-500" />
                   Auto (image center)
                 </label>
               </div>

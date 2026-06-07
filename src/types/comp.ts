@@ -64,7 +64,9 @@ export interface CompTransform {
   scaleY: number;
   scaleLock: boolean;  // Scale Y follows Scale X (uniform scale)
   centerAuto: boolean; // true ⇒ center = image center (from decoded pixel size)
-  centerX: number;     // bottom-left output px, used when centerAuto=false
+  // When centerAuto=false: the pivot's anchor in IMAGE/source px (0..iw, 0..ih),
+  // forward-mapped (scale+translate) so it locks to that pixel as the image moves.
+  centerX: number;
   centerY: number;
 }
 

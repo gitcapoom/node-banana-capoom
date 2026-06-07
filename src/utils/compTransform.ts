@@ -35,23 +35,23 @@ export function reformatScale(reformat: CompReformat, refW: number, refH: number
 
 function pieces(
   tr: CompTransform, sx0: number, sy0: number, iw: number, ih: number,
-  // optional center override (for FG_Alpha follow-FG): forces these center params
-  centerOverride?: { auto: boolean; hPos: number; vPos: number; cx: number; cy: number; baseW: number; baseH: number },
+  // optional absolute output-px center override (for FG_Alpha follow-FG)
+  centerOverride?: { c: [number, number] },
 ): CompPieces {
   const sX = tr.scaleX * sx0;
   const sY = tr.scaleY * sy0;
   const ang = (tr.rotation * Math.PI) / 180;
   let c: [number, number];
   if (centerOverride) {
-    c = centerOverride.auto
-      ? [centerOverride.hPos + centerOverride.baseW / 2, centerOverride.vPos + centerOverride.baseH / 2]
-      : [centerOverride.cx, centerOverride.cy];
+    c = centerOverride.c;
   } else {
-    // Auto center = the PLACED image center. Must use the full scale (sX/sY,
-    // which includes the user scale), not the base reformat size — otherwise the
-    // pivot lands off-centre whenever the image is scaled.
-    const bw = iw * sX, bh = ih * sY;
-    c = tr.centerAuto ? [tr.hPos + bw / 2, tr.vPos + bh / 2] : [tr.centerX, tr.centerY];
+    // The rotation/scale pivot is anchored to a SOURCE pixel of the image and
+    // forward-mapped (scale + translate), so it locks to that pixel as the image
+    // moves or scales. Auto = the image-centre pixel; manual (centerAuto=false) =
+    // the pixel the user assigned (centerX/centerY are in image/source px).
+    const scx = tr.centerAuto ? iw / 2 : tr.centerX;
+    const scy = tr.centerAuto ? ih / 2 : tr.centerY;
+    c = [scx * sX + tr.hPos, scy * sY + tr.vPos];
   }
   return { rot: [Math.cos(ang), Math.sin(ang)], c, t: [tr.hPos, tr.vPos], sX, sY, iw, ih };
 }
@@ -73,12 +73,13 @@ export function computeFollowPieces(
   fg: CompTransform, fgW: number, fgH: number, faReformat: CompReformat, faW: number, faH: number,
 ): CompPieces {
   const [sx0, sy0] = reformatScale(faReformat, fgW, fgH, faW, faH);
-  // Center = FG's center (FG has no reformat ⇒ base rect = fgW×fgH, scaled by
-  // the FG's user scale to match the placed image center).
-  return pieces(fg, sx0, sy0, faW, faH, {
-    auto: fg.centerAuto, hPos: fg.hPos, vPos: fg.vPos, cx: fg.centerX, cy: fg.centerY,
-    baseW: fgW * fg.scaleX, baseH: fgH * fg.scaleY,
-  });
+  // FG_Alpha pivots around the FG's centre. FG has no reformat ⇒ its scale is
+  // fg.scaleX/Y; its centre is the auto (fgW/2) or manually-assigned source pixel,
+  // forward-mapped into output px.
+  const fcx = fg.centerAuto ? fgW / 2 : fg.centerX;
+  const fcy = fg.centerAuto ? fgH / 2 : fg.centerY;
+  const cFg: [number, number] = [fcx * fg.scaleX + fg.hPos, fcy * fg.scaleY + fg.vPos];
+  return pieces(fg, sx0, sy0, faW, faH, { c: cFg });
 }
 
 /** Forward-map a source px (bottom-left) → output px (bottom-left). */
