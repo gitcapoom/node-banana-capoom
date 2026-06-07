@@ -68,6 +68,10 @@ export const THUMB_DISPLAY_FIELDS: Partial<Record<NodeType, ThumbDisplayField[]>
   comp: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs", format: "png" }],
   maskPainter: [{ raw: "outputMask", ref: "outputMaskRef", thumb: "outputMaskThumb", folder: "inputs", format: "png" }],
   roto: [{ raw: "outputMask", ref: "outputMaskRef", thumb: "outputMaskThumb", folder: "inputs", format: "png" }],
+  imageCompare: [
+    { raw: "imageA", ref: "imageARef", thumb: "imageAThumb", folder: "inputs" },
+    { raw: "imageB", ref: "imageBRef", thumb: "imageBThumb", folder: "inputs" },
+  ],
 };
 
 /**
@@ -123,5 +127,9 @@ export const RUN_FULLRES_FIELDS: Partial<Record<NodeType, RunImageField[]>> = {
   roto: [
     { raw: "sourceImage", ref: "sourceImageRef", folder: "inputs" },
     { raw: "outputMask", ref: "outputMaskRef", folder: "inputs" },
+  ],
+  imageCompare: [
+    { raw: "imageA", ref: "imageARef", folder: "inputs" },
+    { raw: "imageB", ref: "imageBRef", folder: "inputs" },
   ],
 };

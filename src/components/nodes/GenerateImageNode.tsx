@@ -66,6 +66,9 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
   // Use stable selector for API keys to prevent unnecessary re-fetches
   const { replicateApiKey, falApiKey, kieApiKey, muapiApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
   const [isLoadingCarouselImage, setIsLoadingCarouselImage] = useState(false);
+  // True when the carousel is parked on a history item whose image file is
+  // missing on disk (so we show a placeholder yet keep the nav controls usable).
+  const [carouselMissing, setCarouselMissing] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -416,23 +419,24 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     const image = await loadImageById(imageItem.id);
     setIsLoadingCarouselImage(false);
 
-    if (image) {
-      // Recall stored settings from the history item
-      const settingsUpdate: Record<string, unknown> = {
-        outputImage: image,
-        selectedHistoryIndex: newIndex,
-      };
-      if (imageItem.prompt !== undefined) settingsUpdate.inputPrompt = imageItem.prompt;
-      if (imageItem.aspectRatio) settingsUpdate.aspectRatio = imageItem.aspectRatio;
-      if (imageItem.model) settingsUpdate.model = imageItem.model;
-      if (imageItem.resolution) settingsUpdate.resolution = imageItem.resolution;
-      if (imageItem.selectedModel) settingsUpdate.selectedModel = imageItem.selectedModel;
-      if (imageItem.parameters) settingsUpdate.parameters = imageItem.parameters;
-      if (imageItem.useGoogleSearch !== undefined) settingsUpdate.useGoogleSearch = imageItem.useGoogleSearch;
-      if (imageItem.useImageSearch !== undefined) settingsUpdate.useImageSearch = imageItem.useImageSearch;
-
-      updateNodeData(id, settingsUpdate);
-    }
+    // Always move to the target item and recall its settings — even if its
+    // image file is missing on disk — so the whole history stays browsable and
+    // missing generations are surfaced instead of the carousel silently
+    // sticking on the last image that happened to load.
+    setCarouselMissing(!image);
+    const settingsUpdate: Record<string, unknown> = {
+      outputImage: image ?? null,
+      selectedHistoryIndex: newIndex,
+    };
+    if (imageItem.prompt !== undefined) settingsUpdate.inputPrompt = imageItem.prompt;
+    if (imageItem.aspectRatio) settingsUpdate.aspectRatio = imageItem.aspectRatio;
+    if (imageItem.model) settingsUpdate.model = imageItem.model;
+    if (imageItem.resolution) settingsUpdate.resolution = imageItem.resolution;
+    if (imageItem.selectedModel) settingsUpdate.selectedModel = imageItem.selectedModel;
+    if (imageItem.parameters) settingsUpdate.parameters = imageItem.parameters;
+    if (imageItem.useGoogleSearch !== undefined) settingsUpdate.useGoogleSearch = imageItem.useGoogleSearch;
+    if (imageItem.useImageSearch !== undefined) settingsUpdate.useImageSearch = imageItem.useImageSearch;
+    updateNodeData(id, settingsUpdate);
   }, [id, nodeData.imageHistory, isLoadingCarouselImage, loadImageById, updateNodeData]);
 
   const handleCarouselPrevious = useCallback(async () => {
@@ -450,6 +454,12 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
     const newIndex = (currentIndex + 1) % history.length;
     await navigateCarousel(newIndex);
   }, [nodeData.imageHistory, nodeData.selectedHistoryIndex, navigateCarousel]);
+
+  // Clear the "missing" placeholder once a real image becomes the output
+  // (a present generation loaded, a fresh generation, or hydration on open).
+  useEffect(() => {
+    if (nodeData.outputImage) setCarouselMissing(false);
+  }, [nodeData.outputImage]);
 
   // Handle model selection from browse dialog
   const handleBrowseModelSelect = useCallback((model: ProviderModel) => {
@@ -936,14 +946,25 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
         <SplitGenerationButton id={id} count={nodeData.imageHistory?.length ?? 0} />
         {/* Preview area */}
-        {nodeData.outputImage ? (
+        {nodeData.outputImage || carouselMissing ? (
           <>
-            <img
-              src={nodeData.outputImage}
-              alt="Generated"
-              className="w-full h-full object-contain cursor-pointer"
-              onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}
-            />
+            {nodeData.outputImage ? (
+              <img
+                src={nodeData.outputImage}
+                alt="Generated"
+                className="w-full h-full object-contain cursor-pointer"
+                onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}
+              />
+            ) : (
+              /* Selected generation's file is missing on disk — placeholder keeps the carousel browsable */
+              <div className="w-full h-full min-h-[112px] flex flex-col items-center justify-center gap-1 bg-neutral-900/40 text-center px-3">
+                <svg className="w-5 h-5 text-amber-400/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l18 18M3 16.5l5.25-5.25a2.25 2.25 0 013.182 0L15 15M21 15V6a1.5 1.5 0 00-1.5-1.5H7.5" />
+                </svg>
+                <span className="text-[10px] text-amber-300/90 font-medium">Generation image missing</span>
+                <span className="text-[9px] text-white/40">file not in generations folder</span>
+              </div>
+            )}
             {/* Loading overlay for generation */}
             {nodeData.status === "loading" && (
               <div className="absolute inset-0 bg-neutral-900/70 flex items-center justify-center">

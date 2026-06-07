@@ -198,6 +198,17 @@ async function externalizeNodeImages(
       break;
     }
 
+    case "imageCompare": {
+      // A/B are full-res mirrors of the connected inputs; externalize them to
+      // /inputs (ref + small thumb) so they don't bloat the workflow JSON.
+      const d = data as import("@/types").ImageCompareNodeData;
+      const next: Record<string, unknown> = { ...d };
+      await externalizeDisplayField(d, next, "imageA", "imageARef", "imageAThumb", workflowPath, savedImageIds, "inputs");
+      await externalizeDisplayField(d, next, "imageB", "imageBRef", "imageBThumb", workflowPath, savedImageIds, "inputs");
+      newData = next as import("@/types").ImageCompareNodeData;
+      break;
+    }
+
     case "nanoBanana": {
       const d = data as import("@/types").NanoBananaNodeData;
       let outputImageRef = d.outputImageRef;
@@ -775,7 +786,8 @@ async function hydrateNodeImages(
     // (image/outputImage…Thumb) drives the preview; full-res loads on demand
     // (double-click / run) via useFullResField + the execution pre-pass.
     case "imageInput":
-    case "annotation": {
+    case "annotation":
+    case "imageCompare": {
       newData = data;
       break;
     }

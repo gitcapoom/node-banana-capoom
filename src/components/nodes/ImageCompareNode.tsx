@@ -30,6 +30,7 @@ export function ImageCompareNode({
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const edges = useWorkflowStore((state) => state.edges);
   const nodes = useWorkflowStore((state) => state.nodes);
+  const loadNodeFullResInputs = useWorkflowStore((state) => state.loadNodeFullResInputs);
 
   const compareMode = nodeData.compareMode || "slide";
   const blendOpacity = nodeData.blendOpacity ?? 0.5;
@@ -81,8 +82,13 @@ export function ImageCompareNode({
 
     if (!b && ambiguous.length > 0) b = ambiguous[0];
 
-    return [a || nodeData.imageA || null, b || nodeData.imageB || null];
-  }, [edges, nodes, id, nodeData.imageA, nodeData.imageB]);
+    // Fall back to the externalized inline thumb when the live edge value and
+    // the (lazy, null-on-open) full-res mirror are both unavailable.
+    return [
+      a || nodeData.imageA || nodeData.imageAThumb || null,
+      b || nodeData.imageB || nodeData.imageBThumb || null,
+    ];
+  }, [edges, nodes, id, nodeData.imageA, nodeData.imageB, nodeData.imageAThumb, nodeData.imageBThumb]);
 
   // Full-screen overlay
   const [showOverlay, setShowOverlay] = useState(false);
@@ -175,6 +181,7 @@ export function ImageCompareNode({
           className="flex-1 relative nodrag nopan nowheel"
           onDoubleClick={(e) => {
             e.stopPropagation();
+            void loadNodeFullResInputs(id); // pull full-res from refs for the fullscreen view
             setShowOverlay(true);
           }}
           title="Double-click to view fullscreen"

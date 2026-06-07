@@ -657,6 +657,12 @@ export interface OutputGalleryNodeData extends BaseNodeData {
 export interface ImageCompareNodeData extends BaseNodeData {
   imageA: string | null;
   imageB: string | null;
+  // Externalized + lazy like other image nodes: full-res saved to /inputs as a
+  // ref, a small inline thumb drives the preview, full-res loads on demand.
+  imageARef?: string;
+  imageBRef?: string;
+  imageAThumb?: string;
+  imageBThumb?: string;
   compareMode: "slide" | "blend" | "difference";
   blendOpacity: number;
 }
