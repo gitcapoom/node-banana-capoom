@@ -48,6 +48,9 @@ export function CompModal() {
   const imageNodeRef = useRef<Konva.Image>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const translateRef = useRef<{ startPL: { x: number; y: number }; startH: number; startV: number } | null>(null);
+  // View-pan drag (independent of layer-transform edits) + arrow-key nudge.
+  const panRef = useRef<{ start: { x: number; y: number }; startPos: { x: number; y: number } } | null>(null);
+  const nudgeRef = useRef<(dx: number, dy: number) => void>(() => {});
   const offscreen = useMemo(() => (typeof document !== "undefined" ? document.createElement("canvas") : null), []);
   // Checkerboard tile for visualizing transparency behind the composite.
   const checkerTile = useMemo(() => {
@@ -119,7 +122,7 @@ export function CompModal() {
 
   // Live preview into the offscreen canvas, rAF-coalesced.
   const previewSig = data
-    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
+    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
     : "";
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
@@ -170,6 +173,12 @@ export function CompModal() {
     [sourceNodeId, data, activeKey, updateNodeData],
   );
 
+  // Latest nudge closure (arrow keys move the active transform by whole pixels).
+  nudgeRef.current = (dx: number, dy: number) => {
+    if (!activeTransform?.enabled) return;
+    patchTransform({ hPos: activeTransform.hPos + dx, vPos: activeTransform.vPos + dy });
+  };
+
   // Active input placement pieces (for handles). Hidden unless enabled.
   const showHandles = !!(activeTransform?.enabled && activeSize && outW && outH);
   const pieces: CompPieces | null = useMemo(() => {
@@ -208,13 +217,30 @@ export function CompModal() {
     const p = t.point(pos);
     return { x: p.x, y: outH - p.y };
   };
+  // Press on empty canvas (not the box / a handle) starts a view pan.
+  const onStageDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (e.target !== stageRef.current) return;
+    const p = stageRef.current?.getPointerPosition();
+    if (!p) return;
+    panRef.current = { start: { x: p.x, y: p.y }, startPos: { x: position.x, y: position.y } };
+  };
   const onStageMove = () => {
+    // View pan takes precedence over a layer-transform drag.
+    if (panRef.current) {
+      const p = stageRef.current?.getPointerPosition();
+      if (!p) return;
+      setPosition({
+        x: panRef.current.startPos.x + (p.x - panRef.current.start.x),
+        y: panRef.current.startPos.y + (p.y - panRef.current.start.y),
+      });
+      return;
+    }
     const d = translateRef.current;
     if (!d) return;
     const p = stagePosBL();
     patchTransform({ hPos: d.startH + (p.x - d.startPL.x), vPos: d.startV + (p.y - d.startPL.y) });
   };
-  const endTranslate = () => { translateRef.current = null; };
+  const endTranslate = () => { translateRef.current = null; panRef.current = null; };
   // Inverse rotation Rᵀ applied to a vector
   const invRot = (p: Pt, c: Pt): Pt => {
     if (!pieces) return p;
@@ -242,7 +268,20 @@ export function CompModal() {
   }, [sourceNodeId, data, srcs, updateNodeData, closeModal]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && isModalOpen) closeModal(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (!isModalOpen) return;
+      if (e.key === "Escape") { closeModal(); return; }
+      // Arrow keys nudge the active transform — ignore while typing in a field.
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.tagName === "SELECT")) return;
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") {
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowUp" ? step : e.key === "ArrowDown" ? -step : 0; // vPos+ = up
+        e.preventDefault();
+        nudgeRef.current(dx, dy);
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isModalOpen, closeModal]);
@@ -333,7 +372,7 @@ export function CompModal() {
       <div className="flex-1 flex min-h-0">
         <div ref={containerRef} className="flex-1 overflow-hidden bg-neutral-900">
           {data.bgImage && offscreen ? (
-            <Stage ref={stageRef} width={stageSize.width} height={stageSize.height} scaleX={scale} scaleY={scale} x={position.x} y={position.y} onWheel={handleWheel} onMouseMove={onStageMove} onMouseUp={endTranslate} onMouseLeave={endTranslate}>
+            <Stage ref={stageRef} width={stageSize.width} height={stageSize.height} scaleX={scale} scaleY={scale} x={position.x} y={position.y} onWheel={handleWheel} onMouseDown={onStageDown} onMouseMove={onStageMove} onMouseUp={endTranslate} onMouseLeave={endTranslate}>
               <Layer listening={false}>
                 {/* transparency backdrop: solid black, or checkerboard if enabled */}
                 {data.checkerboard && checkerTile
@@ -403,6 +442,25 @@ export function CompModal() {
                 />
                 Black outside
               </label>
+            )}
+
+            {/* Per-layer opacity — BG & FG only */}
+            {(activeInput === "bg" || activeInput === "fg") && (
+              <div className="flex items-center gap-2" title="Fade this layer toward transparent before the merge">
+                <label className="text-[11px] text-neutral-400 w-[64px] shrink-0">Opacity</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={(activeInput === "bg" ? data.bgOpacity : data.fgOpacity) ?? 1}
+                  onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, activeInput === "bg" ? { bgOpacity: parseFloat(e.target.value) } : { fgOpacity: parseFloat(e.target.value) })}
+                  className="nodrag flex-1 accent-teal-500"
+                />
+                <span className="text-[10px] text-neutral-400 w-9 text-right tabular-nums">
+                  {Math.round(((activeInput === "bg" ? data.bgOpacity : data.fgOpacity) ?? 1) * 100)}%
+                </span>
+              </div>
             )}
 
             <label className="flex items-center gap-2 text-[11px] text-neutral-300 cursor-pointer">

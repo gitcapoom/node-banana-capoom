@@ -420,6 +420,8 @@ export interface CompRenderParams {
   fgBlackOutside: boolean;
   swapBgFg: boolean;       // swap BG/FG roles (+ their alphas) in the merge
   outputResolution: "bg" | "fg"; // which input's size defines the output
+  bgOpacity: number;       // 0..1, scales BG alpha before the merge
+  fgOpacity: number;       // 0..1, scales FG alpha before the merge
 }
 
 /**
@@ -438,7 +440,7 @@ uniform sampler2D u_ba;
 uniform sampler2D u_fg;
 uniform sampler2D u_fa;
 uniform sampler2D u_mt;
-uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_premultBg, u_bg_bo, u_fg_bo, u_swap;
+uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_premultBg, u_bg_bo, u_fg_bo, u_swap, u_bgOpacity, u_fgOpacity;
 uniform vec2 u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size;
 uniform vec2 u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size;
 uniform vec2 u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size;
@@ -477,6 +479,7 @@ void main() {
     b = bAlphaOwn;
   }
   b *= bgCov;
+  b *= u_bgOpacity;                  // per-layer BG opacity
   if (u_premultBg > 0.5) Brgb = Brgb * b; // premultiply BG by its alpha
 
   // FG
@@ -497,6 +500,7 @@ void main() {
   } else {
     a = fgAlphaOwn * fgCov;
   }
+  a *= u_fgOpacity;                  // per-layer FG opacity
   if (u_premultFg > 0.5) A = A * a; // premultiply FG by its alpha
   A *= fgCov;                        // black-outside / no-coverage ⇒ no FG color
 
@@ -590,6 +594,8 @@ function compUniforms(
     u_bg_bo: params.bgBlackOutside ? 1 : 0,
     u_fg_bo: params.fgBlackOutside ? 1 : 0,
     u_swap: params.swapBgFg ? 1 : 0,
+    u_bgOpacity: params.bgOpacity,
+    u_fgOpacity: params.fgOpacity,
     u_ba_has: ba ? 1 : 0,
     u_fg_has: fg ? 1 : 0,
     u_fa_has: fa ? 1 : 0,

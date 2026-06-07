@@ -102,6 +102,11 @@ export interface CompNodeData extends BaseNodeData {
   premultiplyFg: boolean;
   premultiplyBg: boolean;
 
+  /** Per-layer opacity (0..1). Scales each input's alpha before the merge, so
+   *  the BG / FG can be faded toward transparent independently. */
+  bgOpacity: number;
+  fgOpacity: number;
+
   /** Black-outside (Nuke): where a transformed input doesn't cover, leave it
    *  transparent/black (true) vs. hold the edge pixels (false). */
   bgBlackOutside: boolean;
@@ -162,6 +167,8 @@ export function defaultCompData(): CompNodeData {
     matteReformat: "none",
     premultiplyFg: false,
     premultiplyBg: false,
+    bgOpacity: 1,
+    fgOpacity: 1,
     bgBlackOutside: true,
     fgBlackOutside: true,
     swapBgFg: false,

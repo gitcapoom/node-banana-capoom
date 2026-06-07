@@ -63,6 +63,8 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
     fgBlackOutside: data.fgBlackOutside ?? true,
     swapBgFg: data.swapBgFg ?? false,
     outputResolution: data.outputResolution ?? "bg",
+    bgOpacity: data.bgOpacity ?? 1,
+    fgOpacity: data.fgOpacity ?? 1,
   };
 }
 
@@ -168,9 +170,11 @@ async function compositeFallback(urls: CompInputUrls, data: CompNodeData): Promi
   const ctx = canvas.getContext("2d");
   if (!ctx) return { dataUrl: urls.bg!, outW: W, outH: H };
 
-  // BG, then its external alpha pin (BG_Alpha) if present.
+  // BG (faded by BG opacity), then its external alpha pin (BG_Alpha) if present.
   const bg = await loadImg(urls.bg!);
+  ctx.globalAlpha = data.bgOpacity ?? 1;
   ctx.drawImage(bg, 0, 0, W, H);
+  ctx.globalAlpha = 1;
   if (urls.bgAlpha) applyAlphaMask(ctx, await lumToAlphaCanvas(urls.bgAlpha, W, H));
 
   // FG composited at its own size (with FG_Alpha applied), then drawn transformed.
@@ -191,6 +195,7 @@ async function compositeFallback(urls: CompInputUrls, data: CompNodeData): Promi
         const m = solveAffine(srcTL, [c[0], c[1], c[2]]);
         if (m) {
           ctx.save();
+          ctx.globalAlpha = data.fgOpacity ?? 1;
           ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
           ctx.drawImage(fgCanvas, 0, 0);
           ctx.restore();
