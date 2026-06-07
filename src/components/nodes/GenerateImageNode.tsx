@@ -35,10 +35,10 @@ function reorderColumnFirst<T>(items: T[], cols: number): T[] {
 }
 
 // Base 10 aspect ratios (all Gemini image models)
-const BASE_ASPECT_RATIOS: AspectRatio[] = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+const BASE_ASPECT_RATIOS: AspectRatio[] = ["auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
 
 // Extended 14 aspect ratios (Nano Banana 2 adds extreme ratios)
-const EXTENDED_ASPECT_RATIOS: AspectRatio[] = ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"];
+const EXTENDED_ASPECT_RATIOS: AspectRatio[] = ["auto", "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"];
 
 // Resolutions per model (nano-banana-pro: 1K-4K, nano-banana-2: 512-4K)
 const RESOLUTIONS_PRO: Resolution[] = ["1K", "2K", "4K"];
@@ -606,7 +606,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
                 >
                   {aspectRatios.map((ratio) => (
                     <option key={ratio} value={ratio}>
-                      {ratio}
+                      {ratio === "auto" ? "Auto" : ratio}
                     </option>
                   ))}
                 </select>

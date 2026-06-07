@@ -7,6 +7,7 @@
 
 // Aspect Ratios (all models support the base 10; Nano Banana 2 adds 1:4, 1:8, 4:1, 8:1)
 export type AspectRatio =
+  | "auto"
   | "1:1"
   | "1:4"
   | "1:8"
