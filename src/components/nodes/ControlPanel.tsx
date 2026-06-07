@@ -568,8 +568,12 @@ function GenerateImageControls({ node }: { node: Node }) {
   const isGeminiProvider = currentProvider === "gemini";
   const currentModelId = isGeminiProvider ? (nodeData.selectedModel?.modelId || nodeData.model) : null;
   const supportsResolution = currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2";
+  const supportsAdvanced = currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2";
   const aspectRatios = currentModelId === "nano-banana-2" ? EXTENDED_ASPECT_RATIOS : BASE_ASPECT_RATIOS;
   const resolutions = currentModelId === "nano-banana-2" ? RESOLUTIONS_NB2 : RESOLUTIONS_PRO;
+  const geminiParams = nodeData.parameters || {};
+  const setGeminiParam = (key: string, value: unknown) =>
+    updateNodeData(node.id, { parameters: { ...(nodeData.parameters || {}), [key]: value } });
   const hasExternalProviders = !!(replicateEnabled && replicateApiKey);
 
   return (
@@ -675,6 +679,50 @@ function GenerateImageControls({ node }: { node: Node }) {
                 </label>
               </div>
             )}
+
+            {supportsAdvanced && (() => {
+              const sel = "nodrag nopan w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500";
+              return (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-300 mb-1">Seed</label>
+                      <input type="number" placeholder="random" value={(geminiParams.seed as number | string | undefined) ?? ""}
+                        onChange={(e) => setGeminiParam("seed", e.target.value === "" ? "" : Number(e.target.value))} className={sel} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-300 mb-1">Images</label>
+                      <input type="number" min={1} max={4} value={(geminiParams.numImages as number | undefined) ?? 1}
+                        onChange={(e) => setGeminiParam("numImages", Math.min(4, Math.max(1, Math.round(Number(e.target.value) || 1))))} className={sel} title="Number of images (1–4)" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-300 mb-1">Safety</label>
+                      <select value={(geminiParams.safety as string | undefined) ?? "default"} onChange={(e) => setGeminiParam("safety", e.target.value)} className={sel}>
+                        <option value="default">Default</option>
+                        <option value="none">Block none</option>
+                        <option value="high">Block few (high)</option>
+                        <option value="medium">Block some (med+)</option>
+                        <option value="low">Block most (low+)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-300 mb-1">Thinking</label>
+                      <select value={(geminiParams.thinkingLevel as string | undefined) ?? "default"} onChange={(e) => setGeminiParam("thinkingLevel", e.target.value)} className={sel} title="Reasoning effort (model-dependent)">
+                        <option value="default">Default</option>
+                        <option value="low">Low</option>
+                        <option value="high">High</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-300 mb-1">System Prompt</label>
+                    <textarea value={(geminiParams.systemPrompt as string | undefined) ?? ""} rows={2}
+                      onChange={(e) => setGeminiParam("systemPrompt", e.target.value)} placeholder="Optional system instruction…"
+                      className="nodrag nopan nowheel w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y" />
+                  </div>
+                </>
+              );
+            })()}
           </>
         )}
 
