@@ -430,6 +430,10 @@ interface WorkflowStore {
   // Node operations
   addNode: (type: NodeType, position: XYPosition, initialData?: Partial<WorkflowNodeData>) => string;
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void;
+  /** Set a single ephemeral full-res image field WITHOUT marking the workflow
+   *  dirty or pushing undo. For the zoom LOD: swapping thumb↔full-res is pure
+   *  view state (the field is nulled on save regardless). */
+  setNodeFullResField: (nodeId: string, field: string, value: string | null) => void;
   removeNode: (nodeId: string) => void;
   onNodesChange: (changes: NodeChange<WorkflowNode>[]) => void;
 
@@ -826,6 +830,18 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     if (node?.type === "conditionalSwitch" && ("rules" in data || "evaluationPaused" in data)) {
       get().recomputeDimmedNodes();
     }
+  },
+
+  setNodeFullResField: (nodeId: string, field: string, value: string | null) => {
+    set((state) => ({
+      nodes: state.nodes.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { ...node.data, [field]: value } as WorkflowNodeData }
+          : node
+      ) as WorkflowNode[],
+      // Intentionally NOT setting hasUnsavedChanges / pushing undo — this is an
+      // ephemeral view-only LOD swap; the field is externalized (nulled) on save.
+    }));
   },
 
   removeNode: (nodeId: string) => {

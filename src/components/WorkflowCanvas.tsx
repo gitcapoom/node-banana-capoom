@@ -94,6 +94,7 @@ import { ImageCropModal } from "./ImageCropModal";
 import { browseRegistry } from "@/utils/browseRegistry";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { useThumbBackfill } from "@/hooks/useThumbBackfill";
+import { ZoomLodController } from "@/components/ZoomLodController";
 import { SplitGridSettingsModal } from "./SplitGridSettingsModal";
 import { createPortal } from "react-dom";
 import { useAnnotationStore } from "@/store/annotationStore";
@@ -2470,6 +2471,7 @@ export function WorkflowCanvas() {
         <SharedEdgeGradients />
         <GroupBackgroundsPortal />
         <GroupControlsOverlay />
+        <ZoomLodController />
         <Background color="#404040" gap={20} size={1} />
         <Controls className="bg-neutral-800 border border-neutral-700 rounded-lg shadow-lg [&>button]:bg-neutral-800 [&>button]:border-neutral-700 [&>button]:fill-neutral-300 [&>button:hover]:bg-neutral-700 [&>button:hover]:fill-neutral-100" />
         <MiniMap

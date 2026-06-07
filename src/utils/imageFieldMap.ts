@@ -33,6 +33,24 @@ export interface RunImageField {
   folder: "inputs" | "generations";
 }
 
+/**
+ * The single DISPLAYED full-res field the zoom LOD swaps in/out per node (plain
+ * <img> previews only — GPU color/comp nodes are excluded). When a node is
+ * zoomed past the thumb's resolution its full-res loads from `ref`; on zoom-out
+ * it's released back to the thumb. See ZoomLodController.
+ */
+export const LOD_DISPLAY_FIELD: Partial<Record<NodeType, RunImageField>> = {
+  imageInput: { raw: "image", ref: "imageRef", folder: "inputs" },
+  annotation: { raw: "outputImage", ref: "outputImageRef", folder: "inputs" },
+  imageCrop: { raw: "outputImage", ref: "outputImageRef", folder: "inputs" },
+  mirror: { raw: "outputImage", ref: "outputImageRef", folder: "inputs" },
+  reformat: { raw: "outputImage", ref: "outputImageRef", folder: "inputs" },
+  cubemapEquirect: { raw: "outputImage", ref: "outputImageRef", folder: "inputs" },
+  panoShift: { raw: "outputImage", ref: "outputImageRef", folder: "inputs" },
+  maskPainter: { raw: "outputMask", ref: "outputMaskRef", folder: "inputs" },
+  roto: { raw: "outputMask", ref: "outputMaskRef", folder: "inputs" },
+};
+
 export const THUMB_DISPLAY_FIELDS: Partial<Record<NodeType, ThumbDisplayField[]>> = {
   imageInput: [
     { raw: "image", ref: "imageRef", thumb: "imageThumb", folder: "inputs" },
