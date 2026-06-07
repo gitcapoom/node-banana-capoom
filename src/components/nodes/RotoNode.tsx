@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useRotoStore } from "@/store/rotoStore";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { rasterizeRoto } from "@/utils/rasterizeRoto";
 import { RotoNodeData } from "@/types";
 
 type RotoNodeType = Node<RotoNodeData, "roto">;
@@ -23,6 +24,25 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
       updateNodeData(id, { sourceImage: inputs.images[0] });
     }
   }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
+
+  // Safety net: if the matte is missing (e.g. a stale/lost ref on reload) but
+  // the shapes are intact, regenerate it — the shapes are the source of truth.
+  const regenRef = useRef(false);
+  useEffect(() => {
+    if (regenRef.current) return;
+    if (nodeData.outputMask) return;
+    const shapes = nodeData.shapes;
+    const w = nodeData.imageWidth ?? 0;
+    const h = nodeData.imageHeight ?? 0;
+    if (!shapes || shapes.length === 0 || w <= 0 || h <= 0) return;
+    regenRef.current = true;
+    try {
+      const mask = rasterizeRoto(shapes, w, h, { invert: nodeData.invert });
+      updateNodeData(id, { outputMask: mask, outputMaskRef: undefined });
+    } catch (e) {
+      console.error("RotoNode: failed to regenerate matte from shapes", e);
+    }
+  }, [id, nodeData.outputMask, nodeData.shapes, nodeData.imageWidth, nodeData.imageHeight, nodeData.invert, updateNodeData]);
 
   const handleEdit = useCallback(() => {
     const imageToEdit = nodeData.sourceImage;

@@ -499,6 +499,34 @@ async function externalizeNodeImages(
       break;
     }
 
+    case "roto": {
+      // Externalize the (large) source image + output matte to files, exactly
+      // like maskPainter. The vector `shapes` stay inline (small) and are the
+      // real source of truth — `...d` preserves them and every other field.
+      const d = data as import("@/types").RotoNodeData;
+      let sourceImageRef = d.sourceImageRef;
+      let sourceImage = d.sourceImage;
+      let outputMaskRef = d.outputMaskRef;
+      let outputMask = d.outputMask;
+
+      if (d.sourceImageRef && isBase64DataUrl(d.sourceImage)) {
+        sourceImage = null;
+      } else if (isBase64DataUrl(d.sourceImage)) {
+        sourceImageRef = await saveImageAndGetId(d.sourceImage!, workflowPath, savedImageIds, "inputs");
+        sourceImage = null;
+      }
+
+      if (d.outputMaskRef && isBase64DataUrl(d.outputMask)) {
+        outputMask = null;
+      } else if (isBase64DataUrl(d.outputMask)) {
+        outputMaskRef = await saveImageAndGetId(d.outputMask!, workflowPath, savedImageIds, "inputs");
+        outputMask = null;
+      }
+
+      newData = { ...d, sourceImage, sourceImageRef, outputMask, outputMaskRef };
+      break;
+    }
+
     case "imageCrop": {
       const d = data as import("@/types").ImageCropNodeData;
       let sourceImageRef = d.sourceImageRef;
@@ -1045,6 +1073,22 @@ async function hydrateNodeImages(
         sourceImage,
         outputMask,
       };
+      break;
+    }
+
+    case "roto": {
+      const d = data as import("@/types").RotoNodeData;
+      let sourceImage = d.sourceImage;
+      let outputMask = d.outputMask;
+
+      if (d.sourceImageRef && !d.sourceImage) {
+        sourceImage = await loadImageById(d.sourceImageRef, workflowPath, loadedImages, "inputs");
+      }
+      if (d.outputMaskRef && !d.outputMask) {
+        outputMask = await loadImageById(d.outputMaskRef, workflowPath, loadedImages, "inputs");
+      }
+
+      newData = { ...d, sourceImage, outputMask };
       break;
     }
 
