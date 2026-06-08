@@ -6,6 +6,8 @@
  */
 
 import { generateImageId } from "./imageStorage";
+import { THUMB_DISPLAY_FIELDS } from "./imageFieldMap";
+import type { WorkflowNode, WorkflowNodeData, NodeType } from "@/types";
 
 /**
  * Save media content to the workflow's inputs/ or generations/ folder
@@ -134,5 +136,40 @@ export async function loadMediaById(
   } catch (error) {
     console.warn("Error loading media from disk:", error);
     return null;
+  }
+}
+
+/**
+ * Re-localize image refs on freshly-pasted nodes that came from a DIFFERENT
+ * project. The pasted data carries the SOURCE project's ref ids (`img-…`), but
+ * the files live in the source folder — so load each referenced file from the
+ * source and re-save it into THIS project with a fresh id, then point the node
+ * at the new ref (clearing the inline + thumb so the correct preview
+ * regenerates). Refs the source no longer has are left untouched (no worse than
+ * before). Fire-and-forget / non-blocking.
+ */
+export async function relocalizeNodeImageRefs(
+  newNodes: WorkflowNode[],
+  sourcePath: string | null,
+  destPath: string | null,
+  updateNodeData: (id: string, data: Partial<WorkflowNodeData>) => void,
+): Promise<void> {
+  if (!sourcePath || !destPath || sourcePath === destPath) return;
+  for (const node of newNodes) {
+    const fields = THUMB_DISPLAY_FIELDS[node.type as NodeType];
+    if (!fields) continue;
+    const data = node.data as Record<string, unknown>;
+    for (const f of fields) {
+      const ref = data[f.ref] as string | undefined;
+      if (!ref) continue;
+      try {
+        const content = await loadMediaById(ref, sourcePath, f.folder); // from the SOURCE project
+        if (!content) continue; // source file gone — leave the ref as-is
+        const newRef = await saveMediaImmediately(content, destPath, f.folder); // copy into THIS project, fresh id
+        if (newRef) {
+          updateNodeData(node.id, { [f.raw]: null, [f.ref]: newRef, [f.thumb]: undefined } as Partial<WorkflowNodeData>);
+        }
+      } catch { /* skip this field */ }
+    }
   }
 }

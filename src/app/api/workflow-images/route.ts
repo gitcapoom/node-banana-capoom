@@ -294,6 +294,11 @@ export async function GET(request: NextRequest) {
       if (filePath) break; // Stop searching if file was found
     }
 
+    // Lightweight existence check (used by save-time ref validation) — no file read.
+    if (request.nextUrl.searchParams.get("check") === "1") {
+      return NextResponse.json({ success: true, exists: !!filePath });
+    }
+
     if (!filePath) {
       // Return 200 with success: false to avoid Next.js error overlay
       // Missing files are expected when workflow refs point to deleted/moved images

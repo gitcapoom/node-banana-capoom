@@ -31,6 +31,7 @@ import {
 import { useToast } from "@/components/Toast";
 import { logger } from "@/utils/logger";
 import { externalizeWorkflowImages, hydrateWorkflowImages } from "@/utils/imageStorage";
+import { relocalizeNodeImageRefs } from "@/utils/mediaStorage";
 import { EditOperation, applyEditOperations as executeEditOps } from "@/lib/chat/editOperations";
 import {
   loadSaveConfigs,
@@ -330,6 +331,9 @@ export interface WorkflowFile {
 interface ClipboardData {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  // Project the nodes were copied FROM — so paste into a different project can
+  // re-localize image refs (copy the referenced files into the new project).
+  sourceDirectoryPath?: string | null;
 }
 
 // Snapshot for undo/redo history
@@ -981,7 +985,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     const clonedNodes = JSON.parse(JSON.stringify(selectedNodes)) as WorkflowNode[];
     const clonedEdges = JSON.parse(JSON.stringify(connectedEdges)) as WorkflowEdge[];
 
-    set({ clipboard: { nodes: clonedNodes, edges: clonedEdges } });
+    set({ clipboard: { nodes: clonedNodes, edges: clonedEdges, sourceDirectoryPath: get().saveDirectoryPath } });
   },
 
   pasteNodes: (offset: XYPosition = { x: 50, y: 50 }) => {
@@ -1044,6 +1048,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       edges: [...edges, ...newEdges],
       hasUnsavedChanges: true,
     });
+
+    // If pasted from a DIFFERENT project, copy the referenced image files into
+    // this project and re-point the refs (fire-and-forget; previews fill in as
+    // it runs). Without this, pasted nodes point at files in the source project.
+    void relocalizeNodeImageRefs(newNodes, clipboard.sourceDirectoryPath ?? null, get().saveDirectoryPath, get().updateNodeData);
 
     // Fix React Flow selection race condition: After paste, React Flow's internal
     // reconciliation may fire onNodesChange with stale selection state that re-selects
@@ -1132,6 +1141,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       edges: [...edges, ...internalEdges, ...inputEdges],
       hasUnsavedChanges: true,
     });
+
+    // If pasted from a DIFFERENT project, copy the referenced image files into
+    // this project and re-point the refs (fire-and-forget). Without this, pasted
+    // nodes point at files that live in the source project's folder.
+    void relocalizeNodeImageRefs(newNodes, clipboard.sourceDirectoryPath ?? null, get().saveDirectoryPath, get().updateNodeData);
 
     // Fix selection race condition
     const newNodeIdSet = new Set(newNodes.map(n => n.id));

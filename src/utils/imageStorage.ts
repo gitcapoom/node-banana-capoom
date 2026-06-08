@@ -60,6 +60,23 @@ function isBase64DataUrl(str: string | null | undefined): str is string {
 }
 
 /**
+ * Cheap existence check: is `<workflowPath>/<folder>/<ref>.*` actually present in
+ * THIS project? Used at save-time so a ref carried in from another project (via
+ * copy-paste) gets re-saved here instead of left dangling.
+ */
+async function imageRefExists(workflowPath: string, ref: string, folder: "inputs" | "generations"): Promise<boolean> {
+  try {
+    const params = new URLSearchParams({ workflowPath, imageId: ref, folder, check: "1" });
+    const res = await fetch(`/api/workflow-images?${params.toString()}`);
+    if (!res.ok) return false;
+    const j = await res.json();
+    return !!j.exists;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Externalize a NON-displayed image field: full-res data URL → file ref, no
  * thumbnail. For fields not shown in a node preview (color/mask/roto
  * `sourceImage`, comp's input mirrors). Mutates `next`.
@@ -76,7 +93,13 @@ async function externalizeRefField(
   const raw = d[rawKey] as string | null | undefined;
   const existingRef = d[refKey] as string | undefined;
   if (existingRef && isBase64DataUrl(raw)) {
-    next[rawKey] = null;
+    if (await imageRefExists(workflowPath, existingRef, folder)) {
+      next[rawKey] = null; // ref valid here — keep it
+    } else {
+      // Foreign ref (e.g. pasted from another project) — re-save into THIS project.
+      next[refKey] = await saveImageAndGetId(raw, workflowPath, savedImageIds, folder);
+      next[rawKey] = null;
+    }
   } else if (isBase64DataUrl(raw)) {
     next[refKey] = await saveImageAndGetId(raw, workflowPath, savedImageIds, folder);
     next[rawKey] = null;
@@ -106,15 +129,16 @@ async function externalizeDisplayField(
 ): Promise<void> {
   const raw = d[rawKey] as string | null | undefined;
   const existingRef = d[refKey] as string | undefined;
-  if (existingRef && isBase64DataUrl(raw)) {
-    // Hydrated/loaded full-res that already has a matching ref — keep the ref,
-    // just make sure a thumb exists, then drop the heavy inline data.
+  if (existingRef && isBase64DataUrl(raw) && await imageRefExists(workflowPath, existingRef, folder)) {
+    // Hydrated/loaded full-res that already has a matching ref IN THIS PROJECT —
+    // keep the ref, just make sure a thumb exists, then drop the heavy inline data.
     if (!d[thumbKey]) {
       try { next[thumbKey] = await createImageThumbnail(raw, 384, 0.72, thumbFormat); } catch { /* leave thumb unset */ }
     }
     next[rawKey] = null;
   } else if (isBase64DataUrl(raw)) {
-    // New / changed full-res — (re)generate the thumb and save a fresh ref.
+    // New / changed full-res, OR a foreign ref (pasted from another project whose
+    // file isn't here) — (re)generate the thumb and save a fresh ref in THIS project.
     try { next[thumbKey] = await createImageThumbnail(raw, 384, 0.72, thumbFormat); } catch { /* leave thumb unset */ }
     next[refKey] = await saveImageAndGetId(raw, workflowPath, savedImageIds, folder);
     next[rawKey] = null;
