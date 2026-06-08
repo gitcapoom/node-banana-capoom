@@ -644,19 +644,20 @@ async function externalizeNodeImages(
     }
 
     case "comp": {
-      // Comp mirrors up to 5 input images + an output, all big data URLs.
-      // Externalize them all (content-hash dedup means a mirrored input that
-      // equals its upstream's output shares one file, no duplication).
       const d = data as import("@/types").CompNodeData;
       const next: Record<string, unknown> = { ...d };
-      // The 5 input mirrors aren't shown in the preview (re-derived from upstream
-      // on open/run) → ref only. The composited output is the displayed field →
-      // ref + inline PNG thumb (alpha-preserving).
-      await externalizeRefField(d, next, "bgImage", "bgImageRef", workflowPath, savedImageIds, "inputs");
-      await externalizeRefField(d, next, "bgAlphaImage", "bgAlphaImageRef", workflowPath, savedImageIds, "inputs");
-      await externalizeRefField(d, next, "fgImage", "fgImageRef", workflowPath, savedImageIds, "inputs");
-      await externalizeRefField(d, next, "fgAlphaImage", "fgAlphaImageRef", workflowPath, savedImageIds, "inputs");
-      await externalizeRefField(d, next, "matteImage", "matteImageRef", workflowPath, savedImageIds, "inputs");
+      // The 5 input mirrors are re-derived from the connected upstream nodes on
+      // open / run (their pixels are already persisted by those upstream nodes),
+      // so we must NOT persist them here. CompNode clears each input's ref every
+      // time it re-mirrors, so externalizing them re-saved a fresh copy on every
+      // save — steadily bloating the inputs folder with orphaned duplicates.
+      // Drop them; the node + executor rebuild them from the edges.
+      next.bgImage = null; next.bgImageRef = undefined;
+      next.bgAlphaImage = null; next.bgAlphaImageRef = undefined;
+      next.fgImage = null; next.fgImageRef = undefined;
+      next.fgAlphaImage = null; next.fgAlphaImageRef = undefined;
+      next.matteImage = null; next.matteImageRef = undefined;
+      // The composited output IS displayed → keep it (ref + inline PNG thumb).
       await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs", "png");
       newData = next as import("@/types").CompNodeData;
       break;
