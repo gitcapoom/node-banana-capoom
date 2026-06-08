@@ -699,7 +699,8 @@ async function saveImageAndGetId(
 ): Promise<string> {
   // Use MD5 hash for reliable deduplication (consistent with save-generation API, Phase 13 decision)
   // Include folder in hash so same image in different folders gets different IDs
-  const hash = `${folder}-${computeContentHash(imageData)}`;
+  const contentHash = computeContentHash(imageData);
+  const hash = `${folder}-${contentHash}`;
 
   // Skip deduplication if an explicit ID is requested - we must use that exact ID
   // to maintain consistency with imageHistory. Otherwise, deduplicate by content.
@@ -712,8 +713,12 @@ async function saveImageAndGetId(
     return inFlightSaves.get(hash)!;
   }
 
-  // Use existing ID if provided (for consistency with imageHistory), otherwise generate new
-  const imageId = existingId || generateImageId();
+  // Use existing ID if provided (for consistency with imageHistory). Otherwise
+  // derive the id from the CONTENT (content-addressed): identical content always
+  // maps to one file, so nodes that re-mirror + re-save the same input on every
+  // save (color/contrast/hsv/annotation/crop) reuse that file instead of piling
+  // up duplicate copies in the folder.
+  const imageId = existingId || `img-${contentHash}`;
 
   const savePromise = (async () => {
     const response = await fetchWithTimeout(
