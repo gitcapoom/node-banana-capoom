@@ -92,7 +92,10 @@ export function Image2GSNode({ id, data, selected }: NodeProps<Image2GSNodeType>
     // hand the Splat Viewer a dangling blob. A non-blob (server) URL stays valid.
     if (nodeData.output3dUrl && !nodeData.output3dUrl.startsWith("blob:")) return;
     if (!nodeData.model3dHistory || nodeData.model3dHistory.length === 0) return;
-    if (!generationsPath) return;
+    // savedFilePath (persisted, absolute) is enough — load3DById reads from its
+    // folder, so re-hydration works even when the store lost generationsPath on
+    // reload (otherwise the stale blob: URL reaches the viewer → Failed to fetch).
+    if (!generationsPath && !nodeData.savedFilePath) return;
     hydrationAttemptedRef.current = true;
     const item = nodeData.model3dHistory[nodeData.selectedModel3dHistoryIndex || 0];
     if (item) {
@@ -100,7 +103,7 @@ export function Image2GSNode({ id, data, selected }: NodeProps<Image2GSNodeType>
         if (url) updateNodeData(id, { output3dUrl: url });
       });
     }
-  }, [nodeData.output3dUrl, nodeData.model3dHistory, nodeData.selectedModel3dHistoryIndex, generationsPath, id, load3DById, updateNodeData]);
+  }, [nodeData.output3dUrl, nodeData.model3dHistory, nodeData.selectedModel3dHistoryIndex, nodeData.savedFilePath, generationsPath, id, load3DById, updateNodeData]);
 
   // ─── Load camera.json directly (manual) → Focal/Aperture ────────────────
   const handleLoadCameraJson = useCallback(
