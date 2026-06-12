@@ -21,7 +21,7 @@ import { generateWithWaveSpeed } from "./providers/wavespeed";
 import { generateWithMuapi } from "./providers/muapi";
 import { wantsSSE, createSSEStream, SSE_HEADERS } from "./utils/sse";
 import { calculateGenerationCost } from "@/utils/costCalculator";
-import { compressAllImages } from "./utils/imageCompression";
+import { compressAllImages, compressLargeImages } from "./utils/imageCompression";
 import { isImageSizeError } from "./utils/sizeErrorDetection";
 
 // Re-export for backward compatibility (test file imports from route)
@@ -114,6 +114,9 @@ async function retryWithCompressedImages(
       const compressed = await compressAllImages(images, dynamicInputs);
       return generateFn(compressed.images, compressed.dynamicInputs);
     }
+    // Not a size error — log the full stack so non-obvious failures (e.g. a
+    // RangeError / "Maximum call stack size exceeded") can be pinpointed.
+    console.error(`[API:${requestId}] generateFn threw (non-size):`, error instanceof Error ? (error.stack || error.message) : error);
     throw error;
   }
 
@@ -142,8 +145,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: MultiProviderGenerateRequest = await request.json();
+    // images / dynamicInputs are `let` so the proactive compression pass below
+    // can swap in shrunk versions before any provider dispatch.
+    let { images, dynamicInputs } = body;
     const {
-      images,
       prompt,
       model = "nano-banana-pro",
       aspectRatio,
@@ -152,7 +157,6 @@ export async function POST(request: NextRequest) {
       useImageSearch,
       selectedModel,
       parameters,
-      dynamicInputs,
       mediaType,
     } = body;
 
@@ -178,6 +182,22 @@ export async function POST(request: NextRequest) {
         },
         { status: 400 }
       );
+    }
+
+    // Proactively shrink oversized images BEFORE dispatch so very large inputs
+    // don't blow inline-payload limits / cause provider deadlines (Gemini sends
+    // images inline). Only images above the threshold are touched; on failure
+    // we keep the originals (the reactive size-error retry still applies).
+    const PROACTIVE_MAX_BYTES = Number(process.env.GENERATE_IMAGE_MAX_BYTES) || 8 * 1024 * 1024;
+    try {
+      const pre = await compressLargeImages(images || [], dynamicInputs, PROACTIVE_MAX_BYTES);
+      if (pre.compressedCount > 0) {
+        console.log(`[API:${requestId}] Proactively compressed ${pre.compressedCount} oversized image(s) (> ${(PROACTIVE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB)`);
+        images = pre.images;
+        dynamicInputs = pre.dynamicInputs;
+      }
+    } catch (e) {
+      console.warn(`[API:${requestId}] Proactive image compression skipped (continuing with originals): ${e instanceof Error ? e.message : String(e)}`);
     }
 
     // Determine which provider to use
@@ -721,6 +741,11 @@ export async function POST(request: NextRequest) {
     }
 
     console.error(`[API:${requestId}] Generation error: ${errorMessage}${errorDetails ? ` (${errorDetails.substring(0, 200)})` : ""}`);
+    // Full stack helps pinpoint non-obvious failures (e.g. a RangeError /
+    // "Maximum call stack size exceeded" whose frame isn't in the message).
+    if (error instanceof Error && error.stack) {
+      console.error(`[API:${requestId}] Stack:`, error.stack);
+    }
     return NextResponse.json<GenerateResponse>(
       {
         success: false,

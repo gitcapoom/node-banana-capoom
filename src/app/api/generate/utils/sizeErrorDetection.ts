@@ -13,7 +13,7 @@ const SIZE_ERROR_PATTERNS = [
   /request entity too large/i,
   /size.?limit/i,
   /exceeds.*limit/i,
-  /maximum.*size/i,
+  /maximum.*\b(file|image|payload|request|upload|content)\b.*size/i,
   /upload.*limit/i,
   /content.*too.*large/i,
   /image.*too.*big/i,
@@ -24,8 +24,15 @@ const SIZE_ERROR_PATTERNS = [
 
 /**
  * Check if an error message indicates an image/file size issue.
+ *
+ * Guard first against JS engine errors whose text merely contains the word
+ * "size" — most importantly "Maximum call stack size exceeded" (a RangeError
+ * from recursion/large in-memory ops, NOT an upload-size limit). Treating those
+ * as size errors caused a pointless image-compression retry that masked the
+ * real bug.
  */
 export function isImageSizeError(errorMessage: string): boolean {
+  if (/call stack|stack size|recursion|RangeError/i.test(errorMessage)) return false;
   return SIZE_ERROR_PATTERNS.some((pattern) => pattern.test(errorMessage));
 }
 

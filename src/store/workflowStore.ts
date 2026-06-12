@@ -1983,6 +1983,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       // Group selected nodes by dependency level for ordered execution
       const levels = groupNodesByLevel(nodesToExecute, selectedEdges);
 
+      // Collect per-node failures across the whole run so one node's error
+      // (e.g. a transient provider 503) doesn't abort the rest.
+      const nodeFailures: string[] = [];
+
       // Execute levels sequentially, nodes within each level in parallel batches
       for (const level of levels) {
         if (abortController.signal.aborted || !get().isRunning) break;
@@ -2011,21 +2015,25 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
             batch.map((node) => executeNode(node, abortController.signal))
           );
 
-          // Check for failures, filtering out AbortErrors
-          const failed = results.find(
-            (r): r is PromiseRejectedResult =>
+          // Collect per-node failures (excluding user-cancel AbortErrors) but
+          // KEEP GOING — one node's transient error (e.g. a provider 503)
+          // shouldn't abort the whole run. Each failed node already shows its
+          // own error state; nodes downstream of a failed one surface their own
+          // missing-input error when they execute.
+          results.forEach((r, i) => {
+            if (
               r.status === 'rejected' &&
               !(r.reason instanceof DOMException && r.reason.name === 'AbortError')
-          );
-
-          if (failed) {
-            logger.error('node.error', 'Node execution failed in batch', {
-              level: level.level,
-              error: failed.reason instanceof Error ? failed.reason.message : String(failed.reason),
-            });
-            abortController.abort();
-            throw failed.reason;
-          }
+            ) {
+              const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+              nodeFailures.push(batch[i].id);
+              logger.error('node.error', 'Node execution failed in batch (continuing)', {
+                level: level.level,
+                nodeId: batch[i].id,
+                error: msg,
+              });
+            }
+          });
         }
       }
 
@@ -2078,7 +2086,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         }
       }
 
-      logger.info('node.execution', 'Selected nodes execution completed successfully');
+      if (nodeFailures.length > 0) {
+        logger.info('node.execution', `Selected nodes execution completed with ${nodeFailures.length} failure(s)`, { failedNodeIds: nodeFailures });
+        useToast.getState().show(
+          `${nodeFailures.length} node${nodeFailures.length === 1 ? '' : 's'} failed — see the highlighted node(s) for details.`,
+          "error"
+        );
+      } else {
+        logger.info('node.execution', 'Selected nodes execution completed successfully');
+      }
       set({ isRunning: false, currentNodeIds: [], _abortController: null });
 
       saveLogSession();

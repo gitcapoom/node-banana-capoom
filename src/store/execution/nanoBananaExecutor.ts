@@ -319,7 +319,14 @@ export async function executeNanoBanana(
     } else if (error instanceof TypeError) {
       errorMessage = `Network error: ${error.message}`;
     } else if (error instanceof Error) {
-      errorMessage = error.message;
+      const raw = error.message;
+      if (/UNAVAILABLE|Deadline expired|\b503\b|overloaded|temporarily unavailable/i.test(raw)) {
+        errorMessage = "The image model is temporarily unavailable — please retry in a moment.";
+      } else if (/call stack|stack size|RangeError/i.test(raw)) {
+        errorMessage = "Internal error: this request was too complex to process. Try fewer or smaller inputs.";
+      } else {
+        errorMessage = raw;
+      }
     }
 
     updateNodeData(node.id, {

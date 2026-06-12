@@ -204,16 +204,23 @@ export async function uploadImageToFal(base64DataUrl: string, apiKey: string | n
   // Already a URL, not base64
   if (!base64DataUrl.startsWith("data:")) return base64DataUrl;
 
-  const match = base64DataUrl.match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) return base64DataUrl;
+  // Parse "data:<mime>;base64,<data>" with string ops, NOT a regex. A greedy
+  // `(.+)` capture group overflows V8's regex stack on very large strings —
+  // ~28 MB images threw "Maximum call stack size exceeded" here. The header is
+  // short, so a small anchored regex on it is safe.
+  const comma = base64DataUrl.indexOf(",");
+  if (comma < 0) return base64DataUrl;
+  const header = base64DataUrl.slice(0, comma);
+  if (!/;base64$/i.test(header)) return base64DataUrl;
+  const contentType = header.slice(5, header.indexOf(";")); // strip leading "data:"
+  const base64 = base64DataUrl.slice(comma + 1);
 
-  const estimatedBytes = Math.ceil(match[2].length * 3 / 4);
+  const estimatedBytes = Math.ceil(base64.length * 3 / 4);
   if (estimatedBytes > MAX_UPLOAD_SIZE) {
     throw new Error(`Image too large to upload (${(estimatedBytes / (1024 * 1024)).toFixed(1)} MB, max ${MAX_UPLOAD_SIZE / (1024 * 1024)} MB)`);
   }
 
-  const contentType = match[1];
-  const binaryData = Buffer.from(match[2], "base64");
+  const binaryData = Buffer.from(base64, "base64");
 
   const authHeaders: Record<string, string> = {};
   if (apiKey) authHeaders["Authorization"] = `Key ${apiKey}`;

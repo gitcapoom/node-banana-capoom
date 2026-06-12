@@ -22,11 +22,15 @@ export async function compressImage(dataUrl: string): Promise<string> {
   // Only process base64 image data URLs
   if (!dataUrl.startsWith("data:image/")) return dataUrl;
 
-  const match = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
-  if (!match) return dataUrl;
-
-  const mimeType = match[1];
-  const base64Data = match[2];
+  // Parse with string ops, NOT a regex — a greedy `(.+)` capture overflows
+  // V8's regex stack on very large strings (e.g. 28 MB images → RangeError
+  // "Maximum call stack size exceeded").
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return dataUrl;
+  const header = dataUrl.slice(0, comma);
+  if (!/;base64$/i.test(header)) return dataUrl;
+  const mimeType = header.slice(5, header.indexOf(";")); // strip leading "data:"
+  const base64Data = dataUrl.slice(comma + 1);
   const buffer = Buffer.from(base64Data, "base64");
   const originalSize = buffer.length;
 
@@ -100,4 +104,60 @@ export async function compressAllImages(
   }
 
   return { images: compressedImages, dynamicInputs: compressedDynamic };
+}
+
+/** Estimate the decoded byte size of a base64 data URL without decoding it. */
+export function estimatedImageBytes(dataUrl: string): number {
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:")) return 0;
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return 0;
+  return Math.ceil((dataUrl.length - comma - 1) * 3 / 4);
+}
+
+/**
+ * Proactively compress ONLY the images whose decoded size exceeds `maxBytes`,
+ * leaving smaller images untouched (no needless quality loss). Used as a
+ * pre-pass before provider dispatch so very large inputs don't blow inline
+ * payload limits / cause deadlines (Gemini sends images inline, uncompressed).
+ *
+ * Covers both the `images` array and any image values inside `dynamicInputs`
+ * (string or string[]). Returns `compressedCount` so the caller can log/skip.
+ */
+export async function compressLargeImages(
+  images: string[],
+  dynamicInputs: Record<string, string | string[]> | undefined,
+  maxBytes: number
+): Promise<{
+  images: string[];
+  dynamicInputs?: Record<string, string | string[]>;
+  compressedCount: number;
+}> {
+  let compressedCount = 0;
+  const maybeCompress = async (v: string): Promise<string> => {
+    if (v.startsWith("data:image/") && estimatedImageBytes(v) > maxBytes) {
+      compressedCount++;
+      return compressImage(v);
+    }
+    return v;
+  };
+
+  const outImages = await Promise.all(images.map((img) => maybeCompress(img)));
+
+  let outDynamic: Record<string, string | string[]> | undefined;
+  if (dynamicInputs) {
+    outDynamic = {};
+    for (const [key, value] of Object.entries(dynamicInputs)) {
+      if (typeof value === "string") {
+        outDynamic[key] = await maybeCompress(value);
+      } else if (Array.isArray(value)) {
+        outDynamic[key] = await Promise.all(
+          value.map((v) => (typeof v === "string" ? maybeCompress(v) : v))
+        );
+      } else {
+        outDynamic[key] = value;
+      }
+    }
+  }
+
+  return { images: outImages, dynamicInputs: outDynamic, compressedCount };
 }
