@@ -236,8 +236,15 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    // Normalize separators for the local filesystem. URLs commonly use
+    // forward-slash UNC (//server/share/…); Windows `fs` only opens the native
+    // backslash form (\\server\share\…) — forward slashes throw an opaque
+    // "UNKNOWN" error. Validation above ran on the original path, so `..`
+    // traversal is still caught.
+    const nativePath = path.normalize(filePath);
+
     // Read and parse the workflow file
-    const content = await fs.readFile(filePath, 'utf-8');
+    const content = await fs.readFile(nativePath, 'utf-8');
     const workflow = JSON.parse(content);
 
     // Basic validation that it's a workflow file
@@ -258,8 +265,8 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({
       success: true,
       workflow,
-      directoryPath: dirPath,
-      fileName: path.basename(filePath, '.json'),
+      directoryPath: path.dirname(nativePath),
+      fileName: path.basename(nativePath, '.json'),
     });
   } catch (error) {
     logger.error('file.error', 'Failed to open workflow by path', {
