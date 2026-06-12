@@ -140,20 +140,56 @@ export async function generateWithGemini(
 
   console.log(`[API:${requestId}] Config: ${JSON.stringify(config)}`);
 
-  // Make request to Gemini
+  // Make request to Gemini — retry transient upstream failures (503 /
+  // UNAVAILABLE / "Deadline expired" / 429 / 5xx) with exponential backoff.
+  // The SDK does not retry these on its own, so a single blip would otherwise
+  // fail the node (and, in a batch, abort the whole run).
   const geminiStartTime = Date.now();
 
-  const response = await ai.models.generateContent({
-    model: MODEL_MAP[model],
-    contents: [
-      {
-        role: "user",
-        parts: requestParts,
-      },
-    ],
-    config,
-    ...(tools.length > 0 && { tools }),
-  });
+  // Note: 429 / RESOURCE_EXHAUSTED (rate limit) is intentionally NOT here — it
+  // has its own handler downstream ("Rate limit reached", HTTP 429).
+  const TRANSIENT_GEMINI = /\b(500|502|503|504)\b|UNAVAILABLE|Deadline expired|overloaded|temporarily unavailable/i;
+  const MAX_ATTEMPTS = 3;
+  let response: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      response = await ai.models.generateContent({
+        model: MODEL_MAP[model],
+        contents: [{ role: "user", parts: requestParts }],
+        config,
+        ...(tools.length > 0 && { tools }),
+      });
+      break;
+    } catch (err) {
+      const m = err instanceof Error ? err.message : String(err);
+      const transient = TRANSIENT_GEMINI.test(m);
+      if (transient && attempt < MAX_ATTEMPTS) {
+        const delay = 1000 * Math.pow(2, attempt - 1); // 1s, 2s
+        console.warn(`[API:${requestId}] Gemini transient error (attempt ${attempt}/${MAX_ATTEMPTS}), retrying in ${delay}ms: ${m.slice(0, 120)}`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      if (transient) {
+        // Exhausted retries on a transient failure → friendly message.
+        console.error(`[API:${requestId}] Gemini unavailable after ${MAX_ATTEMPTS} attempts: ${m.slice(0, 200)}`);
+        return NextResponse.json<GenerateResponse>(
+          {
+            success: false,
+            error: "The image model is temporarily unavailable (the provider returned 503 / overloaded). Please try again in a moment.",
+          },
+          { status: 503 }
+        );
+      }
+      // Non-transient (rate-limit 429, auth, bad request, …) — let the route's
+      // existing error handling deal with it unchanged.
+      throw err;
+    }
+  }
+
+  if (!response) {
+    throw new Error("Gemini returned no response");
+  }
 
   const geminiDuration = Date.now() - geminiStartTime;
   console.log(`[API:${requestId}] Gemini API completed in ${geminiDuration}ms`);

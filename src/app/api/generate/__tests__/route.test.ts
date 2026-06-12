@@ -556,7 +556,7 @@ describe("/api/generate route", () => {
 
       expect(response.status).toBe(500);
       expect(data.success).toBe(false);
-      expect(data.error).toBe("No content in response");
+      expect(data.error).toBe("No image in response");
     });
 
     it("should handle response with empty parts array", async () => {
