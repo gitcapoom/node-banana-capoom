@@ -159,6 +159,25 @@ export function ImageCropModal() {
     [image, cropRegion, setAspectLock, setCropRegion]
   );
 
+  // "AD" preset — horizontal resolution = source width ÷ 3 × 2; vertical
+  // resolution = 16:9 of that horizontal resolution; crop centered. Computed
+  // in source pixels, then stored as a relative (0–1) region.
+  const handleAdPreset = useCallback(() => {
+    if (!image) return;
+    const srcW = image.width;
+    const srcH = image.height;
+    const hRes = (srcW / 3) * 2;   // horizontal resolution
+    const vRes = hRes * (9 / 16);  // 16:9 of the horizontal resolution
+    let w = hRes / srcW;           // relative width (= 2/3)
+    let h = vRes / srcH;           // relative height
+    if (h > 1) {                   // ultra-wide source: keep 16:9, fit to height
+      h = 1;
+      w = (srcH * (16 / 9)) / srcW;
+    }
+    setAspectLock("16:9");
+    setCropRegion({ x: (1 - w) / 2, y: (1 - h) / 2, width: w, height: h });
+  }, [image, setAspectLock, setCropRegion]);
+
   const handleApply = useCallback(async () => {
     if (!sourceNodeId) return;
 
@@ -294,6 +313,20 @@ export function ImageCropModal() {
                 {p.label}
               </button>
             ))}
+          </div>
+
+          <div className="w-px h-6 bg-neutral-700 mx-3" />
+
+          {/* Quick presets */}
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-neutral-500 uppercase tracking-wide mr-1">Preset</span>
+            <button
+              onClick={handleAdPreset}
+              className="px-2.5 py-1 text-xs rounded transition-colors bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+              title="AD: source width ÷3 ×2 wide, 16:9 tall, centered"
+            >
+              AD
+            </button>
           </div>
 
           <div className="w-px h-6 bg-neutral-700 mx-3" />
