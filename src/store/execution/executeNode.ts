@@ -34,6 +34,7 @@ import {
 import { executeNanoBanana } from "./nanoBananaExecutor";
 import { executeGenerateVideo } from "./generateVideoExecutor";
 import { executeGenerate3D } from "./generate3dExecutor";
+import { executeImage2GS } from "./image2gsExecutor";
 import { executeLlmGenerate } from "./llmGenerateExecutor";
 import { executeSplitGrid } from "./splitGridExecutor";
 import { executeVideoStitch, executeEaseCurve, executeVideoTrim, executeVideoFrameGrab } from "./videoProcessingExecutors";
@@ -97,6 +98,9 @@ export async function executeNode(
       break;
     case "generate3d":
       await executeGenerate3D(ctx, regenOpts);
+      break;
+    case "image2GS":
+      await executeImage2GS(ctx);
       break;
     case "llmGenerate":
       await executeLlmGenerate(ctx, regenOpts);

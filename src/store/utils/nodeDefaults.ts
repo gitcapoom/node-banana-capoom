@@ -10,6 +10,7 @@ import {
   NanoBananaNodeData,
   GenerateVideoNodeData,
   Generate3DNodeData,
+  Image2GSNodeData,
   WorldLabsPanoNodeData,
   WorldLabsWorldNodeData,
   GenerateAudioNodeData,
@@ -65,6 +66,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   nanoBanana: { width: 300, height: 300 },
   generateVideo: { width: 300, height: 300 },
   generate3d: { width: 300, height: 300 },
+  image2GS: { width: 320, height: 440 },
   generateAudio: { width: 300, height: 280 },
   llmGenerate: { width: 320, height: 360 },
   splitGrid: { width: 300, height: 320 },
@@ -563,5 +565,22 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         shiftX: 0,
         outputImage: null,
       } as PanoShiftNodeData;
+    case "image2GS":
+      return {
+        inputImages: [],
+        depthChannels: [],
+        selectedDepthChannel: null,
+        focalLengthMm: 24,
+        apertureMm: 36,
+        fPxOverride: null,
+        blendAlpha: 0.4,
+        output3dUrl: null,
+        savedFilename: null,
+        savedFilePath: null,
+        status: "idle",
+        error: null,
+        model3dHistory: [],
+        selectedModel3dHistoryIndex: 0,
+      } as Image2GSNodeData;
   }
 };

@@ -33,6 +33,7 @@ import {
   GenerateImageNode,
   GenerateVideoNode,
   Generate3DNode,
+  Image2GSNode,
   GenerateAudioNode,
   LLMGenerateNode,
   SplitGridNode,
@@ -109,6 +110,7 @@ const nodeTypes: NodeTypes = {
   nanoBanana: GenerateImageNode,
   generateVideo: GenerateVideoNode,
   generate3d: Generate3DNode,
+  image2GS: Image2GSNode,
   generateAudio: GenerateAudioNode,
   llmGenerate: LLMGenerateNode,
   splitGrid: SplitGridNode,
@@ -198,6 +200,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image", "text"], outputs: ["video"] };
     case "generate3d":
       return { inputs: ["image", "text"], outputs: ["3d"] };
+    case "image2GS":
+      return { inputs: ["image"], outputs: ["3d"] };
     case "generateAudio":
       return { inputs: ["text"], outputs: ["audio"] };
     case "llmGenerate":
@@ -548,6 +552,7 @@ export function WorkflowCanvas() {
     nanoBanana: 'Generate Image',
     generateVideo: 'Generate Video',
     generate3d: 'Generate 3D',
+    image2GS: 'Image → Splat',
     generateAudio: 'Generate Audio',
     llmGenerate: 'LLM Generate',
     splitGrid: 'Split Grid',
@@ -1792,6 +1797,7 @@ export function WorkflowCanvas() {
             nanoBanana: { width: 300, height: 300 },
             generateVideo: { width: 300, height: 300 },
             generate3d: { width: 300, height: 300 },
+            image2GS: { width: 320, height: 440 },
             generateAudio: { width: 300, height: 280 },
             llmGenerate: { width: 320, height: 360 },
             splitGrid: { width: 300, height: 320 },

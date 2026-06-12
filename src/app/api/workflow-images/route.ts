@@ -258,6 +258,7 @@ export async function GET(request: NextRequest) {
     // Construct file path - check folders and extensions in order
     const possibleExtensions = [
       "png", "jpg", "jpeg", "gif", "webp",        // images
+      "exr",                                       // multichannel HDR (depth input)
       "mp4", "webm", "mov",                        // video
       "mp3", "wav", "ogg",                         // audio
       "glb", "spz",                                // 3D
@@ -324,6 +325,7 @@ export async function GET(request: NextRequest) {
       mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
       mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
       glb: "model/gltf-binary", spz: "application/octet-stream",
+      exr: "image/x-exr",
     };
     const mimeType = mimeMap[foundExtension] || "application/octet-stream";
     const dataUrl = `data:${mimeType};base64,${base64}`;

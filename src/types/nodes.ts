@@ -52,6 +52,7 @@ export type NodeType =
   | "switch"
   | "conditionalSwitch"
   | "generate3d"
+  | "image2GS"
   | "glbViewer"
   | "spzViewer"
   | "worldLabsPano"
@@ -490,6 +491,44 @@ export interface Generate3DNodeData extends BaseNodeData {
 }
 
 /**
+ * Image → Gaussian Splat (SHARP) node.
+ *
+ * Takes an RGB image (from a normal image edge) plus a metric-depth EXR loaded
+ * directly on the node (with channel selection) and produces a 3D Gaussian
+ * Splat `.ply` via the local SHARP backend. The output flows over the `3d`
+ * handle into the Gaussian Splat Viewer. The float depth never travels an
+ * image edge — the backend reads it straight from the saved `.exr`.
+ */
+export interface Image2GSNodeData extends BaseNodeData {
+  // RGB input (cached from the connected image edge for display / run)
+  inputImages: string[];
+  inputImageThumb?: string;
+  // Metric-depth EXR (loaded on the node — never travels an edge)
+  depthExrRef?: string;          // ref id of the .exr saved in inputs/
+  depthExrPath?: string;         // absolute path of the saved .exr
+  depthExrFilename?: string;     // original filename for display
+  depthChannels: string[];       // channel names found in the EXR header
+  selectedDepthChannel: string | null;
+  depthPreviewThumb?: string | null; // 8-bit grayscale preview (data URL)
+  depthWidth?: number;
+  depthHeight?: number;
+  // Camera intrinsics → f_px = (focalLengthMm / apertureMm) * imageWidthPx
+  focalLengthMm: number;
+  apertureMm: number;            // horizontal film-back aperture (mm)
+  fPxOverride?: number | null;   // optional explicit f_px override
+  blendAlpha: number;            // 0=trust depth … 1=ignore depth; 0.4 default
+  // 3D output (mirrors Generate3DNodeData)
+  output3dUrl: string | null;    // blob: URL of the generated .ply
+  savedFilename: string | null;
+  savedFilePath: string | null;
+  status: NodeStatus;
+  error: string | null;
+  model3dHistory: Carousel3DItem[];   // carousel history (ids only)
+  selectedModel3dHistoryIndex: number;
+  lastGenerationCost?: number | null;
+}
+
+/**
  * WorldLabs Panorama node - generates equirectangular panoramas via Marble API.
  * Quick preview step (defaults to Marble 0.1-mini for speed/cost).
  * Supports text, single-image, and multi-image prompts with azimuth control.
@@ -887,6 +926,7 @@ export type WorkflowNodeData =
   | NanoBananaNodeData
   | GenerateVideoNodeData
   | Generate3DNodeData
+  | Image2GSNodeData
   | WorldLabsPanoNodeData
   | WorldLabsWorldNodeData
   | GenerateAudioNodeData

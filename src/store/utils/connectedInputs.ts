@@ -93,6 +93,9 @@ export function getSourceOutput(
   } else if (sourceNode.type === "generate3d") {
     const g3dData = sourceNode.data as Generate3DNodeData;
     return { type: "3d", value: g3dData.output3dUrl };
+  } else if (sourceNode.type === "image2GS") {
+    const gsData = sourceNode.data as import("@/types").Image2GSNodeData;
+    return { type: "3d", value: gsData.output3dUrl };
   } else if (sourceNode.type === "generateVideo") {
     return { type: "video", value: (sourceNode.data as GenerateVideoNodeData).outputVideo };
   } else if (sourceNode.type === "generateAudio") {
