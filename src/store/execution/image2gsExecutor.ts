@@ -74,8 +74,11 @@ export async function executeImage2GS(ctx: NodeExecutionContext): Promise<void> 
     const [rgbBlob, depthBlob] = await Promise.all([urlToBlob(rgb), urlToBlob(depthDataUrl)]);
 
     const form = new FormData();
-    form.append("rgb", rgbBlob, "rgb.png");
+    // Backend (/generate) requires the RGB field named "image" (not "rgb").
+    form.append("image", rgbBlob, "rgb.png");
     form.append("depth", depthBlob, nodeData.depthExrFilename || "depth.exr");
+    // Sent for forward-compat; the current backend contract has no depth_channel
+    // field (it auto-reads depth), so this is ignored server-side for now.
     form.append("depth_channel", nodeData.selectedDepthChannel || "");
     form.append("focal_mm", String(nodeData.focalLengthMm ?? 24));
     form.append("aperture_mm", String(nodeData.apertureMm ?? 36));
@@ -94,7 +97,9 @@ export async function executeImage2GS(ctx: NodeExecutionContext): Promise<void> 
       let msg = `HTTP ${response.status}`;
       try {
         const j = await response.json();
-        msg = j.error || msg;
+        const e = j?.error ?? j?.detail;
+        if (typeof e === "string" && e) msg = e;
+        else if (e != null) msg = JSON.stringify(e); // never let an object stringify to "[object Object]"
       } catch {
         /* non-JSON error body */
       }

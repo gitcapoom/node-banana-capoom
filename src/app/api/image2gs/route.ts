@@ -21,6 +21,31 @@ const unreachable = (err: unknown) =>
   );
 
 /**
+ * FastAPI returns errors as { detail: string | { loc, msg, type }[] } — the
+ * array form (422 validation) would otherwise stringify to "[object Object]".
+ * Flatten to one readable line, preferring `error` then `detail`.
+ */
+function formatBackendError(j: unknown): string | null {
+  if (!j || typeof j !== "object") return null;
+  const o = j as Record<string, unknown>;
+  const d = o.error ?? o.detail;
+  if (typeof d === "string") return d || null;
+  if (Array.isArray(d)) {
+    const parts = d.map((e) => {
+      if (e && typeof e === "object") {
+        const ee = e as Record<string, unknown>;
+        const loc = Array.isArray(ee.loc) ? ee.loc.filter((x) => x !== "body").join(".") : "";
+        return [loc, ee.msg].filter(Boolean).join(": ");
+      }
+      return String(e);
+    });
+    return parts.filter(Boolean).join("; ") || null;
+  }
+  if (d && typeof d === "object") return JSON.stringify(d);
+  return null;
+}
+
+/**
  * POST /api/image2gs
  *
  * Proxies an RGB image + metric-depth EXR (multipart/form-data) to the local
@@ -74,7 +99,7 @@ export async function POST(request: NextRequest) {
     let msg = `SHARP backend error (HTTP ${backendRes.status})`;
     try {
       const j = await backendRes.json();
-      msg = j.error || j.detail || msg;
+      msg = formatBackendError(j) || msg;
     } catch {
       const t = await backendRes.text().catch(() => "");
       if (t) msg += ` - ${t.slice(0, 300)}`;
