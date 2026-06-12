@@ -36,6 +36,7 @@ export const ALL_NODES_CATEGORIES: NodeCatalogCategory[] = [
       { type: "nanoBanana", label: "Generate Image" },
       { type: "generateVideo", label: "Generate Video" },
       { type: "generate3d", label: "Generate 3D" },
+      { type: "image2GS", label: "Image to Splat" },
       { type: "generateAudio", label: "Generate Audio" },
       { type: "llmGenerate", label: "LLM Generate" },
       { type: "worldLabsPano", label: "Generate Panorama" },

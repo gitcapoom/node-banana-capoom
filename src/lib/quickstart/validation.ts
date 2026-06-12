@@ -69,6 +69,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   nanoBanana: { width: 300, height: 300 },
   generateVideo: { width: 300, height: 300 },
   generate3d: { width: 300, height: 300 },
+  image2GS: { width: 320, height: 440 },
   generateAudio: { width: 300, height: 280 },
   llmGenerate: { width: 320, height: 360 },
   splitGrid: { width: 300, height: 320 },
@@ -345,6 +346,23 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         status: "idle",
         error: null,
         lastGenerationCost: null,
+      };
+    case "image2GS":
+      return {
+        inputImages: [],
+        depthChannels: [],
+        selectedDepthChannel: null,
+        focalLengthMm: 24,
+        apertureMm: 36,
+        fPxOverride: null,
+        blendAlpha: 0.4,
+        output3dUrl: null,
+        savedFilename: null,
+        savedFilePath: null,
+        status: "idle",
+        error: null,
+        model3dHistory: [],
+        selectedModel3dHistoryIndex: 0,
       };
     case "generateAudio":
       return {

@@ -7,6 +7,7 @@ export { PromptConstructorNode } from "./PromptConstructorNode";
 export { GenerateImageNode, NanoBananaNode } from "./GenerateImageNode";
 export { GenerateVideoNode } from "./GenerateVideoNode";
 export { Generate3DNode } from "./Generate3DNode";
+export { Image2GSNode } from "./Image2GSNode";
 export { GenerateAudioNode } from "./GenerateAudioNode";
 export { LLMGenerateNode } from "./LLMGenerateNode";
 export { SplitGridNode } from "./SplitGridNode";
