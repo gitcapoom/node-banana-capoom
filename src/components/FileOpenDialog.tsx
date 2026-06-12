@@ -13,6 +13,8 @@ interface FileOpenDialogProps {
   onCancel: () => void;
   initialPath?: string;
   mode?: "file" | "directory";
+  /** In file mode, also list non-.json files (images/EXRs) so they can be picked. */
+  showAllFiles?: boolean;
 }
 
 const STORAGE_KEY = "fileOpenDialog_lastPath";
@@ -24,7 +26,7 @@ function formatSize(bytes?: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function FileOpenDialog({ onFileSelected, onCancel, initialPath, mode = "file" }: FileOpenDialogProps) {
+export function FileOpenDialog({ onFileSelected, onCancel, initialPath, mode = "file", showAllFiles = false }: FileOpenDialogProps) {
   const isDirectoryMode = mode === "directory";
   const [currentPath, setCurrentPath] = useState<string>(initialPath || "");
   const [pathInput, setPathInput] = useState<string>("");
@@ -42,7 +44,7 @@ export function FileOpenDialog({ onFileSelected, onCancel, initialPath, mode = "
     try {
       const searchParams = new URLSearchParams();
       if (dirPath) searchParams.set("path", dirPath);
-      if (isDirectoryMode) searchParams.set("showAllFiles", "true");
+      if (isDirectoryMode || showAllFiles) searchParams.set("showAllFiles", "true");
       const qs = searchParams.toString();
       const response = await fetch(`/api/list-directory${qs ? `?${qs}` : ""}`);
       const result = await response.json();
@@ -70,7 +72,7 @@ export function FileOpenDialog({ onFileSelected, onCancel, initialPath, mode = "
     } finally {
       setLoading(false);
     }
-  }, [isDirectoryMode]);
+  }, [isDirectoryMode, showAllFiles]);
 
   // Load initial directory on mount
   useEffect(() => {

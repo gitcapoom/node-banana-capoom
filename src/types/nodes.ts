@@ -503,6 +503,12 @@ export interface Image2GSNodeData extends BaseNodeData {
   // RGB input (cached from the connected image edge for display / run)
   inputImages: string[];
   inputImageThumb?: string;
+  // RGB loaded on the node (mirrors the depth EXR load). rgbSourcePath = display
+  // filename (also names the output .ply); the image is saved to inputs/.
+  rgbSourcePath?: string | null;
+  rgbImageRef?: string;          // ref id of the RGB saved in inputs/
+  rgbImagePath?: string;         // absolute path of the saved RGB
+  rgbImageThumb?: string | null; // small preview (data URL)
   // Metric-depth EXR (loaded on the node — never travels an edge)
   depthExrRef?: string;          // ref id of the .exr saved in inputs/
   depthExrPath?: string;         // absolute path of the saved .exr
@@ -516,6 +522,10 @@ export interface Image2GSNodeData extends BaseNodeData {
   focalLengthMm: number;
   apertureMm: number;            // horizontal film-back aperture (mm)
   fPxOverride?: number | null;   // optional explicit f_px override
+  // camera.json loaded directly on the node (manual, not auto-derived).
+  cameraJsonName?: string | null;       // camera_name, for display
+  cameraJsonFocalRaw?: number | null;   // raw focal_length (before the ×2/3 option)
+  focalTwoThirds?: boolean;             // multiply the camera.json focal by 2/3
   blendAlpha: number;            // 0=trust depth … 1=ignore depth; 0.4 default
   // 3D output (mirrors Generate3DNodeData)
   output3dUrl: string | null;    // blob: URL of the generated .ply
@@ -880,6 +890,10 @@ export interface SpzViewerNodeData extends BaseNodeData {
   capturedDepthImage: string | null; // Depth map from latest capture (grayscale)
   capturedDepthImageRef?: string; // External ref for capturedDepthImage
   viewerOpen: boolean;           // Whether the viewer window is currently open
+  // camera.json loaded directly on the node → seeds the viewer's Lens/Sensor.
+  cameraJsonName?: string | null;
+  cameraJsonFocal?: number | null;     // focal_length (mm) → viewer Lens
+  cameraJsonAperture?: number | null;  // aperture (mm) → viewer Sensor
 }
 
 /**

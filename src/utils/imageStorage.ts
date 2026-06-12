@@ -477,6 +477,15 @@ async function externalizeNodeImages(
       break;
     }
 
+    case "image2GS": {
+      const d = data as import("@/types").Image2GSNodeData;
+      // Drop only the ephemeral blob: output URL — it's dead after a reload, and
+      // the node re-hydrates output3dUrl from model3dHistory on mount. Keep the
+      // cached RGB so it survives as an execution fallback.
+      newData = { ...d, output3dUrl: null };
+      break;
+    }
+
     case "glbViewer": {
       const d = data as import("@/types").GLBViewerNodeData;
       let capturedImageRef = d.capturedImageRef;
