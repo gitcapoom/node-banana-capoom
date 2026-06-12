@@ -662,9 +662,14 @@ export default function StandaloneViewerPage() {
   const [sensorIndex, setSensorIndex] = useState(DEFAULT_SENSOR_INDEX);
   const [lensIndex, setLensIndex] = useState(DEFAULT_LENS_INDEX);
   const [aspectIndex, setAspectIndex] = useState(DEFAULT_ASPECT_RATIO_INDEX);
+  // Custom numeric overrides (cancel presets). Seeded from camera.json (Sensor
+  // = aperture mm, Lens = focal_length mm) when the node passes them.
+  const [customSensorMm, setCustomSensorMm] = useState<number | null>(null);
+  const [customLensMm, setCustomLensMm] = useState<number | null>(null);
   const [splatLoaded, setSplatLoaded] = useState(false);
   const [captureFlash, setCaptureFlash] = useState(false);
   const [showControls, setShowControls] = useState(true);
+  const [cameraPanelOpen, setCameraPanelOpen] = useState(true);
   const [isDragging, setIsDragging] = useState(false);
   const [navMode, setNavMode] = useState<"orbit" | "fly">("fly");
 
@@ -758,6 +763,9 @@ export default function StandaloneViewerPage() {
   // `colmapWorldFrame` (the same one applied to COLMAP camera tracks). SPZ
   // self-normalizes via its coordinate_system header and is exempt.
   const splatIsPlyRef = useRef(false);
+  // Always view splats from the capture origin (0,0,0), aimed at the splat,
+  // instead of the 3/4 auto-frame — identical for connected + drag-dropped.
+  const cameraSpaceRef = useRef(true);
   const initRef = useRef(false);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const axesHelperRef = useRef<THREE.AxesHelper | null>(null);
@@ -880,8 +888,12 @@ export default function StandaloneViewerPage() {
   useEffect(() => { isLoopingRef.current = isLooping; }, [isLooping]);
 
   // Camera settings
-  const sensor = SENSOR_PRESETS[sensorIndex];
-  const focalLength = LENS_FOCAL_LENGTHS[lensIndex];
+  const sensorPreset = SENSOR_PRESETS[sensorIndex];
+  // Custom numeric value wins over the preset (presets are just the starting point).
+  const sensor = customSensorMm != null
+    ? { name: `${customSensorMm.toFixed(1)}mm`, widthMm: customSensorMm, heightMm: sensorPreset.heightMm }
+    : sensorPreset;
+  const focalLength = customLensMm ?? LENS_FOCAL_LENGTHS[lensIndex];
   const aspectRatio = ASPECT_RATIO_PRESETS[aspectIndex];
   const vFov = calculateCameraFOV(sensor.widthMm, focalLength, aspectRatio.ratio);
   const selectedAspectRef = useRef(aspectRatio.ratio);
@@ -897,6 +909,11 @@ export default function StandaloneViewerPage() {
     if (url) setSpzUrl(url);
     if (name) setWorldName(name);
     if (wId) setWorldId(wId);
+    // Seed Sensor (aperture) + Lens (focal) from the camera.json values the node passes.
+    const lensP = Number(params.get("lens"));
+    const sensorP = Number(params.get("sensor"));
+    if (Number.isFinite(lensP) && lensP > 0) setCustomLensMm(lensP);
+    if (Number.isFinite(sensorP) && sensorP > 0) setCustomSensorMm(sensorP);
   }, []);
 
   // ─── Center camera helper ────────────────────────────────────────
@@ -915,6 +932,45 @@ export default function StandaloneViewerPage() {
   const centerCamera = useCallback(() => {
     if (!cameraRef.current) return;
     const camera = cameraRef.current;
+
+    // Camera-space (image2GS) splats: view from the capture origin (0,0,0),
+    // aimed at the splat — no 3/4 auto-framing. lookAt handles whichever side
+    // the splat sits on; the y-up world frame keeps it upright.
+    if (cameraSpaceRef.current) {
+      const csplat = splatMeshRef.current as
+        | (THREE.Object3D & { getBoundingBox?: (centersOnly?: boolean) => THREE.Box3 })
+        | null;
+      let target = new THREE.Vector3(0, 0, -1);
+      if (csplat?.getBoundingBox) {
+        try {
+          const bbox = csplat.getBoundingBox(false);
+          if (bbox && Number.isFinite(bbox.min.x) && !bbox.isEmpty()) {
+            target = bbox.getCenter(new THREE.Vector3()).applyMatrix4(csplat.matrixWorld);
+          }
+        } catch {
+          /* not ready — fall back to looking down -Z */
+        }
+      }
+      camera.position.set(0, 0, 0);
+      camera.lookAt(target);
+      camera.near = 0.001;
+      camera.far = 1000;
+      camera.updateProjectionMatrix();
+      const dm = depthMaterialRef.current;
+      if (dm) {
+        dm.uniforms.cameraNear.value = camera.near;
+        dm.uniforms.cameraFar.value = camera.far;
+      }
+      if (controlsRef.current) {
+        controlsRef.current.target.copy(target);
+        controlsRef.current.update();
+      }
+      const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ");
+      yawRef.current = euler.y;
+      pitchRef.current = euler.x;
+      rollRef.current = euler.z;
+      return;
+    }
 
     // Try to fit to the splat's bounding box. Spark's SplatMesh exposes
     // `getBoundingBox()` which walks the packed splat data — Box3.setFromObject
@@ -2546,11 +2602,13 @@ export default function StandaloneViewerPage() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Capture
-      if (e.key === " " || e.key === "Enter") {
-        e.preventDefault();
-        handleCapture();
+      // Don't fire viewer shortcuts while typing in a form field (Sensor/Lens
+      // inputs, path box, etc.) — pressing Enter there must NOT capture.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) {
+        return;
       }
+      // Capture is button-only — no Space/Enter shortcut.
       // Toggle controls visibility
       if (e.key === "h" || e.key === "H") {
         setShowControls((s) => !s);
@@ -2862,37 +2920,43 @@ export default function StandaloneViewerPage() {
           <div className="flex items-end justify-between gap-4">
             {/* Camera Settings */}
             <div className="bg-black/70 backdrop-blur-md rounded-lg p-3 pointer-events-auto max-w-md">
+              <button
+                onClick={() => setCameraPanelOpen((o) => !o)}
+                className="flex items-center gap-1 text-[10px] text-neutral-300 hover:text-white transition-colors mb-2"
+                title={cameraPanelOpen ? "Collapse" : "Expand"}
+              >
+                <svg className={`w-3 h-3 transition-transform ${cameraPanelOpen ? "" : "-rotate-90"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+                Camera
+              </button>
+              {cameraPanelOpen && (
+                <>
               <div className="grid grid-cols-3 gap-3">
-                {/* Sensor */}
+                {/* Sensor (mm) — numeric, seeded from camera.json aperture */}
                 <div>
-                  <label className="text-[9px] text-neutral-500 block mb-1">Sensor</label>
-                  <select
-                    value={sensorIndex}
-                    onChange={(e) => setSensorIndex(Number(e.target.value))}
-                    className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-2 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
-                  >
-                    {SENSOR_PRESETS.map((s, i) => (
-                      <option key={s.name} value={i}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="text-[9px] text-neutral-500 block mb-1">Sensor (mm)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="1"
+                    value={Number(sensor.widthMm.toFixed(2))}
+                    onChange={(e) => setCustomSensorMm(e.target.value === "" ? null : Number(e.target.value))}
+                    className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-2 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+                  />
                 </div>
 
-                {/* Lens */}
+                {/* Lens (mm) — numeric, seeded from camera.json focal_length */}
                 <div>
-                  <label className="text-[9px] text-neutral-500 block mb-1">Lens</label>
-                  <select
-                    value={lensIndex}
-                    onChange={(e) => setLensIndex(Number(e.target.value))}
-                    className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-2 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none appearance-none"
-                  >
-                    {LENS_FOCAL_LENGTHS.map((fl, i) => (
-                      <option key={fl} value={i}>
-                        {fl}mm
-                      </option>
-                    ))}
-                  </select>
+                  <label className="text-[9px] text-neutral-500 block mb-1">Lens (mm)</label>
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    value={focalLength}
+                    onChange={(e) => setCustomLensMm(e.target.value === "" ? null : Number(e.target.value))}
+                    className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-2 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+                  />
                 </div>
 
                 {/* Aspect Ratio */}
@@ -3211,6 +3275,8 @@ export default function StandaloneViewerPage() {
                   <span className="text-[9px] text-neutral-600 ml-1 self-center">F</span>
                 </div>
               </div>
+                </>
+              )}
             </div>
 
             {/* Transform Panel */}
@@ -3342,7 +3408,7 @@ export default function StandaloneViewerPage() {
                 onClick={handleCapture}
                 disabled={!splatLoaded}
                 className="bg-red-600 hover:bg-red-500 disabled:bg-neutral-700 disabled:cursor-not-allowed text-white rounded-full w-14 h-14 flex items-center justify-center shadow-lg transition-all active:scale-95"
-                title="Capture frame (Space / Enter)"
+                title="Capture frame"
               >
                 <div className="w-10 h-10 border-2 border-white rounded-full flex items-center justify-center">
                   <div className="w-6 h-6 bg-white rounded-full" />

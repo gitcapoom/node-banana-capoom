@@ -66,8 +66,8 @@ export const ASPECT_RATIO_PRESETS: AspectRatioPreset[] = [
   { name: "1:1 Square", ratio: 1.0 },
 ];
 
-/** Default aspect ratio index (2.39:1 Scope) */
-export const DEFAULT_ASPECT_RATIO_INDEX = 0;
+/** Default aspect ratio index (16:9) */
+export const DEFAULT_ASPECT_RATIO_INDEX = 2;
 
 // ─── FOV Calculations ───────────────────────────────────────────
 

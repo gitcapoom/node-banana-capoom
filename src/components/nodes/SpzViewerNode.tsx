@@ -9,6 +9,7 @@ import { useCanRun } from "@/hooks/useCanRun";
 import { SpzViewerNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 import { saveMediaImmediately } from "@/utils/mediaStorage";
+import { readCameraJsonFile } from "@/utils/cameraJson";
 
 type SpzViewerNodeType = Node<SpzViewerNodeData, "spzViewer">;
 
@@ -34,6 +35,8 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   const nodes = useWorkflowStore((state) => state.nodes);
   const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const edges = useWorkflowStore((state) => state.edges);
+  const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
   const { isExecuting } = useCanRun(id);
 
   const viewerWindowRef = useRef<Window | null>(null);
@@ -155,6 +158,23 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     };
   }, [nodeData.spzUrl]);
 
+  // ─── Auto-adopt a connected 3D input ────────────────────────
+  // This node has no Run button, so without this, wiring an upstream splat
+  // (e.g. Image → Splat) wouldn't load until the upstream re-ran. Adopt the
+  // connected model3d as soon as it appears or changes (connect, or upstream
+  // regeneration). Connected input takes precedence over a drag-dropped file.
+  useEffect(() => {
+    const { model3d } = getConnectedInputs(id);
+    if (model3d && model3d !== nodeData.spzUrl) {
+      updateNodeData(id, {
+        spzUrl: model3d,
+        filename: nodeData.filename || "splat.ply",
+        capturedImage: null,
+        capturedDepthImage: null,
+      });
+    }
+  }, [edges, nodes, id, getConnectedInputs, nodeData.spzUrl, nodeData.filename, updateNodeData]);
+
   // ─── Handlers ──────────────────────────────────────────────
 
   const handleRun = useCallback(() => {
@@ -170,11 +190,41 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
       worldId: id, // Use node ID for postMessage routing
     });
 
+    // image2GS outputs a .ply. Its filename can default to "world.spz", which
+    // makes the viewer treat it as SPZ and SKIP the PLY orientation (→ 180°-X
+    // off). When the source is image2GS, force a .ply name so the viewer applies
+    // the PLY world rotation.
+    const { edges, nodes } = useWorkflowStore.getState();
+    const inEdge = edges.find(
+      (e) => e.target === id && (e.targetHandle === "3d" || (e.targetHandle ?? "").startsWith("3d")),
+    );
+    const src = inEdge ? nodes.find((n) => n.id === inEdge.source) : undefined;
+    if (src?.type === "image2GS") {
+      params.set("name", "splat.ply");
+    }
+
+    // Lens/Sensor come from a camera.json loaded directly on THIS node.
+    if (typeof nodeData.cameraJsonFocal === "number") params.set("lens", String(nodeData.cameraJsonFocal));
+    if (typeof nodeData.cameraJsonAperture === "number") params.set("sensor", String(nodeData.cameraJsonAperture));
+
     const viewerUrl = `/viewer?${params.toString()}`;
     const w = window.open(viewerUrl, `spz-viewer-${id}`, "width=1280,height=720,alwaysOnTop=yes");
     viewerWindowRef.current = w;
     updateNodeData(id, { viewerOpen: true });
-  }, [id, nodeData.spzUrl, nodeData.filename, updateNodeData]);
+  }, [id, nodeData.spzUrl, nodeData.filename, nodeData.cameraJsonFocal, nodeData.cameraJsonAperture, updateNodeData]);
+
+  const handleLoadCameraJson = useCallback(
+    async (file: File) => {
+      const cj = await readCameraJsonFile(file);
+      if (!cj) return;
+      updateNodeData(id, {
+        cameraJsonName: cj.name,
+        cameraJsonFocal: cj.focal,
+        cameraJsonAperture: cj.aperture,
+      });
+    },
+    [id, updateNodeData],
+  );
 
   const isAcceptedFile = useCallback((filename: string) => {
     const lower = filename.toLowerCase();
@@ -384,6 +434,28 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
             </div>
           </div>
         )}
+
+        {/* camera.json → viewer Lens/Sensor */}
+        <div className="flex items-center gap-2 pt-1">
+          <label className="nodrag nopan shrink-0 text-[10px] text-emerald-500 hover:text-emerald-400 px-1.5 py-1 border border-neutral-700 rounded hover:border-neutral-600 cursor-pointer">
+            Load camera.json
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleLoadCameraJson(f);
+                e.target.value = "";
+              }}
+              className="hidden"
+            />
+          </label>
+          {nodeData.cameraJsonName && (
+            <span className="text-[9px] text-emerald-600/90 truncate" title={`Lens/Sensor from camera.json · ${nodeData.cameraJsonName}`}>
+              ✓ {nodeData.cameraJsonName}
+            </span>
+          )}
+        </div>
 
         {/* Handle labels */}
         <div className="absolute left-5 text-[9px] text-neutral-600" style={{ top: "50%", transform: "translateY(-50%)" }}>

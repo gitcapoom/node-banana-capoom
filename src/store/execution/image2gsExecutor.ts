@@ -15,6 +15,7 @@
 
 import type { Image2GSNodeData, Carousel3DItem } from "@/types";
 import { loadMediaById } from "@/utils/mediaStorage";
+import { driveToUnc, filenameStem } from "@/utils/pathTranslation";
 import type { NodeExecutionContext } from "./types";
 
 /** Convert a data: URL (or any fetchable URL) into a Blob (browser context). */
@@ -30,6 +31,7 @@ export async function executeImage2GS(ctx: NodeExecutionContext): Promise<void> 
     updateNodeData,
     getFreshNode,
     getNodes,
+    getEdges,
     signal,
     generationsPath,
     saveDirectoryPath,
@@ -40,7 +42,42 @@ export async function executeImage2GS(ctx: NodeExecutionContext): Promise<void> 
   const freshNode = getFreshNode(node.id);
   const nodeData = (freshNode?.data || node.data) as Image2GSNodeData;
 
-  const rgb = images[0] || nodeData.inputImages?.[0] || null;
+  // Recover the project dir from the saved EXR path when the store lost
+  // saveDirectoryPath (a page reload restores the workflow but not the project
+  // dir). depthExrPath = <saveDir>/inputs/<file>.exr.
+  const effectiveSaveDir =
+    saveDirectoryPath ||
+    (nodeData.depthExrPath
+      ? nodeData.depthExrPath.replace(/\\/g, "/").replace(/\/+$/, "").replace(/\/inputs\/[^/]*$/i, "")
+      : null);
+  const effectiveGenerationsPath =
+    generationsPath || (effectiveSaveDir ? `${effectiveSaveDir}/generations` : null);
+
+  let rgb = images[0] || nodeData.inputImages?.[0] || null;
+  // RGB loaded directly on the node (mirrors the EXR load) — read it from inputs/.
+  if (!rgb && nodeData.rgbImageRef && effectiveSaveDir) {
+    rgb = await loadMediaById(nodeData.rgbImageRef, effectiveSaveDir, "inputs");
+  }
+  // The upstream image's full-res may be unloaded — the lazy full-res pre-pass
+  // no-ops when saveDirectoryPath is null. Pull the RGB straight from the
+  // connected source node's data (raw value, else its saved ref).
+  if (!rgb && effectiveSaveDir) {
+    const inEdge = getEdges().find(
+      (e) => e.target === node.id && (e.targetHandle === "image" || (e.targetHandle ?? "").startsWith("image")),
+    );
+    const src = inEdge ? getNodes().find((n) => n.id === inEdge.source) : undefined;
+    const sd = src?.data as
+      | { image?: string | null; outputImage?: string | null; imageRef?: string; outputImageRef?: string }
+      | undefined;
+    if (sd) {
+      rgb = sd.outputImage || sd.image || null;
+      const ref = sd.outputImageRef || sd.imageRef;
+      if (!rgb && ref) {
+        rgb = await loadMediaById(ref, effectiveSaveDir, sd.imageRef ? "inputs" : "generations");
+      }
+    }
+  }
+
   if (!rgb) {
     updateNodeData(node.id, { status: "error", error: "Connect an RGB image input" });
     throw new Error("image2GS: missing RGB image input");
@@ -49,7 +86,7 @@ export async function executeImage2GS(ctx: NodeExecutionContext): Promise<void> 
     updateNodeData(node.id, { status: "error", error: "Load a depth EXR on the node" });
     throw new Error("image2GS: missing depth EXR");
   }
-  if (!saveDirectoryPath) {
+  if (!effectiveSaveDir) {
     updateNodeData(node.id, { status: "error", error: "Set a project save directory first" });
     throw new Error("image2GS: no saveDirectoryPath");
   }
@@ -64,7 +101,7 @@ export async function executeImage2GS(ctx: NodeExecutionContext): Promise<void> 
   });
 
   // Load the saved depth EXR bytes back from inputs/.
-  const depthDataUrl = await loadMediaById(nodeData.depthExrRef, saveDirectoryPath, "inputs");
+  const depthDataUrl = await loadMediaById(nodeData.depthExrRef, effectiveSaveDir, "inputs");
   if (!depthDataUrl) {
     updateNodeData(node.id, { status: "error", error: "Depth EXR file not found in inputs/" });
     throw new Error("image2GS: depth EXR ref not resolvable");
@@ -128,14 +165,39 @@ export async function executeImage2GS(ctx: NodeExecutionContext): Promise<void> 
       selectedModel3dHistoryIndex: 0,
     });
 
-    // Auto-save the .ply to the generations folder. Multipart with a `.ply`
-    // filename makes save-generation preserve the extension + dedupe by hash.
-    if (generationsPath) {
+    // ── Output naming + folder routing (SALACAK pipeline) ──
+    // Name the .ply after the RGB; route by the RGB's source folder:
+    //   …/outputs/Image/…  → <project>/outputs/GS   (promoted output)
+    //   …/inputs/… or other → generations/          (working output)
+    //   no source path/name → generations/ + timestamp (default)
+    let outputDir = effectiveGenerationsPath;
+    let outputStem = model3dId;
+    const rgbPath = driveToUnc(nodeData.rgbSourcePath);
+    if (rgbPath) {
+      outputStem = filenameStem(rgbPath) || model3dId;
+      const fwd = rgbPath.replace(/\\/g, "/");
+      if (effectiveSaveDir && /\/outputs\/image\//i.test(fwd)) {
+        outputDir = `${effectiveSaveDir.replace(/[\\/]+$/, "")}/outputs/GS`;
+      }
+    } else {
+      // No explicit path — name the .ply after the upstream source's filename.
+      const inEdge = getEdges().find(
+        (e) => e.target === node.id && (e.targetHandle === "image" || (e.targetHandle ?? "").startsWith("image")),
+      );
+      const srcData = inEdge
+        ? (getNodes().find((n) => n.id === inEdge.source)?.data as { filename?: string | null } | undefined)
+        : undefined;
+      if (srcData?.filename) outputStem = filenameStem(srcData.filename) || model3dId;
+    }
+
+    // Auto-save the .ply. Multipart with a `.ply` filename makes save-generation
+    // preserve the extension + dedupe by hash; createDirectory makes outputs/GS.
+    if (outputDir) {
       const saveForm = new FormData();
-      saveForm.append("directoryPath", generationsPath);
-      saveForm.append("customFilename", model3dId);
+      saveForm.append("directoryPath", outputDir);
+      saveForm.append("customFilename", outputStem);
       saveForm.append("createDirectory", "true");
-      saveForm.append("file", new File([plyBlob], `${model3dId}.ply`, { type: "application/octet-stream" }));
+      saveForm.append("file", new File([plyBlob], `${outputStem}.ply`, { type: "application/octet-stream" }));
 
       const savePromise = fetch("/api/save-generation", { method: "POST", body: saveForm })
         .then((res) => res.json())
