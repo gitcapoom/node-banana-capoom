@@ -10,6 +10,8 @@ import { MaskPainterModal } from "@/components/MaskPainterModal";
 import { RotoModal } from "@/components/RotoModal";
 import { CompModal } from "@/components/CompModal";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { openWorkflowByPath } from "@/utils/openWorkflowByPath";
+import { useToast } from "@/components/Toast";
 
 export default function Home() {
   const initializeAutoSave = useWorkflowStore(
@@ -30,6 +32,25 @@ export default function Home() {
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  // Deep-link: open a project directly from a `?project=<absolute path>` URL,
+  // e.g. http://host:3000/?project=//OTOSERVE10/Projects/AD/.../AI_Gen/AI_Gen.json
+  // Runs once on first load; the param is left in place so the link stays
+  // bookmarkable.
+  useEffect(() => {
+    const project = new URLSearchParams(window.location.search).get("project");
+    if (!project) return;
+    openWorkflowByPath(project).then((r) => {
+      if (!r.ok) {
+        useToast.getState().show(
+          "Couldn't open project from URL",
+          "error",
+          true,
+          `${r.error || "Unknown error"}\n${project}`
+        );
+      }
+    });
   }, []);
 
   return (
