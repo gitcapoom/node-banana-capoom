@@ -37,6 +37,8 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "src/splat-viewer/vite.config.ts",
+    "src/splat-viewer/src/main.tsx"
   ]
 }

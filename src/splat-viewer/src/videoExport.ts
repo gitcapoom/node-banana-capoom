@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { ensureEvenDimension } from "@/lib/video-probing";
+import { ensureEvenDimension } from "./lib/ensureEvenDimension";
 import type { CameraPath } from "./cameraAnimation";
 import { evaluateCameraPath } from "./cameraAnimation";
 
