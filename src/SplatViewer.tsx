@@ -1695,19 +1695,25 @@ export default function SplatViewer() {
   // ─── Load SPZ from URL ──────────────────────────────────────────
 
   const loadSplatFromUrl = useCallback(async (url: string) => {
-    if (!sceneRef.current) {
-      initScene();
-      // Wait for scene to initialize
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    const scene = sceneRef.current;
-    if (!scene) return;
-
     setLoading(true);
     setError(null);
     setSplatLoaded(false);
     setTransform(defaultTransform);
+
+    if (!sceneRef.current) {
+      // Yield so the viewer-mode canvas container mounts before initScene()
+      // (it bails without containerRef), then wait for the renderer to be ready.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      initScene();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const scene = sceneRef.current;
+    if (!scene) {
+      setError("Failed to initialize 3D scene");
+      setLoading(false);
+      return;
+    }
 
     try {
       const { SplatMesh } = await import("@sparkjsdev/spark");
@@ -1754,19 +1760,28 @@ export default function SplatViewer() {
   // ─── Load SPZ from file (drag-and-drop or file picker) ─────────
 
   const loadSplatFromFile = useCallback(async (file: File) => {
-    if (!sceneRef.current) {
-      initScene();
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    const scene = sceneRef.current;
-    if (!scene) return;
-
+    // Enter viewer mode first: the canvas container only mounts outside the
+    // upload screen, and initScene() bails without it — which would silently
+    // drop the file (no scene, no error, nothing happens).
     setLoading(true);
     setError(null);
     setSplatLoaded(false);
     setTransform(defaultTransform);
     setWorldName(file.name.replace(/\.spz$/i, ""));
+
+    if (!sceneRef.current) {
+      // Yield so React commits the viewer-mode DOM, then init the renderer.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      initScene();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const scene = sceneRef.current;
+    if (!scene) {
+      setError("Failed to initialize 3D scene");
+      setLoading(false);
+      return;
+    }
 
     try {
       const { SplatMesh } = await import("@sparkjsdev/spark");
