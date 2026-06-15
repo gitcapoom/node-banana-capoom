@@ -6,7 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { LoadingBadge } from "./LoadingBadge";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
-import { Image2GSNodeData } from "@/types";
+import { Image2GSNodeData, Image2GSDepthMethod, Image2GSGradeSource, Image2GSGradeCurve } from "@/types";
 import { useToast } from "@/components/Toast";
 import { readCameraJsonFile } from "@/utils/cameraJson";
 
@@ -305,6 +305,62 @@ export function Image2GSNode({ id, data, selected }: NodeProps<Image2GSNodeType>
     });
   }, [id, updateNodeData]);
 
+  // ─── Albedo AOV: load like the RGB (only for exr_grade · region) ─────────
+  const [isDraggingAlbedo, setIsDraggingAlbedo] = useState(false);
+  const processAlbedoFile = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith("image/")) {
+        useToast.getState().show("Please drop an image (PNG/JPG)", "error");
+        return;
+      }
+      if (!saveDirectoryPath) {
+        useToast.getState().show("Set a project save directory first", "error");
+        return;
+      }
+      updateNodeData(id, { albedoSourcePath: file.name });
+      try {
+        const stem = file.name.replace(/\.[^.]+$/, "");
+        const saveForm = new FormData();
+        saveForm.append("directoryPath", `${saveDirectoryPath}/inputs`);
+        saveForm.append("customFilename", stem);
+        saveForm.append("createDirectory", "true");
+        saveForm.append("file", file);
+        const saveRes = await fetch("/api/save-generation", { method: "POST", body: saveForm }).then((r) => r.json());
+        if (saveRes.success) {
+          updateNodeData(id, { albedoImageRef: saveRes.imageId, albedoImagePath: saveRes.filePath });
+        }
+        const dataUrl = await new Promise<string>((resolve) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => resolve("");
+          r.readAsDataURL(file);
+        });
+        if (dataUrl) updateNodeData(id, { albedoImageThumb: await makeImageThumb(dataUrl) });
+      } catch (err) {
+        useToast.getState().show("Albedo load failed", "error", true, err instanceof Error ? err.message : String(err));
+      }
+    },
+    [id, saveDirectoryPath, updateNodeData],
+  );
+  const handleAlbedoDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDraggingAlbedo(false);
+      const file = e.dataTransfer.files?.[0];
+      if (file) processAlbedoFile(file);
+    },
+    [processAlbedoFile],
+  );
+  const handleRemoveAlbedo = useCallback(() => {
+    updateNodeData(id, {
+      albedoImageRef: undefined,
+      albedoImagePath: undefined,
+      albedoSourcePath: null,
+      albedoImageThumb: null,
+    });
+  }, [id, updateNodeData]);
+
   const handleClear3D = useCallback(() => {
     updateNodeData(id, {
       output3dUrl: null,
@@ -342,6 +398,8 @@ export function Image2GSNode({ id, data, selected }: NodeProps<Image2GSNodeType>
 
   const hasExr = !!nodeData.depthExrRef || !!nodeData.depthExrFilename;
   const hasRgb = !!nodeData.rgbImageRef || !!nodeData.rgbSourcePath;
+  const hasAlbedo = !!nodeData.albedoImageRef || !!nodeData.albedoSourcePath;
+  const depthMethod = nodeData.depthMethod ?? "exr_pixel";
 
   return (
     <BaseNode id={id} selected={selected} isExecuting={isExecuting} hasError={nodeData.status === "error"}>
@@ -419,6 +477,24 @@ export function Image2GSNode({ id, data, selected }: NodeProps<Image2GSNodeType>
           </div>
         )}
 
+        {/* Depth method (SHARP /generate pipeline) */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[9px] text-neutral-500 shrink-0 w-[58px]">Method</span>
+          <select
+            value={depthMethod}
+            onChange={(e) => updateNodeData(id, { depthMethod: e.target.value as Image2GSDepthMethod })}
+            className="nodrag nopan flex-1 min-w-0 text-[10px] bg-neutral-800 border border-neutral-700 rounded px-1.5 py-1 text-neutral-200"
+            title="sharp = no depth · exr_pixel = per-pixel blend · exr_grade = match depth distribution"
+          >
+            <option value="sharp">sharp — no depth</option>
+            <option value="exr_pixel">exr_pixel — per-pixel</option>
+            <option value="exr_grade">exr_grade — distribution</option>
+          </select>
+        </div>
+        {depthMethod === "sharp" && (
+          <p className="text-[8px] text-neutral-600 leading-tight">SHARP uses its own predicted depth — the EXR below is ignored.</p>
+        )}
+
         {/* Depth EXR */}
         {!hasExr ? (
           <div
@@ -480,6 +556,74 @@ export function Image2GSNode({ id, data, selected }: NodeProps<Image2GSNodeType>
           </div>
         )}
 
+        {/* exr_grade options — depth distribution matching */}
+        {depthMethod === "exr_grade" && (
+          <div className="space-y-1.5 border-l-2 border-neutral-800 pl-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] text-neutral-500 shrink-0 w-[58px]">Source</span>
+              <select
+                value={nodeData.gradeSource ?? "percentile"}
+                onChange={(e) => updateNodeData(id, { gradeSource: e.target.value as Image2GSGradeSource })}
+                className="nodrag nopan flex-1 min-w-0 text-[10px] bg-neutral-800 border border-neutral-700 rounded px-1.5 py-1 text-neutral-200"
+              >
+                <option value="percentile">percentile</option>
+                <option value="region">region (needs albedo)</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[9px] text-neutral-500 shrink-0 w-[58px]">Curve</span>
+              <select
+                value={nodeData.gradeCurve ?? "affine"}
+                onChange={(e) => updateNodeData(id, { gradeCurve: e.target.value as Image2GSGradeCurve })}
+                className="nodrag nopan flex-1 min-w-0 text-[10px] bg-neutral-800 border border-neutral-700 rounded px-1.5 py-1 text-neutral-200"
+              >
+                <option value="affine">affine</option>
+                <option value="polynomial">polynomial</option>
+                <option value="histogram">histogram</option>
+              </select>
+            </div>
+            <label className="flex items-center gap-2">
+              <span className="text-[9px] text-neutral-500 shrink-0 w-[58px]">Slope {Number(nodeData.gradeMinSlope ?? 0).toFixed(2)}</span>
+              <input
+                type="range" min={0} max={1} step={0.05}
+                value={nodeData.gradeMinSlope ?? 0}
+                onChange={setNum("gradeMinSlope")}
+                className="nodrag nopan flex-1 accent-emerald-500"
+                title="Min grade-curve slope. 0 = off · 0.3–0.6 reduces 3DGS flicker/popping under camera motion (looser metric match)."
+              />
+            </label>
+            {(nodeData.gradeSource ?? "percentile") === "region" &&
+              (!hasAlbedo ? (
+                <div
+                  onDrop={handleAlbedoDrop}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingAlbedo(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingAlbedo(false); }}
+                  className={`rounded-lg border-2 border-dashed transition-colors min-h-[48px] flex flex-col items-center justify-center cursor-pointer ${
+                    isDraggingAlbedo ? "border-amber-500 bg-amber-500/10" : "border-neutral-700 hover:border-neutral-600 bg-neutral-900"
+                  }`}
+                >
+                  <p className="text-[10px] text-neutral-500 text-center px-2">Drop <code className="text-amber-400">albedo</code></p>
+                  <label className="mt-0.5 text-[10px] text-amber-400 hover:text-amber-300 cursor-pointer">
+                    Browse
+                    <input type="file" accept="image/*" onChange={(e) => { const f = e.target.files?.[0]; if (f) processAlbedoFile(f); e.target.value = ""; }} className="hidden" />
+                  </label>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 bg-neutral-900 rounded px-2 py-1">
+                  {nodeData.albedoImageThumb ? (
+                    <img src={nodeData.albedoImageThumb} alt="albedo" className="w-8 h-8 object-cover rounded shrink-0 border border-neutral-700" draggable={false} />
+                  ) : (
+                    <div className="w-8 h-8 rounded shrink-0 bg-neutral-800 flex items-center justify-center"><span className="text-[8px] text-neutral-600">ALB</span></div>
+                  )}
+                  <span className="text-[10px] text-neutral-300 truncate flex-1" title={nodeData.albedoSourcePath || ""}>{nodeData.albedoSourcePath}</span>
+                  <button onClick={handleRemoveAlbedo} className="nodrag nopan text-neutral-500 hover:text-red-400 shrink-0" title="Remove albedo">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+              ))}
+          </div>
+        )}
+
         {/* Camera intrinsics */}
         <div className="grid grid-cols-2 gap-1.5">
           <label className="flex flex-col gap-0.5">
@@ -517,17 +661,19 @@ export function Image2GSNode({ id, data, selected }: NodeProps<Image2GSNodeType>
           </p>
         )}
 
-        {/* Blend alpha */}
-        <label className="flex items-center gap-2">
-          <span className="text-[9px] text-neutral-500 shrink-0 w-[58px]">Blend {Number(nodeData.blendAlpha ?? 0.4).toFixed(2)}</span>
-          <input
-            type="range" min={0} max={1} step={0.05}
-            value={nodeData.blendAlpha ?? 0.4}
-            onChange={setNum("blendAlpha")}
-            className="nodrag nopan flex-1 accent-emerald-500"
-            title="0 = trust depth fully · 1 = ignore depth (vanilla SHARP) · 0.4 = metric anchor"
-          />
-        </label>
+        {/* Blend alpha (exr_pixel only) */}
+        {depthMethod === "exr_pixel" && (
+          <label className="flex items-center gap-2">
+            <span className="text-[9px] text-neutral-500 shrink-0 w-[58px]">Blend {Number(nodeData.blendAlpha ?? 0.4).toFixed(2)}</span>
+            <input
+              type="range" min={0} max={1} step={0.05}
+              value={nodeData.blendAlpha ?? 0.4}
+              onChange={setNum("blendAlpha")}
+              className="nodrag nopan flex-1 accent-emerald-500"
+              title="0 = trust depth fully · 1 = ignore depth (vanilla SHARP) · 0.4 = metric anchor"
+            />
+          </label>
+        )}
 
         <p className="text-[8px] text-neutral-600 leading-tight">Depth must be camera-space Z, meters, +Z forward.</p>
 

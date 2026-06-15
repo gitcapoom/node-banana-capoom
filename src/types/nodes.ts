@@ -499,6 +499,10 @@ export interface Generate3DNodeData extends BaseNodeData {
  * handle into the Gaussian Splat Viewer. The float depth never travels an
  * image edge — the backend reads it straight from the saved `.exr`.
  */
+export type Image2GSDepthMethod = "sharp" | "exr_pixel" | "exr_grade";
+export type Image2GSGradeSource = "percentile" | "region";
+export type Image2GSGradeCurve = "affine" | "polynomial" | "histogram";
+
 export interface Image2GSNodeData extends BaseNodeData {
   // RGB input (cached from the connected image edge for display / run)
   inputImages: string[];
@@ -526,7 +530,17 @@ export interface Image2GSNodeData extends BaseNodeData {
   cameraJsonName?: string | null;       // camera_name, for display
   cameraJsonFocalRaw?: number | null;   // raw focal_length (before the ×2/3 option)
   focalTwoThirds?: boolean;             // multiply the camera.json focal by 2/3
-  blendAlpha: number;            // 0=trust depth … 1=ignore depth; 0.4 default
+  blendAlpha: number;            // 0=trust depth … 1=ignore depth; 0.4 default (exr_pixel only)
+  // SHARP /generate depth pipeline (depth_method + grade_* + albedo AOV).
+  depthMethod: Image2GSDepthMethod;   // "sharp" (no depth) | "exr_pixel" | "exr_grade"; default "exr_pixel"
+  gradeSource: Image2GSGradeSource;   // exr_grade only; default "percentile"
+  gradeCurve: Image2GSGradeCurve;     // exr_grade only; default "affine"
+  gradeMinSlope: number;              // exr_grade only; floor on the grade-curve slope (0=off, 0.3–0.6 reduces 3DGS popping); >= 0
+  // Albedo AOV loaded on the node — only for depth_method="exr_grade" + grade_source="region".
+  albedoSourcePath?: string | null;   // display filename
+  albedoImageRef?: string;            // ref id of the albedo saved in inputs/
+  albedoImagePath?: string;           // absolute path of the saved albedo
+  albedoImageThumb?: string | null;   // small preview (data URL)
   // 3D output (mirrors Generate3DNodeData)
   output3dUrl: string | null;    // blob: URL of the generated .ply
   savedFilename: string | null;

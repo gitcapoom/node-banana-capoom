@@ -52,14 +52,18 @@ function formatBackendError(j: unknown): string | null {
  * SHARP FastAPI service's /generate endpoint and streams back the resulting
  * `.ply` Gaussian splat.
  *
- * Request fields (multipart):
- *   rgb           File   — RGB image (png/jpg)
- *   depth         File   — metric depth `.exr`
- *   depth_channel string — channel name to read as depth ("" = auto)
+ * Request fields (multipart) — forwarded verbatim to /generate:
+ *   image         File   — RGB image (png/jpg)
+ *   depth         File   — metric depth `.exr` (omit for depth_method=sharp)
+ *   albedo        File   — albedo AOV (only depth_method=exr_grade + grade_source=region)
+ *   depth_method  string — sharp | exr_pixel | exr_grade
+ *   grade_source  string — exr_grade only: percentile | region
+ *   grade_curve   string — exr_grade only: affine | polynomial | histogram
+ *   grade_min_slope string — exr_grade only: floor on grade-curve slope (>=0; 0=off)
  *   focal_mm      string — focal length (mm)
  *   aperture_mm   string — horizontal film-back aperture (mm)
  *   f_px          string — optional explicit f_px override
- *   blend_alpha   string — metric anchor blend (0..1)
+ *   blend_alpha   string — exr_pixel only: metric anchor blend (0..1)
  *
  * Success: 200, application/octet-stream — the raw `.ply` bytes.
  * Failure: 502, JSON { success:false, error }.

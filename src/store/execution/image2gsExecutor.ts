@@ -82,9 +82,20 @@ export async function executeImage2GS(ctx: NodeExecutionContext): Promise<void> 
     updateNodeData(node.id, { status: "error", error: "Connect an RGB image input" });
     throw new Error("image2GS: missing RGB image input");
   }
-  if (!nodeData.depthExrRef) {
+  // SHARP depth pipeline (API /generate). "sharp" = no depth; "exr_pixel" /
+  // "exr_grade" need the EXR; "exr_grade" + "region" also needs an albedo AOV.
+  const depthMethod = nodeData.depthMethod || "exr_pixel";
+  const gradeSource = nodeData.gradeSource || "percentile";
+  const gradeCurve = nodeData.gradeCurve || "affine";
+  const needsDepth = depthMethod !== "sharp";
+  const needsAlbedo = depthMethod === "exr_grade" && gradeSource === "region";
+  if (needsDepth && !nodeData.depthExrRef) {
     updateNodeData(node.id, { status: "error", error: "Load a depth EXR on the node" });
     throw new Error("image2GS: missing depth EXR");
+  }
+  if (needsAlbedo && !nodeData.albedoImageRef) {
+    updateNodeData(node.id, { status: "error", error: "Load an albedo image (exr_grade · region)" });
+    throw new Error("image2GS: missing albedo for exr_grade/region");
   }
   if (!effectiveSaveDir) {
     updateNodeData(node.id, { status: "error", error: "Set a project save directory first" });
@@ -100,27 +111,53 @@ export async function executeImage2GS(ctx: NodeExecutionContext): Promise<void> 
     lastGenerationCost: null,
   });
 
-  // Load the saved depth EXR bytes back from inputs/.
-  const depthDataUrl = await loadMediaById(nodeData.depthExrRef, effectiveSaveDir, "inputs");
-  if (!depthDataUrl) {
-    updateNodeData(node.id, { status: "error", error: "Depth EXR file not found in inputs/" });
-    throw new Error("image2GS: depth EXR ref not resolvable");
+  // Load the saved depth EXR bytes back from inputs/ (skipped for "sharp").
+  let depthDataUrl: string | null = null;
+  if (needsDepth) {
+    depthDataUrl = await loadMediaById(nodeData.depthExrRef as string, effectiveSaveDir, "inputs");
+    if (!depthDataUrl) {
+      updateNodeData(node.id, { status: "error", error: "Depth EXR file not found in inputs/" });
+      throw new Error("image2GS: depth EXR ref not resolvable");
+    }
+  }
+  // Load the albedo AOV from inputs/ (only "exr_grade" + "region").
+  let albedoDataUrl: string | null = null;
+  if (needsAlbedo) {
+    albedoDataUrl = await loadMediaById(nodeData.albedoImageRef as string, effectiveSaveDir, "inputs");
+    if (!albedoDataUrl) {
+      updateNodeData(node.id, { status: "error", error: "Albedo image not found in inputs/" });
+      throw new Error("image2GS: albedo ref not resolvable");
+    }
   }
 
   try {
-    const [rgbBlob, depthBlob] = await Promise.all([urlToBlob(rgb), urlToBlob(depthDataUrl)]);
+    const rgbBlob = await urlToBlob(rgb);
 
     const form = new FormData();
     // Backend (/generate) requires the RGB field named "image" (not "rgb").
     form.append("image", rgbBlob, "rgb.png");
-    form.append("depth", depthBlob, nodeData.depthExrFilename || "depth.exr");
-    // Sent for forward-compat; the current backend contract has no depth_channel
-    // field (it auto-reads depth), so this is ignored server-side for now.
-    form.append("depth_channel", nodeData.selectedDepthChannel || "");
+    form.append("depth_method", depthMethod);
+    if (depthDataUrl) {
+      const depthBlob = await urlToBlob(depthDataUrl);
+      form.append("depth", depthBlob, nodeData.depthExrFilename || "depth.exr");
+      // Harmless legacy field; the backend auto-reads the single-channel EXR.
+      form.append("depth_channel", nodeData.selectedDepthChannel || "");
+    }
+    if (albedoDataUrl) {
+      const albedoBlob = await urlToBlob(albedoDataUrl);
+      form.append("albedo", albedoBlob, nodeData.albedoSourcePath || "albedo.png");
+    }
+    if (depthMethod === "exr_grade") {
+      form.append("grade_source", gradeSource);
+      form.append("grade_curve", gradeCurve);
+      // Floor on the grade-curve slope (>= 0); 0 = off. Reduces 3DGS popping.
+      form.append("grade_min_slope", String(Math.max(0, nodeData.gradeMinSlope ?? 0)));
+    }
     form.append("focal_mm", String(nodeData.focalLengthMm ?? 24));
     form.append("aperture_mm", String(nodeData.apertureMm ?? 36));
     if (nodeData.fPxOverride != null) form.append("f_px", String(nodeData.fPxOverride));
-    form.append("blend_alpha", String(nodeData.blendAlpha ?? 0.4));
+    // blend_alpha is exr_pixel only (ignored by sharp, forced to 0 by exr_grade).
+    if (depthMethod === "exr_pixel") form.append("blend_alpha", String(nodeData.blendAlpha ?? 0.4));
 
     updateNodeData(node.id, { loadingPhase: "Generating splat…" });
 
