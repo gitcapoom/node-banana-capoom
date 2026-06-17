@@ -861,7 +861,8 @@ export default function SplatViewer() {
   // Mesh overlay refs
   const meshObjectsRef = useRef<Map<string, THREE.Object3D>>(new Map());
   const meshFileInputRef = useRef<HTMLInputElement>(null);
-  const transformControlsRef = useRef<THREE.Object3D | null>(null); // TransformControls (typed as Object3D to avoid TS import issues)
+  const transformControlsRef = useRef<THREE.Object3D | null>(null);         // helper Object3D (for scene.add + visibility)
+  const transformControlsInstanceRef = useRef<{ attach: (o: THREE.Object3D) => void; detach: () => void; setMode: (m: string) => void } | null>(null); // TC instance (for attach/detach/setMode)
   const transformDraggingRef = useRef(false);
   const pmremGeneratorRef = useRef<THREE.PMREMGenerator | null>(null);
   // Light overlay refs
@@ -1295,6 +1296,7 @@ export default function SplatViewer() {
       const tcHelper = transformControls.getHelper();
       scene.add(tcHelper);
       transformControlsRef.current = tcHelper;
+      transformControlsInstanceRef.current = transformControls as unknown as typeof transformControlsInstanceRef.current;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       transformControls.addEventListener("dragging-changed", (event: any) => {
@@ -1580,7 +1582,7 @@ export default function SplatViewer() {
         for (const [id, root] of meshObjectsRef.current) {
           if (root === hitObj || root.getObjectById(hitObj.id)) {
             setSelectedOverlayId(id);
-            (transformControlsRef.current as unknown as { attach: (o: THREE.Object3D) => void })?.attach(root);
+            transformControlsInstanceRef.current?.attach(root);
             return;
           }
         }
@@ -1590,7 +1592,7 @@ export default function SplatViewer() {
             setSelectedOverlayId(id);
             const lightObj = lightObjectsRef.current.get(id);
             if (lightObj) {
-              (transformControlsRef.current as unknown as { attach: (o: THREE.Object3D) => void })?.attach(lightObj as unknown as THREE.Object3D);
+              transformControlsInstanceRef.current?.attach(lightObj as unknown as THREE.Object3D);
             }
             return;
           }
@@ -1598,7 +1600,7 @@ export default function SplatViewer() {
       }
       // Missed everything — deselect
       setSelectedOverlayId(null);
-      (transformControlsRef.current as unknown as { detach: () => void })?.detach();
+      transformControlsInstanceRef.current?.detach();
     };
 
     canvas.addEventListener("click", onCanvasClick);
@@ -2209,7 +2211,7 @@ export default function SplatViewer() {
     meshObjectsRef.current.delete(id);
     if (selectedOverlayId === id) {
       setSelectedOverlayId(null);
-      (transformControlsRef.current as unknown as { detach: () => void })?.detach();
+      transformControlsInstanceRef.current?.detach();
     }
     setMeshEntries(prev => prev.filter(e => e.id !== id));
   }, [selectedOverlayId]);
@@ -2354,14 +2356,14 @@ export default function SplatViewer() {
     if (helper) lightHelperToIdRef.current.delete(helper);
     if (selectedOverlayId === id) {
       setSelectedOverlayId(null);
-      (transformControlsRef.current as unknown as { detach: () => void })?.detach();
+      transformControlsInstanceRef.current?.detach();
     }
     setLightEntries(prev => prev.filter(e => e.id !== id));
   }, [selectedOverlayId]);
 
   // Sync gizmo mode to TransformControls
   useEffect(() => {
-    (transformControlsRef.current as unknown as { setMode?: (m: string) => void })?.setMode?.(gizmoMode);
+    transformControlsInstanceRef.current?.setMode(gizmoMode);
   }, [gizmoMode]);
 
   // ─── Auto-load if URL param present ─────────────────────────────
@@ -3871,12 +3873,12 @@ export default function SplatViewer() {
                 onSelectMesh={(id) => {
                   setSelectedOverlayId(id);
                   const obj = meshObjectsRef.current.get(id);
-                  if (obj) (transformControlsRef.current as unknown as { attach: (o: THREE.Object3D) => void })?.attach(obj);
+                  if (obj) transformControlsInstanceRef.current?.attach(obj);
                 }}
                 onSelectLight={(id) => {
                   setSelectedOverlayId(id);
                   const light = lightObjectsRef.current.get(id);
-                  if (light) (transformControlsRef.current as unknown as { attach: (o: THREE.Object3D) => void })?.attach(light as unknown as THREE.Object3D);
+                  if (light) transformControlsInstanceRef.current?.attach(light as unknown as THREE.Object3D);
                 }}
                 onGizmoModeChange={setGizmoMode}
                 onMeshTransformChange={(id, t) => setMeshEntries(prev => prev.map(e => e.id === id ? { ...e, transform: t } : e))}
