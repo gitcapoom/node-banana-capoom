@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-// Re-declare types locally (component is peer to SplatViewer, not importing from it)
+// Re-declare types locally (peer component to SplatViewer)
 interface MeshTransform {
   position: { x: number; y: number; z: number };
   rotation: { x: number; y: number; z: number };
@@ -13,8 +13,6 @@ interface MeshEntry {
   id: string;
   name: string;
   visible: boolean;
-  hasIBL: boolean;
-  envMapIntensity: number;
   transform: MeshTransform;
 }
 
@@ -31,32 +29,54 @@ interface LightEntry {
   targetPosition: { x: number; y: number; z: number };
   angle: number;
   penumbra: number;
+  lockTarget: boolean;
   width: number;
   height: number;
   rotation: { x: number; y: number; z: number };
 }
 
+interface IblEntry {
+  id: string;
+  name: string;
+  visible: boolean;
+  position: { x: number; y: number; z: number };
+  radius: number;
+  ramp: number;
+  intensity: number;
+  lift: { r: number; g: number; b: number };
+  gain: { r: number; g: number; b: number };
+  gamma: { r: number; g: number; b: number };
+}
+
 interface MeshPanelProps {
   meshEntries: MeshEntry[];
   lightEntries: LightEntry[];
+  iblEntries: IblEntry[];
   selectedId: string | null;
+  selectedSpotTargetId: string | null;
   gizmoMode: "translate" | "rotate" | "scale";
   onSelectMesh: (id: string) => void;
   onSelectLight: (id: string) => void;
+  onSelectSpotTarget: (id: string) => void;
   onGizmoModeChange: (mode: "translate" | "rotate" | "scale") => void;
   onMeshTransformChange: (id: string, t: MeshTransform) => void;
   onMeshVisibilityToggle: (id: string) => void;
-  onMeshEnvMapIntensityChange: (id: string, v: number) => void;
   onRemoveMesh: (id: string) => void;
-  onCaptureIBL: (id: string) => void;
+  onCaptureIblFromMesh: (meshId: string) => void;
   onAddMesh: () => void;
   onAddLight: (type: LightType) => void;
   onLightChange: (id: string, partial: Partial<LightEntry>) => void;
   onRemoveLight: (id: string) => void;
+  onIblChange: (id: string, partial: Partial<IblEntry>) => void;
+  onCaptureIblAtCamera: () => void;
+  onRemoveIbl: (id: string) => void;
 }
 
-function NumInput({ label, value, onChange, step = 0.1, width = "w-16" }: {
-  label: string; value: number; onChange: (v: number) => void; step?: number; width?: string;
+// ─── Sub-components ───────────────────────────────────────────────
+
+function NumInput({ label, value, onChange, step = 0.1, width = "w-16", min }: {
+  label: string; value: number; onChange: (v: number) => void;
+  step?: number; width?: string; min?: number;
 }) {
   return (
     <label className="flex flex-col gap-0.5">
@@ -64,6 +84,7 @@ function NumInput({ label, value, onChange, step = 0.1, width = "w-16" }: {
       <input
         type="number"
         step={step}
+        min={min}
         value={Number(value.toFixed(3))}
         onChange={e => onChange(parseFloat(e.target.value) || 0)}
         className={`nodrag nopan ${width} text-[10px] bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5 text-neutral-200`}
@@ -90,77 +111,88 @@ function XyzRow({ label, value, onChange, step }: {
   );
 }
 
+function RgbRow({ label, value, onChange, step = 0.01 }: {
+  label: string;
+  value: { r: number; g: number; b: number };
+  onChange: (v: { r: number; g: number; b: number }) => void;
+  step?: number;
+}) {
+  return (
+    <div className="space-y-0.5">
+      <span className="text-[8px] text-neutral-500 uppercase">{label}</span>
+      <div className="flex gap-1">
+        <NumInput label="R" value={value.r} onChange={v => onChange({ ...value, r: v })} step={step} />
+        <NumInput label="G" value={value.g} onChange={v => onChange({ ...value, g: v })} step={step} />
+        <NumInput label="B" value={value.b} onChange={v => onChange({ ...value, b: v })} step={step} />
+      </div>
+    </div>
+  );
+}
+
+const EyeOnIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+  </svg>
+);
+const EyeOffIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+  </svg>
+);
+const XIcon = () => (
+  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+  </svg>
+);
+const ChevronIcon = ({ open }: { open: boolean }) => (
+  <svg className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+  </svg>
+);
+
+const gizmoButtons: { mode: "translate" | "rotate" | "scale"; title: string }[] = [
+  { mode: "translate", title: "Translate" },
+  { mode: "rotate", title: "Rotate" },
+  { mode: "scale", title: "Scale" },
+];
+
+// ─── Main component ───────────────────────────────────────────────
+
 export default function MeshPanel({
-  meshEntries, lightEntries, selectedId, gizmoMode,
-  onSelectMesh, onSelectLight, onGizmoModeChange,
-  onMeshTransformChange, onMeshVisibilityToggle, onMeshEnvMapIntensityChange,
-  onRemoveMesh, onCaptureIBL, onAddMesh,
+  meshEntries, lightEntries, iblEntries,
+  selectedId, selectedSpotTargetId, gizmoMode,
+  onSelectMesh, onSelectLight, onSelectSpotTarget, onGizmoModeChange,
+  onMeshTransformChange, onMeshVisibilityToggle, onRemoveMesh, onCaptureIblFromMesh, onAddMesh,
   onAddLight, onLightChange, onRemoveLight,
+  onIblChange, onCaptureIblAtCamera, onRemoveIbl,
 }: MeshPanelProps) {
-  const [tab, setTab] = useState<"meshes" | "lights">("meshes");
+  const [tab, setTab] = useState<"meshes" | "lights" | "ibl">("meshes");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const gizmoButtons: { mode: "translate" | "rotate" | "scale"; title: string; icon: React.ReactNode }[] = [
-    {
-      mode: "translate",
-      title: "Translate (move)",
-      icon: (
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h8M12 3v18M5 12H3m18 0h-2M7 7l-4 4 4 4M17 7l4 4-4 4" />
-        </svg>
-      ),
-    },
-    {
-      mode: "rotate",
-      title: "Rotate",
-      icon: (
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-      ),
-    },
-    {
-      mode: "scale",
-      title: "Scale",
-      icon: (
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-        </svg>
-      ),
-    },
-  ];
-
   return (
-    <div className="bg-black/70 backdrop-blur-md rounded-lg p-3 w-64 max-h-[70vh] flex flex-col gap-2 pointer-events-auto select-none">
-      {/* Header + tabs */}
+    <div className="bg-black/70 backdrop-blur-md rounded-lg p-3 w-64 max-h-[80vh] flex flex-col gap-2 pointer-events-auto select-none">
+      {/* Tabs */}
       <div className="flex items-center gap-1">
-        <button
-          onClick={() => setTab("meshes")}
-          className={`flex-1 text-[10px] py-1 rounded transition-colors ${tab === "meshes" ? "bg-neutral-700 text-white" : "text-neutral-500 hover:text-neutral-300"}`}
-        >
+        <button onClick={() => setTab("meshes")} className={`flex-1 text-[10px] py-1 rounded transition-colors ${tab === "meshes" ? "bg-neutral-700 text-white" : "text-neutral-500 hover:text-neutral-300"}`}>
           Meshes ({meshEntries.length})
         </button>
-        <button
-          onClick={() => setTab("lights")}
-          className={`flex-1 text-[10px] py-1 rounded transition-colors ${tab === "lights" ? "bg-neutral-700 text-white" : "text-neutral-500 hover:text-neutral-300"}`}
-        >
+        <button onClick={() => setTab("lights")} className={`flex-1 text-[10px] py-1 rounded transition-colors ${tab === "lights" ? "bg-neutral-700 text-white" : "text-neutral-500 hover:text-neutral-300"}`}>
           Lights ({lightEntries.length})
+        </button>
+        <button onClick={() => setTab("ibl")} className={`flex-1 text-[10px] py-1 rounded transition-colors ${tab === "ibl" ? "bg-neutral-700 text-white" : "text-neutral-500 hover:text-neutral-300"}`}>
+          IBL ({iblEntries.length})
         </button>
       </div>
 
-      {/* Gizmo mode bar — shown when something is selected */}
+      {/* Gizmo mode bar */}
       {selectedId && (
         <div className="flex items-center gap-1 border border-neutral-700 rounded p-1">
-          {gizmoButtons.map(({ mode, title, icon }) => (
-            <button
-              key={mode}
-              onClick={() => onGizmoModeChange(mode)}
-              title={title}
-              className={`flex-1 flex items-center justify-center h-6 rounded transition-colors ${
-                gizmoMode === mode ? "bg-indigo-600 text-white" : "text-neutral-400 hover:text-white"
-              }`}
+          {gizmoButtons.map(({ mode, title }) => (
+            <button key={mode} onClick={() => onGizmoModeChange(mode)} title={title}
+              className={`flex-1 text-[9px] h-6 rounded transition-colors ${gizmoMode === mode ? "bg-indigo-600 text-white" : "text-neutral-400 hover:text-white"}`}
             >
-              {icon}
+              {title[0]}
             </button>
           ))}
         </div>
@@ -168,6 +200,8 @@ export default function MeshPanel({
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto space-y-1 min-h-0">
+
+        {/* ── Meshes tab ── */}
         {tab === "meshes" && (
           <>
             {meshEntries.length === 0 && (
@@ -176,74 +210,34 @@ export default function MeshPanel({
             {meshEntries.map(entry => (
               <div key={entry.id} className={`rounded border ${entry.id === selectedId ? "border-indigo-500" : "border-neutral-700"}`}>
                 <div className="flex items-center gap-1.5 p-1.5">
-                  {/* Visibility */}
-                  <button onClick={() => onMeshVisibilityToggle(entry.id)} className="text-neutral-500 hover:text-white shrink-0" title={entry.visible ? "Hide" : "Show"}>
-                    {entry.visible
-                      ? <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                      : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-                    }
+                  <button onClick={() => onMeshVisibilityToggle(entry.id)} className="text-neutral-500 hover:text-white shrink-0">
+                    {entry.visible ? <EyeOnIcon /> : <EyeOffIcon />}
                   </button>
-                  {/* Name — click to select */}
-                  <button
-                    onClick={() => onSelectMesh(entry.id)}
-                    className="flex-1 text-left text-[10px] text-neutral-200 truncate hover:text-white"
-                  >
+                  <button onClick={() => onSelectMesh(entry.id)} className="flex-1 text-left text-[10px] text-neutral-200 truncate hover:text-white">
                     {entry.name}
                   </button>
-                  {/* Expand */}
-                  <button
-                    onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
-                    className="text-neutral-500 hover:text-white shrink-0"
-                  >
-                    <svg className={`w-3 h-3 transition-transform ${expandedId === entry.id ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
+                  <button onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)} className="text-neutral-500 hover:text-white shrink-0">
+                    <ChevronIcon open={expandedId === entry.id} />
                   </button>
-                  {/* Remove */}
-                  <button onClick={() => onRemoveMesh(entry.id)} className="text-neutral-500 hover:text-red-400 shrink-0" title="Remove">
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                  <button onClick={() => onRemoveMesh(entry.id)} className="text-neutral-500 hover:text-red-400 shrink-0">
+                    <XIcon />
                   </button>
                 </div>
                 {expandedId === entry.id && (
                   <div className="border-t border-neutral-700 p-2 space-y-2">
-                    <XyzRow
-                      label="Position"
-                      value={entry.transform.position}
-                      onChange={pos => onMeshTransformChange(entry.id, { ...entry.transform, position: pos })}
-                    />
-                    <XyzRow
-                      label="Rotation °"
-                      value={entry.transform.rotation}
-                      onChange={rot => onMeshTransformChange(entry.id, { ...entry.transform, rotation: rot })}
-                      step={1}
-                    />
-                    <NumInput
-                      label="Scale"
-                      value={entry.transform.scale}
+                    <XyzRow label="Position" value={entry.transform.position}
+                      onChange={pos => onMeshTransformChange(entry.id, { ...entry.transform, position: pos })} />
+                    <XyzRow label="Rotation °" value={entry.transform.rotation}
+                      onChange={rot => onMeshTransformChange(entry.id, { ...entry.transform, rotation: rot })} step={1} />
+                    <NumInput label="Scale" value={entry.transform.scale}
                       onChange={s => onMeshTransformChange(entry.id, { ...entry.transform, scale: Math.max(0.0001, s) })}
-                      step={0.1}
-                      width="w-full"
-                    />
-                    {/* IBL */}
-                    <div className="pt-1 border-t border-neutral-700 space-y-1">
-                      <button
-                        onClick={() => onCaptureIBL(entry.id)}
+                      step={0.1} width="w-full" />
+                    <div className="pt-1 border-t border-neutral-700">
+                      <button onClick={() => onCaptureIblFromMesh(entry.id)}
                         className="w-full text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-2 py-1 transition-colors"
-                        title="Capture 360 environment from mesh center and apply as IBL"
-                      >
-                        {entry.hasIBL ? "Re-capture IBL" : "Capture IBL"}
+                        title="Capture 360 IBL from mesh center and add to IBL list">
+                        Capture IBL from mesh
                       </button>
-                      {entry.hasIBL && (
-                        <label className="flex items-center gap-2">
-                          <span className="text-[9px] text-neutral-500 shrink-0 w-14">IBL {entry.envMapIntensity.toFixed(2)}</span>
-                          <input
-                            type="range" min={0} max={3} step={0.05}
-                            value={entry.envMapIntensity}
-                            onChange={e => onMeshEnvMapIntensityChange(entry.id, parseFloat(e.target.value))}
-                            className="nodrag nopan flex-1 accent-indigo-500"
-                          />
-                        </label>
-                      )}
                     </div>
                   </div>
                 )}
@@ -252,6 +246,7 @@ export default function MeshPanel({
           </>
         )}
 
+        {/* ── Lights tab ── */}
         {tab === "lights" && (
           <>
             {lightEntries.length === 0 && (
@@ -261,77 +256,85 @@ export default function MeshPanel({
               <div key={entry.id} className={`rounded border ${entry.id === selectedId ? "border-indigo-500" : "border-neutral-700"}`}>
                 <div className="flex items-center gap-1.5 p-1.5">
                   <button onClick={() => onLightChange(entry.id, { visible: !entry.visible })} className="text-neutral-500 hover:text-white shrink-0">
-                    {entry.visible
-                      ? <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                      : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-                    }
+                    {entry.visible ? <EyeOnIcon /> : <EyeOffIcon />}
                   </button>
                   <button onClick={() => onSelectLight(entry.id)} className="flex-1 text-left text-[10px] text-neutral-200 truncate hover:text-white">
-                    {entry.name}
-                    <span className="ml-1 text-neutral-500">{entry.type}</span>
+                    {entry.name} <span className="text-neutral-500">{entry.type}</span>
                   </button>
                   <button onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)} className="text-neutral-500 hover:text-white shrink-0">
-                    <svg className={`w-3 h-3 transition-transform ${expandedId === entry.id ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
+                    <ChevronIcon open={expandedId === entry.id} />
                   </button>
                   <button onClick={() => onRemoveLight(entry.id)} className="text-neutral-500 hover:text-red-400 shrink-0">
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    <XIcon />
                   </button>
                 </div>
                 {expandedId === entry.id && (
                   <div className="border-t border-neutral-700 p-2 space-y-2">
+                    {/* Color + Intensity */}
                     <div className="flex items-center gap-2">
-                      <span className="text-[9px] text-neutral-500 w-14">Color</span>
-                      <input
-                        type="color"
-                        value={entry.color}
+                      <span className="text-[9px] text-neutral-500 w-12">Color</span>
+                      <input type="color" value={entry.color}
                         onChange={e => onLightChange(entry.id, { color: e.target.value })}
-                        className="nodrag nopan w-8 h-6 cursor-pointer rounded bg-transparent border border-neutral-700"
-                      />
+                        className="nodrag nopan w-8 h-6 cursor-pointer rounded bg-transparent border border-neutral-700" />
                     </div>
                     <label className="flex items-center gap-2">
-                      <span className="text-[9px] text-neutral-500 shrink-0 w-14">Intensity</span>
-                      <input
-                        type="range" min={0} max={20} step={0.1}
+                      <span className="text-[9px] text-neutral-500 shrink-0 w-12">Intensity</span>
+                      <input type="range" min={0} max={100} step={0.5}
                         value={entry.intensity}
                         onChange={e => onLightChange(entry.id, { intensity: parseFloat(e.target.value) })}
-                        className="nodrag nopan flex-1 accent-yellow-500"
-                      />
-                      <span className="text-[9px] text-neutral-400 w-6">{entry.intensity.toFixed(1)}</span>
+                        className="nodrag nopan flex-1 accent-yellow-500" />
+                      <span className="text-[9px] text-neutral-400 w-8">{entry.intensity.toFixed(1)}</span>
                     </label>
-                    <XyzRow
-                      label="Position"
-                      value={entry.position}
-                      onChange={pos => onLightChange(entry.id, { position: pos })}
-                    />
+                    <XyzRow label="Position" value={entry.position}
+                      onChange={pos => onLightChange(entry.id, { position: pos })} />
+
+                    {/* SpotLight specific */}
                     {entry.type === "spot" && (
                       <>
-                        <XyzRow
-                          label="Target"
-                          value={entry.targetPosition}
-                          onChange={t => onLightChange(entry.id, { targetPosition: t })}
-                        />
+                        {/* Light vs Target TC toggle */}
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => onSelectLight(entry.id)}
+                            className={`flex-1 text-[9px] py-1 rounded transition-colors ${selectedId === entry.id && selectedSpotTargetId !== entry.id ? "bg-indigo-600 text-white" : "bg-neutral-700 text-neutral-300 hover:bg-neutral-600"}`}
+                          >
+                            Move Light
+                          </button>
+                          <button
+                            onClick={() => onSelectSpotTarget(entry.id)}
+                            className={`flex-1 text-[9px] py-1 rounded transition-colors ${selectedSpotTargetId === entry.id ? "bg-amber-600 text-white" : "bg-neutral-700 text-neutral-300 hover:bg-neutral-600"}`}
+                          >
+                            Move Target
+                          </button>
+                        </div>
+                        {/* Lock target toggle */}
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input type="checkbox" checked={entry.lockTarget}
+                            onChange={e => onLightChange(entry.id, { lockTarget: e.target.checked })}
+                            className="nodrag nopan accent-indigo-500" />
+                          <span className="text-[9px] text-neutral-400">Move light + target together</span>
+                        </label>
+                        <XyzRow label="Target" value={entry.targetPosition}
+                          onChange={t => onLightChange(entry.id, { targetPosition: t })} />
                         <label className="flex items-center gap-2">
-                          <span className="text-[9px] text-neutral-500 shrink-0 w-14">Angle°</span>
+                          <span className="text-[9px] text-neutral-500 shrink-0 w-12">Angle°</span>
                           <input type="range" min={1} max={89} step={1}
                             value={Math.round((entry.angle * 180) / Math.PI)}
                             onChange={e => onLightChange(entry.id, { angle: (parseInt(e.target.value) * Math.PI) / 180 })}
-                            className="nodrag nopan flex-1 accent-yellow-500"
-                          />
+                            className="nodrag nopan flex-1 accent-yellow-500" />
                           <span className="text-[9px] text-neutral-400 w-6">{Math.round((entry.angle * 180) / Math.PI)}°</span>
                         </label>
                         <label className="flex items-center gap-2">
-                          <span className="text-[9px] text-neutral-500 shrink-0 w-14">Penumbra</span>
+                          <span className="text-[9px] text-neutral-500 shrink-0 w-12">Penumbra</span>
                           <input type="range" min={0} max={1} step={0.05}
                             value={entry.penumbra}
                             onChange={e => onLightChange(entry.id, { penumbra: parseFloat(e.target.value) })}
-                            className="nodrag nopan flex-1 accent-yellow-500"
-                          />
-                          <span className="text-[9px] text-neutral-400 w-6">{entry.penumbra.toFixed(2)}</span>
+                            className="nodrag nopan flex-1 accent-yellow-500" />
+                          <span className="text-[9px] text-neutral-400 w-8">{entry.penumbra.toFixed(2)}</span>
                         </label>
                       </>
                     )}
+
+                    {/* RectAreaLight specific */}
                     {entry.type === "rect" && (
                       <>
                         <div className="flex gap-2">
@@ -347,23 +350,99 @@ export default function MeshPanel({
             ))}
           </>
         )}
+
+        {/* ── IBL tab ── */}
+        {tab === "ibl" && (
+          <>
+            {iblEntries.length === 0 && (
+              <p className="text-[10px] text-neutral-600 text-center py-4">No IBLs yet.<br />Capture from mesh or camera.</p>
+            )}
+            {iblEntries.map(entry => (
+              <div key={entry.id} className="rounded border border-neutral-700">
+                <div className="flex items-center gap-1.5 p-1.5">
+                  <button onClick={() => onIblChange(entry.id, { visible: !entry.visible })} className="text-neutral-500 hover:text-white shrink-0">
+                    {entry.visible ? <EyeOnIcon /> : <EyeOffIcon />}
+                  </button>
+                  <span className="flex-1 text-[10px] text-neutral-200 truncate">{entry.name}</span>
+                  <button onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)} className="text-neutral-500 hover:text-white shrink-0">
+                    <ChevronIcon open={expandedId === entry.id} />
+                  </button>
+                  <button onClick={() => onRemoveIbl(entry.id)} className="text-neutral-500 hover:text-red-400 shrink-0">
+                    <XIcon />
+                  </button>
+                </div>
+                {expandedId === entry.id && (
+                  <div className="border-t border-neutral-700 p-2 space-y-2">
+                    {/* Position */}
+                    <XyzRow label="Position" value={entry.position}
+                      onChange={pos => onIblChange(entry.id, { position: pos })} />
+
+                    {/* Volume */}
+                    <label className="flex items-center gap-2">
+                      <span className="text-[9px] text-neutral-500 shrink-0 w-12">Radius</span>
+                      <input type="range" min={0} max={50} step={0.5}
+                        value={entry.radius}
+                        onChange={e => onIblChange(entry.id, { radius: parseFloat(e.target.value) })}
+                        className="nodrag nopan flex-1 accent-teal-500" />
+                      <span className="text-[9px] text-neutral-400 w-8">{entry.radius === 0 ? "∞" : entry.radius.toFixed(1)}</span>
+                    </label>
+                    {entry.radius > 0 && (
+                      <label className="flex items-center gap-2">
+                        <span className="text-[9px] text-neutral-500 shrink-0 w-12">Ramp</span>
+                        <input type="range" min={0} max={1} step={0.05}
+                          value={entry.ramp}
+                          onChange={e => onIblChange(entry.id, { ramp: parseFloat(e.target.value) })}
+                          className="nodrag nopan flex-1 accent-teal-500" />
+                        <span className="text-[9px] text-neutral-400 w-8">{entry.ramp.toFixed(2)}</span>
+                      </label>
+                    )}
+                    <label className="flex items-center gap-2">
+                      <span className="text-[9px] text-neutral-500 shrink-0 w-12">Intensity</span>
+                      <input type="range" min={0} max={5} step={0.05}
+                        value={entry.intensity}
+                        onChange={e => onIblChange(entry.id, { intensity: parseFloat(e.target.value) })}
+                        className="nodrag nopan flex-1 accent-teal-500" />
+                      <span className="text-[9px] text-neutral-400 w-8">{entry.intensity.toFixed(2)}</span>
+                    </label>
+
+                    {/* Color grading */}
+                    <div className="pt-1 border-t border-neutral-700 space-y-2">
+                      <span className="text-[9px] text-neutral-500 uppercase block">Color Grade (HDR)</span>
+                      <RgbRow label="Lift" value={entry.lift}
+                        onChange={v => onIblChange(entry.id, { lift: v })} step={0.01} />
+                      <RgbRow label="Gain" value={entry.gain}
+                        onChange={v => onIblChange(entry.id, { gain: v })} step={0.05} />
+                      <RgbRow label="Gamma" value={entry.gamma}
+                        onChange={v => onIblChange(entry.id, { gamma: v })} step={0.05} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
-      {/* Footer action buttons */}
+      {/* Footer */}
       {tab === "meshes" && (
-        <button
-          onClick={onAddMesh}
-          className="w-full text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-2 py-1.5 transition-colors"
-        >
+        <button onClick={onAddMesh}
+          className="w-full text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-2 py-1.5 transition-colors">
           + Add Mesh (.glb / .obj)
         </button>
       )}
       {tab === "lights" && (
         <div className="flex gap-1">
-          <button onClick={() => onAddLight("point")} className="flex-1 text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-1 py-1.5 transition-colors" title="Add point light">Point</button>
-          <button onClick={() => onAddLight("spot")} className="flex-1 text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-1 py-1.5 transition-colors" title="Add spot light">Spot</button>
-          <button onClick={() => onAddLight("rect")} className="flex-1 text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-1 py-1.5 transition-colors" title="Add rect area light">Rect</button>
+          <button onClick={() => onAddLight("point")} className="flex-1 text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-1 py-1.5 transition-colors">Point</button>
+          <button onClick={() => onAddLight("spot")} className="flex-1 text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-1 py-1.5 transition-colors">Spot</button>
+          <button onClick={() => onAddLight("rect")} className="flex-1 text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-1 py-1.5 transition-colors">Rect</button>
         </div>
+      )}
+      {tab === "ibl" && (
+        <button onClick={onCaptureIblAtCamera}
+          className="w-full text-[10px] bg-teal-800 hover:bg-teal-700 text-neutral-200 rounded px-2 py-1.5 transition-colors"
+          title="Capture 360 IBL from current camera position">
+          + Capture IBL at Camera
+        </button>
       )}
     </div>
   );

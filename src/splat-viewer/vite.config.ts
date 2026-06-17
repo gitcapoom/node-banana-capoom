@@ -7,4 +7,5 @@ import tailwindcss from "@tailwindcss/vite";
 // via git subtree, so it must use only relative + npm imports (no @/ or next/).
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  base: "./",
 });

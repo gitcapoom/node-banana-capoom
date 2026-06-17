@@ -56,7 +56,7 @@ import MeshPanel from "./MeshPanel";
 /** UUID that works on HTTP (non-HTTPS) origins where crypto.randomUUID is unavailable. */
 function makeId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return makeId();
+    return crypto.randomUUID();
   }
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
@@ -96,8 +96,6 @@ interface MeshEntry {
   id: string;
   name: string;
   visible: boolean;
-  hasIBL: boolean;
-  envMapIntensity: number;
   transform: MeshTransform;
 }
 
@@ -121,6 +119,7 @@ interface LightEntry {
   targetPosition: { x: number; y: number; z: number };
   angle: number;       // radians, default Math.PI/6
   penumbra: number;    // 0..1
+  lockTarget: boolean; // move target along with light
   // RectAreaLight extras
   width: number;
   height: number;
@@ -138,9 +137,38 @@ const defaultLightEntry = (type: LightType, idx: number): LightEntry => ({
   targetPosition: { x: 0, y: 0, z: 0 },
   angle: Math.PI / 6,
   penumbra: 0.2,
+  lockTarget: false,
   width: 1,
   height: 1,
   rotation: { x: 0, y: 0, z: 0 },
+});
+
+// ─── IBL entry ───────────────────────────────────────────────────
+
+interface IblEntry {
+  id: string;
+  name: string;
+  visible: boolean;
+  position: { x: number; y: number; z: number }; // world position of capture
+  radius: number;   // sphere volume radius (0 = global/infinite)
+  ramp: number;     // 0–1: fraction of radius used as falloff ramp
+  intensity: number; // base envMapIntensity
+  lift: { r: number; g: number; b: number };  // color grade lift (default 0)
+  gain: { r: number; g: number; b: number };  // color grade gain (default 1)
+  gamma: { r: number; g: number; b: number }; // color grade gamma (default 1)
+}
+
+const defaultIblEntry = (idx: number): IblEntry => ({
+  id: makeId(),
+  name: `IBL ${idx}`,
+  visible: true,
+  position: { x: 0, y: 0, z: 0 },
+  radius: 0,
+  ramp: 0.5,
+  intensity: 1,
+  lift: { r: 0, g: 0, b: 0 },
+  gain: { r: 1, g: 1, b: 1 },
+  gamma: { r: 1, g: 1, b: 1 },
 });
 
 // Lazy-cached dynamic imports for mesh loaders
@@ -771,10 +799,12 @@ export default function SplatViewer() {
   // Viewer container size (for responsive framing overlay)
   const [viewerSize, setViewerSize] = useState({ w: 1280, h: 720 });
 
-  // ─── Mesh overlays + lights ──────────────────────────────────────
+  // ─── Mesh overlays + lights + IBL ────────────────────────────────
   const [meshEntries, setMeshEntries] = useState<MeshEntry[]>([]);
   const [lightEntries, setLightEntries] = useState<LightEntry[]>([]);
+  const [iblEntries, setIblEntries] = useState<IblEntry[]>([]);
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null); // mesh OR light id
+  const [selectedSpotTargetId, setSelectedSpotTargetId] = useState<string | null>(null); // id of spot whose target TC is attached to
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
   const [showMeshPanel, setShowMeshPanel] = useState(false);
 
@@ -869,6 +899,18 @@ export default function SplatViewer() {
   const lightObjectsRef = useRef<Map<string, THREE.Light>>(new Map());
   const lightHelpersRef = useRef<Map<string, THREE.Object3D>>(new Map());
   const lightHelperToIdRef = useRef<Map<THREE.Object3D, string>>(new Map());
+  // IBL refs
+  const iblRawCubeRTRef = useRef<Map<string, THREE.WebGLCubeRenderTarget>>(new Map());
+  const iblGradedPmremRef = useRef<Map<string, THREE.Texture>>(new Map());
+  const iblGradePassRef = useRef<{ scene: THREE.Scene; camera: THREE.OrthographicCamera; mat: THREE.ShaderMaterial } | null>(null);
+  // Undo / gizmo drag tracking
+  const undoStackRef = useRef<Array<{ meshEntries: MeshEntry[]; lightEntries: LightEntry[]; iblEntries: IblEntry[] }>>([]);
+  const prevDragPosRef = useRef<THREE.Vector3>(new THREE.Vector3());
+  // Mirror refs — always hold latest state values for imperative (non-React) handlers
+  const meshEntriesRef = useRef<MeshEntry[]>([]);
+  const lightEntriesRef = useRef<LightEntry[]>([]);
+  const iblEntriesRef = useRef<IblEntry[]>([]);
+  const pushUndoFnRef = useRef<(() => void) | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const axesHelperRef = useRef<THREE.AxesHelper | null>(null);
 
@@ -1282,6 +1324,55 @@ export default function SplatViewer() {
     // ─── PMREMGenerator (for IBL capture) ─────────────────────────
     pmremGeneratorRef.current = new THREE.PMREMGenerator(renderer);
 
+    // ─── IBL cube-face grade pass ──────────────────────────────────
+    // Renders each face of a raw cube RT through a lift/gain/gamma shader
+    // into a new cube RT, then converts to PMREM. Uses GLSL ES 1.0 syntax
+    // (Three.js maps textureCube → texture and gl_FragColor → out fragColor).
+    {
+      const gradeMat = new THREE.ShaderMaterial({
+        uniforms: {
+          uCube: { value: null as THREE.CubeTexture | null },
+          uFace: { value: 0 },
+          uLift: { value: new THREE.Vector3(0, 0, 0) },
+          uGain: { value: new THREE.Vector3(1, 1, 1) },
+          uGamma: { value: new THREE.Vector3(1, 1, 1) },
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+        `,
+        fragmentShader: `
+          varying vec2 vUv;
+          uniform samplerCube uCube;
+          uniform int uFace;
+          uniform vec3 uLift, uGain, uGamma;
+          vec3 faceDir(int f, vec2 uv) {
+            vec2 p = uv * 2.0 - 1.0;
+            if (f == 0) return normalize(vec3( 1.0,-p.y,-p.x));
+            if (f == 1) return normalize(vec3(-1.0,-p.y, p.x));
+            if (f == 2) return normalize(vec3( p.x, 1.0, p.y));
+            if (f == 3) return normalize(vec3( p.x,-1.0,-p.y));
+            if (f == 4) return normalize(vec3( p.x,-p.y, 1.0));
+            return normalize(vec3(-p.x,-p.y,-1.0));
+          }
+          void main() {
+            vec4 c = textureCube(uCube, faceDir(uFace, vUv));
+            vec3 col = c.rgb * uGain + uLift;
+            col = pow(max(col, vec3(0.0)), 1.0 / max(uGamma, vec3(0.001)));
+            gl_FragColor = vec4(col, c.a);
+          }
+        `,
+        depthTest: false,
+        depthWrite: false,
+      });
+      const gradeGeo = new THREE.PlaneGeometry(2, 2);
+      const gradeMesh = new THREE.Mesh(gradeGeo, gradeMat);
+      const gradeScene = new THREE.Scene();
+      gradeScene.add(gradeMesh);
+      const gradeCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+      iblGradePassRef.current = { scene: gradeScene, camera: gradeCam, mat: gradeMat };
+    }
+
     // ─── RectAreaLight uniforms init ───────────────────────────────
     import("three/examples/jsm/lights/RectAreaLightUniformsLib.js").then(({ RectAreaLightUniformsLib }) => {
       RectAreaLightUniformsLib.init();
@@ -1300,9 +1391,18 @@ export default function SplatViewer() {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       transformControls.addEventListener("dragging-changed", (event: any) => {
-        transformDraggingRef.current = event.value as boolean;
+        const isDragging = event.value as boolean;
+        transformDraggingRef.current = isDragging;
         if (controlsRef.current) {
-          controlsRef.current.enabled = !event.value && navModeRef.current === "orbit";
+          controlsRef.current.enabled = !isDragging && navModeRef.current === "orbit";
+        }
+        const tc2 = transformControls as unknown as { object?: THREE.Object3D };
+        if (isDragging && tc2.object) {
+          // Record position at drag start for lockTarget delta tracking
+          prevDragPosRef.current.copy(tc2.object.position);
+        } else if (!isDragging) {
+          // Drag ended — push undo snapshot via stable ref
+          pushUndoFnRef.current?.();
         }
       });
 
@@ -1329,17 +1429,44 @@ export default function SplatViewer() {
             return;
           }
         }
-        // Sync to light entries
+        // Check if obj is a SpotLight.target (for spot target gizmo mode)
         for (const [id, lightObj] of lightObjectsRef.current) {
-          if ((lightObj as unknown as THREE.Object3D) === obj) {
+          const spotLight = lightObj as THREE.SpotLight;
+          if (spotLight.isSpotLight && (spotLight.target as unknown as THREE.Object3D) === obj) {
             setLightEntries(prev => prev.map(e => e.id !== id ? e : {
               ...e,
-              position: { x: obj.position.x, y: obj.position.y, z: obj.position.z },
-              rotation: {
+              targetPosition: { x: obj.position.x, y: obj.position.y, z: obj.position.z },
+            }));
+            return;
+          }
+        }
+        // Sync to light entries (light itself)
+        for (const [id, lightObj] of lightObjectsRef.current) {
+          if ((lightObj as unknown as THREE.Object3D) === obj) {
+            // Compute per-frame delta for lockTarget
+            const delta = obj.position.clone().sub(prevDragPosRef.current);
+            prevDragPosRef.current.copy(obj.position);
+            setLightEntries(prev => prev.map(e => {
+              if (e.id !== id) return e;
+              const newPos = { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+              const newRot = {
                 x: THREE.MathUtils.radToDeg(obj.rotation.x),
                 y: THREE.MathUtils.radToDeg(obj.rotation.y),
                 z: THREE.MathUtils.radToDeg(obj.rotation.z),
-              },
+              };
+              if (e.type === "spot" && e.lockTarget) {
+                return {
+                  ...e,
+                  position: newPos,
+                  rotation: newRot,
+                  targetPosition: {
+                    x: e.targetPosition.x + delta.x,
+                    y: e.targetPosition.y + delta.y,
+                    z: e.targetPosition.z + delta.z,
+                  },
+                };
+              }
+              return { ...e, position: newPos, rotation: newRot };
             }));
             return;
           }
@@ -2108,6 +2235,179 @@ export default function SplatViewer() {
     }
   }, [initScene, centerCamera]);
 
+  // ─── Mirror refs + Undo + IBL ────────────────────────────────────
+  // Declared before loadMeshFromFile/removeMesh/addLight so they can reference
+  // pushUndo and applyIblsToMeshes in their dependency arrays.
+
+  useEffect(() => { meshEntriesRef.current = meshEntries; }, [meshEntries]);
+  useEffect(() => { lightEntriesRef.current = lightEntries; }, [lightEntries]);
+  useEffect(() => { iblEntriesRef.current = iblEntries; }, [iblEntries]);
+
+  const pushUndo = useCallback(() => {
+    const stack = undoStackRef.current;
+    if (stack.length >= 50) stack.shift();
+    stack.push({
+      meshEntries: meshEntriesRef.current.map(e => ({
+        ...e, transform: { ...e.transform, position: { ...e.transform.position }, rotation: { ...e.transform.rotation } },
+      })),
+      lightEntries: lightEntriesRef.current.map(e => ({
+        ...e, position: { ...e.position }, targetPosition: { ...e.targetPosition }, rotation: { ...e.rotation },
+      })),
+      iblEntries: iblEntriesRef.current.map(e => ({
+        ...e, position: { ...e.position }, lift: { ...e.lift }, gain: { ...e.gain }, gamma: { ...e.gamma },
+      })),
+    });
+  }, []);
+
+  useEffect(() => { pushUndoFnRef.current = pushUndo; }, [pushUndo]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        const snap = undoStackRef.current.pop();
+        if (!snap) return;
+        setMeshEntries(snap.meshEntries);
+        setLightEntries(snap.lightEntries);
+        setIblEntries(snap.iblEntries);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const applyIblGrade = useCallback((entry: IblEntry) => {
+    const renderer = rendererRef.current;
+    const pmremGen = pmremGeneratorRef.current;
+    const gradePass = iblGradePassRef.current;
+    const rawCubeRT = iblRawCubeRTRef.current.get(entry.id);
+    if (!renderer || !pmremGen || !gradePass || !rawCubeRT) return;
+
+    const { scene: gradeScene, camera: gradeCam, mat } = gradePass;
+    const size = rawCubeRT.width;
+    mat.uniforms.uCube.value = rawCubeRT.texture;
+    mat.uniforms.uLift.value.set(entry.lift.r, entry.lift.g, entry.lift.b);
+    mat.uniforms.uGain.value.set(entry.gain.r, entry.gain.g, entry.gain.b);
+    mat.uniforms.uGamma.value.set(entry.gamma.r, entry.gamma.g, entry.gamma.b);
+
+    const gradedCubeRT = new THREE.WebGLCubeRenderTarget(size, {
+      format: THREE.RGBAFormat, type: THREE.HalfFloatType,
+    });
+    for (let face = 0; face < 6; face++) {
+      mat.uniforms.uFace.value = face;
+      renderer.setRenderTarget(gradedCubeRT, face);
+      renderer.render(gradeScene, gradeCam);
+    }
+    renderer.setRenderTarget(null);
+
+    const pmrem = pmremGen.fromCubemap(gradedCubeRT.texture);
+    gradedCubeRT.dispose();
+    const old = iblGradedPmremRef.current.get(entry.id);
+    if (old) old.dispose();
+    iblGradedPmremRef.current.set(entry.id, pmrem.texture);
+  }, []);
+
+  const applyIblsToMeshes = useCallback(() => {
+    for (const meshObj of meshObjectsRef.current.values()) {
+      const box = new THREE.Box3().setFromObject(meshObj);
+      const center = box.getCenter(new THREE.Vector3());
+      let bestIntensity = -1;
+      let bestTex: THREE.Texture | null = null;
+
+      for (const ibl of iblEntriesRef.current) {
+        if (!ibl.visible) continue;
+        const iblPos = new THREE.Vector3(ibl.position.x, ibl.position.y, ibl.position.z);
+        const dist = center.distanceTo(iblPos);
+        let rampFactor = 1;
+        if (ibl.radius > 0) {
+          const outer = ibl.radius;
+          if (dist > outer) continue;
+          const inner = outer * Math.max(0, 1 - ibl.ramp);
+          if (dist > inner) rampFactor = 1 - (dist - inner) / (outer - inner);
+        }
+        const eff = ibl.intensity * rampFactor;
+        if (eff > bestIntensity) {
+          bestIntensity = eff;
+          bestTex = iblGradedPmremRef.current.get(ibl.id) ?? null;
+        }
+      }
+
+      meshObj.traverse((child) => {
+        if (!(child as THREE.Mesh).isMesh) return;
+        const mesh = child as THREE.Mesh;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        mats.forEach((m) => {
+          const std = m as THREE.MeshStandardMaterial;
+          std.envMap = bestTex ?? null;
+          std.envMapIntensity = bestIntensity > 0 ? bestIntensity : 0;
+          std.needsUpdate = true;
+        });
+      });
+    }
+  }, []);
+
+  useEffect(() => { applyIblsToMeshes(); }, [iblEntries, applyIblsToMeshes]);
+
+  const captureIBL = useCallback(async (position: THREE.Vector3 | string) => {
+    const scene = sceneRef.current;
+    const renderer = rendererRef.current;
+    if (!scene || !renderer) return;
+
+    const doCapture = (pos: THREE.Vector3, hideObj?: THREE.Object3D) => {
+      const cubeRT = new THREE.WebGLCubeRenderTarget(256, {
+        format: THREE.RGBAFormat, type: THREE.HalfFloatType,
+      });
+      const cubeCamera = new THREE.CubeCamera(0.01, 1000, cubeRT);
+      cubeCamera.position.copy(pos);
+      scene.add(cubeCamera);
+      if (hideObj) hideObj.visible = false;
+      cubeCamera.update(renderer, scene);
+      if (hideObj) hideObj.visible = true;
+      scene.remove(cubeCamera);
+      return cubeRT;
+    };
+
+    let capturePos: THREE.Vector3;
+    let cubeRT: THREE.WebGLCubeRenderTarget;
+
+    if (typeof position === "string") {
+      const meshObj = meshObjectsRef.current.get(position);
+      if (!meshObj) return;
+      const box = new THREE.Box3().setFromObject(meshObj);
+      capturePos = box.getCenter(new THREE.Vector3());
+      cubeRT = doCapture(capturePos, meshObj);
+    } else {
+      capturePos = position;
+      cubeRT = doCapture(capturePos);
+    }
+
+    const idx = iblEntriesRef.current.length + 1;
+    const entry = defaultIblEntry(idx);
+    entry.position = { x: capturePos.x, y: capturePos.y, z: capturePos.z };
+    iblRawCubeRTRef.current.set(entry.id, cubeRT);
+    applyIblGrade(entry);
+    pushUndo();
+    setIblEntries(prev => [...prev, entry]);
+  }, [applyIblGrade, pushUndo]);
+
+  const removeIbl = useCallback((id: string) => {
+    iblRawCubeRTRef.current.get(id)?.dispose();
+    iblGradedPmremRef.current.get(id)?.dispose();
+    iblRawCubeRTRef.current.delete(id);
+    iblGradedPmremRef.current.delete(id);
+    pushUndo();
+    setIblEntries(prev => prev.filter(e => e.id !== id));
+  }, [pushUndo]);
+
+  // Re-grade + re-apply whenever IBL entries change (grade params, visibility, etc.)
+  useEffect(() => {
+    for (const entry of iblEntries) {
+      if (iblRawCubeRTRef.current.has(entry.id)) applyIblGrade(entry);
+    }
+    applyIblsToMeshes();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [iblEntries]);
+
   // ─── Mesh overlay: load, transform, remove ──────────────────────
 
   const loadMeshFromFile = useCallback(async (file: File) => {
@@ -2157,15 +2457,13 @@ export default function SplatViewer() {
       scene.add(object);
       meshObjectsRef.current.set(id, object);
 
-      setMeshEntries(prev => [...prev, {
-        id, name, visible: true, hasIBL: false, envMapIntensity: 1,
-        transform: { ...defaultMeshTransform },
-      }]);
+      pushUndo();
+      setMeshEntries(prev => [...prev, { id, name, visible: true, transform: { ...defaultMeshTransform } }]);
     } catch (err) {
       URL.revokeObjectURL(objectUrl);
       setError(`Failed to load mesh: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }, []);
+  }, [pushUndo]);
 
   // Apply mesh transforms whenever meshEntries changes
   useEffect(() => {
@@ -2181,18 +2479,10 @@ export default function SplatViewer() {
         "XYZ",
       );
       obj.scale.setScalar(entry.transform.scale);
-      // Sync envMapIntensity
-      obj.traverse((child) => {
-        if ((child as THREE.Mesh).isMesh) {
-          const mat = (child as THREE.Mesh).material;
-          const mats = Array.isArray(mat) ? mat : [mat];
-          mats.forEach((m) => {
-            (m as THREE.MeshStandardMaterial).envMapIntensity = entry.envMapIntensity;
-          });
-        }
-      });
     }
-  }, [meshEntries]);
+    // Mesh positions changed — re-evaluate IBL volume influence
+    applyIblsToMeshes();
+  }, [meshEntries, applyIblsToMeshes]);
 
   const removeMesh = useCallback((id: string) => {
     const scene = sceneRef.current;
@@ -2213,47 +2503,10 @@ export default function SplatViewer() {
       setSelectedOverlayId(null);
       transformControlsInstanceRef.current?.detach();
     }
+    pushUndo();
     setMeshEntries(prev => prev.filter(e => e.id !== id));
-  }, [selectedOverlayId]);
+  }, [selectedOverlayId, pushUndo]);
 
-  // ─── IBL capture (CubeCamera → PMREM → envMap per mesh) ─────────
-
-  const captureIBL = useCallback(async (meshId: string) => {
-    const scene = sceneRef.current;
-    const renderer = rendererRef.current;
-    const pmremGen = pmremGeneratorRef.current;
-    const meshObj = meshObjectsRef.current.get(meshId);
-    if (!scene || !renderer || !pmremGen || !meshObj) return;
-
-    const box = new THREE.Box3().setFromObject(meshObj);
-    const center = box.getCenter(new THREE.Vector3());
-
-    const cubeRT = new THREE.WebGLCubeRenderTarget(256);
-    const cubeCamera = new THREE.CubeCamera(0.01, 1000, cubeRT);
-    cubeCamera.position.copy(center);
-    scene.add(cubeCamera);
-
-    meshObj.visible = false;
-    cubeCamera.update(renderer, scene);
-    meshObj.visible = true;
-    scene.remove(cubeCamera);
-
-    const pmrem = pmremGen.fromCubemap(cubeRT.texture);
-    cubeRT.dispose();
-
-    meshObj.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const mat = (child as THREE.Mesh).material;
-        const mats = Array.isArray(mat) ? mat : [mat];
-        mats.forEach((m) => {
-          (m as THREE.MeshStandardMaterial).envMap = pmrem.texture;
-          (m as THREE.MeshStandardMaterial).needsUpdate = true;
-        });
-      }
-    });
-
-    setMeshEntries(prev => prev.map(e => e.id === meshId ? { ...e, hasIBL: true } : e));
-  }, []);
 
   // ─── Light overlays ──────────────────────────────────────────────
 
@@ -2300,8 +2553,9 @@ export default function SplatViewer() {
     lightHelpersRef.current.set(entry.id, helper);
     lightHelperToIdRef.current.set(helper, entry.id);
 
+    pushUndo();
     setLightEntries(prev => [...prev, entry]);
-  }, [lightEntries]);
+  }, [lightEntries, pushUndo]);
 
   // Apply light property changes whenever lightEntries changes
   useEffect(() => {
@@ -2358,8 +2612,10 @@ export default function SplatViewer() {
       setSelectedOverlayId(null);
       transformControlsInstanceRef.current?.detach();
     }
+    if (selectedSpotTargetId === id) setSelectedSpotTargetId(null);
+    pushUndo();
     setLightEntries(prev => prev.filter(e => e.id !== id));
-  }, [selectedOverlayId]);
+  }, [selectedOverlayId, selectedSpotTargetId, pushUndo]);
 
   // Sync gizmo mode to TransformControls
   useEffect(() => {
@@ -3868,28 +4124,43 @@ export default function SplatViewer() {
               <MeshPanel
                 meshEntries={meshEntries}
                 lightEntries={lightEntries}
+                iblEntries={iblEntries}
                 selectedId={selectedOverlayId}
+                selectedSpotTargetId={selectedSpotTargetId}
                 gizmoMode={gizmoMode}
                 onSelectMesh={(id) => {
                   setSelectedOverlayId(id);
+                  setSelectedSpotTargetId(null);
                   const obj = meshObjectsRef.current.get(id);
                   if (obj) transformControlsInstanceRef.current?.attach(obj);
                 }}
                 onSelectLight={(id) => {
                   setSelectedOverlayId(id);
+                  setSelectedSpotTargetId(null);
                   const light = lightObjectsRef.current.get(id);
                   if (light) transformControlsInstanceRef.current?.attach(light as unknown as THREE.Object3D);
+                }}
+                onSelectSpotTarget={(id) => {
+                  setSelectedOverlayId(id);
+                  setSelectedSpotTargetId(id);
+                  const spot = lightObjectsRef.current.get(id) as THREE.SpotLight | undefined;
+                  if (spot?.isSpotLight) transformControlsInstanceRef.current?.attach(spot.target as unknown as THREE.Object3D);
                 }}
                 onGizmoModeChange={setGizmoMode}
                 onMeshTransformChange={(id, t) => setMeshEntries(prev => prev.map(e => e.id === id ? { ...e, transform: t } : e))}
                 onMeshVisibilityToggle={(id) => setMeshEntries(prev => prev.map(e => e.id === id ? { ...e, visible: !e.visible } : e))}
-                onMeshEnvMapIntensityChange={(id, v) => setMeshEntries(prev => prev.map(e => e.id === id ? { ...e, envMapIntensity: v } : e))}
                 onRemoveMesh={removeMesh}
-                onCaptureIBL={captureIBL}
+                onCaptureIblFromMesh={(meshId) => captureIBL(meshId)}
                 onAddMesh={() => meshFileInputRef.current?.click()}
                 onAddLight={addLight}
                 onLightChange={(id, partial) => setLightEntries(prev => prev.map(e => e.id === id ? { ...e, ...partial } : e))}
                 onRemoveLight={removeLight}
+                onIblChange={(id, partial) => setIblEntries(prev => prev.map(e => e.id === id ? { ...e, ...partial } : e))}
+                onCaptureIblAtCamera={() => {
+                  const cam = cameraRef.current;
+                  if (cam) captureIBL(cam.position.clone());
+                }}
+                onRemoveIbl={removeIbl}
               />
             )}
 
