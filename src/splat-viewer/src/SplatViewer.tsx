@@ -53,6 +53,17 @@ import MeshPanel from "./MeshPanel";
 
 // ─── Helpers ────────────────────────────────────────────────────
 
+/** UUID that works on HTTP (non-HTTPS) origins where crypto.randomUUID is unavailable. */
+function makeId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return makeId();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 /** Trigger a browser download for a Blob */
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -117,7 +128,7 @@ interface LightEntry {
 }
 
 const defaultLightEntry = (type: LightType, idx: number): LightEntry => ({
-  id: crypto.randomUUID(),
+  id: makeId(),
   type,
   name: `${type[0].toUpperCase()}${type.slice(1)} ${idx}`,
   visible: true,
@@ -1279,8 +1290,11 @@ export default function SplatViewer() {
     import("three/examples/jsm/controls/TransformControls.js").then(({ TransformControls }) => {
       const transformControls = new TransformControls(camera, renderer.domElement);
       transformControls.setSize(0.8);
-      scene.add(transformControls as unknown as THREE.Object3D);
-      transformControlsRef.current = transformControls as unknown as THREE.Object3D;
+      // Three.js r155+: TransformControls is no longer an Object3D itself.
+      // getHelper() returns the Object3D gizmo that belongs in the scene.
+      const tcHelper = transformControls.getHelper();
+      scene.add(tcHelper);
+      transformControlsRef.current = tcHelper;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       transformControls.addEventListener("dragging-changed", (event: any) => {
@@ -2103,7 +2117,7 @@ export default function SplatViewer() {
     if (!isGlb && !isObj) return;
 
     const objectUrl = URL.createObjectURL(file);
-    const id = crypto.randomUUID();
+    const id = makeId();
     const name = file.name.replace(/\.(glb|gltf|obj)$/i, "");
 
     try {
