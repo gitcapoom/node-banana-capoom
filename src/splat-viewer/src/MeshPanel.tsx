@@ -43,9 +43,9 @@ interface IblEntry {
   radius: number;
   ramp: number;
   intensity: number;
-  lift: { r: number; g: number; b: number };
-  gain: { r: number; g: number; b: number };
-  gamma: { r: number; g: number; b: number };
+  lift: number;
+  gain: number;
+  gamma: number;
 }
 
 interface MeshPanelProps {
@@ -55,10 +55,12 @@ interface MeshPanelProps {
   selectedId: string | null;
   selectedSpotTargetId: string | null;
   gizmoMode: "translate" | "rotate" | "scale";
+  gizmoSpace: "world" | "local";
   onSelectMesh: (id: string) => void;
   onSelectLight: (id: string) => void;
   onSelectSpotTarget: (id: string) => void;
   onGizmoModeChange: (mode: "translate" | "rotate" | "scale") => void;
+  onGizmoSpaceChange: (space: "world" | "local") => void;
   onMeshTransformChange: (id: string, t: MeshTransform) => void;
   onMeshVisibilityToggle: (id: string) => void;
   onRemoveMesh: (id: string) => void;
@@ -74,10 +76,14 @@ interface MeshPanelProps {
 
 // ─── Sub-components ───────────────────────────────────────────────
 
+// NumInput with local state to allow intermediate typing (e.g. "-" or "1.")
 function NumInput({ label, value, onChange, step = 0.1, width = "w-16", min }: {
   label: string; value: number; onChange: (v: number) => void;
   step?: number; width?: string; min?: number;
 }) {
+  const [raw, setRaw] = useState<string | null>(null);
+  const displayVal = raw !== null ? raw : Number(value.toFixed(3)).toString();
+
   return (
     <label className="flex flex-col gap-0.5">
       <span className="text-[8px] text-neutral-500 uppercase">{label}</span>
@@ -85,8 +91,13 @@ function NumInput({ label, value, onChange, step = 0.1, width = "w-16", min }: {
         type="number"
         step={step}
         min={min}
-        value={Number(value.toFixed(3))}
-        onChange={e => onChange(parseFloat(e.target.value) || 0)}
+        value={displayVal}
+        onChange={e => {
+          setRaw(e.target.value);
+          const parsed = parseFloat(e.target.value);
+          if (!isNaN(parsed)) onChange(parsed);
+        }}
+        onBlur={() => setRaw(null)}
         className={`nodrag nopan ${width} text-[10px] bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5 text-neutral-200`}
       />
     </label>
@@ -111,20 +122,32 @@ function XyzRow({ label, value, onChange, step }: {
   );
 }
 
-function RgbRow({ label, value, onChange, step = 0.01 }: {
-  label: string;
-  value: { r: number; g: number; b: number };
-  onChange: (v: { r: number; g: number; b: number }) => void;
-  step?: number;
+// Single-value slider row with a numeric input alongside (supports negative)
+function SliderRow({ label, value, onChange, min, max, step = 0.01 }: {
+  label: string; value: number; onChange: (v: number) => void;
+  min: number; max: number; step?: number;
 }) {
+  const [raw, setRaw] = useState<string | null>(null);
+  const displayVal = raw !== null ? raw : Number(value.toFixed(3)).toString();
   return (
-    <div className="space-y-0.5">
-      <span className="text-[8px] text-neutral-500 uppercase">{label}</span>
-      <div className="flex gap-1">
-        <NumInput label="R" value={value.r} onChange={v => onChange({ ...value, r: v })} step={step} />
-        <NumInput label="G" value={value.g} onChange={v => onChange({ ...value, g: v })} step={step} />
-        <NumInput label="B" value={value.b} onChange={v => onChange({ ...value, b: v })} step={step} />
-      </div>
+    <div className="flex items-center gap-2">
+      <span className="text-[9px] text-neutral-500 shrink-0 w-10">{label}</span>
+      <input type="range" min={min} max={max} step={step}
+        value={Math.max(min, Math.min(max, value))}
+        onChange={e => onChange(parseFloat(e.target.value))}
+        className="nodrag nopan flex-1 accent-teal-500" />
+      <input
+        type="number"
+        step={step}
+        value={displayVal}
+        onChange={e => {
+          setRaw(e.target.value);
+          const parsed = parseFloat(e.target.value);
+          if (!isNaN(parsed)) onChange(parsed);
+        }}
+        onBlur={() => setRaw(null)}
+        className="nodrag nopan w-14 text-[10px] bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5 text-neutral-200"
+      />
     </div>
   );
 }
@@ -161,8 +184,9 @@ const gizmoButtons: { mode: "translate" | "rotate" | "scale"; title: string }[] 
 
 export default function MeshPanel({
   meshEntries, lightEntries, iblEntries,
-  selectedId, selectedSpotTargetId, gizmoMode,
-  onSelectMesh, onSelectLight, onSelectSpotTarget, onGizmoModeChange,
+  selectedId, selectedSpotTargetId, gizmoMode, gizmoSpace,
+  onSelectMesh, onSelectLight, onSelectSpotTarget,
+  onGizmoModeChange, onGizmoSpaceChange,
   onMeshTransformChange, onMeshVisibilityToggle, onRemoveMesh, onCaptureIblFromMesh, onAddMesh,
   onAddLight, onLightChange, onRemoveLight,
   onIblChange, onCaptureIblAtCamera, onRemoveIbl,
@@ -185,7 +209,7 @@ export default function MeshPanel({
         </button>
       </div>
 
-      {/* Gizmo mode bar */}
+      {/* Gizmo mode + space bar (shown when something is selected) */}
       {selectedId && (
         <div className="flex items-center gap-1 border border-neutral-700 rounded p-1">
           {gizmoButtons.map(({ mode, title }) => (
@@ -195,6 +219,14 @@ export default function MeshPanel({
               {title[0]}
             </button>
           ))}
+          <div className="w-px h-4 bg-neutral-600 mx-0.5" />
+          <button
+            onClick={() => onGizmoSpaceChange(gizmoSpace === "world" ? "local" : "world")}
+            title={gizmoSpace === "world" ? "World space (click for local)" : "Local space (click for world)"}
+            className={`text-[9px] px-1.5 h-6 rounded transition-colors ${gizmoSpace === "local" ? "bg-amber-600 text-white" : "text-neutral-400 hover:text-white"}`}
+          >
+            {gizmoSpace === "world" ? "W" : "L"}
+          </button>
         </div>
       )}
 
@@ -231,7 +263,7 @@ export default function MeshPanel({
                       onChange={rot => onMeshTransformChange(entry.id, { ...entry.transform, rotation: rot })} step={1} />
                     <NumInput label="Scale" value={entry.transform.scale}
                       onChange={s => onMeshTransformChange(entry.id, { ...entry.transform, scale: Math.max(0.0001, s) })}
-                      step={0.1} width="w-full" />
+                      step={0.1} width="w-full" min={0.0001} />
                     <div className="pt-1 border-t border-neutral-700">
                       <button onClick={() => onCaptureIblFromMesh(entry.id)}
                         className="w-full text-[10px] bg-neutral-700 hover:bg-neutral-600 text-neutral-200 rounded px-2 py-1 transition-colors"
@@ -379,7 +411,7 @@ export default function MeshPanel({
 
                     {/* Volume */}
                     <label className="flex items-center gap-2">
-                      <span className="text-[9px] text-neutral-500 shrink-0 w-12">Radius</span>
+                      <span className="text-[9px] text-neutral-500 shrink-0 w-10">Radius</span>
                       <input type="range" min={0} max={50} step={0.5}
                         value={entry.radius}
                         onChange={e => onIblChange(entry.id, { radius: parseFloat(e.target.value) })}
@@ -388,7 +420,7 @@ export default function MeshPanel({
                     </label>
                     {entry.radius > 0 && (
                       <label className="flex items-center gap-2">
-                        <span className="text-[9px] text-neutral-500 shrink-0 w-12">Ramp</span>
+                        <span className="text-[9px] text-neutral-500 shrink-0 w-10">Ramp</span>
                         <input type="range" min={0} max={1} step={0.05}
                           value={entry.ramp}
                           onChange={e => onIblChange(entry.id, { ramp: parseFloat(e.target.value) })}
@@ -397,7 +429,7 @@ export default function MeshPanel({
                       </label>
                     )}
                     <label className="flex items-center gap-2">
-                      <span className="text-[9px] text-neutral-500 shrink-0 w-12">Intensity</span>
+                      <span className="text-[9px] text-neutral-500 shrink-0 w-10">Intensity</span>
                       <input type="range" min={0} max={5} step={0.05}
                         value={entry.intensity}
                         onChange={e => onIblChange(entry.id, { intensity: parseFloat(e.target.value) })}
@@ -405,15 +437,12 @@ export default function MeshPanel({
                       <span className="text-[9px] text-neutral-400 w-8">{entry.intensity.toFixed(2)}</span>
                     </label>
 
-                    {/* Color grading */}
+                    {/* Color grading — single sliders, negative-capable */}
                     <div className="pt-1 border-t border-neutral-700 space-y-2">
                       <span className="text-[9px] text-neutral-500 uppercase block">Color Grade (HDR)</span>
-                      <RgbRow label="Lift" value={entry.lift}
-                        onChange={v => onIblChange(entry.id, { lift: v })} step={0.01} />
-                      <RgbRow label="Gain" value={entry.gain}
-                        onChange={v => onIblChange(entry.id, { gain: v })} step={0.05} />
-                      <RgbRow label="Gamma" value={entry.gamma}
-                        onChange={v => onIblChange(entry.id, { gamma: v })} step={0.05} />
+                      <SliderRow label="Lift" value={entry.lift} onChange={v => onIblChange(entry.id, { lift: v })} min={-2} max={2} step={0.01} />
+                      <SliderRow label="Gain" value={entry.gain} onChange={v => onIblChange(entry.id, { gain: v })} min={-2} max={10} step={0.05} />
+                      <SliderRow label="Gamma" value={entry.gamma} onChange={v => onIblChange(entry.id, { gamma: v })} min={0.1} max={5} step={0.05} />
                     </div>
                   </div>
                 )}

@@ -153,9 +153,10 @@ interface IblEntry {
   radius: number;   // sphere volume radius (0 = global/infinite)
   ramp: number;     // 0–1: fraction of radius used as falloff ramp
   intensity: number; // base envMapIntensity
-  lift: { r: number; g: number; b: number };  // color grade lift (default 0)
-  gain: { r: number; g: number; b: number };  // color grade gain (default 1)
-  gamma: { r: number; g: number; b: number }; // color grade gamma (default 1)
+  lift: number;     // color grade lift, additive offset (default 0, can be negative)
+  gain: number;     // color grade gain, multiplier (default 1, can be negative)
+  gamma: number;    // color grade gamma exponent (default 1, positive only)
+  needsRecapture?: boolean; // true when restored from save but texture is missing
 }
 
 const defaultIblEntry = (idx: number): IblEntry => ({
@@ -166,9 +167,9 @@ const defaultIblEntry = (idx: number): IblEntry => ({
   radius: 0,
   ramp: 0.5,
   intensity: 1,
-  lift: { r: 0, g: 0, b: 0 },
-  gain: { r: 1, g: 1, b: 1 },
-  gamma: { r: 1, g: 1, b: 1 },
+  lift: 0,
+  gain: 1,
+  gamma: 1,
 });
 
 // Lazy-cached dynamic imports for mesh loaders
@@ -806,6 +807,7 @@ export default function SplatViewer() {
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null); // mesh OR light id
   const [selectedSpotTargetId, setSelectedSpotTargetId] = useState<string | null>(null); // id of spot whose target TC is attached to
   const [gizmoMode, setGizmoMode] = useState<"translate" | "rotate" | "scale">("translate");
+  const [gizmoSpace, setGizmoSpace] = useState<"world" | "local">("world");
   const [showMeshPanel, setShowMeshPanel] = useState(false);
 
   // Transform state (applied to splat mesh)
@@ -884,6 +886,7 @@ export default function SplatViewer() {
   // `colmapWorldFrame` (the same one applied to COLMAP camera tracks). SPZ
   // self-normalizes via its coordinate_system header and is exempt.
   const splatIsPlyRef = useRef(false);
+  const [splatIsPly, setSplatIsPly] = useState(false);
   // Always view splats from the capture origin (0,0,0), aimed at the splat,
   // instead of the 3/4 auto-frame — identical for connected + drag-dropped.
   const cameraSpaceRef = useRef(true);
@@ -1333,9 +1336,9 @@ export default function SplatViewer() {
         uniforms: {
           uCube: { value: null as THREE.CubeTexture | null },
           uFace: { value: 0 },
-          uLift: { value: new THREE.Vector3(0, 0, 0) },
-          uGain: { value: new THREE.Vector3(1, 1, 1) },
-          uGamma: { value: new THREE.Vector3(1, 1, 1) },
+          uLift: { value: 0 },
+          uGain: { value: 1 },
+          uGamma: { value: 1 },
         },
         vertexShader: `
           varying vec2 vUv;
@@ -1345,7 +1348,7 @@ export default function SplatViewer() {
           varying vec2 vUv;
           uniform samplerCube uCube;
           uniform int uFace;
-          uniform vec3 uLift, uGain, uGamma;
+          uniform float uLift, uGain, uGamma;
           vec3 faceDir(int f, vec2 uv) {
             vec2 p = uv * 2.0 - 1.0;
             if (f == 0) return normalize(vec3( 1.0,-p.y,-p.x));
@@ -1358,7 +1361,7 @@ export default function SplatViewer() {
           void main() {
             vec4 c = textureCube(uCube, faceDir(uFace, vUv));
             vec3 col = c.rgb * uGain + uLift;
-            col = pow(max(col, vec3(0.0)), 1.0 / max(uGamma, vec3(0.001)));
+            col = pow(max(col, vec3(0.0)), vec3(1.0 / max(abs(uGamma), 0.001)));
             gl_FragColor = vec4(col, c.a);
           }
         `,
@@ -2151,6 +2154,7 @@ export default function SplatViewer() {
         new URLSearchParams(window.location.search).get("name") || "";
       splatIsPlyRef.current =
         /\.ply($|\?)/i.test(url) || /\.ply$/i.test(filenameHint);
+      setSplatIsPly(splatIsPlyRef.current);
       // Apply the base PLY rotation now; the user-transform useEffect won't
       // re-fire for this new mesh since splatMeshRef hasn't been assigned yet.
       if (splatIsPlyRef.current) {
@@ -2221,6 +2225,7 @@ export default function SplatViewer() {
 
       await splatMesh.initialized;
       splatIsPlyRef.current = /\.ply$/i.test(file.name);
+      setSplatIsPly(splatIsPlyRef.current);
       if (splatIsPlyRef.current) {
         const baseRot = worldFrameToSceneRotation(colmapWorldFrameRef.current);
         (splatMesh as unknown as THREE.Object3D).quaternion.setFromRotationMatrix(baseRot);
@@ -2254,7 +2259,7 @@ export default function SplatViewer() {
         ...e, position: { ...e.position }, targetPosition: { ...e.targetPosition }, rotation: { ...e.rotation },
       })),
       iblEntries: iblEntriesRef.current.map(e => ({
-        ...e, position: { ...e.position }, lift: { ...e.lift }, gain: { ...e.gain }, gamma: { ...e.gamma },
+        ...e, position: { ...e.position },
       })),
     });
   }, []);
@@ -2276,6 +2281,90 @@ export default function SplatViewer() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // ─── Save / Load viewer state ──────────────────────────────────
+
+  const VIEWER_STORAGE_KEY = "node-banana-splat-viewer-state-v1";
+
+  interface ViewerSaveState {
+    meshEntries: MeshEntry[];
+    lightEntries: LightEntry[];
+    iblEntries: IblEntry[];
+    transform: typeof defaultTransform;
+    camera?: { px: number; py: number; pz: number; qx: number; qy: number; qz: number; qw: number };
+  }
+
+  const buildSaveState = useCallback((): ViewerSaveState => {
+    const cam = cameraRef.current;
+    return {
+      meshEntries: meshEntriesRef.current,
+      lightEntries: lightEntriesRef.current,
+      iblEntries: iblEntriesRef.current,
+      transform,
+      camera: cam ? {
+        px: cam.position.x, py: cam.position.y, pz: cam.position.z,
+        qx: cam.quaternion.x, qy: cam.quaternion.y, qz: cam.quaternion.z, qw: cam.quaternion.w,
+      } : undefined,
+    };
+  }, [transform]);
+
+  const applySaveState = useCallback((state: ViewerSaveState) => {
+    if (state.meshEntries) setMeshEntries(state.meshEntries);
+    if (state.lightEntries) setLightEntries(state.lightEntries);
+    if (state.iblEntries) setIblEntries(state.iblEntries);
+    if (state.transform) setTransform(state.transform);
+    if (state.camera) {
+      const cam = cameraRef.current;
+      if (cam) {
+        cam.position.set(state.camera.px, state.camera.py, state.camera.pz);
+        cam.quaternion.set(state.camera.qx, state.camera.qy, state.camera.qz, state.camera.qw);
+      }
+    }
+  }, []);
+
+  const saveStateToLocalStorage = useCallback(() => {
+    try {
+      localStorage.setItem(VIEWER_STORAGE_KEY, JSON.stringify(buildSaveState()));
+    } catch (_) { /* quota exceeded — silently skip */ }
+  }, [buildSaveState]);
+
+  const loadStateFromLocalStorage = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(VIEWER_STORAGE_KEY);
+      if (raw) applySaveState(JSON.parse(raw) as ViewerSaveState);
+    } catch (_) { /* corrupt — silently skip */ }
+  }, [applySaveState]);
+
+  const downloadSaveState = useCallback(() => {
+    const json = JSON.stringify(buildSaveState(), null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    triggerDownload(blob, "splat-viewer-state.json");
+  }, [buildSaveState]);
+
+  const loadSaveStateInputRef = useRef<HTMLInputElement>(null);
+  const handleLoadSaveStateFile = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const state = JSON.parse(ev.target?.result as string) as ViewerSaveState;
+        applySaveState(state);
+        saveStateToLocalStorage();
+      } catch (_) { setError("Invalid viewer state file."); }
+    };
+    reader.readAsText(file);
+  }, [applySaveState, saveStateToLocalStorage]);
+
+  // Restore from localStorage once on mount
+  useEffect(() => {
+    loadStateFromLocalStorage();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-save to localStorage whenever key state changes
+  useEffect(() => {
+    saveStateToLocalStorage();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meshEntries, lightEntries, iblEntries, transform]);
+
   const applyIblGrade = useCallback((entry: IblEntry) => {
     const renderer = rendererRef.current;
     const pmremGen = pmremGeneratorRef.current;
@@ -2286,9 +2375,9 @@ export default function SplatViewer() {
     const { scene: gradeScene, camera: gradeCam, mat } = gradePass;
     const size = rawCubeRT.width;
     mat.uniforms.uCube.value = rawCubeRT.texture;
-    mat.uniforms.uLift.value.set(entry.lift.r, entry.lift.g, entry.lift.b);
-    mat.uniforms.uGain.value.set(entry.gain.r, entry.gain.g, entry.gain.b);
-    mat.uniforms.uGamma.value.set(entry.gamma.r, entry.gamma.g, entry.gamma.b);
+    mat.uniforms.uLift.value = entry.lift;
+    mat.uniforms.uGain.value = entry.gain;
+    mat.uniforms.uGamma.value = entry.gamma;
 
     const gradedCubeRT = new THREE.WebGLCubeRenderTarget(size, {
       format: THREE.RGBAFormat, type: THREE.HalfFloatType,
@@ -2617,10 +2706,13 @@ export default function SplatViewer() {
     setLightEntries(prev => prev.filter(e => e.id !== id));
   }, [selectedOverlayId, selectedSpotTargetId, pushUndo]);
 
-  // Sync gizmo mode to TransformControls
+  // Sync gizmo mode and space to TransformControls
   useEffect(() => {
     transformControlsInstanceRef.current?.setMode(gizmoMode);
   }, [gizmoMode]);
+  useEffect(() => {
+    (transformControlsInstanceRef.current as unknown as { setSpace?: (s: string) => void })?.setSpace?.(gizmoSpace);
+  }, [gizmoSpace]);
 
   // ─── Auto-load if URL param present ─────────────────────────────
 
@@ -4034,11 +4126,15 @@ export default function SplatViewer() {
                   className="mt-2 flex items-center gap-2"
                   title="Coordinate system of the original capture. Applied to imported and exported COLMAP camera tracks, and to PLY splats at load (SPZ uses its embedded metadata)."
                 >
-                  <label className="text-[9px] text-neutral-500 shrink-0">Coordinate system</label>
+                  <label className="text-[9px] text-neutral-500 shrink-0">
+                    Coordinate system
+                    {!splatIsPly && <span className="ml-1 text-neutral-600">(PLY only)</span>}
+                  </label>
                   <select
                     value={colmapWorldFrame}
                     onChange={(e) => handleChangeColmapWorldFrame(e.target.value as ColmapWorldFrame)}
-                    className="flex-1 min-w-0 text-[10px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+                    disabled={!splatIsPly}
+                    className={`flex-1 min-w-0 text-[10px] py-0.5 px-1 rounded bg-neutral-800 border border-neutral-700 focus:border-indigo-500 focus:outline-none ${splatIsPly ? "text-neutral-200" : "text-neutral-600 cursor-not-allowed"}`}
                   >
                     <option value="y-down" title="Raw COLMAP, OpenCV, OpenSfM, hloc, pixsfm. Camera-frame convention: +X right, +Y down, +Z forward. This is the COLMAP spec default.">
                       COLMAP / OpenCV (Y-down)
@@ -4128,6 +4224,8 @@ export default function SplatViewer() {
                 selectedId={selectedOverlayId}
                 selectedSpotTargetId={selectedSpotTargetId}
                 gizmoMode={gizmoMode}
+                gizmoSpace={gizmoSpace}
+                onGizmoSpaceChange={setGizmoSpace}
                 onSelectMesh={(id) => {
                   setSelectedOverlayId(id);
                   setSelectedSpotTargetId(null);
@@ -4236,6 +4334,30 @@ export default function SplatViewer() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25" />
                 </svg>
               </button>
+
+              {/* Save viewer state */}
+              <button
+                onClick={downloadSaveState}
+                className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
+                title="Save viewer state (meshes, lights, IBL, camera)"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+              </button>
+
+              {/* Load viewer state */}
+              <button
+                onClick={() => loadSaveStateInputRef.current?.click()}
+                className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
+                title="Load viewer state from JSON file"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 17H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v9a2 2 0 01-2 2h-3m-1-4l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+              </button>
+              <input ref={loadSaveStateInputRef} type="file" accept=".json" style={{ display: "none" }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleLoadSaveStateFile(f); e.target.value = ""; }} />
 
               {/* Transform toggle */}
               <button
