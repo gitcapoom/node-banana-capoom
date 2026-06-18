@@ -902,6 +902,7 @@ export interface SpzViewerNodeData extends BaseNodeData {
   capturedImage: string | null;  // Latest captured screenshot from viewer
   capturedImageRef?: string;     // External ref for capturedImage
   capturedDepthImage: string | null; // Depth map from latest capture (grayscale)
+  viewerState?: object | null;   // Full viewer state (meshes, lights, IBL, camera, splat transform)
   capturedDepthImageRef?: string; // External ref for capturedDepthImage
   viewerOpen: boolean;           // Whether the viewer window is currently open
   // camera.json loaded directly on the node → seeds the viewer's Lens/Sensor.

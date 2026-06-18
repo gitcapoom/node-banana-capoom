@@ -97,6 +97,7 @@ interface MeshEntry {
   name: string;
   visible: boolean;
   transform: MeshTransform;
+  fileData?: string; // base64 data URL for state restoration
 }
 
 const defaultMeshTransform: MeshTransform = {
@@ -1650,6 +1651,35 @@ export default function SplatViewer() {
       // fly-nav drag doesn't kick in mid-pick.
       if (tryPickFocus(e)) return;
       if (transformDraggingRef.current) return;
+
+      // In orbit mode, set the pivot to the clicked surface point using a fast depth read
+      if (navModeRef.current === "orbit" && e.button === 0 && controlsRef.current) {
+        const rect = canvas.getBoundingClientRect();
+        const px = e.clientX - rect.left;
+        const py = e.clientY - rect.top;
+        const w = canvas.clientWidth;
+        const h = canvas.clientHeight;
+        const depthLive = depthLiveTargetRef.current;
+        const depthVisLive = depthVisLiveTargetRef.current;
+        if (w > 0 && h > 0 && depthLive && depthVisLive && depthMaterialRef.current && depthSceneRef.current && depthCameraRef.current) {
+          depthLive.setSize(w, h);
+          depthVisLive.setSize(w, h);
+          renderDepthLive(renderer, scene, camera, depthLive, depthMaterialRef.current, depthSceneRef.current, depthCameraRef.current, depthVisLive);
+          const localX = Math.max(0, Math.min(w - 1, Math.floor(px)));
+          const localY = Math.max(0, Math.min(h - 1, h - 1 - Math.floor(py)));
+          const pix = new Float32Array(4);
+          renderer.readRenderTargetPixels(depthVisLive, localX, localY, 1, 1, pix);
+          const depthM = pix[0];
+          if (Number.isFinite(depthM) && depthM > 0.001) {
+            const ndcX = (px / w) * 2 - 1;
+            const ndcY = -(py / h) * 2 + 1;
+            const dir = new THREE.Vector3(ndcX, ndcY, 0.5).unproject(camera).sub(camera.position).normalize();
+            controlsRef.current.target.copy(camera.position.clone().addScaledVector(dir, depthM));
+            controlsRef.current.update();
+          }
+        }
+      }
+
       if (navModeRef.current !== "fly") return;
       isMouseDraggingRef.current = true;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
@@ -2284,6 +2314,7 @@ export default function SplatViewer() {
   // ─── Save / Load viewer state ──────────────────────────────────
 
   const VIEWER_STORAGE_KEY = "node-banana-splat-viewer-state-v1";
+  const worldIdRef = useRef<string | null>(null);
 
   interface ViewerSaveState {
     meshEntries: MeshEntry[];
@@ -2291,10 +2322,13 @@ export default function SplatViewer() {
     iblEntries: IblEntry[];
     transform: typeof defaultTransform;
     camera?: { px: number; py: number; pz: number; qx: number; qy: number; qz: number; qw: number };
+    cameraPath?: unknown;
+    orbitTarget?: { x: number; y: number; z: number };
   }
 
   const buildSaveState = useCallback((): ViewerSaveState => {
     const cam = cameraRef.current;
+    const controls = controlsRef.current;
     return {
       meshEntries: meshEntriesRef.current,
       lightEntries: lightEntriesRef.current,
@@ -2304,14 +2338,17 @@ export default function SplatViewer() {
         px: cam.position.x, py: cam.position.y, pz: cam.position.z,
         qx: cam.quaternion.x, qy: cam.quaternion.y, qz: cam.quaternion.z, qw: cam.quaternion.w,
       } : undefined,
+      cameraPath,
+      orbitTarget: controls ? { x: controls.target.x, y: controls.target.y, z: controls.target.z } : undefined,
     };
-  }, [transform]);
+  }, [transform, cameraPath]);
 
   const applySaveState = useCallback((state: ViewerSaveState) => {
     if (state.meshEntries) setMeshEntries(state.meshEntries);
     if (state.lightEntries) setLightEntries(state.lightEntries);
     if (state.iblEntries) setIblEntries(state.iblEntries);
     if (state.transform) setTransform(state.transform);
+    if (state.cameraPath) setCameraPath(state.cameraPath as CameraPath);
     if (state.camera) {
       const cam = cameraRef.current;
       if (cam) {
@@ -2319,11 +2356,21 @@ export default function SplatViewer() {
         cam.quaternion.set(state.camera.qx, state.camera.qy, state.camera.qz, state.camera.qw);
       }
     }
+    if (state.orbitTarget) {
+      const controls = controlsRef.current;
+      if (controls) {
+        controls.target.set(state.orbitTarget.x, state.orbitTarget.y, state.orbitTarget.z);
+        controls.update();
+      }
+    }
   }, []);
 
   const saveStateToLocalStorage = useCallback(() => {
     try {
-      localStorage.setItem(VIEWER_STORAGE_KEY, JSON.stringify(buildSaveState()));
+      const state = buildSaveState();
+      // Strip large fileData from localStorage to avoid quota; fileData lives in node-banana
+      const lightState = { ...state, meshEntries: state.meshEntries.map(({ fileData: _fd, ...rest }) => rest) };
+      localStorage.setItem(VIEWER_STORAGE_KEY, JSON.stringify(lightState));
     } catch (_) { /* quota exceeded — silently skip */ }
   }, [buildSaveState]);
 
@@ -2353,17 +2400,35 @@ export default function SplatViewer() {
     reader.readAsText(file);
   }, [applySaveState, saveStateToLocalStorage]);
 
-  // Restore from localStorage once on mount
+  // On mount: read worldId from URL; restore from sessionStorage (node-banana) or localStorage
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const wid = params.get("worldId");
+    worldIdRef.current = wid;
+    if (wid) {
+      try {
+        const raw = sessionStorage.getItem(`splat-viewer-state-${wid}`);
+        if (raw) { applySaveState(JSON.parse(raw) as ViewerSaveState); return; }
+      } catch (_) { /* corrupt */ }
+    }
     loadStateFromLocalStorage();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-save to localStorage whenever key state changes
+  // Auto-save: localStorage (no fileData) + postMessage full state to parent window
   useEffect(() => {
     saveStateToLocalStorage();
+    if (window.opener && worldIdRef.current) {
+      try {
+        window.opener.postMessage({
+          type: "splat-viewer-state",
+          worldId: worldIdRef.current,
+          state: buildSaveState(),
+        }, window.location.origin);
+      } catch (_) { /* cross-origin or closed */ }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meshEntries, lightEntries, iblEntries, transform]);
+  }, [meshEntries, lightEntries, iblEntries, transform, cameraPath]);
 
   const applyIblGrade = useCallback((entry: IblEntry) => {
     const renderer = rendererRef.current;
@@ -2488,9 +2553,22 @@ export default function SplatViewer() {
     setIblEntries(prev => prev.filter(e => e.id !== id));
   }, [pushUndo]);
 
-  // Re-grade + re-apply whenever IBL entries change (grade params, visibility, etc.)
+  // Re-grade + re-apply whenever IBL entries change; re-captures missing cube RTs on restore
   useEffect(() => {
+    const scene = sceneRef.current;
+    const renderer = rendererRef.current;
     for (const entry of iblEntries) {
+      if (!iblRawCubeRTRef.current.has(entry.id) && scene && renderer) {
+        // Re-capture at saved position (happens when state is restored from save)
+        const pos = new THREE.Vector3(entry.position.x, entry.position.y, entry.position.z);
+        const cubeRT = new THREE.WebGLCubeRenderTarget(256, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
+        const cubeCamera = new THREE.CubeCamera(0.01, 1000, cubeRT);
+        cubeCamera.position.copy(pos);
+        scene.add(cubeCamera);
+        cubeCamera.update(renderer, scene);
+        scene.remove(cubeCamera);
+        iblRawCubeRTRef.current.set(entry.id, cubeRT);
+      }
       if (iblRawCubeRTRef.current.has(entry.id)) applyIblGrade(entry);
     }
     applyIblsToMeshes();
@@ -2546,19 +2624,76 @@ export default function SplatViewer() {
       scene.add(object);
       meshObjectsRef.current.set(id, object);
 
+      // Store file as base64 data URL so state restoration can re-create the mesh
+      const fileData = await new Promise<string>(resolve => {
+        const reader = new FileReader();
+        reader.onload = (ev) => resolve(ev.target!.result as string);
+        reader.readAsDataURL(file);
+      });
+
       pushUndo();
-      setMeshEntries(prev => [...prev, { id, name, visible: true, transform: { ...defaultMeshTransform } }]);
+      setMeshEntries(prev => [...prev, { id, name, visible: true, transform: { ...defaultMeshTransform }, fileData }]);
     } catch (err) {
       URL.revokeObjectURL(objectUrl);
       setError(`Failed to load mesh: ${err instanceof Error ? err.message : String(err)}`);
     }
   }, [pushUndo]);
 
-  // Apply mesh transforms whenever meshEntries changes
+  // Apply mesh transforms whenever meshEntries changes; re-creates meshes from fileData on restore
   useEffect(() => {
     for (const entry of meshEntries) {
       const obj = meshObjectsRef.current.get(entry.id);
-      if (!obj) continue;
+      if (!obj) {
+        if (entry.fileData) {
+          // Re-create Three.js mesh from stored base64 data URL
+          const scene = sceneRef.current;
+          if (!scene) continue;
+          const { id: eid, name, fileData, transform, visible } = entry;
+          (async () => {
+            try {
+              const response = await fetch(fileData);
+              const blob = await response.blob();
+              const blobUrl = URL.createObjectURL(blob);
+              const isObj = name.toLowerCase().endsWith(".obj");
+              let object: THREE.Object3D;
+              if (isObj) {
+                const { OBJLoader } = await getOBJLoader();
+                const loader = new OBJLoader();
+                object = await new Promise<THREE.Object3D>((res, rej) => loader.load(blobUrl, res, undefined, rej));
+              } else {
+                const { GLTFLoader } = await getGLTFLoader();
+                const loader = new GLTFLoader();
+                const gltf = await new Promise<{ scene: THREE.Object3D }>((res, rej) => loader.load(blobUrl, res, undefined, rej));
+                object = gltf.scene;
+              }
+              URL.revokeObjectURL(blobUrl);
+              object.traverse((child) => {
+                const mesh = child as THREE.Mesh;
+                if (mesh.isMesh) {
+                  const mats = Array.isArray(mesh.material) ? mesh.material as THREE.Material[] : [mesh.material as THREE.Material];
+                  mats.forEach((m) => { m.depthWrite = true; m.depthTest = true; });
+                  mesh.renderOrder = 0;
+                }
+              });
+              object.renderOrder = 0;
+              object.visible = visible;
+              object.position.set(transform.position.x, transform.position.y, transform.position.z);
+              object.rotation.set(
+                THREE.MathUtils.degToRad(transform.rotation.x),
+                THREE.MathUtils.degToRad(transform.rotation.y),
+                THREE.MathUtils.degToRad(transform.rotation.z),
+                "XYZ",
+              );
+              object.scale.setScalar(transform.scale);
+              scene.add(object);
+              meshObjectsRef.current.set(eid, object);
+            } catch (err) {
+              console.warn("Failed to restore mesh:", name, err);
+            }
+          })();
+        }
+        continue;
+      }
       obj.visible = entry.visible;
       obj.position.set(entry.transform.position.x, entry.transform.position.y, entry.transform.position.z);
       obj.rotation.set(
@@ -2599,17 +2734,14 @@ export default function SplatViewer() {
 
   // ─── Light overlays ──────────────────────────────────────────────
 
-  const addLight = useCallback((type: LightType) => {
+  // Creates Three.js light object + helper for a given LightEntry (used by addLight and restore)
+  const createLightInScene = useCallback((entry: LightEntry) => {
     const scene = sceneRef.current;
     if (!scene) return;
-
-    const idx = lightEntries.filter(e => e.type === type).length + 1;
-    const entry = defaultLightEntry(type, idx);
-
     let light: THREE.Light;
-    if (type === "point") {
+    if (entry.type === "point") {
       light = new THREE.PointLight(entry.color, entry.intensity);
-    } else if (type === "spot") {
+    } else if (entry.type === "spot") {
       const spot = new THREE.SpotLight(entry.color, entry.intensity);
       spot.angle = entry.angle;
       spot.penumbra = entry.penumbra;
@@ -2617,22 +2749,18 @@ export default function SplatViewer() {
       scene.add(spot.target);
       light = spot;
     } else {
-      const rect = new THREE.RectAreaLight(entry.color, entry.intensity, entry.width, entry.height);
-      light = rect;
+      light = new THREE.RectAreaLight(entry.color, entry.intensity, entry.width, entry.height);
     }
-
     light.position.set(entry.position.x, entry.position.y, entry.position.z);
     scene.add(light);
     lightObjectsRef.current.set(entry.id, light);
 
-    // Add a helper for click-selection
     let helper: THREE.Object3D;
-    if (type === "point") {
+    if (entry.type === "point") {
       helper = new THREE.PointLightHelper(light as THREE.PointLight, 0.3);
-    } else if (type === "spot") {
+    } else if (entry.type === "spot") {
       helper = new THREE.SpotLightHelper(light as THREE.SpotLight);
     } else {
-      // RectAreaLight has no built-in helper — use a small box
       const geo = new THREE.BoxGeometry(0.2, 0.2, 0.05);
       const mat = new THREE.MeshBasicMaterial({ color: 0xffff00, wireframe: true });
       helper = new THREE.Mesh(geo, mat);
@@ -2641,14 +2769,20 @@ export default function SplatViewer() {
     scene.add(helper);
     lightHelpersRef.current.set(entry.id, helper);
     lightHelperToIdRef.current.set(helper, entry.id);
+  }, []);
 
+  const addLight = useCallback((type: LightType) => {
+    const idx = lightEntries.filter(e => e.type === type).length + 1;
+    const entry = defaultLightEntry(type, idx);
+    createLightInScene(entry);
     pushUndo();
     setLightEntries(prev => [...prev, entry]);
-  }, [lightEntries, pushUndo]);
+  }, [lightEntries, pushUndo, createLightInScene]);
 
-  // Apply light property changes whenever lightEntries changes
+  // Apply light property changes whenever lightEntries changes; creates missing Three.js objects on restore
   useEffect(() => {
     for (const entry of lightEntries) {
+      if (!lightObjectsRef.current.has(entry.id)) createLightInScene(entry);
       const light = lightObjectsRef.current.get(entry.id);
       const helper = lightHelpersRef.current.get(entry.id);
       if (!light) continue;
@@ -2684,7 +2818,7 @@ export default function SplatViewer() {
         (helper as THREE.PointLightHelper)?.update?.();
       }
     }
-  }, [lightEntries]);
+  }, [lightEntries, createLightInScene]);
 
   const removeLight = useCallback((id: string) => {
     const scene = sceneRef.current;
