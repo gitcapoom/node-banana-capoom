@@ -249,7 +249,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   }, []);
 
   const processFile = useCallback(
-    (file: File) => {
+    async (file: File) => {
       if (!isAcceptedFile(file.name)) {
         return;
       }
@@ -259,7 +259,19 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
         URL.revokeObjectURL(nodeData.spzUrl);
       }
 
-      const url = URL.createObjectURL(file);
+      // Try to get a persistent Caddy URL; fall back to blob URL
+      let url: string;
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const resp = await fetch("/api/upload-splat", { method: "POST", body: fd });
+        const json = await resp.json() as { success: boolean; url?: string };
+        if (!json.success || !json.url) throw new Error("upload failed");
+        url = json.url;
+      } catch {
+        url = URL.createObjectURL(file);
+      }
+
       updateNodeData(id, {
         spzUrl: url,
         filename: file.name,
