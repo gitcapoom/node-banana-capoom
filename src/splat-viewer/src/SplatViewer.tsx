@@ -892,6 +892,9 @@ export default function SplatViewer() {
   // instead of the 3/4 auto-frame — identical for connected + drag-dropped.
   const cameraSpaceRef = useRef(true);
   const initRef = useRef(false);
+  // Binary cache for blob-URL splats — survives page reload via viewerState
+  const splatFileDataRef = useRef<string | null>(null);
+
   // Mesh overlay refs
   const meshObjectsRef = useRef<Map<string, THREE.Object3D>>(new Map());
   const meshFileInputRef = useRef<HTMLInputElement>(null);
@@ -1063,14 +1066,48 @@ export default function SplatViewer() {
     const name = params.get("name");
     const wId = params.get("worldId");
 
-    if (url) setSpzUrl(url);
     if (name) setWorldName(name);
     if (wId) setWorldId(wId);
-    // Seed Sensor (aperture) + Lens (focal) from the camera.json values the node passes.
     const lensP = Number(params.get("lens"));
     const sensorP = Number(params.get("sensor"));
     if (Number.isFinite(lensP) && lensP > 0) setCustomLensMm(lensP);
     if (Number.isFinite(sensorP) && sensorP > 0) setCustomSensorMm(sensorP);
+
+    // Restore viewer state and resolve the splat URL atomically.
+    // If saved state has splatFileData, decode it to a fresh blob URL so
+    // dead blob:// URLs from a previous page load don't cause a fetch error.
+    worldIdRef.current = wId;
+    let savedState: ViewerSaveState | null = null;
+    if (wId) {
+      try {
+        const raw = sessionStorage.getItem(`splat-viewer-state-${wId}`);
+        if (raw) savedState = JSON.parse(raw) as ViewerSaveState;
+      } catch (_) { /* corrupt */ }
+    }
+    if (!savedState) {
+      try {
+        const raw = localStorage.getItem(VIEWER_STORAGE_KEY);
+        if (raw) savedState = JSON.parse(raw) as ViewerSaveState;
+      } catch (_) { /* corrupt */ }
+    }
+    if (savedState) applySaveState(savedState);
+
+    // Resolve splat URL: prefer recovered file data over potentially-dead blob URL
+    if (savedState?.splatFileData) {
+      try {
+        const b64 = savedState.splatFileData.split(",")[1];
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: "application/octet-stream" });
+        setSpzUrl(URL.createObjectURL(blob));
+      } catch (_) {
+        if (url) setSpzUrl(url);
+      }
+    } else if (url) {
+      setSpzUrl(url);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── Center camera helper ────────────────────────────────────────
@@ -1652,8 +1689,8 @@ export default function SplatViewer() {
       if (tryPickFocus(e)) return;
       if (transformDraggingRef.current) return;
 
-      // In orbit mode, set the pivot to the clicked surface point using a fast depth read
-      if (navModeRef.current === "orbit" && e.button === 0 && controlsRef.current) {
+      // In orbit mode, Alt+click sets the pivot to the clicked surface point using a fast depth read
+      if (navModeRef.current === "orbit" && e.button === 0 && e.altKey && controlsRef.current) {
         const rect = canvas.getBoundingClientRect();
         const px = e.clientX - rect.left;
         const py = e.clientY - rect.top;
@@ -2178,6 +2215,20 @@ export default function SplatViewer() {
       });
 
       await splatMesh.initialized;
+
+      // If loaded from a blob URL, cache binary data so the viewer state can
+      // survive a page reload (blob URLs expire when the page is closed).
+      if (url.startsWith("blob:")) {
+        try {
+          const resp = await fetch(url);
+          const buf = await resp.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          splatFileDataRef.current = "data:application/octet-stream;base64," + btoa(binary);
+        } catch (_) { /* non-critical — state will just not survive reload */ }
+      }
+
       // URLs from SpzViewerNode are blob: URLs with no extension; the real
       // filename rides in the `name` query param. Check both.
       const filenameHint =
@@ -2324,6 +2375,7 @@ export default function SplatViewer() {
     camera?: { px: number; py: number; pz: number; qx: number; qy: number; qz: number; qw: number };
     cameraPath?: unknown;
     orbitTarget?: { x: number; y: number; z: number };
+    splatFileData?: string; // base64 data URL — restores blob-URL splats across page reloads
   }
 
   const buildSaveState = useCallback((): ViewerSaveState => {
@@ -2340,6 +2392,7 @@ export default function SplatViewer() {
       } : undefined,
       cameraPath,
       orbitTarget: controls ? { x: controls.target.x, y: controls.target.y, z: controls.target.z } : undefined,
+      splatFileData: splatFileDataRef.current ?? undefined,
     };
   }, [transform, cameraPath]);
 
@@ -2400,20 +2453,7 @@ export default function SplatViewer() {
     reader.readAsText(file);
   }, [applySaveState, saveStateToLocalStorage]);
 
-  // On mount: read worldId from URL; restore from sessionStorage (node-banana) or localStorage
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const wid = params.get("worldId");
-    worldIdRef.current = wid;
-    if (wid) {
-      try {
-        const raw = sessionStorage.getItem(`splat-viewer-state-${wid}`);
-        if (raw) { applySaveState(JSON.parse(raw) as ViewerSaveState); return; }
-      } catch (_) { /* corrupt */ }
-    }
-    loadStateFromLocalStorage();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // (mount restore merged into the URL-params effect above)
 
   // Auto-save: localStorage (no fileData) + postMessage full state to parent window
   useEffect(() => {
