@@ -21,7 +21,13 @@ GEMINI_API_KEY=your_gemini_api_key
 OPENAI_API_KEY=your_openai_api_key    # Optional, for OpenAI LLM provider
 KIE_API_KEY=your_kie_api_key          # Optional, for Kie.ai models (Sora, Veo, Kling, etc.)
 WORLDLABS_API_KEY=your_worldlabs_key  # Optional, for WorldLabs Marble 3D generation
+CADDY_BASE_URL=http://otoserve10:8080  # Optional, base URL of the Caddy file server
+CADDY_UPLOAD_PATH=/path/to/caddy/root  # Optional, filesystem path Caddy serves from
 ```
+
+When `CADDY_BASE_URL` and `CADDY_UPLOAD_PATH` are set, locally-uploaded `.spz`/`.ply` files
+dragged into the splat viewer are saved to `CADDY_UPLOAD_PATH/splat_uploads/` and referenced
+via a persistent Caddy URL — so the splat survives page reloads without re-uploading.
 
 ## Architecture Overview
 
