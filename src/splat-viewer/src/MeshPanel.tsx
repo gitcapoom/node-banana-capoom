@@ -14,6 +14,7 @@ interface MeshEntry {
   name: string;
   visible: boolean;
   transform: MeshTransform;
+  fileData?: string;
 }
 
 type LightType = "point" | "spot" | "rect";
@@ -76,7 +77,7 @@ interface MeshPanelProps {
 
 // ─── Sub-components ───────────────────────────────────────────────
 
-// NumInput with local state to allow intermediate typing (e.g. "-" or "1.")
+// NumInput with local state to allow intermediate negative values (e.g. typing "-" or "1.")
 function NumInput({ label, value, onChange, step = 0.1, width = "w-16", min }: {
   label: string; value: number; onChange: (v: number) => void;
   step?: number; width?: string; min?: number;
@@ -122,7 +123,7 @@ function XyzRow({ label, value, onChange, step }: {
   );
 }
 
-// Single-value slider row with a numeric input alongside (supports negative)
+// Single-value slider row with numeric input alongside (supports negative)
 function SliderRow({ label, value, onChange, min, max, step = 0.01 }: {
   label: string; value: number; onChange: (v: number) => void;
   min: number; max: number; step?: number;
@@ -302,7 +303,6 @@ export default function MeshPanel({
                 </div>
                 {expandedId === entry.id && (
                   <div className="border-t border-neutral-700 p-2 space-y-2">
-                    {/* Color + Intensity */}
                     <div className="flex items-center gap-2">
                       <span className="text-[9px] text-neutral-500 w-12">Color</span>
                       <input type="color" value={entry.color}
@@ -320,10 +320,8 @@ export default function MeshPanel({
                     <XyzRow label="Position" value={entry.position}
                       onChange={pos => onLightChange(entry.id, { position: pos })} />
 
-                    {/* SpotLight specific */}
                     {entry.type === "spot" && (
                       <>
-                        {/* Light vs Target TC toggle */}
                         <div className="flex gap-1">
                           <button
                             onClick={() => onSelectLight(entry.id)}
@@ -338,7 +336,6 @@ export default function MeshPanel({
                             Move Target
                           </button>
                         </div>
-                        {/* Lock target toggle */}
                         <label className="flex items-center gap-2 cursor-pointer">
                           <input type="checkbox" checked={entry.lockTarget}
                             onChange={e => onLightChange(entry.id, { lockTarget: e.target.checked })}
@@ -366,7 +363,6 @@ export default function MeshPanel({
                       </>
                     )}
 
-                    {/* RectAreaLight specific */}
                     {entry.type === "rect" && (
                       <>
                         <div className="flex gap-2">
@@ -405,11 +401,8 @@ export default function MeshPanel({
                 </div>
                 {expandedId === entry.id && (
                   <div className="border-t border-neutral-700 p-2 space-y-2">
-                    {/* Position */}
                     <XyzRow label="Position" value={entry.position}
                       onChange={pos => onIblChange(entry.id, { position: pos })} />
-
-                    {/* Volume */}
                     <label className="flex items-center gap-2">
                       <span className="text-[9px] text-neutral-500 shrink-0 w-10">Radius</span>
                       <input type="range" min={0} max={50} step={0.5}

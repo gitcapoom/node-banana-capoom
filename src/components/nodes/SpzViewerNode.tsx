@@ -47,6 +47,16 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
+
+      // Handle splat-viewer-state messages (viewer state sync)
+      if (event.data?.type === "splat-viewer-state" && event.data.worldId === id) {
+        updateNodeData(id, { viewerState: event.data.state });
+        try {
+          sessionStorage.setItem(`splat-viewer-state-${id}`, JSON.stringify(event.data.state));
+        } catch (_) { /* quota */ }
+        return;
+      }
+
       if (event.data?.type !== "worldlabs-capture") return;
       // Use node ID as worldId for routing
       if (event.data.worldId !== id) return;
@@ -207,11 +217,18 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     if (typeof nodeData.cameraJsonFocal === "number") params.set("lens", String(nodeData.cameraJsonFocal));
     if (typeof nodeData.cameraJsonAperture === "number") params.set("sensor", String(nodeData.cameraJsonAperture));
 
+    // Persist viewer state to sessionStorage so the viewer can restore it on open
+    if (nodeData.viewerState) {
+      try {
+        sessionStorage.setItem(`splat-viewer-state-${id}`, JSON.stringify(nodeData.viewerState));
+      } catch (_) { /* quota */ }
+    }
+
     const viewerUrl = `/viewer?${params.toString()}`;
     const w = window.open(viewerUrl, `spz-viewer-${id}`, "width=1280,height=720,alwaysOnTop=yes");
     viewerWindowRef.current = w;
     updateNodeData(id, { viewerOpen: true });
-  }, [id, nodeData.spzUrl, nodeData.filename, nodeData.cameraJsonFocal, nodeData.cameraJsonAperture, updateNodeData]);
+  }, [id, nodeData.spzUrl, nodeData.filename, nodeData.cameraJsonFocal, nodeData.cameraJsonAperture, nodeData.viewerState, updateNodeData]);
 
   const handleLoadCameraJson = useCallback(
     async (file: File) => {
