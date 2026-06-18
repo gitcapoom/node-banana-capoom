@@ -892,9 +892,6 @@ export default function SplatViewer() {
   // instead of the 3/4 auto-frame — identical for connected + drag-dropped.
   const cameraSpaceRef = useRef(true);
   const initRef = useRef(false);
-  // Binary cache for blob-URL splats — survives page reload via viewerState
-  const splatFileDataRef = useRef<string | null>(null);
-
   // Mesh overlay refs
   const meshObjectsRef = useRef<Map<string, THREE.Object3D>>(new Map());
   const meshFileInputRef = useRef<HTMLInputElement>(null);
@@ -1092,21 +1089,7 @@ export default function SplatViewer() {
     }
     if (savedState) applySaveState(savedState);
 
-    // Resolve splat URL: prefer recovered file data over potentially-dead blob URL
-    if (savedState?.splatFileData) {
-      try {
-        const b64 = savedState.splatFileData.split(",")[1];
-        const binary = atob(b64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const blob = new Blob([bytes], { type: "application/octet-stream" });
-        setSpzUrl(URL.createObjectURL(blob));
-      } catch (_) {
-        if (url) setSpzUrl(url);
-      }
-    } else if (url) {
-      setSpzUrl(url);
-    }
+    if (url) setSpzUrl(url);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2216,19 +2199,6 @@ export default function SplatViewer() {
 
       await splatMesh.initialized;
 
-      // If loaded from a blob URL, cache binary data so the viewer state can
-      // survive a page reload (blob URLs expire when the page is closed).
-      if (url.startsWith("blob:")) {
-        try {
-          const resp = await fetch(url);
-          const buf = await resp.arrayBuffer();
-          const bytes = new Uint8Array(buf);
-          let binary = "";
-          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-          splatFileDataRef.current = "data:application/octet-stream;base64," + btoa(binary);
-        } catch (_) { /* non-critical — state will just not survive reload */ }
-      }
-
       // URLs from SpzViewerNode are blob: URLs with no extension; the real
       // filename rides in the `name` query param. Check both.
       const filenameHint =
@@ -2375,7 +2345,6 @@ export default function SplatViewer() {
     camera?: { px: number; py: number; pz: number; qx: number; qy: number; qz: number; qw: number };
     cameraPath?: unknown;
     orbitTarget?: { x: number; y: number; z: number };
-    splatFileData?: string; // base64 data URL — restores blob-URL splats across page reloads
   }
 
   const buildSaveState = useCallback((): ViewerSaveState => {
@@ -2392,7 +2361,6 @@ export default function SplatViewer() {
       } : undefined,
       cameraPath,
       orbitTarget: controls ? { x: controls.target.x, y: controls.target.y, z: controls.target.z } : undefined,
-      splatFileData: splatFileDataRef.current ?? undefined,
     };
   }, [transform, cameraPath]);
 
