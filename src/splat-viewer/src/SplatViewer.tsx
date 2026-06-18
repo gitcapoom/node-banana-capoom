@@ -2274,7 +2274,8 @@ export default function SplatViewer() {
         } else {
           throw new Error("upload failed");
         }
-      } catch {
+      } catch (uploadErr) {
+        console.warn("[splat-viewer] Caddy upload failed, using blob URL:", uploadErr);
         splatUrl = URL.createObjectURL(file);
         usesBlobUrl = true;
       }
