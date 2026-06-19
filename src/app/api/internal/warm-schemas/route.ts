@@ -3,7 +3,7 @@
  *
  * Called by `server.js` at startup + once per 24h. Also exposed for manual
  * kick-off via:
- *   curl -X POST http://localhost:3001/api/_internal/warm-schemas
+ *   curl -X POST http://localhost:3001/api/internal/warm-schemas
  *
  * Runs are serialized with a module-level lock so concurrent calls return the
  * current in-flight report instead of queueing another warm.

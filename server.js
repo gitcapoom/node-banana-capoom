@@ -23,13 +23,13 @@ const port = (process.env.PORT || '3000').trim();
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
-// Schema warmer — POSTs to /api/_internal/warm-schemas every 24h.
+// Schema warmer — POSTs to /api/internal/warm-schemas every 24h.
 // First run happens ~15s after boot so Next has finished wiring routes.
 const WARM_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const WARM_INITIAL_DELAY_MS = 15 * 1000;
 function triggerSchemaWarm(reason) {
   const hostForWarm = hostname === '0.0.0.0' ? '127.0.0.1' : hostname;
-  const url = `http://${hostForWarm}:${port}/api/_internal/warm-schemas`;
+  const url = `http://${hostForWarm}:${port}/api/internal/warm-schemas`;
   const started = Date.now();
   console.log(`[schema-warmer] Triggering warm (${reason}) → ${url}`);
   fetch(url, { method: 'POST' })
