@@ -4,7 +4,7 @@ import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Node } from "@xyflow/react";
 import { useWorkflowStore, saveNanoBananaDefaults, useProviderApiKeys } from "@/store/workflowStore";
-import { NodeType, NanoBananaNodeData, LLMGenerateNodeData, GenerateVideoNodeData, Generate3DNodeData, GenerateAudioNodeData, EaseCurveNodeData, ConditionalSwitchNodeData, WorldLabsPanoNodeData, WorldLabsWorldNodeData, AspectRatio, Resolution, ModelType, MODEL_DISPLAY_NAMES, ProviderType, SelectedModel, LLMProvider, LLMModelType, MatchMode, ConditionalSwitchRule } from "@/types";
+import { NodeType, NanoBananaNodeData, UpscaleGridNodeData, LLMGenerateNodeData, GenerateVideoNodeData, Generate3DNodeData, GenerateAudioNodeData, EaseCurveNodeData, ConditionalSwitchNodeData, WorldLabsPanoNodeData, WorldLabsWorldNodeData, AspectRatio, Resolution, ModelType, MODEL_DISPLAY_NAMES, ProviderType, SelectedModel, LLMProvider, LLMModelType, MatchMode, ConditionalSwitchRule } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { ModelParameters } from "./ModelParameters";
@@ -21,6 +21,7 @@ import { useInlineParameters } from "@/hooks/useInlineParameters";
 // List of node types that have configurable parameters
 const CONFIGURABLE_NODE_TYPES: NodeType[] = [
   "nanoBanana",
+  "upscaleGrid",
   "generateVideo",
   "generate3d",
   "generateAudio",
@@ -34,6 +35,7 @@ const CONFIGURABLE_NODE_TYPES: NodeType[] = [
 // Generation node types that can use inline parameters
 const GENERATION_NODE_TYPES: NodeType[] = [
   "nanoBanana",
+  "upscaleGrid",
   "generateVideo",
   "generate3d",
   "generateAudio",
@@ -145,6 +147,9 @@ export function ControlPanel() {
             {selectedNode.type === "nanoBanana" && (
               <GenerateImageControls node={selectedNode} />
             )}
+            {selectedNode.type === "upscaleGrid" && (
+              <UpscaleGridControls node={selectedNode} />
+            )}
             {selectedNode.type === "generateVideo" && (
               <GenerateVideoControls node={selectedNode} />
             )}
@@ -179,6 +184,7 @@ export function ControlPanel() {
 function getNodeTypeTitle(type: NodeType): string {
   const titles: Record<string, string> = {
     nanoBanana: "Generate Image Settings",
+    upscaleGrid: "Upscale Grid Settings",
     generateVideo: "Generate Video Settings",
     generate3d: "Generate 3D Settings",
     generateAudio: "Generate Audio Settings",
@@ -735,6 +741,276 @@ function GenerateImageControls({ node }: { node: Node }) {
             onParametersChange={handleParametersChange}
           />
         )}
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={() => regenerateNode(node.id)}
+          disabled={!canRun}
+          title={blockedReason || undefined}
+          className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+        >
+          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+          {isExecuting ? "Running..." : "Run"}
+        </button>
+      </div>
+
+      {isBrowseDialogOpen && (
+        <ModelSearchDialog
+          isOpen={isBrowseDialogOpen}
+          onClose={() => setIsBrowseDialogOpen(false)}
+          onModelSelected={handleBrowseModelSelect}
+          initialCapabilityFilter="image"
+        />
+      )}
+    </>
+  );
+}
+
+// Upscale Grid Controls — full image-model picker (any provider) + tile/blend params
+function UpscaleGridControls({ node }: { node: Node }) {
+  const nodeData = node.data as UpscaleGridNodeData;
+  const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
+  const { canRun, blockedReason, isExecuting } = useCanRun(node.id);
+  const { replicateApiKey, falApiKey, kieApiKey, replicateEnabled, kieEnabled } = useProviderApiKeys();
+  const [externalModels, setExternalModels] = useState<ProviderModel[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [modelsFetchError, setModelsFetchError] = useState<string | null>(null);
+  const [isBrowseDialogOpen, setIsBrowseDialogOpen] = useState(false);
+
+  const currentProvider: ProviderType = nodeData.selectedModel?.provider || "gemini";
+
+  const enabledProviders = useMemo(() => {
+    const providers: { id: ProviderType; name: string }[] = [];
+    providers.push({ id: "gemini", name: "Gemini" });
+    providers.push({ id: "fal", name: "fal.ai" });
+    if (replicateEnabled && replicateApiKey) providers.push({ id: "replicate", name: "Replicate" });
+    if (kieEnabled && kieApiKey) providers.push({ id: "kie", name: "Kie.ai" });
+    return providers;
+  }, [replicateEnabled, replicateApiKey, kieEnabled, kieApiKey]);
+
+  const fetchModels = useCallback(async () => {
+    if (currentProvider === "gemini") {
+      setExternalModels([]);
+      setModelsFetchError(null);
+      return;
+    }
+    setIsLoadingModels(true);
+    setModelsFetchError(null);
+    try {
+      const capabilities = IMAGE_CAPABILITIES.join(",");
+      const headers: HeadersInit = {};
+      switch (currentProvider) {
+        case "replicate": if (replicateApiKey) headers["X-Replicate-Key"] = replicateApiKey; break;
+        case "fal": if (falApiKey) headers["X-Fal-Key"] = falApiKey; break;
+        case "kie": if (kieApiKey) headers["X-Kie-Key"] = kieApiKey; break;
+      }
+      const response = await deduplicatedFetch(`/api/models?provider=${currentProvider}&capabilities=${capabilities}`, { headers });
+      if (response.ok) {
+        const data = await response.json();
+        setExternalModels(data.models || []);
+        setModelsFetchError(null);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        setExternalModels([]);
+        setModelsFetchError(errorData.error || `Failed to load models (${response.status})`);
+      }
+    } catch {
+      setExternalModels([]);
+      setModelsFetchError("Failed to load models. Check your connection.");
+    } finally {
+      setIsLoadingModels(false);
+    }
+  }, [currentProvider, replicateApiKey, falApiKey, kieApiKey]);
+
+  useEffect(() => { fetchModels(); }, [fetchModels]);
+
+  const handleProviderChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const provider = e.target.value as ProviderType;
+      if (provider === "gemini") {
+        const modelId = nodeData.model || "nano-banana-pro";
+        updateNodeData(node.id, {
+          selectedModel: { provider: "gemini", modelId, displayName: GEMINI_IMAGE_MODELS.find(m => m.value === modelId)?.label || "Nano Banana Pro" },
+          parameters: {},
+        });
+      } else {
+        updateNodeData(node.id, { selectedModel: { provider, modelId: "", displayName: "Select model..." }, parameters: {} });
+      }
+    },
+    [node.id, nodeData.model, updateNodeData]
+  );
+
+  const handleExternalModelChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const model = externalModels.find(m => m.id === e.target.value);
+      if (model) {
+        updateNodeData(node.id, {
+          selectedModel: { provider: currentProvider, modelId: model.id, displayName: model.name, capabilities: model.capabilities },
+          parameters: {},
+        });
+      }
+    },
+    [node.id, currentProvider, externalModels, updateNodeData]
+  );
+
+  const handleModelChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const model = e.target.value as ModelType;
+      updateNodeData(node.id, {
+        model,
+        selectedModel: { provider: "gemini", modelId: model, displayName: GEMINI_IMAGE_MODELS.find(m => m.value === model)?.label || model },
+      });
+    },
+    [node.id, updateNodeData]
+  );
+
+  const handleParametersChange = useCallback(
+    (parameters: Record<string, unknown>) => updateNodeData(node.id, { parameters }),
+    [node.id, updateNodeData]
+  );
+
+  const handleBrowseModelSelect = useCallback((model: ProviderModel) => {
+    updateNodeData(node.id, {
+      selectedModel: { provider: model.provider, modelId: model.id, displayName: model.name, capabilities: model.capabilities },
+      parameters: {},
+    });
+    setIsBrowseDialogOpen(false);
+  }, [node.id, updateNodeData]);
+
+  const isGeminiProvider = currentProvider === "gemini";
+  const currentModelId = isGeminiProvider ? (nodeData.selectedModel?.modelId || nodeData.model) : null;
+  const supportsResolution = currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2";
+  const aspectRatios = currentModelId === "nano-banana-2" ? EXTENDED_ASPECT_RATIOS : BASE_ASPECT_RATIOS;
+  const resolutions = currentModelId === "nano-banana-2" ? RESOLUTIONS_NB2 : RESOLUTIONS_PRO;
+  const selCls = "nodrag nopan w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500";
+  const LONG_EDGE_OPTIONS = [4096, 6144, 8192, 12288, 16384];
+
+  return (
+    <>
+      <div className="space-y-3">
+        {/* Model name + provider + browse */}
+        <div className="border-t border-neutral-700 pt-3">
+          <div className="flex items-start gap-2">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm text-neutral-100 truncate">
+                {nodeData.selectedModel?.displayName || GEMINI_IMAGE_MODELS.find(m => m.value === nodeData.model)?.label || "Select model..."}
+              </div>
+              <span className="text-[10px] text-neutral-500 truncate block mt-0.5">
+                {enabledProviders.find(p => p.id === currentProvider)?.name || currentProvider}
+              </span>
+            </div>
+            <button
+              onClick={() => setIsBrowseDialogOpen(true)}
+              className="nodrag nopan shrink-0 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 transition-colors"
+            >
+              Browse
+            </button>
+          </div>
+        </div>
+
+        {/* Provider selector */}
+        <div>
+          <label className="block text-xs font-medium text-neutral-300 mb-1">Provider</label>
+          <select value={currentProvider} onChange={handleProviderChange} className={selCls}>
+            {enabledProviders.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Gemini controls */}
+        {isGeminiProvider && (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-neutral-300 mb-1">Model</label>
+              <select value={currentModelId || "nano-banana-pro"} onChange={handleModelChange} className={selCls}>
+                {GEMINI_IMAGE_MODELS.map(m => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-neutral-300 mb-1">Aspect Ratio</label>
+              <select value={nodeData.aspectRatio || "1:1"} onChange={(e) => updateNodeData(node.id, { aspectRatio: e.target.value as AspectRatio })} className={selCls}>
+                {aspectRatios.map(ar => (
+                  <option key={ar} value={ar}>{ar === "auto" ? "Auto" : ar}</option>
+                ))}
+              </select>
+            </div>
+            {supportsResolution && (
+              <div>
+                <label className="block text-xs font-medium text-neutral-300 mb-1">Resolution</label>
+                <select value={nodeData.resolution || "2K"} onChange={(e) => updateNodeData(node.id, { resolution: e.target.value as Resolution })} className={selCls}>
+                  {resolutions.map(res => (
+                    <option key={res} value={res}>{res}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {(currentModelId === "nano-banana-pro" || currentModelId === "nano-banana-2") && (
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id={`ug-google-search-${node.id}`}
+                  checked={nodeData.useGoogleSearch || false}
+                  onChange={(e) => updateNodeData(node.id, { useGoogleSearch: e.target.checked })}
+                  className="nodrag nopan w-3 h-3 text-blue-600 bg-neutral-700 border-neutral-600 rounded focus:ring-blue-500"
+                />
+                <label htmlFor={`ug-google-search-${node.id}`} className="ml-2 text-xs text-neutral-300">Google Search</label>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* External provider model + parameters */}
+        {!isGeminiProvider && (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-neutral-300 mb-1">Model</label>
+              <select value={nodeData.selectedModel?.modelId || ""} onChange={handleExternalModelChange} className={selCls} disabled={isLoadingModels}>
+                <option value="">{isLoadingModels ? "Loading…" : "Select model…"}</option>
+                {externalModels.map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+              {modelsFetchError && <span className="text-[10px] text-red-400 block mt-1">{modelsFetchError}</span>}
+            </div>
+            {nodeData.selectedModel?.modelId && (
+              <ModelParameters
+                modelId={nodeData.selectedModel.modelId}
+                provider={currentProvider}
+                parameters={nodeData.parameters || {}}
+                onParametersChange={handleParametersChange}
+              />
+            )}
+          </>
+        )}
+
+        {/* Upscale-specific params */}
+        <div className="border-t border-neutral-700 pt-3 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-neutral-300 mb-1" title="Each quadrant crop is this much larger than a perfect quarter">Quadrant Overlap %</label>
+            <input
+              type="number"
+              min={2}
+              max={50}
+              step={1}
+              value={nodeData.overlapPercent ?? 10}
+              onChange={(e) => updateNodeData(node.id, { overlapPercent: Math.min(50, Math.max(2, Math.round(Number(e.target.value) || 10))) })}
+              className={selCls}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-neutral-300 mb-1" title="Long edge of the final blended image">Output Size</label>
+            <select value={nodeData.finalLongEdge ?? 8192} onChange={(e) => updateNodeData(node.id, { finalLongEdge: Number(e.target.value) })} className={selCls}>
+              {LONG_EDGE_OPTIONS.map(px => (
+                <option key={px} value={px}>{px === 8192 ? "8K (8192)" : px === 4096 ? "4K (4096)" : `${px}px`}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       <div className="flex justify-end">

@@ -11,6 +11,7 @@ export { Image2GSNode } from "./Image2GSNode";
 export { GenerateAudioNode } from "./GenerateAudioNode";
 export { LLMGenerateNode } from "./LLMGenerateNode";
 export { SplitGridNode } from "./SplitGridNode";
+export { UpscaleGridNode } from "./UpscaleGridNode";
 export { OutputNode } from "./OutputNode";
 export { OutputGalleryNode } from "./OutputGalleryNode";
 export { ImageCompareNode } from "./ImageCompareNode";

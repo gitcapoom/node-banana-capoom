@@ -578,6 +578,16 @@ async function externalizeNodeImages(
       break;
     }
 
+    case "upscaleGrid": {
+      const d = data as import("@/types").UpscaleGridNodeData;
+      const next: Record<string, unknown> = { ...d };
+      // Output already baked into the generations folder by the executor; this
+      // re-externalizes only if a run rehydrated outputImage to a data URL.
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "generations");
+      newData = next as import("@/types").UpscaleGridNodeData;
+      break;
+    }
+
     case "mirror": {
       const d = data as import("@/types").MirrorNodeData;
       const next: Record<string, unknown> = { ...d };

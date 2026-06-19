@@ -34,6 +34,7 @@ export const ALL_NODES_CATEGORIES: NodeCatalogCategory[] = [
     label: "Generate",
     nodes: [
       { type: "nanoBanana", label: "Generate Image" },
+      { type: "upscaleGrid", label: "Upscale (Grid)" },
       { type: "generateVideo", label: "Generate Video" },
       { type: "generate3d", label: "Generate 3D" },
       { type: "image2GS", label: "Image to Splat" },

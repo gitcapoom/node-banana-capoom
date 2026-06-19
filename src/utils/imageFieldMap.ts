@@ -62,6 +62,7 @@ export const THUMB_DISPLAY_FIELDS: Partial<Record<NodeType, ThumbDisplayField[]>
     { raw: "sourceImage", ref: "sourceImageRef", thumb: "sourceImageThumb", folder: "inputs" },
     { raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs" },
   ],
+  upscaleGrid: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "generations" }],
   colorGrade: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs" }],
   hsvCorrect: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs" }],
   contrastAdjust: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs" }],
@@ -120,6 +121,7 @@ export const RUN_FULLRES_FIELDS: Partial<Record<NodeType, RunImageField[]>> = {
     { raw: "outputImage", ref: "outputImageRef", folder: "inputs" },
   ],
   comp: [{ raw: "outputImage", ref: "outputImageRef", folder: "inputs" }],
+  upscaleGrid: [{ raw: "outputImage", ref: "outputImageRef", folder: "generations" }],
   maskPainter: [
     { raw: "sourceImage", ref: "sourceImageRef", folder: "inputs" },
     { raw: "outputMask", ref: "outputMaskRef", folder: "inputs" },

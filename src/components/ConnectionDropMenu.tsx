@@ -43,6 +43,16 @@ const IMAGE_TARGET_OPTIONS: MenuOption[] = [
     ),
   },
   {
+    type: "upscaleGrid",
+    label: "Upscale (Grid)",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75h6.5v6.5h-6.5zM13.75 3.75h6.5v6.5h-6.5zM3.75 13.75h6.5v6.5h-6.5zM13.75 13.75h6.5v6.5h-6.5z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16 7l1.5-1.5M17.5 5.5H16M17.5 5.5V7" />
+      </svg>
+    ),
+  },
+  {
     type: "splitGrid",
     label: "Split Grid Node",
     icon: (

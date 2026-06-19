@@ -44,6 +44,7 @@ import {
   HsvCorrectNodeData,
   ContrastAdjustNodeData,
   PanoShiftNodeData,
+  UpscaleGridNodeData,
   WorkflowNodeData,
   GroupColor,
   SelectedModel,
@@ -101,6 +102,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   hsvCorrect: { width: 280, height: 380 },
   contrastAdjust: { width: 280, height: 380 },
   panoShift: { width: 320, height: 280 },
+  upscaleGrid: { width: 300, height: 320 },
 };
 
 /**
@@ -565,6 +567,40 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         shiftX: 0,
         outputImage: null,
       } as PanoShiftNodeData;
+    case "upscaleGrid": {
+      const nodeDefaults = loadNodeDefaults();
+      const legacyDefaults = loadGenerateImageDefaults();
+
+      let selectedModel: SelectedModel;
+      if (nodeDefaults.generateImage?.selectedModel) {
+        selectedModel = nodeDefaults.generateImage.selectedModel;
+      } else {
+        const modelDisplayName = MODEL_DISPLAY_NAMES[legacyDefaults.model as ModelType] || legacyDefaults.model;
+        selectedModel = {
+          provider: "gemini",
+          modelId: legacyDefaults.model,
+          displayName: modelDisplayName,
+        };
+      }
+
+      return {
+        inputImages: [],
+        inputPrompt: null,
+        outputImage: null,
+        aspectRatio: nodeDefaults.generateImage?.aspectRatio ?? legacyDefaults.aspectRatio,
+        resolution: nodeDefaults.generateImage?.resolution ?? legacyDefaults.resolution,
+        model: legacyDefaults.model,
+        selectedModel,
+        useGoogleSearch: nodeDefaults.generateImage?.useGoogleSearch ?? legacyDefaults.useGoogleSearch,
+        useImageSearch: nodeDefaults.generateImage?.useImageSearch ?? legacyDefaults.useImageSearch,
+        overlapPercent: 10,
+        finalLongEdge: 8192,
+        quadrantOutputs: [null, null, null, null],
+        status: "idle",
+        error: null,
+        lastGenerationCost: null,
+      } as UpscaleGridNodeData;
+    }
     case "image2GS":
       return {
         inputImages: [],
