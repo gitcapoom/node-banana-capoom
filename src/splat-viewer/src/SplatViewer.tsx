@@ -2259,33 +2259,15 @@ export default function SplatViewer() {
         (splatMeshRef.current as { dispose?: () => void })?.dispose?.();
       }
 
-      // Try to upload to Caddy for a persistent URL; fall back to blob URL
-      let splatUrl: string;
-      let usesBlobUrl = false;
-      try {
-        const fd = new FormData();
-        fd.append("file", file);
-        const resp = await fetch("/api/upload-splat", { method: "POST", body: fd });
-        const json = await resp.json() as { success: boolean; url?: string };
-        if (json.success && json.url) {
-          splatUrl = json.url;
-          // Persist the Caddy URL in state so it survives page reloads
-          setSpzUrl(json.url);
-        } else {
-          throw new Error("upload failed");
-        }
-      } catch (uploadErr) {
-        console.warn("[splat-viewer] Caddy upload failed, using blob URL:", uploadErr);
-        splatUrl = URL.createObjectURL(file);
-        usesBlobUrl = true;
-      }
+      // Create object URL from file
+      const objectUrl = URL.createObjectURL(file);
 
       const splatMesh = new SplatMesh({
-        url: splatUrl,
+        url: objectUrl,
         onLoad: () => {
           setSplatLoaded(true);
           setLoading(false);
-          if (usesBlobUrl) URL.revokeObjectURL(splatUrl);
+          URL.revokeObjectURL(objectUrl);
 
           // Center camera at origin
           centerCamera();
