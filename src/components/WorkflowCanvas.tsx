@@ -37,6 +37,7 @@ import {
   GenerateAudioNode,
   LLMGenerateNode,
   SplitGridNode,
+  UpscaleGridNode,
   OutputNode,
   OutputGalleryNode,
   ImageCompareNode,
@@ -114,6 +115,7 @@ const nodeTypes: NodeTypes = {
   generateAudio: GenerateAudioNode,
   llmGenerate: LLMGenerateNode,
   splitGrid: SplitGridNode,
+  upscaleGrid: UpscaleGridNode,
   output: OutputNode,
   outputGallery: OutputGalleryNode,
   imageCompare: ImageCompareNode,
@@ -550,6 +552,7 @@ export function WorkflowCanvas() {
     array: 'Array',
     promptConstructor: 'Prompt Constructor',
     nanoBanana: 'Generate Image',
+    upscaleGrid: 'Upscale Grid',
     generateVideo: 'Generate Video',
     generate3d: 'Generate 3D',
     image2GS: 'Image → Splat',
@@ -592,9 +595,11 @@ export function WorkflowCanvas() {
   // Helper to get node title (used for FloatingNodeHeader)
   const getNodeTitle = useCallback((node: Node) => {
     // For generate nodes, check for selectedModel display name
-    if (node.type === "nanoBanana" || node.type === "generateVideo" || node.type === "generate3d" || node.type === "generateAudio") {
+    if (node.type === "nanoBanana" || node.type === "generateVideo" || node.type === "generate3d" || node.type === "generateAudio" || node.type === "upscaleGrid") {
       const model = (node.data as any)?.selectedModel;
-      if (model?.displayName) return model.displayName;
+      if (model?.displayName) {
+        return node.type === "upscaleGrid" ? `Upscale · ${model.displayName}` : model.displayName;
+      }
     }
 
     // For LLM nodes, check for selectedLLMModel or selectedModel
@@ -1801,6 +1806,7 @@ export function WorkflowCanvas() {
             generateAudio: { width: 300, height: 280 },
             llmGenerate: { width: 320, height: 360 },
             splitGrid: { width: 300, height: 320 },
+            upscaleGrid: { width: 300, height: 320 },
             output: { width: 320, height: 320 },
             outputGallery: { width: 320, height: 360 },
             imageCompare: { width: 400, height: 360 },
@@ -2522,6 +2528,8 @@ export function WorkflowCanvas() {
                 return "#06b6d4";
               case "splitGrid":
                 return "#f59e0b";
+              case "upscaleGrid":
+                return "#10b981";
               case "output":
                 return "#ef4444";
               case "outputGallery":
@@ -2582,7 +2590,8 @@ export function WorkflowCanvas() {
             // Browse button for generate nodes in inline-parameters mode
             const showBrowse = inlineParametersEnabled && (
               node.type === "nanoBanana" || node.type === "generateVideo" ||
-              node.type === "generate3d" || node.type === "generateAudio"
+              node.type === "generate3d" || node.type === "generateAudio" ||
+              node.type === "upscaleGrid"
             );
             const browseAction = showBrowse ? (
               <button

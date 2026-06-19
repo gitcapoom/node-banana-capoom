@@ -90,6 +90,9 @@ export function getSourceOutput(
   } else if (sourceNode.type === "nanoBanana") {
     const nbData = sourceNode.data as NanoBananaNodeData;
     return { type: "image", value: nbData.outputImage };
+  } else if (sourceNode.type === "upscaleGrid") {
+    const ugData = sourceNode.data as import("@/types").UpscaleGridNodeData;
+    return { type: "image", value: ugData.outputImage };
   } else if (sourceNode.type === "generate3d") {
     const g3dData = sourceNode.data as Generate3DNodeData;
     return { type: "3d", value: g3dData.output3dUrl };

@@ -33,6 +33,7 @@ const NODE_HEADER_COLORS: Record<string, string> = {
   panoEditor: "#f97316",        // orange-500
   maskPainter: "#eab308",       // yellow-500
   splitGrid: "#ea580c",         // orange-600
+  upscaleGrid: "#10b981",       // emerald-500 (tiled AI upscale)
   videoStitch: "#fbbf24",       // amber-400
   videoTrim: "#d97706",         // amber-600
   easeCurve: "#facc15",         // yellow-400
@@ -68,7 +69,7 @@ export interface CommentNavigationProps {
   onNext: () => void;
 }
 
-const RUNNABLE_TYPES = new Set(['nanoBanana', 'generateVideo', 'generate3d', 'generateAudio', 'llmGenerate', 'worldLabsPano', 'worldLabsWorld', 'panoEditor']);
+const RUNNABLE_TYPES = new Set(['nanoBanana', 'generateVideo', 'generate3d', 'generateAudio', 'llmGenerate', 'worldLabsPano', 'worldLabsWorld', 'panoEditor', 'upscaleGrid']);
 const EXPANDABLE_TYPES = new Set(['prompt', 'promptConstructor', 'splitGrid', 'annotation']);
 
 interface FloatingNodeHeaderProps {

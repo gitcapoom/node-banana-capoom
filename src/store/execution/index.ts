@@ -45,6 +45,8 @@ export type { LlmGenerateOptions } from "./llmGenerateExecutor";
 
 export { executeSplitGrid } from "./splitGridExecutor";
 
+export { executeUpscaleGrid } from "./upscaleGridExecutor";
+
 export {
   executeVideoStitch,
   executeEaseCurve,

@@ -73,6 +73,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   generateAudio: { width: 300, height: 280 },
   llmGenerate: { width: 320, height: 360 },
   splitGrid: { width: 300, height: 320 },
+  upscaleGrid: { width: 300, height: 320 },
   output: { width: 320, height: 320 },
   outputGallery: { width: 320, height: 360 },
   imageCompare: { width: 400, height: 360 },
@@ -321,6 +322,23 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         error: null,
         imageHistory: [],
         selectedHistoryIndex: 0,
+        lastGenerationCost: null,
+      };
+    case "upscaleGrid":
+      return {
+        inputImages: [],
+        inputPrompt: null,
+        outputImage: null,
+        aspectRatio: "1:1",
+        resolution: "1K",
+        model: "nano-banana-pro",
+        useGoogleSearch: false,
+        useImageSearch: false,
+        overlapPercent: 10,
+        finalLongEdge: 8192,
+        quadrantOutputs: [null, null, null, null],
+        status: "idle",
+        error: null,
         lastGenerationCost: null,
       };
     case "generateVideo":

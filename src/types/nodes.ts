@@ -72,7 +72,8 @@ export type NodeType =
   | "colorGrade"
   | "hsvCorrect"
   | "contrastAdjust"
-  | "panoShift";
+  | "panoShift"
+  | "upscaleGrid";
 
 /**
  * Node execution status
@@ -438,6 +439,46 @@ export interface NanoBananaNodeData extends BaseNodeData {
   imageHistory: CarouselImageItem[]; // Carousel history (IDs only)
   selectedHistoryIndex: number; // Currently selected image in carousel
   lastGenerationCost?: number | null; // Cost of the last generation run
+}
+
+/**
+ * Upscale Grid node — tiled AI upscale.
+ *
+ * Splits the input image into 4 corner quadrants (each the input's aspect
+ * ratio, enlarged by `overlapPercent`), sends each to a chosen image
+ * generator independently with identical parameters, then Lanczos-resizes and
+ * feather-blends the 4 outputs back into one high-resolution image.
+ *
+ * Model selection mirrors NanoBananaNodeData so the node exposes the same
+ * provider/model picker and parameter UI as a normal image generator.
+ */
+export interface UpscaleGridNodeData extends BaseNodeData {
+  inputImages: string[];
+  inputImageRefs?: string[];
+  inputPrompt: string | null;
+  outputImage: string | null;
+  outputImageRef?: string;       // full-res file ref in the generations folder
+  outputImageThumb?: string;     // inline small preview (full-res loads on double-click)
+  // ── Model selection (mirrors NanoBananaNodeData) ──
+  aspectRatio: AspectRatio;
+  resolution: Resolution;
+  model: ModelType;
+  selectedModel?: SelectedModel;
+  useGoogleSearch: boolean;
+  useImageSearch: boolean;
+  parameters?: Record<string, unknown>;
+  inputSchema?: ModelInputDef[];
+  parametersExpanded?: boolean;
+  // ── Upscale-specific ──
+  /** How much larger each quadrant crop is than a perfect quarter. Default 10 (%). */
+  overlapPercent: number;
+  /** Long edge of the final blended canvas in pixels. Default 8192. */
+  finalLongEdge: number;
+  /** Per-quadrant generated outputs (UL, UR, LL, LR) for live preview. */
+  quadrantOutputs?: (string | null)[];
+  status: NodeStatus;
+  error: string | null;
+  lastGenerationCost?: number | null;
 }
 
 /**
@@ -989,7 +1030,8 @@ export type WorkflowNodeData =
   | ColorGradeNodeData
   | HsvCorrectNodeData
   | ContrastAdjustNodeData
-  | PanoShiftNodeData;
+  | PanoShiftNodeData
+  | UpscaleGridNodeData;
 
 /**
  * Workflow node with typed data (extended with optional groupId)

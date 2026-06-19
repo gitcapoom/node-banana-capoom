@@ -84,6 +84,7 @@ import {
   executeGenerateAudio,
   executeLlmGenerate,
   executeSplitGrid,
+  executeUpscaleGrid,
   executeVideoStitch,
   executeEaseCurve,
   executeVideoTrim,
@@ -1721,6 +1722,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
       if (node.type === "nanoBanana") {
         await executeNanoBanana(executionCtx, regenOptions);
+      } else if (node.type === "upscaleGrid") {
+        await executeUpscaleGrid(executionCtx);
       } else if (node.type === "array") {
         await executeArray(executionCtx);
       } else if (node.type === "llmGenerate") {
@@ -1938,6 +1941,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           break;
         case "splitGrid":
           await executeSplitGrid(executionCtx);
+          break;
+        case "upscaleGrid":
+          await executeUpscaleGrid(executionCtx);
           break;
         case "output":
           await executeOutput(executionCtx);
