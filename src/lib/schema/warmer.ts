@@ -26,7 +26,7 @@ import { mergePlaygroundFields } from "./merge";
 import { scrapePlayground, type PlaygroundScrapeResult } from "./playground";
 import { writeCachedSchema, readCachedSchema } from "./diskCache";
 
-import { fetchAndNormalizeFal } from "./normalize/fal";
+import { fetchAndNormalizeFal, normalizeFalSpec } from "./normalize/fal";
 import { fetchAndNormalizeReplicate } from "./normalize/replicate";
 import { fetchAndNormalizeWaveSpeed } from "./normalize/wavespeed";
 import { fetchAndNormalizeMuapi } from "./normalize/muapi";
@@ -208,6 +208,8 @@ const FAL_API_BASE = "https://api.fal.ai/v1";
 const WAVESPEED_API_BASE = "https://api.wavespeed.ai/api/v3";
 const PER_LIST_TIMEOUT_MS = 30_000;
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 interface RawModelListItem {
   id: string;
   provider: ProviderType;
@@ -236,35 +238,97 @@ async function listReplicateModels(apiKey: string): Promise<RawModelListItem[]> 
   return results;
 }
 
-async function listFalModels(apiKey: string | null): Promise<RawModelListItem[]> {
-  const results: RawModelListItem[] = [];
+/**
+ * Bulk-warm every fal model via the list endpoint's INLINE OpenAPI specs.
+ *
+ * fal rate-limits the per-model metadata endpoint hard (~50-200 fetches per
+ * window), so warming the ~1,300-model catalog one-at-a-time made the bulk of
+ * them fail with 429 (counted as "failed"). Instead we paginate
+ * `/v1/models?expand=openapi-3.0`, which returns each model's full OpenAPI
+ * spec inline — the whole catalog in ~140 list requests with no throttling.
+ * Each inline spec goes straight through `normalizeFalSpec` (no extra network).
+ *
+ * We deliberately SKIP the playground HTML scrape here: at ~1,300 models that
+ * would be ~1,300 full-page fetches to fal.ai's website (re-introducing the
+ * throttling problem). The OpenAPI spec alone carries the input schema the
+ * node UI + request builder need. The on-demand warm (`warmModelSchema`, hit
+ * by GET /api/models/:id) still does the richer scrape+merge for any model the
+ * user actually opens.
+ */
+async function warmFalBulk(
+  apiKey: string | null,
+  force: boolean
+): Promise<{ total: number; successful: number; failed: number }> {
+  const stats = { total: 0, successful: 0, failed: 0 };
+  const headers: HeadersInit = {};
+  if (apiKey) headers["Authorization"] = `Key ${apiKey}`;
+
   let cursor: string | null = null;
   let hasMore = true;
   let pages = 0;
-  const headers: HeadersInit = {};
-  if (apiKey) headers["Authorization"] = `Key ${apiKey}`;
-  while (hasMore && pages < 15) {
-    const params = new URLSearchParams();
+  // ~10 models/page with expand; 250 pages covers ~2,500 models with headroom.
+  const MAX_PAGES = 250;
+
+  while (hasMore && pages < MAX_PAGES) {
+    const params = new URLSearchParams({ expand: "openapi-3.0" });
     if (cursor) params.set("cursor", cursor);
-    const qs = params.toString();
-    const res = await fetch(`${FAL_API_BASE}/models${qs ? `?${qs}` : ""}`, {
-      headers,
-      signal: AbortSignal.timeout(PER_LIST_TIMEOUT_MS),
-    });
-    if (!res.ok) break;
-    const data = await res.json() as {
-      models: Array<{ endpoint_id: string }>;
+
+    let res: Response;
+    try {
+      res = await fetch(`${FAL_API_BASE}/models?${params.toString()}`, {
+        headers,
+        signal: AbortSignal.timeout(PER_LIST_TIMEOUT_MS),
+      });
+    } catch (err) {
+      console.warn(`[schema warmer] fal bulk page ${pages} fetch error:`, err);
+      break;
+    }
+    if (!res.ok) {
+      console.warn(`[schema warmer] fal bulk page ${pages} → status ${res.status}, stopping`);
+      break;
+    }
+
+    const data = (await res.json()) as {
+      models: Array<{ endpoint_id: string; openapi?: Record<string, unknown> }>;
       next_cursor: string | null;
       has_more: boolean;
     };
+
     for (const m of data.models) {
-      results.push({ id: m.endpoint_id, provider: "fal" });
+      stats.total++;
+      const modelId = m.endpoint_id;
+
+      // force=false: keep an existing cache entry, skip re-normalizing.
+      if (!force) {
+        const existing = await readCachedSchema("fal", modelId);
+        if (existing) {
+          stats.successful++;
+          continue;
+        }
+      }
+
+      try {
+        const normalized = m.openapi ? normalizeFalSpec(m.openapi) : null;
+        const extracted = normalized ? extractFromNormalized(normalized) : null;
+        if (!extracted) {
+          stats.failed++;
+          continue;
+        }
+        await writeCachedSchema("fal", modelId, extracted);
+        stats.successful++;
+      } catch (err) {
+        console.warn(`[schema warmer] fal bulk ${modelId} error:`, err);
+        stats.failed++;
+      }
     }
+
     cursor = data.next_cursor;
     hasMore = data.has_more;
     pages++;
+    await sleep(100); // gentle pacing between list pages
   }
-  return results;
+
+  return stats;
 }
 
 async function listWaveSpeedModels(apiKey: string): Promise<RawModelListItem[]> {
@@ -325,11 +389,11 @@ export async function warmAllSchemas(opts?: WarmOptions): Promise<WarmReport> {
 
   const startedAt = Date.now();
 
-  // 1. Enumerate model lists in parallel.
+  // 1. Enumerate per-model provider lists in parallel. fal is handled
+  //    separately by warmFalBulk (inline-spec sweep) — see that function.
   const listTasks: Array<Promise<RawModelListItem[]>> = [];
 
   if (apiKeys.replicate) listTasks.push(listReplicateModels(apiKeys.replicate).catch(() => []));
-  listTasks.push(listFalModels(apiKeys.fal ?? null).catch(() => []));
   if (apiKeys.wavespeed) listTasks.push(listWaveSpeedModels(apiKeys.wavespeed).catch(() => []));
   if (apiKeys.kie) listTasks.push(listStaticModels("kie").catch(() => []));
   listTasks.push(listStaticModels("gemini").catch(() => []));
@@ -338,14 +402,19 @@ export async function warmAllSchemas(opts?: WarmOptions): Promise<WarmReport> {
   const listed = (await Promise.all(listTasks)).flat();
   const tasks: WarmTask[] = listed.map(({ id, provider }) => ({ provider, modelId: id }));
 
-  console.log(`[schema warmer] Starting: ${tasks.length} models across providers`);
+  console.log(
+    `[schema warmer] Starting: ${tasks.length} per-model models + fal (bulk via list-expand)`
+  );
 
-  // 2. Execute with concurrency cap.
+  // 2. Execute. Per-model providers run through the concurrency-capped queue;
+  //    fal bulk-warms in parallel from its inline-spec sweep (awaited below).
   const perProvider: WarmReport["perProvider"] = {};
   let successful = 0;
   let failed = 0;
   let playgroundAugmented = 0;
   let completed = 0;
+
+  const falWarm = warmFalBulk(apiKeys.fal ?? null, force);
 
   await runWithConcurrency(
     tasks,
@@ -391,8 +460,18 @@ export async function warmAllSchemas(opts?: WarmOptions): Promise<WarmReport> {
     concurrency
   );
 
+  // Merge fal's bulk results (warmFalBulk owns its own counters).
+  const falStats = await falWarm;
+  perProvider["fal"] = falStats;
+  successful += falStats.successful;
+  failed += falStats.failed;
+  console.log(
+    `[schema warmer] fal bulk: ${falStats.successful}/${falStats.total} ok, ` +
+    `${falStats.failed} failed`
+  );
+
   const report: WarmReport = {
-    total: tasks.length,
+    total: tasks.length + falStats.total,
     successful,
     failed,
     playgroundAugmented,
@@ -401,7 +480,7 @@ export async function warmAllSchemas(opts?: WarmOptions): Promise<WarmReport> {
   };
 
   console.log(
-    `[schema warmer] Done: ${successful}/${tasks.length} ok, ` +
+    `[schema warmer] Done: ${successful}/${report.total} ok, ` +
     `${failed} failed, ${playgroundAugmented} playground-augmented, ` +
     `${(report.durationMs / 1000).toFixed(1)}s`
   );
