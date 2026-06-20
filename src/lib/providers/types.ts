@@ -56,6 +56,14 @@ export interface ModelInput {
   description?: string;
   /** Whether schema expects array format (e.g., image_urls: string[] vs image_url: string) */
   isArray?: boolean;
+  /**
+   * True for a repeatable array-of-object group (e.g. Kling `elements`). Each
+   * item in the array gets its own set of pins built from `children`. Routing
+   * uses field paths like `elements.{itemIndex}.{childName}`.
+   */
+  repeatable?: boolean;
+  /** Media sub-field pins (the per-item template) for a repeatable group. */
+  children?: ModelInput[];
 }
 
 /**

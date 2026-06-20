@@ -58,6 +58,46 @@ describe("getConnectedInputsPure — dynamic pins flag", () => {
     ]);
   });
 
+  it("assembles repeatable-group dyn pins into nested dynamicInputs paths", () => {
+    const nodes = [
+      makeNode("f0", "imageInput", { image: "frontal0" }),
+      makeNode("r0a", "imageInput", { image: "ref0a" }),
+      makeNode("r0b", "imageInput", { image: "ref0b" }),
+      makeNode("v0", "generateVideo", { outputVideo: "vid0" }),
+      makeNode("gen", "generateVideo", {
+        inputSchema: [
+          {
+            name: "elements",
+            type: "image",
+            repeatable: true,
+            children: [
+              { name: "frontal_image_url", type: "image", isArray: false },
+              { name: "reference_image_urls", type: "image", isArray: true },
+              { name: "video_url", type: "video", isArray: false },
+            ],
+          },
+        ],
+      }),
+    ];
+    const edges = [
+      dynEdge("f0", "gen", dynPinId("image", "elements.0.frontal_image_url", 0)),
+      dynEdge("r0a", "gen", dynPinId("image", "elements.0.reference_image_urls", 0)),
+      dynEdge("r0b", "gen", dynPinId("image", "elements.0.reference_image_urls", 1)),
+      {
+        id: "v0-gen",
+        source: "v0",
+        target: "gen",
+        sourceHandle: "video",
+        targetHandle: dynPinId("video", "elements.0.video_url", 0),
+      } as WorkflowEdge,
+    ];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    // Scalar children stay scalar; array child accumulates.
+    expect(result.dynamicInputs["elements.0.frontal_image_url"]).toBe("frontal0");
+    expect(result.dynamicInputs["elements.0.reference_image_urls"]).toEqual(["ref0a", "ref0b"]);
+    expect(result.dynamicInputs["elements.0.video_url"]).toBe("vid0");
+  });
+
   it("ignores the dyn-pin scheme when the flag is off (classic routing)", () => {
     setDynamicPinsEnabled(false);
     const nodes = [

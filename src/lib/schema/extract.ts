@@ -155,6 +155,41 @@ function hoistNestedInputs(
 }
 
 /**
+ * Detect a repeatable array-of-object input (e.g. Kling `elements`) and build a
+ * group ModelInput whose `children` are the media sub-fields (image/video/audio).
+ * Non-media sub-fields (e.g. `voice_id`) are left out — they stay in the
+ * parameter panel. Returns null if `prop` isn't such a group or has no media.
+ */
+function buildRepeatableGroup(
+  name: string,
+  prop: NormalizedProperty,
+  required: boolean
+): ModelInput | null {
+  if (prop.type !== "array" || !prop.items) return null;
+  const item = prop.items;
+  if (item.type !== "object" || !item.properties) return null;
+
+  const children: ModelInput[] = [];
+  for (const subProp of Object.values(item.properties)) {
+    const decision = classifyInput(subProp);
+    if (decision && (decision.kind === "image" || decision.kind === "video" || decision.kind === "audio")) {
+      children.push(propertyToInput(subProp, decision.kind, subProp.required ?? false));
+    }
+  }
+  if (children.length === 0) return null;
+
+  const label = name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  return {
+    name,
+    type: children[0].type, // representative; rendering keys off repeatable/children
+    required,
+    label,
+    repeatable: true,
+    children,
+  };
+}
+
+/**
  * Extract inputs and parameters from a NormalizedSchema.
  *
  * @returns ExtractedResult — .parameters (for node body), .inputs (for pins), .health (observability)
@@ -172,6 +207,24 @@ export function extractFromNormalized(schema: NormalizedSchema): ExtractedResult
 
     if (inputDecision && inputDecision.kind) {
       inputs.push(propertyToInput(prop, inputDecision.kind, isRequired));
+      continue;
+    }
+
+    // Repeatable array-of-object group with media sub-fields (e.g. Kling
+    // `elements`). Surface it as a repeatable input (per-item pins) and strip
+    // the media sub-fields from the parameter to avoid duplication, while
+    // keeping any non-media sub-fields (e.g. voice_id) in the param panel.
+    const group = buildRepeatableGroup(name, prop, isRequired);
+    if (group) {
+      inputs.push(group);
+      const mediaNames = new Set((group.children ?? []).map((c) => c.name));
+      const param = propertyToParameter(prop);
+      const itemProps = param.items?.properties;
+      if (itemProps) {
+        const remaining = itemProps.filter((p) => !mediaNames.has(p.name));
+        param.items!.properties = remaining;
+        if (remaining.length > 0) parameters.push(param);
+      }
       continue;
     }
 

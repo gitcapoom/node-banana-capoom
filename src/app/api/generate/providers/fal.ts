@@ -7,6 +7,7 @@
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
 import { validateMediaUrl } from "@/utils/urlValidation";
+import { setAtPath } from "./deepSet";
 import {
   INPUT_PATTERNS,
   InputMapping,
@@ -320,26 +321,6 @@ export async function generateWithFalQueue(
       return uploadImageToFal(value, apiKey);
     }
     return value;
-  };
-
-  // Deep-set a possibly-dotted key into a target object. E.g. "fill_image.fill_image_url"
-  // ensures the request body has `{ fill_image: { fill_image_url: <value> } }`.
-  const setAtPath = (target: Record<string, unknown>, dottedKey: string, value: unknown): void => {
-    if (!dottedKey.includes(".")) {
-      target[dottedKey] = value;
-      return;
-    }
-    const segments = dottedKey.split(".");
-    let cursor = target;
-    for (let i = 0; i < segments.length - 1; i++) {
-      const seg = segments[i];
-      const existing = cursor[seg];
-      if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
-        cursor[seg] = {};
-      }
-      cursor = cursor[seg] as Record<string, unknown>;
-    }
-    cursor[segments[segments.length - 1]] = value;
   };
 
   if (hasDynamicInputs) {
