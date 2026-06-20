@@ -10,6 +10,8 @@ import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 import { GenerateVideoNodeData, ProviderType, SelectedModel, ModelInputDef } from "@/types";
+import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
+import { DynamicInputHandles } from "./DynamicInputHandles";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
@@ -68,6 +70,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+  const dynamicPinsOn = useDynamicPinsEnabled();
   const updateNodeInternals = useUpdateNodeInternals();
 
   // Tell React Flow to recalculate handle positions when schema changes
@@ -524,7 +527,9 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       ) : undefined}
     >
       {/* Dynamic input handles based on model schema */}
-      {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
+      {dynamicPinsOn ? (
+        <DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />
+      ) : nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
         // Render handles from schema, sorted by type (images first, text second)
         // IMPORTANT: Always render "image" and "text" handles to maintain connection
         // compatibility. Schema may only have text inputs (text-to-video models) but

@@ -19,6 +19,8 @@ import {
   ModelInputDef,
 } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
+import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
+import { DynamicInputHandles } from "./DynamicInputHandles";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
 import { getImageDimensions, calculateNodeSizePreservingHeight } from "@/utils/nodeDimensions";
@@ -63,6 +65,7 @@ export function UpscaleGridNode({ id, data, selected }: NodeProps<UpscaleGridNod
   const [isLoadingFull, setIsLoadingFull] = useState(false);
 
   const { inlineParametersEnabled } = useInlineParameters();
+  const dynamicPinsOn = useDynamicPinsEnabled();
   const updateNodeInternals = useUpdateNodeInternals();
   const { setNodes } = useReactFlow();
 
@@ -467,7 +470,9 @@ export function UpscaleGridNode({ id, data, selected }: NodeProps<UpscaleGridNod
         ) : undefined}
       >
         {/* Dynamic input handles based on model schema */}
-        {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
+        {dynamicPinsOn ? (
+          <DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />
+        ) : nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
           (() => {
             const imageInputs = nodeData.inputSchema!.filter((i) => i.type === "image");
             const videoInputs = nodeData.inputSchema!.filter((i) => i.type === "video");

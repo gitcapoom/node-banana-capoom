@@ -9,6 +9,8 @@ import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
 import { Generate3DNodeData, ProviderType, SelectedModel, ModelInputDef } from "@/types";
+import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
+import { DynamicInputHandles } from "./DynamicInputHandles";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
@@ -90,6 +92,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+  const dynamicPinsOn = useDynamicPinsEnabled();
 
   // Register browse callback for floating header button
   useEffect(() => {
@@ -485,7 +488,9 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
       ) : undefined}
     >
       {/* Dynamic input handles based on model schema */}
-      {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
+      {dynamicPinsOn ? (
+        <DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />
+      ) : nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
         (() => {
           const imageInputs = nodeData.inputSchema!.filter(i => i.type === "image");
           const textInputs = nodeData.inputSchema!.filter(i => i.type === "text");
