@@ -17,6 +17,7 @@ import type { NormalizedSchema, NormalizedProperty, ExtractedResult } from "./ty
 import type { ModelParameter, ModelInput } from "@/lib/providers/types";
 import { classifyInput } from "./classify";
 import { EXCLUDED_PARAMS, PRIORITY_PARAMS } from "./constants";
+import { detectRefConvention } from "../refTokens";
 
 /**
  * Convert a NormalizedProperty → ModelParameter (for rendering in the node body).
@@ -89,6 +90,10 @@ function propertyToInput(
 
   const isArray = prop.type === "array" || (prop.type === "union" && !!prop.unionVariants?.some(v => v.type === "array"));
 
+  // Detect a prompt-reference convention (e.g. "@Image1, @Image2") for array
+  // inputs so the UI can offer stable tokens and we can translate at submit.
+  const refConvention = isArray ? detectRefConvention(prop.description) : undefined;
+
   return {
     name: prop.name,
     type: kind,
@@ -96,6 +101,7 @@ function propertyToInput(
     label: labelFromName,
     description: prop.description,
     isArray,
+    ...(refConvention ? { refConvention } : {}),
   };
 }
 
