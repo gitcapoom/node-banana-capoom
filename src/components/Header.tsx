@@ -62,9 +62,14 @@ function CommentsNavigationIcon() {
 
 function DynamicPinsToggle() {
   const enabled = useDynamicPinsEnabled();
+  const migratePinMode = useWorkflowStore((state) => state.migratePinMode);
   return (
     <button
-      onClick={() => setDynamicPinsEnabled(!enabled)}
+      onClick={() => {
+        const next = !enabled;
+        setDynamicPinsEnabled(next);
+        migratePinMode(next);
+      }}
       className={`p-1.5 rounded transition-colors ${
         enabled
           ? "text-blue-400 bg-blue-500/15 hover:bg-blue-500/25"
