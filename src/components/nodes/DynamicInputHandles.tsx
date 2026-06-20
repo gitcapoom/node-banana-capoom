@@ -22,7 +22,7 @@ import { useShallow } from "zustand/shallow";
 import { useWorkflowStore } from "@/store/workflowStore";
 import type { ModelInputDef } from "@/types";
 import { dynPinId, parseDynPin, type DynPinType } from "@/lib/dynamicPinId";
-import { stableRefToken } from "@/lib/refTokens";
+import { stableRefToken, slotToLetter } from "@/lib/refTokens";
 
 const HANDLE_COLORS: Record<DynPinType, string> = {
   image: "var(--handle-color-image, #3b82f6)",
@@ -94,12 +94,14 @@ export function DynamicInputHandles({
       return;
     }
     const slots = connectedSlots(type, fieldPath);
-    // One pin per connected slot (rank = position the model sees = @ImageN).
+    // One pin per connected slot. Each pin gets a STABLE letter from its (stable)
+    // slot index so deleting a middle pin never renumbers the survivors. For
+    // @-convention fields we also show the live model position (→ @Image1).
     slots.forEach((slot, rank) => {
       const id = dynPinId(type, fieldPath, slot);
       const slotLabel = refConvention
         ? `${stableRefToken(refConvention, slot)} → @${refConvention}${rank + 1}`
-        : `${label} ${rank + 1}`;
+        : `${label} ${slotToLetter(slot)}`;
       pins.push({ id, type, label: slotLabel, empty: false });
     });
     // Trailing empty pin at the next stable slot index (monotonic, never reused).
