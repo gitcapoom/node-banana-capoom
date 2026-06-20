@@ -21,6 +21,7 @@ import "@xyflow/react/dist/style.css";
 
 import { useWorkflowStore, WorkflowFile, generateWorkflowId } from "@/store/workflowStore";
 import { useShallow } from "zustand/shallow";
+import { parseDynPin } from "@/lib/dynamicPinId";
 import { useToast } from "@/components/Toast";
 import dynamic from "next/dynamic";
 import {
@@ -162,6 +163,9 @@ const edgeTypes: EdgeTypes = {
 // For dynamic handles, we use naming convention: image inputs contain "image", text inputs are "prompt" or "negative_prompt"
 const getHandleType = (handleId: string | null | undefined): "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | "universal" | null => {
   if (!handleId) return null;
+  // Dynamic-pin slots (new pin model): dynpin__{type}__{field}__{slot}
+  const dyn = parseDynPin(handleId);
+  if (dyn) return dyn.type;
   // Generic Router handles — return null to allow any type connection
   if (handleId === "generic-input" || handleId === "generic-output") return null;
   // Universal handle (output node) — accepts any media type
@@ -690,6 +694,15 @@ export function WorkflowCanvas() {
       const sourceType = getHandleType(connection.sourceHandle);
       const targetType = getHandleType(connection.targetHandle);
 
+      // New dynamic-pin slots accept exactly one edge each; the trailing empty
+      // slot is where the next connection lands.
+      if (parseDynPin(connection.targetHandle)) {
+        const slotTaken = edges.some(
+          (e) => e.target === connection.target && e.targetHandle === connection.targetHandle
+        );
+        if (slotTaken) return false;
+      }
+
       // Switch input: accept any type (generic-input handle)
       const targetNode = nodes.find((n) => n.id === connection.target);
       const sourceNode = nodes.find((n) => n.id === connection.source);
@@ -776,7 +789,7 @@ export function WorkflowCanvas() {
       // Image handles connect to image handles, text handles connect to text handles
       return sourceType === targetType;
     },
-    [nodes]
+    [nodes, edges]
   );
 
   const handleConnect = useCallback(

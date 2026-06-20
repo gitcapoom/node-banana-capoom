@@ -36,6 +36,8 @@ import {
   VideoInputNodeData,
   ImageCropNodeData,
 } from "@/types";
+import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
+import { parseDynPin } from "@/lib/dynamicPinId";
 
 /**
  * Return type for getConnectedInputs
@@ -232,6 +234,7 @@ export function getConnectedInputsPure(
   let model3d: string | null = null;
   let text: string | null = null;
   const dynamicInputs: Record<string, string | string[]> = {};
+  const dynamicPinsOn = getDynamicPinsEnabled();
   let easeCurve: ConnectedInputs["easeCurve"] = null;
 
   // Get the target node to check for inputSchema
@@ -439,6 +442,31 @@ export function getConnectedInputsPure(
 
       // Background image handle — visual only, not a model input
       if (handleId === "image-bg") return;
+
+      // New dynamic-pin model: dynpin__{type}__{field}__{slot}. Each slot is
+      // one value of a (possibly array) field. Route it back into the same
+      // images[]/dynamicInputs[field] arrays the rest of the pipeline expects,
+      // so executors and the API layer are unchanged.
+      if (dynamicPinsOn) {
+        const dyn = parseDynPin(handleId);
+        if (dyn) {
+          if (dyn.field !== "primary") {
+            const existing = dynamicInputs[dyn.field];
+            dynamicInputs[dyn.field] =
+              existing === undefined
+                ? [value]
+                : Array.isArray(existing)
+                ? [...existing, value]
+                : [existing, value];
+          }
+          if (dyn.type === "3d") model3d = value;
+          else if (dyn.type === "video") videos.push(value);
+          else if (dyn.type === "audio") audio.push(value);
+          else if (dyn.type === "text") text = typeof value === "string" ? value : String(value);
+          else images.push(value);
+          return;
+        }
+      }
 
       // Map normalized handle ID to schema name for dynamicInputs
       if (handleId && handleToSchemaName[handleId]) {

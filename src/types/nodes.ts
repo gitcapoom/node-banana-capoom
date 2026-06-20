@@ -414,6 +414,8 @@ export interface ModelInputDef {
   required: boolean;
   label: string;
   description?: string;
+  /** True when the field accepts multiple values (array). Drives growing pins. */
+  isArray?: boolean;
 }
 
 /**

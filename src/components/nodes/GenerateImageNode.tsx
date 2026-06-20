@@ -10,6 +10,8 @@ import { useWorkflowStore, saveNanoBananaDefaults, useProviderApiKeys } from "@/
 import { useCanRun } from "@/hooks/useCanRun";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 import { NanoBananaNodeData, AspectRatio, Resolution, ModelType, MODEL_DISPLAY_NAMES, ProviderType, SelectedModel, ModelInputDef } from "@/types";
+import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
+import { DynamicInputHandles } from "./DynamicInputHandles";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
@@ -77,6 +79,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+  const dynamicPinsOn = useDynamicPinsEnabled();
   const updateNodeInternals = useUpdateNodeInternals();
 
   // Tell React Flow to recalculate handle positions when schema changes
@@ -762,7 +765,9 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       ) : undefined}
     >
       {/* Dynamic input handles based on model schema */}
-      {nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
+      {dynamicPinsOn ? (
+        <DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />
+      ) : nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
         (() => {
           const imageInputs = nodeData.inputSchema!.filter(i => i.type === "image");
           const textInputs = nodeData.inputSchema!.filter(i => i.type === "text");
