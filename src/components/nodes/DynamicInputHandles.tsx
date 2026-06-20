@@ -21,7 +21,7 @@ import { Handle, Position, useUpdateNodeInternals } from "@xyflow/react";
 import { useShallow } from "zustand/shallow";
 import { useWorkflowStore } from "@/store/workflowStore";
 import type { ModelInputDef } from "@/types";
-import { dynPinId, type DynPinType } from "@/lib/dynamicPinId";
+import { dynPinId, parseDynPin, type DynPinType } from "@/lib/dynamicPinId";
 
 const HANDLE_COLORS: Record<DynPinType, string> = {
   image: "var(--handle-color-image, #3b82f6)",
@@ -36,26 +36,6 @@ interface Descriptor {
   field: string;
   label: string;
   multi: boolean;
-}
-
-/**
- * Build the field descriptors. With a schema, each field maps 1:1 (multi =
- * isArray). Without a schema, fall back to the classic generic inputs so the
- * node still works: a multi primary image + a single prompt.
- */
-function buildDescriptors(
-  inputSchema: ModelInputDef[] | undefined,
-  fallback: Descriptor[]
-): Descriptor[] {
-  if (inputSchema && inputSchema.length > 0) {
-    return inputSchema.map((i) => ({
-      type: i.type as DynPinType,
-      field: i.name,
-      label: i.label || i.name,
-      multi: !!i.isArray,
-    }));
-  }
-  return fallback;
 }
 
 export const DEFAULT_GENERATOR_FALLBACK: Descriptor[] = [
@@ -82,31 +62,58 @@ export function DynamicInputHandles({
     )
   );
 
-  const descriptors = buildDescriptors(inputSchema, fallback);
-
-  // Flatten descriptors → concrete pins, growing multi fields by connection count.
+  // Build the concrete pin list. Scalar fields get one pin; multi/array fields
+  // grow one pin per connection plus a trailing empty pin; repeatable groups
+  // (e.g. Kling `elements`) render per-item sub-groups that grow by item.
   const pins: Array<{ id: string; type: DynPinType; label: string; empty: boolean }> = [];
-  for (const d of descriptors) {
-    if (!d.multi) {
-      pins.push({ id: dynPinId(d.type, d.field, 0), type: d.type, label: d.label, empty: false });
-      continue;
+  const isEmpty = (id: string) => !targetHandles.includes(id);
+
+  const addField = (type: DynPinType, fieldPath: string, label: string, multi: boolean) => {
+    if (!multi) {
+      const id = dynPinId(type, fieldPath, 0);
+      pins.push({ id, type, label, empty: isEmpty(id) });
+      return;
     }
-    const prefix = `dynpin__${d.type}__${d.field}__`;
+    const prefix = `dynpin__${type}__${fieldPath}__`;
     const count = targetHandles.filter((h) => h.startsWith(prefix)).length;
-    for (let i = 0; i < count; i++) {
-      pins.push({
-        id: dynPinId(d.type, d.field, i),
-        type: d.type,
-        label: `${d.label} ${i + 1}`,
-        empty: false,
-      });
+    for (let i = 0; i <= count; i++) {
+      const id = dynPinId(type, fieldPath, i);
+      const slotLabel = count === 0 ? label : i < count ? `${label} ${i + 1}` : `+ ${label}`;
+      pins.push({ id, type, label: slotLabel, empty: isEmpty(id) });
     }
-    pins.push({
-      id: dynPinId(d.type, d.field, count),
-      type: d.type,
-      label: count === 0 ? d.label : `+ ${d.label}`,
-      empty: true,
-    });
+  };
+
+  if (inputSchema && inputSchema.length > 0) {
+    for (const input of inputSchema) {
+      if (input.repeatable && input.children && input.children.length > 0) {
+        // Count items that already have a connection, then render one more
+        // empty item so the user can add the next element.
+        const groupPrefix = `${input.name}.`;
+        let maxItem = -1;
+        for (const h of targetHandles) {
+          const dyn = parseDynPin(h);
+          if (dyn && dyn.field.startsWith(groupPrefix)) {
+            const idx = Number(dyn.field.slice(groupPrefix.length).split(".")[0]);
+            if (Number.isInteger(idx)) maxItem = Math.max(maxItem, idx);
+          }
+        }
+        const singular = (input.label || input.name).replace(/s$/, "");
+        for (let j = 0; j <= maxItem + 1; j++) {
+          for (const child of input.children) {
+            addField(
+              child.type as DynPinType,
+              `${input.name}.${j}.${child.name}`,
+              `${singular} ${j + 1} · ${child.label || child.name}`,
+              !!child.isArray
+            );
+          }
+        }
+      } else {
+        addField(input.type as DynPinType, input.name, input.label || input.name, !!input.isArray);
+      }
+    }
+  } else {
+    for (const d of fallback) addField(d.type, d.field, d.label, d.multi);
   }
 
   // Recompute handle geometry whenever the pin set changes.

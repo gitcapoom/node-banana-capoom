@@ -9,7 +9,7 @@ import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 // localStorage cache for model schemas (persists across dev server restarts)
 // Bump SCHEMA_CACHE_VERSION when schema extraction logic changes to auto-invalidate
 const SCHEMA_CACHE_KEY = "node-banana-schema-cache";
-const SCHEMA_CACHE_VERSION = 7; // v7: hoist nested wrapper image URLs (fill_image_url etc.) as input pins
+const SCHEMA_CACHE_VERSION = 8; // v8: repeatable array-of-object groups (e.g. Kling elements) as per-item input pins
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {
