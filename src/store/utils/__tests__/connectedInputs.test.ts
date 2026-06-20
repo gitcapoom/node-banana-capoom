@@ -152,6 +152,45 @@ describe("getConnectedInputsPure — dynamic pins flag", () => {
     expect(result.text).toBe("use @Image1 and ");
   });
 
+  it("compacts repeatable-group items and translates @Element tokens", () => {
+    const nodes = [
+      makeNode("a", "imageInput", { image: "imgA" }),
+      makeNode("c", "imageInput", { image: "imgC" }),
+      makeNode("p", "prompt", { prompt: "@ElementA meets @ElementC" }),
+      makeNode("gen", "generateVideo", {
+        inputSchema: [
+          {
+            name: "elements",
+            type: "image",
+            repeatable: true,
+            refConvention: "Element",
+            children: [{ name: "frontal_image_url", type: "image", isArray: false }],
+          },
+          { name: "prompt", type: "text" },
+        ],
+      }),
+    ];
+    // Connect item 0 and item 2 (skip 1) to prove the array compacts.
+    const edges = [
+      dynEdge("a", "gen", dynPinId("image", "elements.0.frontal_image_url", 0)),
+      dynEdge("c", "gen", dynPinId("image", "elements.2.frontal_image_url", 0)),
+      {
+        id: "p-gen",
+        source: "p",
+        target: "gen",
+        sourceHandle: "text",
+        targetHandle: dynPinId("text", "prompt", 0),
+      } as WorkflowEdge,
+    ];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    // item 0 → rank 0 (elements.0), item 2 → rank 1 (elements.1): dense, no hole.
+    expect(result.dynamicInputs["elements.0.frontal_image_url"]).toBe("imgA");
+    expect(result.dynamicInputs["elements.1.frontal_image_url"]).toBe("imgC");
+    expect(result.dynamicInputs["elements.2.frontal_image_url"]).toBeUndefined();
+    // @ElementA (item 0) → @Element1; @ElementC (item 2) → @Element2.
+    expect(result.text).toBe("@Element1 meets @Element2");
+  });
+
   it("ignores the dyn-pin scheme when the flag is off (classic routing)", () => {
     setDynamicPinsEnabled(false);
     const nodes = [
