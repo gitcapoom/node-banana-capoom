@@ -1,6 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { getConnectedInputsPure, validateWorkflowPure } from "../connectedInputs";
 import type { WorkflowNode, WorkflowEdge } from "@/types";
+import { setDynamicPinsEnabled } from "@/lib/dynamicPins";
+import { dynPinId } from "@/lib/dynamicPinId";
 
 function makeNode(id: string, type: string, data: Record<string, unknown> = {}): WorkflowNode {
   return { id, type, position: { x: 0, y: 0 }, data } as WorkflowNode;
@@ -15,6 +17,60 @@ function makeEdge(source: string, target: string, targetHandle?: string): Workfl
     targetHandle: targetHandle || "image",
   } as WorkflowEdge;
 }
+
+describe("getConnectedInputsPure — dynamic pins flag", () => {
+  beforeEach(() => setDynamicPinsEnabled(true));
+  afterEach(() => setDynamicPinsEnabled(false));
+
+  const dynEdge = (source: string, target: string, handle: string): WorkflowEdge =>
+    ({ id: `${source}-${handle}`, source, target, sourceHandle: "image", targetHandle: handle }) as WorkflowEdge;
+
+  it("aggregates primary-image dyn-pin slots into images[]", () => {
+    const nodes = [
+      makeNode("a", "imageInput", { image: "data:image/png;base64,a" }),
+      makeNode("b", "imageInput", { image: "data:image/png;base64,b" }),
+      makeNode("gen", "nanoBanana"),
+    ];
+    const edges = [
+      dynEdge("a", "gen", dynPinId("image", "primary", 0)),
+      dynEdge("b", "gen", dynPinId("image", "primary", 1)),
+    ];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    expect(result.images).toEqual(["data:image/png;base64,a", "data:image/png;base64,b"]);
+    // "primary" is the generic input — it must not leak into dynamicInputs.
+    expect(result.dynamicInputs).toEqual({});
+  });
+
+  it("routes named array-field dyn-pin slots into dynamicInputs[field]", () => {
+    const nodes = [
+      makeNode("a", "imageInput", { image: "data:image/png;base64,a" }),
+      makeNode("b", "imageInput", { image: "data:image/png;base64,b" }),
+      makeNode("gen", "nanoBanana"),
+    ];
+    const edges = [
+      dynEdge("a", "gen", dynPinId("image", "image_urls", 0)),
+      dynEdge("b", "gen", dynPinId("image", "image_urls", 1)),
+    ];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    expect(result.dynamicInputs.image_urls).toEqual([
+      "data:image/png;base64,a",
+      "data:image/png;base64,b",
+    ]);
+  });
+
+  it("ignores the dyn-pin scheme when the flag is off (classic routing)", () => {
+    setDynamicPinsEnabled(false);
+    const nodes = [
+      makeNode("a", "imageInput", { image: "data:image/png;base64,a" }),
+      makeNode("gen", "nanoBanana"),
+    ];
+    const edges = [dynEdge("a", "gen", dynPinId("image", "primary", 0))];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    // Routed as a generic image via source type; no dynamicInputs entry.
+    expect(result.images).toEqual(["data:image/png;base64,a"]);
+    expect(result.dynamicInputs).toEqual({});
+  });
+});
 
 describe("getConnectedInputsPure", () => {
   it("should return empty arrays when no edges connect to node", () => {
