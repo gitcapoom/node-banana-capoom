@@ -185,6 +185,10 @@ function buildRepeatableGroup(
   if (children.length === 0) return null;
 
   const label = name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  // Repeatable groups can carry a prompt-reference convention too (Kling
+  // `elements`: "Reference in prompt as @Element1, @Element2"). The whole item
+  // is referenced (@Element1), so the token lives on the group, not its children.
+  const refConvention = detectRefConvention(prop.description);
   return {
     name,
     type: children[0].type, // representative; rendering keys off repeatable/children
@@ -192,6 +196,7 @@ function buildRepeatableGroup(
     label,
     repeatable: true,
     children,
+    ...(refConvention ? { refConvention } : {}),
   };
 }
 

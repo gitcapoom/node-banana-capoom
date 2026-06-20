@@ -324,6 +324,43 @@ export function getConnectedInputsPure(
     });
   }
 
+  // Repeatable groups (e.g. Kling `elements`): map each connected item index to
+  // its DENSE rank so the assembled array has no holes and @Element{n} lines up
+  // with array position. Item indices are stable; ranks are positional.
+  const groupItemRanks = new Map<string, Map<number, number>>();
+  if (dynamicPinsOn && inputSchema) {
+    for (const input of inputSchema) {
+      if (!input.repeatable) continue;
+      const prefix = `${input.name}.`;
+      const items = new Set<number>();
+      for (const e of incomingEdges) {
+        const d = parseDynPin(e.targetHandle);
+        if (d && d.field.startsWith(prefix)) {
+          const idx = Number(d.field.slice(prefix.length).split(".")[0]);
+          if (Number.isInteger(idx)) items.add(idx);
+        }
+      }
+      const rankMap = new Map<number, number>();
+      [...items].sort((a, b) => a - b).forEach((idx, rank) => rankMap.set(idx, rank));
+      groupItemRanks.set(input.name, rankMap);
+    }
+  }
+
+  // Rewrite a group-child path's stable item index to its dense rank, so the
+  // payload array is contiguous: elements.2.video_url -> elements.1.video_url.
+  const remapFieldPath = (fieldPath: string): string => {
+    for (const [groupName, rankMap] of groupItemRanks) {
+      const prefix = `${groupName}.`;
+      if (!fieldPath.startsWith(prefix)) continue;
+      const rest = fieldPath.slice(prefix.length);
+      const dot = rest.indexOf(".");
+      if (dot <= 0) continue;
+      const rank = rankMap.get(Number(rest.slice(0, dot)));
+      if (rank !== undefined) return `${groupName}.${rank}.${rest.slice(dot + 1)}`;
+    }
+    return fieldPath;
+  };
+
   incomingEdges
     .forEach((edge) => {
       const sourceNode = nodes.find((n) => n.id === edge.source);
@@ -487,18 +524,19 @@ export function getConnectedInputsPure(
         const dyn = parseDynPin(handleId);
         if (dyn) {
           if (dyn.field !== "primary") {
-            const existing = dynamicInputs[dyn.field];
+            const fieldKey = remapFieldPath(dyn.field);
+            const existing = dynamicInputs[fieldKey];
             if (existing !== undefined) {
               // A second value for this field — it must be an array.
-              dynamicInputs[dyn.field] = Array.isArray(existing)
+              dynamicInputs[fieldKey] = Array.isArray(existing)
                 ? [...existing, value]
                 : [existing, value];
-            } else if (isArrayPath(dyn.field)) {
-              dynamicInputs[dyn.field] = [value];
+            } else if (isArrayPath(fieldKey)) {
+              dynamicInputs[fieldKey] = [value];
             } else {
               // Scalar field (single slot) — keep the raw value so the provider
               // receives a string, not a 1-element array.
-              dynamicInputs[dyn.field] = value;
+              dynamicInputs[fieldKey] = value;
             }
           }
           if (dyn.type === "3d") model3d = value;
@@ -564,14 +602,22 @@ export function getConnectedInputsPure(
   if (dynamicPinsOn && text && inputSchema) {
     let resolved: string = text;
     for (const input of inputSchema) {
-      if (!input.refConvention || !input.isArray) continue;
-      const slots: number[] = [];
-      for (const e of incomingEdges) {
-        const d = parseDynPin(e.targetHandle);
-        if (d && d.field === input.name) slots.push(d.slot);
+      if (!input.refConvention) continue;
+      if (input.isArray) {
+        // Top-level array field (@ImageA → @Image1): tokens index by slot.
+        const slots: number[] = [];
+        for (const e of incomingEdges) {
+          const d = parseDynPin(e.targetHandle);
+          if (d && d.field === input.name) slots.push(d.slot);
+        }
+        slots.sort((a, b) => a - b);
+        resolved = translateReferenceTokens(resolved, input.refConvention, slots);
+      } else if (input.repeatable) {
+        // Repeatable group (@ElementA → @Element1): tokens index by item index;
+        // rankMap keys are already the connected item indices in ascending order.
+        const items = [...(groupItemRanks.get(input.name)?.keys() ?? [])];
+        resolved = translateReferenceTokens(resolved, input.refConvention, items);
       }
-      slots.sort((a, b) => a - b);
-      resolved = translateReferenceTokens(resolved, input.refConvention, slots);
     }
     text = resolved;
   }

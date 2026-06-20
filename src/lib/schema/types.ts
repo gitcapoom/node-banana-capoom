@@ -80,4 +80,4 @@ export interface CachedSchemaEntry {
 }
 
 /** Bump when extract.ts logic changes. Any cache entries with lower version are re-extracted. */
-export const SCHEMA_FORMAT_VERSION = 3; // v3: detect @-reference convention on array inputs (refConvention)
+export const SCHEMA_FORMAT_VERSION = 4; // v4: detect @-reference convention on repeatable groups too (Kling elements)

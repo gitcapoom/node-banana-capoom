@@ -118,24 +118,42 @@ export function DynamicInputHandles({
   if (inputSchema && inputSchema.length > 0) {
     for (const input of inputSchema) {
       if (input.repeatable && input.children && input.children.length > 0) {
-        // Count items that already have a connection, then render one more
-        // empty item so the user can add the next element.
+        // Connected item indices (stable) → dense rank; plus one trailing empty
+        // item so the user can add the next element.
         const groupPrefix = `${input.name}.`;
+        const connectedItems: number[] = [];
+        const seenItems = new Set<number>();
         let maxItem = -1;
         for (const h of targetHandles) {
           const dyn = parseDynPin(h);
           if (dyn && dyn.field.startsWith(groupPrefix)) {
             const idx = Number(dyn.field.slice(groupPrefix.length).split(".")[0]);
-            if (Number.isInteger(idx)) maxItem = Math.max(maxItem, idx);
+            if (Number.isInteger(idx)) {
+              maxItem = Math.max(maxItem, idx);
+              if (!seenItems.has(idx)) {
+                seenItems.add(idx);
+                connectedItems.push(idx);
+              }
+            }
           }
         }
+        connectedItems.sort((a, b) => a - b);
+        const conv = input.refConvention;
         const singular = (input.label || input.name).replace(/s$/, "");
         for (let j = 0; j <= maxItem + 1; j++) {
+          const rank = connectedItems.indexOf(j);
+          // The whole item is referenced (@Element1), so the stable token lives
+          // on the item and is echoed on each of its child pins.
+          const itemPrefix = conv
+            ? rank >= 0
+              ? `${stableRefToken(conv, j)} → @${conv}${rank + 1}`
+              : `+ @${conv}`
+            : `${singular} ${j + 1}`;
           for (const child of input.children) {
             addField(
               child.type as DynPinType,
               `${input.name}.${j}.${child.name}`,
-              `${singular} ${j + 1} · ${child.label || child.name}`,
+              `${itemPrefix} · ${child.label || child.name}`,
               !!child.isArray
             );
           }
