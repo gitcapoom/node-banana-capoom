@@ -1,0 +1,66 @@
+import { describe, it, expect } from "vitest";
+import { migrateEdgeHandles } from "../pinMigration";
+import type { WorkflowNode, WorkflowEdge } from "@/types";
+
+const node = (id: string, type: string, data: Record<string, unknown> = {}): WorkflowNode =>
+  ({ id, type, position: { x: 0, y: 0 }, data }) as WorkflowNode;
+const edge = (id: string, target: string, targetHandle: string): WorkflowEdge =>
+  ({ id, source: "s", target, sourceHandle: "image", targetHandle }) as WorkflowEdge;
+const handles = (edges: WorkflowEdge[]) => edges.map((e) => e.targetHandle);
+
+describe("migrateEdgeHandles", () => {
+  it("classic → dynamic for a schemaless generator (primary image + prompt)", () => {
+    const nodes = [node("gen", "nanoBanana")];
+    const edges = [edge("e1", "gen", "image"), edge("e2", "gen", "image"), edge("e3", "gen", "text")];
+    expect(handles(migrateEdgeHandles(nodes, edges, "dynamic"))).toEqual([
+      "dynpin__image__primary__0",
+      "dynpin__image__primary__1",
+      "dynpin__text__prompt__0",
+    ]);
+  });
+
+  it("round-trips schemaless edges classic → dynamic → classic", () => {
+    const nodes = [node("gen", "nanoBanana")];
+    const edges = [edge("e1", "gen", "image"), edge("e2", "gen", "image"), edge("e3", "gen", "text")];
+    const dyn = migrateEdgeHandles(nodes, edges, "dynamic");
+    expect(handles(migrateEdgeHandles(nodes, dyn, "classic"))).toEqual(["image", "image-1", "text"]);
+  });
+
+  it("maps named schema image fields by position and round-trips", () => {
+    const nodes = [
+      node("gen", "generateVideo", {
+        inputSchema: [
+          { name: "image_urls", type: "image", isArray: true },
+          { name: "mask_url", type: "image" },
+          { name: "prompt", type: "text" },
+        ],
+      }),
+    ];
+    // classic: two images on the array handle, one on the mask handle, a prompt
+    const edges = [
+      edge("e1", "gen", "image"),
+      edge("e2", "gen", "image"),
+      edge("e3", "gen", "image-1"),
+      edge("e4", "gen", "text"),
+    ];
+    const dyn = migrateEdgeHandles(nodes, edges, "dynamic");
+    expect(handles(dyn)).toEqual([
+      "dynpin__image__image_urls__0",
+      "dynpin__image__image_urls__1",
+      "dynpin__image__mask_url__0",
+      "dynpin__text__prompt__0",
+    ]);
+    expect(handles(migrateEdgeHandles(nodes, dyn, "classic"))).toEqual(["image", "image", "image-1", "text"]);
+  });
+
+  it("leaves nested element slots and non-generator edges untouched", () => {
+    const nodes = [node("gen", "generateVideo"), node("out", "output")];
+    const edges = [
+      edge("e1", "gen", "dynpin__image__elements.0.frontal_image_url__0"),
+      edge("e2", "out", "image"),
+    ];
+    const back = migrateEdgeHandles(nodes, edges, "classic");
+    expect(back[0].targetHandle).toBe("dynpin__image__elements.0.frontal_image_url__0");
+    expect(back[1].targetHandle).toBe("image");
+  });
+});

@@ -63,6 +63,8 @@ import {
   clearNodeImageRefs,
 } from "./utils/executionUtils";
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
+import { migrateEdgeHandles } from "./utils/pinMigration";
+import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { ensureFullResForNodes } from "./execution/hydrateForRun";
 import { evaluateRule } from "./utils/ruleEvaluation";
 import { computeDimmedNodes } from "./utils/dimmingUtils";
@@ -491,6 +493,8 @@ interface WorkflowStore {
   // Save/Load
   saveWorkflow: (name?: string) => void;
   loadWorkflow: (workflow: WorkflowFile, workflowPath?: string, options?: { preserveSnapshot?: boolean }) => Promise<void>;
+  /** Remap edge handles between the classic and dynamic-pin schemes when the flag toggles. */
+  migratePinMode: (enabled: boolean) => void;
   importWorkflow: (workflow: WorkflowFile, dropPosition?: { x: number; y: number }) => void;
   clearWorkflow: () => void;
 
@@ -2154,6 +2158,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     URL.revokeObjectURL(url);
   },
 
+  migratePinMode: (enabled: boolean) => {
+    const { nodes, edges } = get();
+    const migrated = migrateEdgeHandles(nodes, edges, enabled ? "dynamic" : "classic");
+    // migrateEdgeHandles reuses unchanged edge refs, so a cheap identity check
+    // tells us whether anything actually moved (avoids needless re-render / churn).
+    const changed = migrated.length !== edges.length || migrated.some((e, i) => e !== edges[i]);
+    if (changed) set({ edges: migrated });
+  },
+
   loadWorkflow: async (workflow: WorkflowFile, workflowPath?: string, options?: { preserveSnapshot?: boolean }) => {
     // Free old workflow data before loading new one to reduce peak memory
     deletedNodesCache.clear();
@@ -2310,6 +2323,14 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // Load cost data for this workflow
     const costData = workflow.id ? loadWorkflowCostData(workflow.id) : null;
 
+    // Normalize edge handles to the active pin scheme so connections anchor
+    // regardless of which mode the file was saved in.
+    const finalEdges = migrateEdgeHandles(
+      hydratedWorkflow.nodes,
+      hydratedWorkflow.edges,
+      getDynamicPinsEnabled() ? "dynamic" : "classic"
+    );
+
     set({
       // Clear selected state - selection should not be persisted across sessions
       // Also validate position to ensure coordinates are finite numbers
@@ -2321,7 +2342,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           y: isFinite(node.position?.y) ? node.position.y : 0,
         },
       })),
-      edges: hydratedWorkflow.edges,
+      edges: finalEdges,
       edgeStyle: hydratedWorkflow.edgeStyle || "angular",
       groups: hydratedWorkflow.groups || {},
       isRunning: false,
