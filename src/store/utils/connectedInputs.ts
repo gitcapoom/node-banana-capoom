@@ -38,6 +38,7 @@ import {
 } from "@/types";
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { parseDynPin } from "@/lib/dynamicPinId";
+import { translateReferenceTokens } from "@/lib/refTokens";
 
 /**
  * Return type for getConnectedInputs
@@ -245,6 +246,7 @@ export function getConnectedInputsPure(
       type: string;
       isArray?: boolean;
       repeatable?: boolean;
+      refConvention?: string;
       children?: Array<{ name: string; isArray?: boolean }>;
     }>;
   })?.inputSchema;
@@ -309,8 +311,20 @@ export function getConnectedInputsPure(
     }
   }
 
-  edges
-    .filter((edge) => edge.target === nodeId)
+  // Process edges in dyn-pin slot order so multi-value arrays are assembled
+  // top-to-bottom (so position 1 = topmost pin = @Image1). Same-field dyn-pin
+  // edges sort by slot; everything else keeps its original relative order.
+  const incomingEdges = edges.filter((edge) => edge.target === nodeId);
+  if (dynamicPinsOn) {
+    incomingEdges.sort((a, b) => {
+      const da = parseDynPin(a.targetHandle);
+      const db = parseDynPin(b.targetHandle);
+      if (da && db && da.type === db.type && da.field === db.field) return da.slot - db.slot;
+      return 0;
+    });
+  }
+
+  incomingEdges
     .forEach((edge) => {
       const sourceNode = nodes.find((n) => n.id === edge.source);
       if (!sourceNode) return;
@@ -542,6 +556,24 @@ export function getConnectedInputsPure(
         };
       }
     }
+  }
+
+  // Stable reference tokens (e.g. @ImageA) → positional tokens (@Image1) for the
+  // OUTGOING prompt, based on each input's CURRENT position. The authored prompt
+  // node text is never modified — only the resolved text sent to generation.
+  if (dynamicPinsOn && text && inputSchema) {
+    let resolved: string = text;
+    for (const input of inputSchema) {
+      if (!input.refConvention || !input.isArray) continue;
+      const slots: number[] = [];
+      for (const e of incomingEdges) {
+        const d = parseDynPin(e.targetHandle);
+        if (d && d.field === input.name) slots.push(d.slot);
+      }
+      slots.sort((a, b) => a - b);
+      resolved = translateReferenceTokens(resolved, input.refConvention, slots);
+    }
+    text = resolved;
   }
 
   return { images, videos, audio, model3d, text, dynamicInputs, easeCurve };

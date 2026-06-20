@@ -22,6 +22,7 @@ import { useShallow } from "zustand/shallow";
 import { useWorkflowStore } from "@/store/workflowStore";
 import type { ModelInputDef } from "@/types";
 import { dynPinId, parseDynPin, type DynPinType } from "@/lib/dynamicPinId";
+import { stableRefToken } from "@/lib/refTokens";
 
 const HANDLE_COLORS: Record<DynPinType, string> = {
   image: "var(--handle-color-image, #3b82f6)",
@@ -68,19 +69,50 @@ export function DynamicInputHandles({
   const pins: Array<{ id: string; type: DynPinType; label: string; empty: boolean }> = [];
   const isEmpty = (id: string) => !targetHandles.includes(id);
 
-  const addField = (type: DynPinType, fieldPath: string, label: string, multi: boolean) => {
+  // Slots currently connected to a field, ascending. Slot ids are stable (a
+  // deletion leaves a gap rather than renumbering), which is what makes the
+  // @-reference tokens stable.
+  const connectedSlots = (type: DynPinType, fieldPath: string): number[] => {
+    const slots: number[] = [];
+    for (const h of targetHandles) {
+      const d = parseDynPin(h);
+      if (d && d.type === type && d.field === fieldPath) slots.push(d.slot);
+    }
+    return slots.sort((a, b) => a - b);
+  };
+
+  const addField = (
+    type: DynPinType,
+    fieldPath: string,
+    label: string,
+    multi: boolean,
+    refConvention?: string
+  ) => {
     if (!multi) {
       const id = dynPinId(type, fieldPath, 0);
       pins.push({ id, type, label, empty: isEmpty(id) });
       return;
     }
-    const prefix = `dynpin__${type}__${fieldPath}__`;
-    const count = targetHandles.filter((h) => h.startsWith(prefix)).length;
-    for (let i = 0; i <= count; i++) {
-      const id = dynPinId(type, fieldPath, i);
-      const slotLabel = count === 0 ? label : i < count ? `${label} ${i + 1}` : `+ ${label}`;
-      pins.push({ id, type, label: slotLabel, empty: isEmpty(id) });
-    }
+    const slots = connectedSlots(type, fieldPath);
+    // One pin per connected slot (rank = position the model sees = @ImageN).
+    slots.forEach((slot, rank) => {
+      const id = dynPinId(type, fieldPath, slot);
+      const slotLabel = refConvention
+        ? `${stableRefToken(refConvention, slot)} → @${refConvention}${rank + 1}`
+        : `${label} ${rank + 1}`;
+      pins.push({ id, type, label: slotLabel, empty: false });
+    });
+    // Trailing empty pin at the next stable slot index (monotonic, never reused).
+    const nextSlot = slots.length ? slots[slots.length - 1] + 1 : 0;
+    const emptyId = dynPinId(type, fieldPath, nextSlot);
+    const emptyLabel = refConvention
+      ? slots.length === 0
+        ? `@${refConvention}…`
+        : `+ @${refConvention}`
+      : slots.length === 0
+        ? label
+        : `+ ${label}`;
+    pins.push({ id: emptyId, type, label: emptyLabel, empty: true });
   };
 
   if (inputSchema && inputSchema.length > 0) {
@@ -109,7 +141,7 @@ export function DynamicInputHandles({
           }
         }
       } else {
-        addField(input.type as DynPinType, input.name, input.label || input.name, !!input.isArray);
+        addField(input.type as DynPinType, input.name, input.label || input.name, !!input.isArray, input.refConvention);
       }
     }
   } else {

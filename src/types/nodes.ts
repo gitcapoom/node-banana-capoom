@@ -420,6 +420,8 @@ export interface ModelInputDef {
   repeatable?: boolean;
   /** Media sub-field pins (per-item template) for a repeatable group. */
   children?: ModelInputDef[];
+  /** Prompt-reference convention detected from the description (e.g. "Image"). */
+  refConvention?: string;
 }
 
 /**
