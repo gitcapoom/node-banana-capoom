@@ -98,6 +98,60 @@ describe("getConnectedInputsPure — dynamic pins flag", () => {
     expect(result.dynamicInputs["elements.0.video_url"]).toBe("vid0");
   });
 
+  it("translates stable @-tokens in the prompt to positional tokens at submit", () => {
+    const nodes = [
+      makeNode("a", "imageInput", { image: "imgA" }),
+      makeNode("b", "imageInput", { image: "imgB" }),
+      makeNode("p", "prompt", { prompt: "@ImageA next to @ImageB" }),
+      makeNode("gen", "generateVideo", {
+        inputSchema: [
+          { name: "image_urls", type: "image", isArray: true, refConvention: "Image" },
+          { name: "prompt", type: "text" },
+        ],
+      }),
+    ];
+    const edges = [
+      dynEdge("a", "gen", dynPinId("image", "image_urls", 0)),
+      dynEdge("b", "gen", dynPinId("image", "image_urls", 1)),
+      {
+        id: "p-gen",
+        source: "p",
+        target: "gen",
+        sourceHandle: "text",
+        targetHandle: dynPinId("text", "prompt", 0),
+      } as WorkflowEdge,
+    ];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    expect(result.text).toBe("@Image1 next to @Image2");
+  });
+
+  it("keeps a stable token valid after a middle reference is removed", () => {
+    // Only slot 1 (@ImageB) is connected; slot 0 (@ImageA) was deleted.
+    const nodes = [
+      makeNode("b", "imageInput", { image: "imgB" }),
+      makeNode("p", "prompt", { prompt: "use @ImageB and @ImageA" }),
+      makeNode("gen", "generateVideo", {
+        inputSchema: [
+          { name: "image_urls", type: "image", isArray: true, refConvention: "Image" },
+          { name: "prompt", type: "text" },
+        ],
+      }),
+    ];
+    const edges = [
+      dynEdge("b", "gen", dynPinId("image", "image_urls", 1)),
+      {
+        id: "p-gen",
+        source: "p",
+        target: "gen",
+        sourceHandle: "text",
+        targetHandle: dynPinId("text", "prompt", 0),
+      } as WorkflowEdge,
+    ];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    // @ImageB → @Image1 (it's now the only/first image); @ImageA dropped.
+    expect(result.text).toBe("use @Image1 and ");
+  });
+
   it("ignores the dyn-pin scheme when the flag is off (classic routing)", () => {
     setDynamicPinsEnabled(false);
     const nodes = [
