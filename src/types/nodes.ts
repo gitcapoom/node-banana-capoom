@@ -416,6 +416,10 @@ export interface ModelInputDef {
   description?: string;
   /** True when the field accepts multiple values (array). Drives growing pins. */
   isArray?: boolean;
+  /** True for a repeatable array-of-object group (e.g. Kling `elements`). */
+  repeatable?: boolean;
+  /** Media sub-field pins (per-item template) for a repeatable group. */
+  children?: ModelInputDef[];
 }
 
 /**

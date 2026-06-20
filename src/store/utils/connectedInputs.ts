@@ -239,7 +239,29 @@ export function getConnectedInputsPure(
 
   // Get the target node to check for inputSchema
   const targetNode = nodes.find((n) => n.id === nodeId);
-  const inputSchema = (targetNode?.data as { inputSchema?: Array<{ name: string; type: string; isArray?: boolean }> })?.inputSchema;
+  const inputSchema = (targetNode?.data as {
+    inputSchema?: Array<{
+      name: string;
+      type: string;
+      isArray?: boolean;
+      repeatable?: boolean;
+      children?: Array<{ name: string; isArray?: boolean }>;
+    }>;
+  })?.inputSchema;
+
+  // Determine whether a (possibly nested) dyn-pin field path expects an array.
+  // Top-level array fields are in arraySchemaNames (built below); nested paths
+  // like "elements.0.reference_image_urls" consult the repeatable group's child.
+  const isArrayPath = (fieldPath: string): boolean => {
+    if (arraySchemaNames.has(fieldPath)) return true;
+    const m = fieldPath.match(/^(.+)\.\d+\.(.+)$/);
+    if (m && inputSchema) {
+      const group = inputSchema.find((i) => i.name === m[1] && i.repeatable);
+      const child = group?.children?.find((c) => c.name === m[2]);
+      if (child) return !!child.isArray;
+    }
+    return false;
+  };
 
   // Build mapping from normalized handle IDs to schema names if schema exists
   const handleToSchemaName: Record<string, string> = {};
@@ -452,12 +474,18 @@ export function getConnectedInputsPure(
         if (dyn) {
           if (dyn.field !== "primary") {
             const existing = dynamicInputs[dyn.field];
-            dynamicInputs[dyn.field] =
-              existing === undefined
-                ? [value]
-                : Array.isArray(existing)
+            if (existing !== undefined) {
+              // A second value for this field — it must be an array.
+              dynamicInputs[dyn.field] = Array.isArray(existing)
                 ? [...existing, value]
                 : [existing, value];
+            } else if (isArrayPath(dyn.field)) {
+              dynamicInputs[dyn.field] = [value];
+            } else {
+              // Scalar field (single slot) — keep the raw value so the provider
+              // receives a string, not a 1-element array.
+              dynamicInputs[dyn.field] = value;
+            }
           }
           if (dyn.type === "3d") model3d = value;
           else if (dyn.type === "video") videos.push(value);
