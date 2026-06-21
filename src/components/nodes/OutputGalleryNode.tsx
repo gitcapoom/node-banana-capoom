@@ -6,6 +6,8 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { OutputGalleryNodeData } from "@/types";
+import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
+import { DynamicInputHandles, IMAGE_ONLY_FALLBACK } from "./DynamicInputHandles";
 
 type OutputGalleryNodeType = Node<OutputGalleryNodeData, "outputGallery">;
 
@@ -14,6 +16,7 @@ export function OutputGalleryNode({ id, data, selected }: NodeProps<OutputGaller
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const edges = useWorkflowStore((state) => state.edges);
   const nodes = useWorkflowStore((state) => state.nodes);
+  const dynamicPinsOn = useDynamicPinsEnabled();
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   // Collect images in real-time from connected nodes (not just during execution)
@@ -114,12 +117,16 @@ export function OutputGalleryNode({ id, data, selected }: NodeProps<OutputGaller
         selected={selected}
         className="min-w-[200px]"
       >
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="image"
-          data-handletype="image"
-        />
+        {dynamicPinsOn ? (
+          <DynamicInputHandles nodeId={id} fallback={IMAGE_ONLY_FALLBACK} />
+        ) : (
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="image"
+            data-handletype="image"
+          />
+        )}
 
         {displayImages.length === 0 ? (
           <div className="w-full flex-1 min-h-[200px] border border-dashed border-neutral-600 rounded flex items-center justify-center">

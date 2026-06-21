@@ -44,6 +44,16 @@ export const DEFAULT_GENERATOR_FALLBACK: Descriptor[] = [
   { type: "text", field: "prompt", label: "Prompt", multi: false },
 ];
 
+/** Prompt-only fallback for text-to-X generators with no image input (e.g. audio). */
+export const PROMPT_ONLY_FALLBACK: Descriptor[] = [
+  { type: "text", field: "prompt", label: "Prompt", multi: false },
+];
+
+/** Image-only fallback for sinks that collect images (e.g. outputGallery). */
+export const IMAGE_ONLY_FALLBACK: Descriptor[] = [
+  { type: "image", field: "primary", label: "Image", multi: true },
+];
+
 export function DynamicInputHandles({
   nodeId,
   inputSchema,

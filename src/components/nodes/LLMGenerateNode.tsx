@@ -9,6 +9,8 @@ import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
+import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
+import { DynamicInputHandles } from "./DynamicInputHandles";
 
 // LLM providers — the model list for each is fetched live via the
 // `useLlmModelLists` hook (shared with ControlPanel).
@@ -33,6 +35,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
+  const dynamicPinsOn = useDynamicPinsEnabled();
 
   const handleRegenerate = useCallback(() => {
     regenerateNode(id);
@@ -356,22 +359,28 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
         </InlineParameterPanel>
       ) : undefined}
     >
-      {/* Image input - optional */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="image"
-        style={{ top: "35%" }}
-        data-handletype="image"
-      />
-      {/* Text input */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="text"
-        style={{ top: "65%" }}
-        data-handletype="text"
-      />
+      {dynamicPinsOn ? (
+        <DynamicInputHandles nodeId={id} />
+      ) : (
+        <>
+          {/* Image input - optional */}
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="image"
+            style={{ top: "35%" }}
+            data-handletype="image"
+          />
+          {/* Text input */}
+          <Handle
+            type="target"
+            position={Position.Left}
+            id="text"
+            style={{ top: "65%" }}
+            data-handletype="text"
+          />
+        </>
+      )}
       {/* Text output */}
       <Handle
         type="source"

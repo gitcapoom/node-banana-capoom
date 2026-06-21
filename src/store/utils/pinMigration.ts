@@ -23,6 +23,9 @@ export const DYNAMIC_PIN_NODE_TYPES = new Set<string>([
   "generateVideo",
   "generate3d",
   "upscaleGrid",
+  "generateAudio",
+  "llmGenerate",
+  "outputGallery",
 ]);
 
 interface SchemaInput {
