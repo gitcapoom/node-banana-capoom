@@ -694,14 +694,9 @@ export function WorkflowCanvas() {
       const sourceType = getHandleType(connection.sourceHandle);
       const targetType = getHandleType(connection.targetHandle);
 
-      // New dynamic-pin slots accept exactly one edge each; the trailing empty
-      // slot is where the next connection lands.
-      if (parseDynPin(connection.targetHandle)) {
-        const slotTaken = edges.some(
-          (e) => e.target === connection.target && e.targetHandle === connection.targetHandle
-        );
-        if (slotTaken) return false;
-      }
+      // Note: dynamic-pin slots hold one edge each, but dropping onto an
+      // occupied slot is allowed — onConnect replaces the existing edge (keeps
+      // the pin/slot, swaps the source). So no occupancy rejection here.
 
       // Switch input: accept any type (generic-input handle)
       const targetNode = nodes.find((n) => n.id === connection.target);
@@ -789,7 +784,7 @@ export function WorkflowCanvas() {
       // Image handles connect to image handles, text handles connect to text handles
       return sourceType === targetType;
     },
-    [nodes, edges]
+    [nodes]
   );
 
   const handleConnect = useCallback(
