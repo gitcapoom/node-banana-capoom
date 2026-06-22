@@ -106,7 +106,9 @@ export const RouterNode = memo(({ id, data, selected }: NodeProps<WorkflowNode>)
       const d = parseDynPin(e.targetHandle);
       if (d && d.type === "image" && d.field === IMG_FIELD) slots.push(d.slot);
     }
-    return slots.sort((a, b) => a - b);
+    // Dedupe: a slot must map to one pin even if a stale workflow has two edges
+    // on it (otherwise duplicate React keys).
+    return [...new Set(slots)].sort((a, b) => a - b);
   }, [edges, id]);
 
   const refNames = nodeData.refNames || {};

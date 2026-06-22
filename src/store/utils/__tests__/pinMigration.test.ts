@@ -72,6 +72,18 @@ describe("migrateEdgeHandles", () => {
     expect(handles(migrateEdgeHandles(nodes, dyn, "classic"))).toEqual(["image", "image", "image", "text"]);
   });
 
+  it("converting a classic edge skips slots already used by dyn-pin edges (no collision)", () => {
+    const nodes = [node("r", "router")];
+    const edges = [
+      edge("e1", "r", "dynpin__image__primary__0"), // already dynamic, occupies slot 0
+      edge("e2", "r", "image"), // classic — must become slot 1, not collide
+    ];
+    expect(handles(migrateEdgeHandles(nodes, edges, "dynamic"))).toEqual([
+      "dynpin__image__primary__0",
+      "dynpin__image__primary__1",
+    ]);
+  });
+
   it("leaves nested element slots and non-generator edges untouched", () => {
     const nodes = [node("gen", "generateVideo"), node("out", "output")];
     const edges = [

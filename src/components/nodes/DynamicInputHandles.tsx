@@ -88,7 +88,8 @@ export function DynamicInputHandles({
       const d = parseDynPin(h);
       if (d && d.type === type && d.field === fieldPath) slots.push(d.slot);
     }
-    return slots.sort((a, b) => a - b);
+    // Dedupe so a slot renders one pin even if two edges share it (stale data).
+    return [...new Set(slots)].sort((a, b) => a - b);
   };
 
   const addField = (
