@@ -38,7 +38,7 @@ import {
 } from "@/types";
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { parseDynPin } from "@/lib/dynamicPinId";
-import { translateReferenceTokens } from "@/lib/refTokens";
+import { translateReferenceTokens, replaceNamedTokens, slotToLetter } from "@/lib/refTokens";
 
 /**
  * Return type for getConnectedInputs
@@ -375,7 +375,12 @@ export function getConnectedInputsPure(
         // Determine which type this edge carries based on the source handle
         const edgeType = edge.sourceHandle; // Will be "image", "text", "video", "audio", "3d", or "easeCurve"
         const routerTargetHandle = edge.targetHandle;
-        const schemaName = routerTargetHandle ? handleToSchemaName[routerTargetHandle] : undefined;
+        // Resolve the destination field: legacy handle map, or a dyn-pin field
+        // (e.g. router → generator's image_urls pin). "primary" stays generic.
+        const routerDyn = routerTargetHandle ? parseDynPin(routerTargetHandle) : null;
+        const schemaName =
+          (routerTargetHandle ? handleToSchemaName[routerTargetHandle] : undefined) ||
+          (routerDyn && routerDyn.field !== "primary" ? routerDyn.field : undefined);
 
         // Helper to route router values to both generic arrays AND schema-named dynamicInputs
         const routeRouterValues = (values: unknown[]) => {
@@ -603,6 +608,39 @@ export function getConnectedInputsPure(
     let resolved: string = text;
     for (const input of inputSchema) {
       if (!input.refConvention) continue;
+
+      // Router-fed field: the prompt references the ROUTER's stable tokens
+      // (@A / @Hero). Resolve them to this field's positional convention using
+      // the router's image-slot order (single-router, image-first).
+      const routerEdge =
+        input.isArray
+          ? incomingEdges.find((e) => {
+              const d = parseDynPin(e.targetHandle);
+              if (!d || d.field !== input.name) return false;
+              return nodes.find((n) => n.id === e.source)?.type === "router";
+            })
+          : undefined;
+      if (routerEdge) {
+        const routerId = routerEdge.source;
+        const refNames =
+          (nodes.find((n) => n.id === routerId)?.data as { refNames?: Record<string, string> } | undefined)
+            ?.refNames || {};
+        const rslots: number[] = [];
+        for (const e of edges) {
+          if (e.target !== routerId) continue;
+          const d = parseDynPin(e.targetHandle);
+          if (d && d.type === "image" && d.field === "primary") rslots.push(d.slot);
+        }
+        rslots.sort((a, b) => a - b);
+        const map: Record<string, string> = {};
+        rslots.forEach((slot, rank) => {
+          const tok = refNames[String(slot)] || slotToLetter(slot);
+          map[`@${tok}`] = `@${input.refConvention}${rank + 1}`;
+        });
+        resolved = replaceNamedTokens(resolved, map);
+        continue;
+      }
+
       if (input.isArray) {
         // Top-level array field (@ImageA → @Image1): tokens index by slot.
         const slots: number[] = [];

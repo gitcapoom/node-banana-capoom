@@ -63,3 +63,19 @@ export function translateReferenceTokens(
     return rank === -1 ? "" : `@${conv}${rank + 1}`;
   });
 }
+
+/**
+ * Replace arbitrary named tokens (e.g. a router's `@Hero`, `@A`) with their
+ * mapped values (e.g. `@Image1`). Keys include the leading `@`. Matches at a
+ * trailing word boundary so `@A` doesn't fire inside `@Apple`; longer tokens are
+ * tried first so `@Hero` wins over a hypothetical `@H`.
+ */
+export function replaceNamedTokens(text: string, map: Record<string, string>): string {
+  const keys = Object.keys(map);
+  if (keys.length === 0) return text;
+  const escaped = keys
+    .sort((a, b) => b.length - a.length)
+    .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`(?:${escaped.join("|")})\\b`, "g");
+  return text.replace(re, (m) => map[m] ?? m);
+}
