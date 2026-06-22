@@ -38,7 +38,7 @@ import {
 } from "@/types";
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { parseDynPin } from "@/lib/dynamicPinId";
-import { translateReferenceTokens, replaceNamedTokens, slotToLetter } from "@/lib/refTokens";
+import { translateReferenceTokens, replaceNamedTokens, slotToLetter, ordinalPhrase } from "@/lib/refTokens";
 
 /**
  * Return type for getConnectedInputs
@@ -607,11 +607,10 @@ export function getConnectedInputsPure(
   if (dynamicPinsOn && text && inputSchema) {
     let resolved: string = text;
     for (const input of inputSchema) {
-      if (!input.refConvention) continue;
-
-      // Router-fed field: the prompt references the ROUTER's stable tokens
-      // (@A / @Hero). Resolve them to this field's positional convention using
-      // the router's image-slot order (single-router, image-first).
+      // Router-fed array field: resolve the prompt's router tokens (@A / @Hero)
+      // using the router's image-slot order. With an @-convention → positional
+      // tokens (@Image1); without → ordinal phrases a description-based model
+      // understands ("the first image"). Single-router, image-first.
       const routerEdge =
         input.isArray
           ? incomingEdges.find((e) => {
@@ -632,14 +631,19 @@ export function getConnectedInputsPure(
           if (d && d.type === "image" && d.field === "primary") rslots.push(d.slot);
         }
         rslots.sort((a, b) => a - b);
+        const noun = input.type === "video" ? "video" : "image";
         const map: Record<string, string> = {};
         rslots.forEach((slot, rank) => {
           const tok = refNames[String(slot)] || slotToLetter(slot);
-          map[`@${tok}`] = `@${input.refConvention}${rank + 1}`;
+          map[`@${tok}`] = input.refConvention
+            ? `@${input.refConvention}${rank + 1}`
+            : ordinalPhrase(rank + 1, noun);
         });
         resolved = replaceNamedTokens(resolved, map);
         continue;
       }
+
+      if (!input.refConvention) continue;
 
       if (input.isArray) {
         // Top-level array field (@ImageA → @Image1): tokens index by slot.

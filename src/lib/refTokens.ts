@@ -70,6 +70,21 @@ export function translateReferenceTokens(
  * trailing word boundary so `@A` doesn't fire inside `@Apple`; longer tokens are
  * tried first so `@Hero` wins over a hypothetical `@H`.
  */
+const ORDINALS = [
+  "first", "second", "third", "fourth", "fifth",
+  "sixth", "seventh", "eighth", "ninth", "tenth",
+];
+
+/**
+ * A positional phrase a description-based model (e.g. nano-banana) understands,
+ * for models with no `@`-token convention: ordinalPhrase(1, "image") → "the
+ * first image". Falls back to "the Nth image" past ten.
+ */
+export function ordinalPhrase(position: number, noun: string): string {
+  const ord = ORDINALS[position - 1] ?? `${position}th`;
+  return `the ${ord} ${noun}`;
+}
+
 export function replaceNamedTokens(text: string, map: Record<string, string>): string {
   const keys = Object.keys(map);
   if (keys.length === 0) return text;
