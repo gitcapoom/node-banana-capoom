@@ -105,6 +105,20 @@ export function migrateEdgeHandles(
   // handle (an array input) fan out to slots 0, 1, 2…
   const slotCounters = new Map<string, number>();
 
+  // Seed counters past any slots ALREADY used by dyn-pin edges, so converting
+  // classic edges doesn't collide with existing dyn-pin slots on the same field
+  // (which would otherwise put two edges on one slot → duplicate pins).
+  if (toMode === "dynamic") {
+    for (const e of edges) {
+      const node = nodeById.get(e.target);
+      if (!node || !DYNAMIC_PIN_NODE_TYPES.has(node.type as string)) continue;
+      const d = parseDynPin(e.targetHandle);
+      if (!d) continue;
+      const key = `${e.target}|${d.type}|${d.field}`;
+      slotCounters.set(key, Math.max(slotCounters.get(key) ?? 0, d.slot + 1));
+    }
+  }
+
   return edges.map((e) => {
     const node = nodeById.get(e.target);
     if (!node || !DYNAMIC_PIN_NODE_TYPES.has(node.type as string)) return e;
