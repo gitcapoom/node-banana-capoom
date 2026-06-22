@@ -191,6 +191,39 @@ describe("getConnectedInputsPure — dynamic pins flag", () => {
     expect(result.text).toBe("@Element1 meets @Element2");
   });
 
+  it("resolves a generator's prompt tokens through a router bundle", () => {
+    const nodes = [
+      makeNode("imgA", "imageInput", { image: "A" }),
+      makeNode("imgB", "imageInput", { image: "B" }),
+      makeNode("r", "router", { refNames: { "1": "Hero" } }),
+      makeNode("p", "prompt", { prompt: "@A next to @Hero" }),
+      makeNode("gen", "generateVideo", {
+        inputSchema: [
+          { name: "image_urls", type: "image", isArray: true, refConvention: "Image" },
+          { name: "prompt", type: "text" },
+        ],
+      }),
+    ];
+    const edges = [
+      dynEdge("imgA", "r", dynPinId("image", "primary", 0)),
+      dynEdge("imgB", "r", dynPinId("image", "primary", 1)),
+      // router output ("image") → generator's image_urls pin
+      dynEdge("r", "gen", dynPinId("image", "image_urls", 0)),
+      {
+        id: "p-gen",
+        source: "p",
+        target: "gen",
+        sourceHandle: "text",
+        targetHandle: dynPinId("text", "prompt", 0),
+      } as WorkflowEdge,
+    ];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    // The 5-image-style bundle flows through to the field, in router slot order.
+    expect(result.dynamicInputs.image_urls).toEqual(["A", "B"]);
+    // @A → router slot 0 → @Image1; @Hero (named slot 1) → @Image2.
+    expect(result.text).toBe("@Image1 next to @Image2");
+  });
+
   it("ignores the dyn-pin scheme when the flag is off (classic routing)", () => {
     setDynamicPinsEnabled(false);
     const nodes = [

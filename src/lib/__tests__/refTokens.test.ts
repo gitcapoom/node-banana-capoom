@@ -5,6 +5,7 @@ import {
   letterToSlot,
   stableRefToken,
   translateReferenceTokens,
+  replaceNamedTokens,
 } from "../refTokens";
 
 describe("refTokens", () => {
@@ -40,6 +41,14 @@ describe("refTokens", () => {
   it("drops a reference whose slot is no longer connected", () => {
     // @ImageB (slot 1) removed from the graph → its token disappears.
     expect(translateReferenceTokens("@ImageA and @ImageB", "Image", [0])).toBe("@Image1 and ");
+  });
+
+  it("replaces arbitrary named tokens (router @A / @Hero → @ImageN)", () => {
+    const map = { "@A": "@Image1", "@Hero": "@Image2" };
+    expect(replaceNamedTokens("@Hero stands by @A", map)).toBe("@Image2 stands by @Image1");
+    // Word boundary: @A must not fire inside @Apple.
+    expect(replaceNamedTokens("@Apple and @A", map)).toBe("@Apple and @Image1");
+    expect(replaceNamedTokens("nothing here", map)).toBe("nothing here");
   });
 
   it("leaves positional tokens and unrelated text untouched", () => {
