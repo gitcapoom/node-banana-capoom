@@ -65,6 +65,7 @@ import {
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
 import { migrateEdgeHandles } from "./utils/pinMigration";
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
+import { isDynPin } from "@/lib/dynamicPinId";
 import { ensureFullResForNodes } from "./execution/hydrateForRun";
 import { evaluateRule } from "./utils/ruleEvaluation";
 import { computeDimmedNodes } from "./utils/dimmingUtils";
@@ -924,9 +925,17 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         id: `edge-${connection.source}-${connection.target}-${connection.sourceHandle || "default"}-${connection.targetHandle || "default"}`,
         data: edgeDataOverrides ? { ...baseData, ...edgeDataOverrides } : baseData,
       };
+      // Dynamic-pin slots hold exactly one edge: if this handle is already
+      // occupied, drop the existing edge so the new one replaces it. The pin /
+      // slot — and its name — stays the same (only the source changes).
+      const base = isDynPin(connection.targetHandle)
+        ? state.edges.filter(
+            (e) => !(e.target === connection.target && e.targetHandle === connection.targetHandle)
+          )
+        : state.edges;
       // Cast needed: React Flow's Edge<T> types data as T | undefined, but addEdge expects data to be defined
       return {
-        edges: addEdge(newEdge, state.edges as never) as WorkflowEdge[],
+        edges: addEdge(newEdge, base as never) as WorkflowEdge[],
         hasUnsavedChanges: true,
       };
     });
