@@ -857,7 +857,11 @@ export interface VideoFrameGrabNodeData extends BaseNodeData {
  * Router node - pure passthrough routing node with dynamic multi-type handles
  */
 export interface RouterNodeData extends BaseNodeData {
-  // No internal state - all routing is derived from edge connections
+  // Routing is derived from edge connections. The only stored state is optional
+  // custom names for image-input reference slots (dynamic-pins mode), keyed by
+  // slot index → name (e.g. { "0": "Hero", "2": "Logo" }). Used so a downstream
+  // generator's prompt can reference router inputs by a stable token.
+  refNames?: Record<string, string>;
 }
 
 /**

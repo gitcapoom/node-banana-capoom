@@ -53,6 +53,25 @@ describe("migrateEdgeHandles", () => {
     expect(handles(migrateEdgeHandles(nodes, dyn, "classic"))).toEqual(["image", "image", "image-1", "text"]);
   });
 
+  it("router: image edges become primary slots; non-image left alone; collapses back", () => {
+    const nodes = [node("r", "router")];
+    const edges = [
+      edge("e1", "r", "image"),
+      edge("e2", "r", "image"),
+      edge("e3", "r", "image"),
+      edge("e4", "r", "text"), // non-image — image-first, untouched
+    ];
+    const dyn = migrateEdgeHandles(nodes, edges, "dynamic");
+    expect(handles(dyn)).toEqual([
+      "dynpin__image__primary__0",
+      "dynpin__image__primary__1",
+      "dynpin__image__primary__2",
+      "text",
+    ]);
+    // Classic collapses every image slot back to the single "image" handle.
+    expect(handles(migrateEdgeHandles(nodes, dyn, "classic"))).toEqual(["image", "image", "image", "text"]);
+  });
+
   it("leaves nested element slots and non-generator edges untouched", () => {
     const nodes = [node("gen", "generateVideo"), node("out", "output")];
     const edges = [

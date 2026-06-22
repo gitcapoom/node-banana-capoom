@@ -26,6 +26,7 @@ export const DYNAMIC_PIN_NODE_TYPES = new Set<string>([
   "generateAudio",
   "llmGenerate",
   "outputGallery",
+  "router",
 ]);
 
 interface SchemaInput {
@@ -110,6 +111,22 @@ export function migrateEdgeHandles(
     const inputSchema = (node.data as { inputSchema?: SchemaInput[] } | undefined)?.inputSchema;
     const handle = e.targetHandle;
     if (!handle) return e;
+
+    // Router: image-first bundle. Only image edges convert; in classic mode they
+    // collapse back to the single multi-edge "image" handle (no image-N).
+    if (node.type === "router") {
+      if (toMode === "dynamic") {
+        if (parseDynPin(handle)) return e;
+        if (handle !== "image" && !handle.startsWith("image-")) return e;
+        const key = `${node.id}|image|primary`;
+        const slot = slotCounters.get(key) ?? 0;
+        slotCounters.set(key, slot + 1);
+        return { ...e, targetHandle: dynPinId("image", "primary", slot) };
+      }
+      const dyn = parseDynPin(handle);
+      if (!dyn || dyn.type !== "image") return e;
+      return { ...e, targetHandle: "image" };
+    }
 
     if (toMode === "dynamic") {
       if (parseDynPin(handle)) return e; // already dynamic
