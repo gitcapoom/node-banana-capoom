@@ -224,6 +224,39 @@ describe("getConnectedInputsPure — dynamic pins flag", () => {
     expect(result.text).toBe("@Image1 next to @Image2");
   });
 
+  it("resolves router tokens to ordinal phrases for a non-@-convention generator", () => {
+    const nodes = [
+      makeNode("imgA", "imageInput", { image: "A" }),
+      makeNode("imgB", "imageInput", { image: "B" }),
+      makeNode("imgC", "imageInput", { image: "C" }),
+      makeNode("r", "router", {}),
+      makeNode("p", "prompt", { prompt: "@A on the left, @C on the right, @B in the middle" }),
+      makeNode("gen", "nanoBanana", {
+        inputSchema: [
+          { name: "image_urls", type: "image", isArray: true }, // NO refConvention
+          { name: "prompt", type: "text" },
+        ],
+      }),
+    ];
+    const edges = [
+      dynEdge("imgA", "r", dynPinId("image", "primary", 0)),
+      dynEdge("imgB", "r", dynPinId("image", "primary", 1)),
+      dynEdge("imgC", "r", dynPinId("image", "primary", 2)),
+      dynEdge("r", "gen", dynPinId("image", "image_urls", 0)),
+      {
+        id: "p-gen",
+        source: "p",
+        target: "gen",
+        sourceHandle: "text",
+        targetHandle: dynPinId("text", "prompt", 0),
+      } as WorkflowEdge,
+    ];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    expect(result.text).toBe(
+      "the first image on the left, the third image on the right, the second image in the middle"
+    );
+  });
+
   it("ignores the dyn-pin scheme when the flag is off (classic routing)", () => {
     setDynamicPinsEnabled(false);
     const nodes = [

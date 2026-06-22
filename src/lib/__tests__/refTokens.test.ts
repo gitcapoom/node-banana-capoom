@@ -6,6 +6,7 @@ import {
   stableRefToken,
   translateReferenceTokens,
   replaceNamedTokens,
+  ordinalPhrase,
 } from "../refTokens";
 
 describe("refTokens", () => {
@@ -49,6 +50,12 @@ describe("refTokens", () => {
     // Word boundary: @A must not fire inside @Apple.
     expect(replaceNamedTokens("@Apple and @A", map)).toBe("@Apple and @Image1");
     expect(replaceNamedTokens("nothing here", map)).toBe("nothing here");
+  });
+
+  it("builds ordinal phrases for description-based models", () => {
+    expect(ordinalPhrase(1, "image")).toBe("the first image");
+    expect(ordinalPhrase(3, "image")).toBe("the third image");
+    expect(ordinalPhrase(11, "image")).toBe("the 11th image");
   });
 
   it("leaves positional tokens and unrelated text untouched", () => {
