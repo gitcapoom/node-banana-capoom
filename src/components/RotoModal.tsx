@@ -142,6 +142,12 @@ export function RotoModal() {
   const selectDragRef = useRef<{ start: Pt; cur: Pt; moved: boolean; crossLayer: boolean; additive: boolean } | null>(null);
   // Dragging the selection's bounding box (move all selected points together).
   const bboxDragRef = useRef<{ last: Pt } | null>(null);
+  // View panning (middle-mouse drag, or Space + left-drag on the canvas). Stores
+  // the last SCREEN position so we can pan independent of zoom.
+  const panRef = useRef<{ x: number; y: number } | null>(null);
+  const spaceHeldRef = useRef(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
 
   // Switching shapes drops the multi-selection.
   useEffect(() => { setSelectedPointIds([]); }, [selectedShapeId]);
@@ -201,8 +207,17 @@ export function RotoModal() {
 
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
+    const stage = stageRef.current;
+    const pointer = stage?.getPointerPosition();
+    if (!stage || !pointer) return;
+    const oldScale = stage.scaleX();
     const by = 1.1;
-    setScale((s) => Math.min(Math.max(e.evt.deltaY > 0 ? s / by : s * by, 0.1), 8));
+    const newScale = Math.min(Math.max(e.evt.deltaY > 0 ? oldScale / by : oldScale * by, 0.1), 8);
+    // Keep the image point under the cursor pinned while zooming.
+    const mx = (pointer.x - stage.x()) / oldScale;
+    const my = (pointer.y - stage.y()) / oldScale;
+    setScale(newScale);
+    setPosition({ x: pointer.x - mx * newScale, y: pointer.y - my * newScale });
   }, []);
 
   const selShape = work.find((s) => s.id === selectedShapeId) || null;
@@ -334,6 +349,15 @@ export function RotoModal() {
   const onStageMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     const onEmpty = e.target === e.target.getStage() || e.target.name() === "imagebg";
     const onFill = e.target.name() === "fill";
+    // Pan the view: middle-mouse anywhere, or Space + left-drag. Restricted to the
+    // image / empty canvas / fills so it never steals a control-point drag.
+    if ((e.evt.button === 1 || (spaceHeldRef.current && e.evt.button === 0)) && (onEmpty || onFill)) {
+      e.evt.preventDefault();
+      e.cancelBubble = true;
+      panRef.current = { x: e.evt.clientX, y: e.evt.clientY };
+      setIsPanning(true);
+      return;
+    }
     if (!onEmpty && !onFill) return; // a handle was clicked — it manages itself
     const pos = getPos();
 
@@ -356,6 +380,15 @@ export function RotoModal() {
   }, [currentTool, draft, getPos, scale, addShape, setTool, setSelectedShape]);
 
   const onStageMouseMove = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (panRef.current) {
+      // End if neither left (1) nor middle (4) is still held (released off-canvas).
+      if ((e.evt.buttons & 5) === 0) { panRef.current = null; setIsPanning(false); return; }
+      const dx = e.evt.clientX - panRef.current.x;
+      const dy = e.evt.clientY - panRef.current.y;
+      panRef.current = { x: e.evt.clientX, y: e.evt.clientY };
+      setPosition((p) => ({ x: p.x + dx, y: p.y + dy }));
+      return;
+    }
     if (currentTool === "pen" && draft && penDownRef.current) {
       const pos = getPos();
       setDraft((d) => {
@@ -388,6 +421,7 @@ export function RotoModal() {
   }, [currentTool, draft, getPos, scale, translateSelection, commitSelection]);
 
   const onStageMouseUp = useCallback(() => {
+    if (panRef.current) { panRef.current = null; setIsPanning(false); return; }
     penDownRef.current = false;
     if (currentTool !== "select") return;
     if (bboxDragRef.current) { bboxDragRef.current = null; commitSelection(); return; }
@@ -439,6 +473,25 @@ export function RotoModal() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [isModalOpen, draft, currentTool, selShape, selectedPointId, selectedPointIds, closeModal, addShape, setTool, undo, redo, replaceShape, deleteShape, setSelectedPoint]);
+
+  // Space = hold-to-pan modifier. Tracked separately so it can fall through the
+  // canvas without scrolling and updates the grab cursor.
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const editable = (t: EventTarget | null) => {
+      const tag = (t as HTMLElement | null)?.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA";
+    };
+    const down = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !editable(e.target)) { e.preventDefault(); spaceHeldRef.current = true; setSpaceHeld(true); }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") { spaceHeldRef.current = false; setSpaceHeld(false); }
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+  }, [isModalOpen]);
 
   const handleDone = useCallback(() => {
     if (!sourceNodeId || !image) return;
@@ -558,7 +611,7 @@ export function RotoModal() {
             height={containerRef.current?.clientHeight || 600}
             scaleX={scale} scaleY={scale} x={position.x} y={position.y}
             onMouseDown={onStageMouseDown} onMouseMove={onStageMouseMove} onMouseUp={onStageMouseUp} onWheel={handleWheel}
-            style={{ cursor: currentTool === "pen" ? "crosshair" : "default" }}
+            style={{ cursor: isPanning ? "grabbing" : spaceHeld ? "grab" : currentTool === "pen" ? "crosshair" : "default" }}
           >
             <Layer listening>
               {mattePreview && matteImg
