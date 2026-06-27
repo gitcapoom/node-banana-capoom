@@ -887,6 +887,10 @@ export default function SplatViewer() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationIdRef = useRef<number>(0);
   const splatMeshRef = useRef<unknown>(null);
+  // Source of the loaded splat, kept so the downloaded JSON can embed it (and a
+  // scene can be restored into an empty viewer). File loads keep the Blob; URL
+  // loads keep the URL and re-fetch at save time (lighter than holding bytes).
+  const splatSourceRef = useRef<{ blob: Blob; fileName: string } | { url: string; fileName: string } | null>(null);
   // True when the currently loaded splat is a PLY. PLY has no embedded
   // coordinate-system metadata, so we orient it using the user-selected
   // `colmapWorldFrame` (the same one applied to COLMAP camera tracks). SPZ
@@ -2259,6 +2263,8 @@ export default function SplatViewer() {
       // filename rides in the `name` query param. Check both.
       const filenameHint =
         new URLSearchParams(window.location.search).get("name") || "";
+      // Keep the source URL so the downloaded JSON can embed this splat (re-fetched at save).
+      splatSourceRef.current = { url, fileName: filenameHint || url.split("/").pop()?.split("?")[0] || "scene.spz" };
       splatIsPlyRef.current =
         /\.ply($|\?)/i.test(url) || /\.ply$/i.test(filenameHint);
       setSplatIsPly(splatIsPlyRef.current);
@@ -2280,7 +2286,7 @@ export default function SplatViewer() {
 
   // ─── Load SPZ from file (drag-and-drop or file picker) ─────────
 
-  const loadSplatFromFile = useCallback(async (file: File) => {
+  const loadSplatFromFile = useCallback(async (file: File, opts?: { skipCenter?: boolean }) => {
     // Enter viewer mode first: the canvas container only mounts outside the
     // upload screen, and initScene() bails without it — which would silently
     // drop the file (no scene, no error, nothing happens).
@@ -2291,6 +2297,8 @@ export default function SplatViewer() {
     initialCameraStateRef.current = null;
     setTransform(defaultTransform);
     setWorldName(file.name.replace(/\.spz$/i, ""));
+    // Keep the source bytes so the downloaded JSON can embed this splat.
+    splatSourceRef.current = { blob: file, fileName: file.name };
 
     if (!sceneRef.current) {
       // Yield so React commits the viewer-mode DOM, then init the renderer.
@@ -2325,8 +2333,8 @@ export default function SplatViewer() {
           setLoading(false);
           URL.revokeObjectURL(objectUrl);
 
-          // Center camera at origin
-          centerCamera();
+          // Center camera at origin (skipped when restoring a saved pose).
+          if (!opts?.skipCenter) centerCamera();
         },
       });
 
@@ -2401,6 +2409,8 @@ export default function SplatViewer() {
     camera?: { px: number; py: number; pz: number; qx: number; qy: number; qz: number; qw: number };
     cameraPath?: unknown;
     orbitTarget?: { x: number; y: number; z: number };
+    splatFileData?: string; // base64 data URL of the source splat — embedded on download only
+    splatFileName?: string;
   }
 
   const buildSaveState = useCallback((): ViewerSaveState => {
@@ -2420,17 +2430,29 @@ export default function SplatViewer() {
     };
   }, [transform, cameraPath]);
 
-  const applySaveState = useCallback((state: ViewerSaveState) => {
+  const applySaveState = useCallback(async (state: ViewerSaveState) => {
     if (state.meshEntries) setMeshEntries(state.meshEntries);
     if (state.lightEntries) setLightEntries(state.lightEntries);
     if (state.iblEntries) setIblEntries(state.iblEntries);
-    if (state.transform) setTransform(state.transform);
     if (state.cameraPath) setCameraPath(state.cameraPath as CameraPath);
+    // Restore an embedded splat FIRST (skip auto-centering) so the transform and
+    // camera below apply to the loaded mesh rather than being reset by the load.
+    if (state.splatFileData) {
+      try {
+        const blob = await (await fetch(state.splatFileData)).blob();
+        const file = new File([blob], state.splatFileName || "scene.spz", { type: blob.type });
+        await loadSplatFromFile(file, { skipCenter: true });
+      } catch (e) { console.warn("Could not restore embedded splat:", e); }
+    }
+    if (state.transform) setTransform(state.transform);
     if (state.camera) {
       const cam = cameraRef.current;
       if (cam) {
         cam.position.set(state.camera.px, state.camera.py, state.camera.pz);
         cam.quaternion.set(state.camera.qx, state.camera.qy, state.camera.qz, state.camera.qw);
+        // Sync fly-mode euler refs so Fly nav continues from the restored pose.
+        const e = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ");
+        yawRef.current = e.y; pitchRef.current = e.x; rollRef.current = e.z;
       }
     }
     if (state.orbitTarget) {
@@ -2440,7 +2462,19 @@ export default function SplatViewer() {
         controls.update();
       }
     }
-  }, []);
+    // Snapshot the restored pose so Reset returns here exactly.
+    const camSnap = cameraRef.current;
+    if (camSnap && state.camera) {
+      initialCameraStateRef.current = {
+        position: camSnap.position.clone(),
+        quaternion: camSnap.quaternion.clone(),
+        fov: camSnap.fov,
+        orbitTarget: controlsRef.current ? controlsRef.current.target.clone() : new THREE.Vector3(),
+        yaw: yawRef.current, pitch: pitchRef.current, roll: rollRef.current,
+      };
+      setHasInitialCameraSnapshot(true);
+    }
+  }, [loadSplatFromFile]);
 
   const saveStateToLocalStorage = useCallback(() => {
     try {
@@ -2458,19 +2492,35 @@ export default function SplatViewer() {
     } catch (_) { /* corrupt — silently skip */ }
   }, [applySaveState]);
 
-  const downloadSaveState = useCallback(() => {
-    const json = JSON.stringify(buildSaveState(), null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    triggerDownload(blob, "splat-viewer-state.json");
+  const downloadSaveState = useCallback(async () => {
+    const state = buildSaveState();
+    // Embed the splat so the JSON is self-contained — restorable into an empty
+    // viewer. base64 via FileReader (async, off the main thread → no UI freeze).
+    const src = splatSourceRef.current;
+    if (src) {
+      try {
+        const blob = "blob" in src ? src.blob : await (await fetch(src.url)).blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => reject(r.error);
+          r.readAsDataURL(blob);
+        });
+        state.splatFileData = dataUrl;
+        state.splatFileName = src.fileName;
+      } catch (e) { console.warn("Could not embed splat in saved state:", e); }
+    }
+    const json = JSON.stringify(state, null, 2);
+    triggerDownload(new Blob([json], { type: "application/json" }), "splat-viewer-state.json");
   }, [buildSaveState]);
 
   const loadSaveStateInputRef = useRef<HTMLInputElement>(null);
   const handleLoadSaveStateFile = useCallback((file: File) => {
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const state = JSON.parse(ev.target?.result as string) as ViewerSaveState;
-        applySaveState(state);
+        await applySaveState(state);
         saveStateToLocalStorage();
       } catch (_) { setError("Invalid viewer state file."); }
     };
