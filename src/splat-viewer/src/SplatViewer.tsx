@@ -784,6 +784,11 @@ export default function SplatViewer() {
   const [captureFlash, setCaptureFlash] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [cameraPanelOpen, setCameraPanelOpen] = useState(true);
+  // Camera-panel manual transform (position + rotation°, YXZ to match fly mode).
+  // Display value is polled from the live camera while the panel is open, paused
+  // while an input is focused so typing isn't clobbered.
+  const [camXform, setCamXform] = useState({ px: 0, py: 0, pz: 0, rx: 0, ry: 0, rz: 0 });
+  const camInputFocusedRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
   const [navMode, setNavMode] = useState<"orbit" | "fly">("fly");
 
@@ -1012,6 +1017,57 @@ export default function SplatViewer() {
       controlsRef.current.update();
     }
   }, [navMode, focusPickMode]);
+
+  // Manual camera transform from the Camera panel. Applies to the live camera,
+  // syncs the fly-mode euler refs AND the orbit target so the pose sticks in
+  // either nav mode.
+  const applyCamTransform = useCallback((next: { px: number; py: number; pz: number; rx: number; ry: number; rz: number }) => {
+    const cam = cameraRef.current;
+    if (!cam) return;
+    cam.position.set(next.px, next.py, next.pz);
+    const euler = new THREE.Euler(
+      THREE.MathUtils.degToRad(next.rx), // pitch (x)
+      THREE.MathUtils.degToRad(next.ry), // yaw (y)
+      THREE.MathUtils.degToRad(next.rz), // roll (z)
+      "YXZ"
+    );
+    cam.quaternion.setFromEuler(euler);
+    yawRef.current = euler.y;
+    pitchRef.current = euler.x;
+    rollRef.current = euler.z;
+    const controls = controlsRef.current;
+    if (controls) {
+      // Keep the orbit target in front so the pose holds when orbit re-derives.
+      const dist = cam.position.distanceTo(controls.target) || 1;
+      const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
+      controls.target.copy(cam.position.clone().add(fwd.multiplyScalar(dist)));
+      controls.update();
+    }
+  }, []);
+
+  // Reflect the live camera pose in the panel inputs while it's open. Epsilon-
+  // guarded so a still camera causes no re-render; paused while editing.
+  useEffect(() => {
+    if (!cameraPanelOpen) return;
+    const sync = () => {
+      if (camInputFocusedRef.current) return;
+      const cam = cameraRef.current;
+      if (!cam) return;
+      const e = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ");
+      const nv = {
+        px: cam.position.x, py: cam.position.y, pz: cam.position.z,
+        rx: THREE.MathUtils.radToDeg(e.x), ry: THREE.MathUtils.radToDeg(e.y), rz: THREE.MathUtils.radToDeg(e.z),
+      };
+      setCamXform((prev) => {
+        const d = (a: number, b: number) => Math.abs(a - b) > 1e-3;
+        return (d(prev.px, nv.px) || d(prev.py, nv.py) || d(prev.pz, nv.pz) ||
+          d(prev.rx, nv.rx) || d(prev.ry, nv.ry) || d(prev.rz, nv.rz)) ? nv : prev;
+      });
+    };
+    sync();
+    const id = window.setInterval(sync, 150);
+    return () => window.clearInterval(id);
+  }, [cameraPanelOpen]);
 
   // Visual feedback for focus-pick mode: crosshair cursor on the canvas.
   useEffect(() => {
@@ -4351,6 +4407,50 @@ export default function SplatViewer() {
                     </button>
                   ))}
                   <span className="text-[9px] text-neutral-600 ml-1 self-center">F</span>
+                </div>
+              </div>
+
+              {/* Camera transform — explicit position + rotation (sticks in fly & orbit) */}
+              <div className="mt-2 pt-2 border-t border-neutral-800">
+                <label className="text-[9px] text-neutral-500 block mb-1">Position</label>
+                <div className="grid grid-cols-3 gap-1">
+                  {(["px", "py", "pz"] as const).map((k, i) => (
+                    <input
+                      key={k}
+                      type="number"
+                      step={0.1}
+                      value={Math.round(camXform[k] * 1000) / 1000}
+                      title={["X", "Y", "Z"][i]}
+                      onFocus={() => { camInputFocusedRef.current = true; }}
+                      onBlur={() => { camInputFocusedRef.current = false; }}
+                      onChange={(e) => {
+                        const next = { ...camXform, [k]: parseFloat(e.target.value) || 0 };
+                        setCamXform(next);
+                        applyCamTransform(next);
+                      }}
+                      className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-2 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+                    />
+                  ))}
+                </div>
+                <label className="text-[9px] text-neutral-500 block mb-1 mt-1.5">Rotation°</label>
+                <div className="grid grid-cols-3 gap-1">
+                  {(["rx", "ry", "rz"] as const).map((k, i) => (
+                    <input
+                      key={k}
+                      type="number"
+                      step={1}
+                      value={Math.round(camXform[k] * 100) / 100}
+                      title={["Pitch (X)", "Yaw (Y)", "Roll (Z)"][i]}
+                      onFocus={() => { camInputFocusedRef.current = true; }}
+                      onBlur={() => { camInputFocusedRef.current = false; }}
+                      onChange={(e) => {
+                        const next = { ...camXform, [k]: parseFloat(e.target.value) || 0 };
+                        setCamXform(next);
+                        applyCamTransform(next);
+                      }}
+                      className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-2 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
+                    />
+                  ))}
                 </div>
               </div>
                 </>
