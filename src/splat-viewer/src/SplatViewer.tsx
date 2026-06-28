@@ -898,6 +898,11 @@ export default function SplatViewer() {
   // scene can be restored into an empty viewer). File loads keep the Blob; URL
   // loads keep the URL and re-fetch at save time (lighter than holding bytes).
   const splatSourceRef = useRef<{ blob: Blob; fileName: string } | { url: string; fileName: string } | null>(null);
+  // Bumped at the start of every splat load. A slow earlier load checks this
+  // after its await and bails (disposing itself) if a newer load superseded it —
+  // prevents two splats when a saved scene is loaded while a splat is still
+  // streaming in (e.g. the node's URL load racing a manual JSON load).
+  const loadTokenRef = useRef(0);
   // True when the currently loaded splat is a PLY. PLY has no embedded
   // coordinate-system metadata, so we orient it using the user-selected
   // `colmapWorldFrame` (the same one applied to COLMAP camera tracks). SPZ
@@ -2291,6 +2296,7 @@ export default function SplatViewer() {
     setHasInitialCameraSnapshot(false);
     initialCameraStateRef.current = null;
     setTransform(defaultTransform);
+    const myToken = ++loadTokenRef.current;
 
     if (!sceneRef.current) {
       // Yield so the viewer-mode canvas container mounts before initScene()
@@ -2319,6 +2325,7 @@ export default function SplatViewer() {
       const splatMesh = new SplatMesh({
         url,
         onLoad: () => {
+          if (myToken !== loadTokenRef.current) return; // superseded by a newer load
           setSplatLoaded(true);
           setLoading(false);
 
@@ -2345,6 +2352,12 @@ export default function SplatViewer() {
       });
 
       await splatMesh.initialized;
+      // If a newer load started while this one streamed in, discard this one so
+      // we don't end up with two splats in the scene.
+      if (myToken !== loadTokenRef.current) {
+        (splatMesh as unknown as { dispose?: () => void }).dispose?.();
+        return;
+      }
 
       // URLs from SpzViewerNode are blob: URLs with no extension; the real
       // filename rides in the `name` query param. Check both.
@@ -2386,6 +2399,7 @@ export default function SplatViewer() {
     setWorldName(file.name.replace(/\.spz$/i, ""));
     // Keep the source bytes so the downloaded JSON can embed this splat.
     splatSourceRef.current = { blob: file, fileName: file.name };
+    const myToken = ++loadTokenRef.current;
 
     if (!sceneRef.current) {
       // Yield so React commits the viewer-mode DOM, then init the renderer.
@@ -2416,6 +2430,7 @@ export default function SplatViewer() {
       const splatMesh = new SplatMesh({
         url: objectUrl,
         onLoad: () => {
+          if (myToken !== loadTokenRef.current) { URL.revokeObjectURL(objectUrl); return; }
           setSplatLoaded(true);
           setLoading(false);
           URL.revokeObjectURL(objectUrl);
@@ -2426,6 +2441,12 @@ export default function SplatViewer() {
       });
 
       await splatMesh.initialized;
+      // Discard if a newer load superseded this one (prevents two splats).
+      if (myToken !== loadTokenRef.current) {
+        URL.revokeObjectURL(objectUrl);
+        (splatMesh as unknown as { dispose?: () => void }).dispose?.();
+        return;
+      }
       splatIsPlyRef.current = /\.ply$/i.test(file.name);
       setSplatIsPly(splatIsPlyRef.current);
       if (splatIsPlyRef.current) {
@@ -2534,7 +2555,10 @@ export default function SplatViewer() {
         const blob = await (await fetch(state.splatFileData)).blob();
         const file = new File([blob], state.splatFileName || "scene.spz", { type: blob.type });
         await loadSplatFromFile(file, { skipCenter: true });
-      } catch (e) { console.warn("Could not restore embedded splat:", e); }
+      } catch (e) {
+        console.warn("Could not restore embedded splat:", e);
+        setError("Could not restore the embedded splat from this file.");
+      }
     } else if (state.splatPath) {
       // Sidecar save: fetch the splat that lives beside the JSON (outputs/GS).
       try {
@@ -2544,9 +2568,13 @@ export default function SplatViewer() {
           const file = new File([blob], state.splatFileName || "scene.spz", { type: blob.type });
           await loadSplatFromFile(file, { skipCenter: true });
         } else {
-          setError("Saved splat file not found at its recorded path.");
+          const msg = await resp.json().catch(() => null);
+          setError(`Couldn't load the saved splat (${state.splatPath}): ${msg?.error || resp.status}`);
         }
-      } catch (e) { console.warn("Could not load sidecar splat:", e); }
+      } catch (e) {
+        console.warn("Could not load sidecar splat:", e);
+        setError(`Could not load the saved splat: ${e instanceof Error ? e.message : "error"}`);
+      }
     }
     if (state.transform) setTransform(state.transform);
     if (state.camera) {
@@ -2688,7 +2716,7 @@ export default function SplatViewer() {
         const state = JSON.parse(ev.target?.result as string) as ViewerSaveState;
         await applySaveState(state);
         saveStateToLocalStorage();
-      } catch (_) { setError("Invalid viewer state file."); }
+      } catch (err) { setError(`Could not load scene: ${err instanceof Error ? err.message : "invalid file"}`); }
     };
     reader.readAsText(file);
   }, [applySaveState, saveStateToLocalStorage]);
