@@ -2889,46 +2889,62 @@ export default function SplatViewer() {
     const W = 2048;
     const aspect = aspectRef.current || aspectRatio.ratio || 16 / 9;
     const H = Math.max(2, Math.round(W / aspect)) & ~1;
-    const origAspect = camera.aspect;
 
-    // Render the scene to a PNG blob at W×H (transparent background for comp).
-    const renderRgb = async (): Promise<Blob> => {
-      const rt = new THREE.WebGLRenderTarget(W, H, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType });
-      // Encode linear→sRGB on write so the off-screen render matches the canvas
-      // (renderer.outputColorSpace only applies to the default framebuffer).
-      // Without this, lit meshes come out gamma-dark.
-      rt.texture.colorSpace = THREE.SRGBColorSpace;
-      camera.aspect = aspect; camera.updateProjectionMatrix();
-      renderer.setRenderTarget(rt);
-      renderer.setClearColor(0x000000, 0);
-      renderer.clear();
-      renderer.render(scene, camera);
-      renderer.setRenderTarget(null);
-      const buf = new Uint8Array(W * H * 4);
-      renderer.readRenderTargetPixels(rt, 0, 0, W, H, buf);
-      rt.dispose();
-      const id = new ImageData(W, H);
-      const row = W * 4;
-      for (let y = 0; y < H; y++) id.data.set(buf.subarray((H - 1 - y) * row, (H - 1 - y) * row + row), y * row);
-      const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
-      cv.getContext("2d")!.putImageData(id, 0, 0);
-      return await new Promise<Blob>((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
-    };
-
-    // Snapshot + control overlay visibility (gizmo + helpers always off in renders).
+    // Editor-only objects to hide from every render.
     const gizmo = transformControlsRef.current;
-    const gizmoVis = gizmo?.visible ?? false;
+    const grid = gridHelperRef.current;
+    const axes = axesHelperRef.current;
     const meshObjs = Array.from(meshObjectsRef.current.values());
     const lightObjs = Array.from(lightObjectsRef.current.values()) as unknown as THREE.Object3D[];
     const helperObjs = Array.from(lightHelpersRef.current.values());
+    const gizmoVis = gizmo?.visible ?? false;
+    const gridVis = grid?.visible ?? false;
+    const axesVis = axes?.visible ?? false;
     const meshVis = meshObjs.map((o) => o.visible);
     const lightVis = lightObjs.map((o) => o.visible);
     const helperVis = helperObjs.map((o) => o.visible);
 
+    const origSize = renderer.getSize(new THREE.Vector2());
+    const origPixelRatio = renderer.getPixelRatio();
+    const origAspect = camera.aspect;
+
+    // Render via the canvas (the on-screen pipeline — colour-correct for the
+    // splat AND lit meshes) at W×H, then copy the canvas to a PNG blob.
+    const renderRgb = (): Promise<Blob> => {
+      renderer.setRenderTarget(null);
+      renderer.setClearColor(0x000000, 1);
+      renderer.render(scene, camera);
+      const src = renderer.domElement;
+      const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+      cv.getContext("2d")!.drawImage(src, 0, 0, src.width, src.height, 0, 0, W, H);
+      return new Promise<Blob>((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
+    };
+
+    const restore = () => {
+      if (gizmo) gizmo.visible = gizmoVis;
+      if (grid) grid.visible = gridVis;
+      if (axes) axes.visible = axesVis;
+      meshObjs.forEach((o, i) => { o.visible = meshVis[i]; });
+      lightObjs.forEach((o, i) => { o.visible = lightVis[i]; });
+      helperObjs.forEach((o, i) => { o.visible = helperVis[i]; });
+      renderer.setPixelRatio(origPixelRatio);
+      renderer.setSize(origSize.x, origSize.y, false);
+      camera.aspect = origAspect; camera.updateProjectionMatrix();
+      renderer.setRenderTarget(null); renderer.render(scene, camera);
+    };
+
     setSaveSceneStatus("Rendering frame…");
     try {
+      // Editor aids off for every render.
       if (gizmo) gizmo.visible = false;
+      if (grid) grid.visible = false;
+      if (axes) axes.visible = false;
       for (const o of helperObjs) o.visible = false;
+
+      // 2048-wide drawing buffer, square pixels.
+      renderer.setPixelRatio(1);
+      renderer.setSize(W, H, false);
+      camera.aspect = W / H; camera.updateProjectionMatrix();
 
       // C0 — bare splat: all meshes + lights hidden.
       for (const o of meshObjs) o.visible = false;
@@ -2950,16 +2966,12 @@ export default function SplatViewer() {
         } catch (e) { console.warn("EXR export failed:", e); }
       }
 
-      // C0_char — splat + overlays restored to their configured visibility.
+      // C0_char — splat + overlays at their configured visibility.
       meshObjs.forEach((o, i) => { o.visible = meshVis[i]; });
       lightObjs.forEach((o, i) => { o.visible = lightVis[i]; });
       const c0char = await renderRgb();
 
-      // Restore live state.
-      if (gizmo) gizmo.visible = gizmoVis;
-      helperObjs.forEach((o, i) => { o.visible = helperVis[i]; });
-      camera.aspect = origAspect; camera.updateProjectionMatrix();
-      renderer.setRenderTarget(null); renderer.render(scene, camera);
+      restore();
 
       // Write the files into <dir>/<scene>/.
       const write = async (fname: string, body: BodyInit) => {
@@ -2974,12 +2986,7 @@ export default function SplatViewer() {
       if (exrBytes) await write(`${name}.depth.0001.exr`, new Blob([exrBytes as unknown as BlobPart]));
       setSaveSceneStatus(`Saved frame → ${folder}${exrBytes ? "" : " (EXR skipped)"}`);
     } catch (e) {
-      // Restore on failure.
-      if (gizmo) gizmo.visible = gizmoVis;
-      meshObjs.forEach((o, i) => { o.visible = meshVis[i]; });
-      lightObjs.forEach((o, i) => { o.visible = lightVis[i]; });
-      helperObjs.forEach((o, i) => { o.visible = helperVis[i]; });
-      camera.aspect = origAspect; camera.updateProjectionMatrix();
+      restore();
       setSaveSceneStatus(`Save frame failed: ${e instanceof Error ? e.message : "error"}`);
     } finally {
       setFileDialog(null);
