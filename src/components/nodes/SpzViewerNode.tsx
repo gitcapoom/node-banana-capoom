@@ -206,6 +206,9 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
       const base = saveDirectoryPath.replace(/[\\/]+$/, "");
       const sep = base.includes("\\") ? "\\" : "/";
       params.set("gsDir", `${base}${sep}outputs${sep}GS`);
+      // Project folder — the viewer derives camera.json / 3D_Renders defaults one
+      // level up from here (next to the project folder).
+      params.set("projectDir", base);
     }
 
     // image2GS outputs a .ply. Its filename can default to "world.spz", which
