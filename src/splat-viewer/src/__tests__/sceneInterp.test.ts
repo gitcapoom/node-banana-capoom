@@ -78,6 +78,15 @@ describe("evaluateSceneAtFrame", () => {
     expect((evaluateSceneAtFrame(path, 10)!.splatTransform as ReturnType<typeof xform>).position.x).toBeCloseTo(10);
     expect((evaluateSceneAtFrame(path, 5)!.splatTransform as ReturnType<typeof xform>).position.x).toBeCloseTo(5);
   });
+
+  it("step interpolation holds the start keyframe across the whole segment", () => {
+    const stepKf = { ...kf(0, snapA), interpolation: "step" as const };
+    const path: CameraPath = { keyframes: [stepKf, kf(1, snapB)], durationFrames: 11, fps: 25 };
+    // Mid-segment still reads snapA's values (no blend); jumps only at the next key.
+    expect((evaluateSceneAtFrame(path, 5)!.splatTransform as ReturnType<typeof xform>).position.x).toBeCloseTo(0);
+    expect((evaluateSceneAtFrame(path, 9)!.splatTransform as ReturnType<typeof xform>).position.x).toBeCloseTo(0);
+    expect((evaluateSceneAtFrame(path, 10)!.splatTransform as ReturnType<typeof xform>).position.x).toBeCloseTo(10);
+  });
 });
 
 describe("serialize/deserialize round-trip", () => {

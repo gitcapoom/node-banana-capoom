@@ -1298,6 +1298,45 @@ export default function SplatViewer() {
     }
   }, []);
 
+  /**
+   * Frame the camera on the currently selected overlay (mesh or light) — like
+   * centerCamera but fit to the selection's bounding box. No-op if nothing is
+   * selected. Lights have no extent, so they get a small fixed neighbourhood.
+   */
+  const frameSelected = useCallback(() => {
+    const camera = cameraRef.current;
+    if (!camera || !selectedOverlayId) return;
+    const meshObj = meshObjectsRef.current.get(selectedOverlayId);
+    const lightObj = lightObjectsRef.current.get(selectedOverlayId) as unknown as THREE.Object3D | undefined;
+    let center: THREE.Vector3 | null = null;
+    let radius = 0;
+    if (meshObj) {
+      const box = new THREE.Box3().setFromObject(meshObj);
+      if (!box.isEmpty() && Number.isFinite(box.min.x)) {
+        center = box.getCenter(new THREE.Vector3());
+        radius = Math.max(...box.getSize(new THREE.Vector3()).toArray()) * 0.5;
+      }
+    } else if (lightObj) {
+      center = lightObj.position.clone();
+    }
+    if (!center) return;
+    if (!(radius > 0)) radius = 0.5;
+    const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+    const distance = (radius / Math.sin(halfFov)) * 1.6;
+    const offset = new THREE.Vector3(1, 0.5, 1).normalize().multiplyScalar(distance);
+    camera.position.copy(center).add(offset);
+    camera.lookAt(center);
+    camera.updateProjectionMatrix();
+    if (controlsRef.current) {
+      controlsRef.current.target.copy(center);
+      controlsRef.current.update();
+    }
+    const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, "YXZ");
+    yawRef.current = euler.y;
+    pitchRef.current = euler.x;
+    rollRef.current = euler.z;
+  }, [selectedOverlayId]);
+
   const resetCamera = useCallback(() => {
     const snap = initialCameraStateRef.current;
     if (!cameraRef.current) return;
@@ -1476,6 +1515,21 @@ export default function SplatViewer() {
       // getHelper() returns the Object3D gizmo that belongs in the scene.
       const tcHelper = transformControls.getHelper();
       scene.add(tcHelper);
+      // The Gaussian splat (renderOrder 1) paints over anything drawn before it,
+      // hiding the gizmo. Draw the transform handles LAST and ignore depth so
+      // they stay visible on top of the splat (and meshes), DCC-style.
+      tcHelper.renderOrder = 1000;
+      tcHelper.traverse((child) => {
+        child.renderOrder = 1000;
+        const mat = (child as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+        if (mat) {
+          for (const m of Array.isArray(mat) ? mat : [mat]) {
+            m.depthTest = false;
+            m.depthWrite = false;
+            m.transparent = true;
+          }
+        }
+      });
       transformControlsRef.current = tcHelper;
       transformControlsInstanceRef.current = transformControls as unknown as typeof transformControlsInstanceRef.current;
 
@@ -4547,6 +4601,18 @@ export default function SplatViewer() {
                   title="Frame the camera on the splat (SuperSplat-style 3/4 view)"
                 >
                   Frame
+                </button>
+                <button
+                  onClick={() => frameSelected()}
+                  disabled={!selectedOverlayId}
+                  className={`text-[10px] px-2 py-0.5 rounded transition-colors ${
+                    selectedOverlayId
+                      ? "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
+                      : "bg-neutral-900 text-neutral-700 cursor-not-allowed"
+                  }`}
+                  title="Frame the camera on the selected mesh/light"
+                >
+                  Frame Sel
                 </button>
                 <button
                   onClick={() => resetCamera()}

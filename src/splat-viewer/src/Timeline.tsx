@@ -411,7 +411,7 @@ export default function Timeline({
         {/* Interpolation mode selector (visible when keyframe selected) */}
         {selectedKfInterp !== null && (
           <div className="flex items-center gap-0.5">
-            {(["linear", "easeInOut", "smooth"] as const).map((mode) => (
+            {(["step", "linear", "easeInOut", "smooth"] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => {
@@ -424,7 +424,7 @@ export default function Timeline({
                 }`}
                 title={`Interpolation: ${mode}`}
               >
-                {mode === "linear" ? "LIN" : mode === "easeInOut" ? "EASE" : "SMOOTH"}
+                {mode === "step" ? "STEP" : mode === "linear" ? "LIN" : mode === "easeInOut" ? "EASE" : "SMOOTH"}
               </button>
             ))}
             <div className="w-px h-4 bg-neutral-700 mx-1" />

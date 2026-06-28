@@ -2,7 +2,7 @@ import * as THREE from "three";
 
 // ─── Types ──────────────────────────────────────────────────────
 
-export type InterpolationMode = "linear" | "easeInOut" | "smooth";
+export type InterpolationMode = "step" | "linear" | "easeInOut" | "smooth";
 
 /**
  * A full snapshot of the animatable scene state at a keyframe — everything
@@ -191,6 +191,7 @@ export function evaluateCameraPath(
   const mode = kf0.interpolation ?? "smooth";
 
   // ─── Mode-dependent interpolation ────────────────────────
+  // step:      hold the start keyframe's value until the next key (no blend)
   // linear:    straight-line path, constant speed
   // smooth:    Catmull-Rom spline, constant speed (spline provides smoothness)
   // easeInOut: Catmull-Rom spline + cubic ease (decelerate at keyframes)
@@ -198,14 +199,16 @@ export function evaluateCameraPath(
   let position: THREE.Vector3;
   let localT: number;
 
-  if (mode === "easeInOut") {
+  if (mode === "step") {
+    localT = 0; // hold kf0 for the whole segment
+  } else if (mode === "easeInOut") {
     localT = easeInOutCubic(rawT);
   } else {
     localT = rawT; // both "linear" and "smooth" use raw t
   }
 
-  if (mode === "linear") {
-    // Straight-line interpolation between kf0 and kf1
+  if (mode === "linear" || mode === "step") {
+    // Straight-line interpolation between kf0 and kf1 (step pins localT to 0)
     position = new THREE.Vector3().lerpVectors(kf0.position, kf1.position, localT);
   } else {
     // Catmull-Rom spline for "smooth" and "easeInOut"
@@ -364,7 +367,8 @@ export function evaluateSceneAtFrame(path: CameraPath, frameIndex: number): Scen
   const kf1 = keyframes[segIndex + 1];
   const segLen = kf1.time - kf0.time;
   const rawT = segLen > 0 ? (t - kf0.time) / segLen : 0;
-  const localT = (kf0.interpolation ?? "smooth") === "easeInOut" ? easeInOutCubic(rawT) : rawT;
+  const sceneMode = kf0.interpolation ?? "smooth";
+  const localT = sceneMode === "step" ? 0 : sceneMode === "easeInOut" ? easeInOutCubic(rawT) : rawT;
 
   if (kf0.scene && kf1.scene) return interpolateScene(kf0.scene, kf1.scene, localT);
   return kf0.scene ?? kf1.scene ?? null;
