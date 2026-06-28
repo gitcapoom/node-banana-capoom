@@ -915,6 +915,11 @@ export default function SplatViewer() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationIdRef = useRef<number>(0);
+  // Set true while saveFrame is capturing. The animate loop keeps its rAF chain
+  // alive but skips all rendering/viewport work so it can't clobber the 2048-wide
+  // capture buffer's viewport (saveFrame uses setSize(W,H,false), which leaves
+  // clientWidth at the old CSS width → the loop would size its viewport to that).
+  const isCapturingRef = useRef<boolean>(false);
   const splatMeshRef = useRef<unknown>(null);
   // Source of the loaded splat, kept so the downloaded JSON can embed it (and a
   // scene can be restored into an empty viewer). File loads keep the Blob; URL
@@ -1962,6 +1967,12 @@ export default function SplatViewer() {
     function animate(time: number) {
       animationIdRef.current = requestAnimationFrame(animate);
 
+      // saveFrame owns the renderer while capturing — skip rendering entirely so
+      // we don't resize the viewport to the (stale) on-screen clientWidth and
+      // letterbox the 2048-wide capture. The rAF chain above stays alive so the
+      // loop resumes the moment capture finishes.
+      if (isCapturingRef.current) return;
+
       // ─── Camera path playback ───────────────────────
       if (isPlayingRef.current) {
         const path = cameraPathRef.current;
@@ -2912,6 +2923,11 @@ export default function SplatViewer() {
     // splat AND lit meshes) at W×H, then copy the canvas to a PNG blob.
     const renderRgb = (): Promise<Blob> => {
       renderer.setRenderTarget(null);
+      // Fill the whole 2048×H buffer. The depth pass (and any earlier viewport
+      // state) can leave a partial viewport/scissor; reset both so the scene
+      // isn't letterboxed into a sub-rect.
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, W, H);
       renderer.setClearColor(0x000000, 1);
       renderer.render(scene, camera);
       const src = renderer.domElement;
@@ -2934,6 +2950,10 @@ export default function SplatViewer() {
     };
 
     setSaveSceneStatus("Rendering frame…");
+    // Pause the animate loop for the whole capture. It reads the on-screen
+    // clientWidth (unchanged by setSize(W,H,false)) and would resize the
+    // viewport to it between renders, letterboxing C0_char into a sub-rect.
+    isCapturingRef.current = true;
     try {
       // Editor aids off for every render.
       if (gizmo) gizmo.visible = false;
@@ -2989,6 +3009,7 @@ export default function SplatViewer() {
       restore();
       setSaveSceneStatus(`Save frame failed: ${e instanceof Error ? e.message : "error"}`);
     } finally {
+      isCapturingRef.current = false; // resume the animate loop
       setFileDialog(null);
     }
     // captureDepthFrameForExport is a stable useCallback defined later; the
