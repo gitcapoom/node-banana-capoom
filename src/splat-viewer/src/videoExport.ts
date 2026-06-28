@@ -50,6 +50,11 @@ export interface VideoExportOptions {
     ) => void;
   };
   onProgress?: (frame: number, totalFrames: number) => void;
+  /** Called each frame AFTER the camera is positioned and BEFORE the scene is
+   *  rendered. Lets the caller apply keyframed scene state (splat/mesh/light
+   *  transforms + visibility) so the export animates the whole scene, not just
+   *  the camera. No-op if the path carries no scene keyframes. */
+  applySceneAtFrame?: (frame: number) => void;
 }
 
 export interface VideoExportResult {
@@ -170,7 +175,7 @@ async function exportVideoWebCodecs(
 ): Promise<VideoExportResult> {
   const {
     renderer, scene, camera, path, mode, resolution,
-    bitrate = DEFAULT_BITRATE, captureDepthFrame, postProcess, onProgress,
+    bitrate = DEFAULT_BITRATE, captureDepthFrame, postProcess, onProgress, applySceneAtFrame,
   } = opts;
 
   const width = ensureEvenDimension(resolution.width);
@@ -221,6 +226,7 @@ async function exportVideoWebCodecs(
         camera.fov = evaluated.fov;
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
+        applySceneAtFrame?.(frame);
 
         const result = captureDepthFrame(renderer, scene, camera, width, height);
         if (result) {
@@ -250,6 +256,7 @@ async function exportVideoWebCodecs(
       camera.fov = evaluated.fov;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
+      applySceneAtFrame?.(frame);
 
       if (needRgb) {
         // Optional FOV margin for the distortion pass.
@@ -323,7 +330,7 @@ async function exportVideoMediaRecorder(
 ): Promise<VideoExportResult> {
   const {
     renderer, scene, camera, path, mode, resolution,
-    bitrate = DEFAULT_BITRATE, captureDepthFrame, postProcess, onProgress,
+    bitrate = DEFAULT_BITRATE, captureDepthFrame, postProcess, onProgress, applySceneAtFrame,
   } = opts;
 
   const width = ensureEvenDimension(resolution.width);
@@ -398,6 +405,7 @@ async function exportVideoMediaRecorder(
       camera.fov = evaluated.fov;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
+      applySceneAtFrame?.(frame);
 
       if (rgbRecorder) {
         let restoreFov: number | null = null;
