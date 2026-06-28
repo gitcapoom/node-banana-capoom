@@ -993,7 +993,7 @@ export default function SplatViewer() {
   const iblGradedPmremRef = useRef<Map<string, THREE.Texture>>(new Map());
   const iblGradePassRef = useRef<{ scene: THREE.Scene; camera: THREE.OrthographicCamera; mat: THREE.ShaderMaterial } | null>(null);
   // Undo / gizmo drag tracking
-  const undoStackRef = useRef<Array<{ meshEntries: MeshEntry[]; lightEntries: LightEntry[]; iblEntries: IblEntry[] }>>([]);
+  const undoStackRef = useRef<Array<{ meshEntries: MeshEntry[]; lightEntries: LightEntry[]; iblEntries: IblEntry[]; cameraPath: CameraPath }>>([]);
   const prevDragPosRef = useRef<THREE.Vector3>(new THREE.Vector3());
   // Mirror refs — always hold latest state values for imperative (non-React) handlers
   const meshEntriesRef = useRef<MeshEntry[]>([]);
@@ -2594,6 +2594,12 @@ export default function SplatViewer() {
       iblEntries: iblEntriesRef.current.map(e => ({
         ...e, position: { ...e.position },
       })),
+      // Snapshot the keyframes TOO. Without this, an undo rewinds meshEntries
+      // (e.g. removing a just-added mesh) while the keyframes keep referencing
+      // it — the mesh then vanishes from meshEntries but lingers as an orphan
+      // ref in the timeline, and its geometry is silently dropped on the next
+      // save. serialize→deserialize gives a deep clone with the right types.
+      cameraPath: deserializePath(serializePath(cameraPathRef.current)),
     });
   }, []);
 
@@ -2608,6 +2614,7 @@ export default function SplatViewer() {
         setMeshEntries(snap.meshEntries);
         setLightEntries(snap.lightEntries);
         setIblEntries(snap.iblEntries);
+        setCameraPath(snap.cameraPath); // keep keyframes in sync with the meshes/lights they reference
       }
     };
     window.addEventListener("keydown", onKey);
@@ -2786,6 +2793,19 @@ export default function SplatViewer() {
   const saveScene = useCallback(async (dir: string, filename: string) => {
     const src = splatSourceRef.current;
     if (!src) { setSaveSceneStatus("No splat loaded to save."); return; }
+    // Safety net: if the timeline references meshes no longer in the scene (a
+    // sign an earlier desync dropped them), warn before overwriting — saving
+    // would bake in the loss. The undo fix prevents new desyncs.
+    const liveMeshIds = new Set(meshEntriesRef.current.map(m => m.id));
+    const orphanMeshIds = new Set<string>();
+    for (const kf of cameraPathRef.current.keyframes)
+      for (const m of kf.scene?.meshes ?? []) if (!liveMeshIds.has(m.id)) orphanMeshIds.add(m.id);
+    if (orphanMeshIds.size > 0 && typeof window !== "undefined" &&
+        !window.confirm(`${orphanMeshIds.size} mesh(es) referenced by the timeline are no longer in the scene and won't be saved (this can happen after an undo). Save anyway?`)) {
+      setSaveSceneStatus("Save cancelled — timeline references missing meshes.");
+      setFileDialog(null);
+      return;
+    }
     const cleanDir = dir.replace(/[\\/]+$/, "");
     const sep = cleanDir.includes("\\") ? "\\" : "/";
     // The splat keeps its own (stable) file name so versions dedupe against it.
@@ -3401,6 +3421,14 @@ export default function SplatViewer() {
     }
     pushUndo();
     setMeshEntries(prev => prev.filter(e => e.id !== id));
+    // Drop the mesh from every keyframe too, so the timeline never keeps an
+    // orphan reference to a mesh that no longer exists (undo restores both).
+    setCameraPath(prev => ({
+      ...prev,
+      keyframes: prev.keyframes.map(kf =>
+        kf.scene ? { ...kf, scene: { ...kf.scene, meshes: (kf.scene.meshes ?? []).filter(m => m.id !== id) } } : kf,
+      ),
+    }));
   }, [selectedOverlayId, pushUndo]);
 
   // Toggle "always on top" for a mesh — the apply effect re-runs and calls
