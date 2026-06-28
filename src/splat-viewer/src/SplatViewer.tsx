@@ -2863,6 +2863,112 @@ export default function SplatViewer() {
     } finally { setFileDialog(null); }
   }, [buildCameraJson, defaultCameraName]);
 
+  // ─── Save frame: 2048px RGB (bare + with overlays) + depth PNG + metric EXR ──
+  const saveFrame = useCallback(async (dir: string, sceneName: string) => {
+    const renderer = rendererRef.current, scene = sceneRef.current, camera = cameraRef.current;
+    if (!renderer || !scene || !camera) { setSaveSceneStatus("Viewer not ready."); setFileDialog(null); return; }
+    const cleanDir = dir.replace(/[\\/]+$/, "");
+    const sep = cleanDir.includes("\\") ? "\\" : "/";
+    const name = (sceneName || worldName || "scene").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9-_]+/g, "_").replace(/^_+|_+$/g, "") || "scene";
+    const folder = `${cleanDir}${sep}${name}`;
+    const W = 2048;
+    const aspect = aspectRef.current || aspectRatio.ratio || 16 / 9;
+    const H = Math.max(2, Math.round(W / aspect)) & ~1;
+    const origAspect = camera.aspect;
+
+    // Render the scene to a PNG blob at W×H (transparent background for comp).
+    const renderRgb = async (): Promise<Blob> => {
+      const rt = new THREE.WebGLRenderTarget(W, H, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType });
+      camera.aspect = aspect; camera.updateProjectionMatrix();
+      renderer.setRenderTarget(rt);
+      renderer.setClearColor(0x000000, 0);
+      renderer.clear();
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(null);
+      const buf = new Uint8Array(W * H * 4);
+      renderer.readRenderTargetPixels(rt, 0, 0, W, H, buf);
+      rt.dispose();
+      const id = new ImageData(W, H);
+      const row = W * 4;
+      for (let y = 0; y < H; y++) id.data.set(buf.subarray((H - 1 - y) * row, (H - 1 - y) * row + row), y * row);
+      const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+      cv.getContext("2d")!.putImageData(id, 0, 0);
+      return await new Promise<Blob>((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
+    };
+
+    // Snapshot + control overlay visibility (gizmo + helpers always off in renders).
+    const gizmo = transformControlsRef.current;
+    const gizmoVis = gizmo?.visible ?? false;
+    const meshObjs = Array.from(meshObjectsRef.current.values());
+    const lightObjs = Array.from(lightObjectsRef.current.values()) as unknown as THREE.Object3D[];
+    const helperObjs = Array.from(lightHelpersRef.current.values());
+    const meshVis = meshObjs.map((o) => o.visible);
+    const lightVis = lightObjs.map((o) => o.visible);
+    const helperVis = helperObjs.map((o) => o.visible);
+
+    setSaveSceneStatus("Rendering frame…");
+    try {
+      if (gizmo) gizmo.visible = false;
+      for (const o of helperObjs) o.visible = false;
+
+      // C0 — bare splat: all meshes + lights hidden.
+      for (const o of meshObjs) o.visible = false;
+      for (const o of lightObjs) o.visible = false;
+      const c0 = await renderRgb();
+
+      // Depth (bare splat) → normalized PNG + metric (linear, float) EXR.
+      let depthPng: Blob | null = null;
+      let exrBytes: Uint8Array | null = null;
+      const depthRes = captureDepthFrameForExport(renderer, scene, camera, W, H);
+      if (depthRes?.imageData) {
+        const cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+        cv.getContext("2d")!.putImageData(depthRes.imageData, 0, 0);
+        depthPng = await new Promise<Blob>((res) => cv.toBlob((b) => res(b!), "image/png"));
+        try {
+          const { EXRExporter } = await import("three/examples/jsm/exporters/EXRExporter.js");
+          const vis = depthVisExportTargetRef.current;
+          if (vis) exrBytes = await new EXRExporter().parse(renderer, vis, { type: THREE.FloatType });
+        } catch (e) { console.warn("EXR export failed:", e); }
+      }
+
+      // C0_char — splat + overlays restored to their configured visibility.
+      meshObjs.forEach((o, i) => { o.visible = meshVis[i]; });
+      lightObjs.forEach((o, i) => { o.visible = lightVis[i]; });
+      const c0char = await renderRgb();
+
+      // Restore live state.
+      if (gizmo) gizmo.visible = gizmoVis;
+      helperObjs.forEach((o, i) => { o.visible = helperVis[i]; });
+      camera.aspect = origAspect; camera.updateProjectionMatrix();
+      renderer.setRenderTarget(null); renderer.render(scene, camera);
+
+      // Write the files into <dir>/<scene>/.
+      const write = async (fname: string, body: BodyInit) => {
+        const r = await fetch(`/api/write-file?path=${encodeURIComponent(`${folder}${sep}${fname}`)}`, { method: "POST", body });
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j?.success) throw new Error(`${fname}: ${j?.error || `HTTP ${r.status}`}`);
+      };
+      setSaveSceneStatus("Saving frame…");
+      await write(`${name}.C0.0001.png`, c0);
+      await write(`${name}.C0_char.0001.png`, c0char);
+      if (depthPng) await write(`${name}.depth.0001.png`, depthPng);
+      if (exrBytes) await write(`${name}.depth.0001.exr`, new Blob([exrBytes as unknown as BlobPart]));
+      setSaveSceneStatus(`Saved frame → ${folder}${exrBytes ? "" : " (EXR skipped)"}`);
+    } catch (e) {
+      // Restore on failure.
+      if (gizmo) gizmo.visible = gizmoVis;
+      meshObjs.forEach((o, i) => { o.visible = meshVis[i]; });
+      lightObjs.forEach((o, i) => { o.visible = lightVis[i]; });
+      helperObjs.forEach((o, i) => { o.visible = helperVis[i]; });
+      camera.aspect = origAspect; camera.updateProjectionMatrix();
+      setSaveSceneStatus(`Save frame failed: ${e instanceof Error ? e.message : "error"}`);
+    } finally {
+      setFileDialog(null);
+    }
+    // captureDepthFrameForExport is a stable useCallback defined later; the
+    // closure resolves it at call time (omitted from deps to avoid a TDZ here).
+  }, [worldName, aspectRatio.ratio]);
+
   // ─── Dialog openers ───────────────────────────────────────────────
   const openSaveScene = useCallback(() => setFileDialog({
     mode: "save", initialPath: saveDir ?? undefined,
@@ -2878,6 +2984,15 @@ export default function SplatViewer() {
     defaultFilename: "camera", extension: ".json",
     onConfirm: (dir, name) => saveCameraJson(dir, name || "camera"),
   }), [baseDir, saveDir, saveCameraJson]);
+  const openSaveFrame = useCallback(() => {
+    const b = baseDir();
+    const initial = b ? `${b}${b.includes("\\") ? "\\" : "/"}3D_Renders` : (saveDir ?? undefined);
+    setFileDialog({
+      mode: "save", initialPath: initial,
+      defaultFilename: (worldName || "scene").replace(/\.[^.]+$/, ""), extension: "",
+      onConfirm: (dir, name) => saveFrame(dir, name || "scene"),
+    });
+  }, [baseDir, saveDir, worldName, saveFrame]);
 
   // (mount restore merged into the URL-params effect above)
 
@@ -5156,6 +5271,18 @@ export default function SplatViewer() {
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 6h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z" />
+                </svg>
+              </button>
+
+              {/* Save frame — 2048px renders (bare + char) + depth PNG + metric EXR */}
+              <button
+                onClick={openSaveFrame}
+                className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
+                title="Save frame (2048px C0 + C0_char + depth PNG + metric EXR)"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
               </button>
               {saveSceneStatus && (
