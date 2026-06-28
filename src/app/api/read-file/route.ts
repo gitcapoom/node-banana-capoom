@@ -9,22 +9,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Serves bytes of a local file for the splat viewer to load sidecar assets
-// (the splat referenced by a saved scene JSON). Localhost-only + traversal-
-// guarded via validateWorkflowPath, which allows network/UNC/mapped-drive
-// project paths (matching list-directory). Streamed so a large splat is never
-// buffered whole in server memory.
-
-function isLocalhostRequest(req: NextRequest): boolean {
-  const forwarded = req.headers.get("x-forwarded-for");
-  if (forwarded) {
-    const firstIp = forwarded.split(",")[0].trim();
-    if (firstIp !== "127.0.0.1" && firstIp !== "::1" && firstIp !== "::ffff:127.0.0.1") return false;
-  }
-  const host = req.headers.get("host") || "";
-  const hostname = host.split(":")[0];
-  if (hostname && hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1") return false;
-  return true;
-}
+// (the splat referenced by a saved scene JSON). Traversal-guarded via
+// validateWorkflowPath, which allows network/UNC/mapped-drive project paths.
+// No localhost-only gate — the app is routinely accessed over the LAN, and the
+// sibling file routes (list-directory / save-generation) gate the same way.
+// Streamed so a large splat is never buffered whole in server memory.
 
 const MIME: Record<string, string> = {
   ".json": "application/json",
@@ -35,10 +24,6 @@ const MIME: Record<string, string> = {
 };
 
 export async function GET(req: NextRequest) {
-  if (!isLocalhostRequest(req)) {
-    return NextResponse.json({ success: false, error: "Forbidden: localhost only" }, { status: 403 });
-  }
-
   const inputPath = req.nextUrl.searchParams.get("path");
   if (!inputPath || typeof inputPath !== "string") {
     return NextResponse.json({ success: false, error: "path is required" }, { status: 400 });
