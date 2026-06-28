@@ -2555,6 +2555,13 @@ export default function SplatViewer() {
     splatFileData?: string; // base64 data URL of the source splat — embedded on download only
     splatFileName?: string;
     splatPath?: string;     // absolute path of a sidecar splat saved beside the JSON (outputs/GS)
+    cameraOptics?: {        // sensor/lens/aspect → the resting camera FOV
+      customSensorMm: number | null;
+      customLensMm: number | null;
+      sensorIndex: number;
+      lensIndex: number;
+      aspectIndex: number;
+    };
   }
 
   const buildSaveState = useCallback((): ViewerSaveState => {
@@ -2571,13 +2578,23 @@ export default function SplatViewer() {
       } : undefined,
       cameraPath: serializePath(cameraPath),
       orbitTarget: controls ? { x: controls.target.x, y: controls.target.y, z: controls.target.z } : undefined,
+      cameraOptics: { customSensorMm, customLensMm, sensorIndex, lensIndex, aspectIndex },
     };
-  }, [transform, cameraPath]);
+  }, [transform, cameraPath, customSensorMm, customLensMm, sensorIndex, lensIndex, aspectIndex]);
 
   const applySaveState = useCallback(async (state: ViewerSaveState) => {
     if (state.meshEntries) setMeshEntries(state.meshEntries);
     if (state.lightEntries) setLightEntries(state.lightEntries);
     if (state.iblEntries) setIblEntries(state.iblEntries);
+    if (state.cameraOptics) {
+      // Restore sensor/lens/aspect → the FOV effect recomputes the resting fov.
+      const co = state.cameraOptics;
+      setCustomSensorMm(co.customSensorMm ?? null);
+      setCustomLensMm(co.customLensMm ?? null);
+      if (typeof co.sensorIndex === "number") setSensorIndex(co.sensorIndex);
+      if (typeof co.lensIndex === "number") setLensIndex(co.lensIndex);
+      if (typeof co.aspectIndex === "number") setAspectIndex(co.aspectIndex);
+    }
     if (state.cameraPath) setCameraPath(deserializePath(state.cameraPath as SerializedCameraPath));
     // Restore an embedded splat FIRST (skip auto-centering) so the transform and
     // camera below apply to the loaded mesh rather than being reset by the load.
