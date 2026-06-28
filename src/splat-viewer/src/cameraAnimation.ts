@@ -4,6 +4,25 @@ import * as THREE from "three";
 
 export type InterpolationMode = "linear" | "easeInOut" | "smooth";
 
+/**
+ * A full snapshot of the animatable scene state at a keyframe — everything
+ * other than the camera pose (which lives in the keyframe fields directly).
+ * Stored as plain JSON (no THREE objects) so it serializes trivially and can be
+ * interpolated generically. The concrete shapes live in SplatViewer; this module
+ * only walks them structurally (numbers lerp, booleans/strings step, hex colors
+ * blend, arrays/objects recurse), matching entities by id.
+ *
+ * `ibls` is captured for completeness/forward-compat but not yet applied live
+ * (per-frame IBL re-grading is too expensive for 60fps playback).
+ */
+export interface SceneSnapshot {
+  splatTransform?: unknown;
+  meshes?: Array<{ id: string; transform: unknown; visible: boolean }>;
+  lights?: Array<{ id: string; [k: string]: unknown }>;
+  ibls?: Array<{ id: string; [k: string]: unknown }>;
+  orbitTarget?: [number, number, number];
+}
+
 export interface CameraKeyframe {
   /** Normalized time in [0, 1] along the animation path */
   time: number;
@@ -13,6 +32,8 @@ export interface CameraKeyframe {
   fov: number;
   /** Interpolation mode for the segment starting at this keyframe */
   interpolation?: InterpolationMode;
+  /** Full scene state at this keyframe (geometry/visibility/lights/…). */
+  scene?: SceneSnapshot;
 }
 
 export interface CameraPath {
@@ -93,6 +114,7 @@ function cloneKeyframe(kf: CameraKeyframe): CameraKeyframe {
     quaternion: kf.quaternion.clone(),
     fov: kf.fov,
     interpolation: kf.interpolation,
+    scene: kf.scene, // immutable plain-JSON snapshot — shallow ref is safe
   };
 }
 
@@ -251,6 +273,103 @@ function interpolatePositionCatmullRom(
   return result;
 }
 
+// ─── Scene-state interpolation ──────────────────────────────────
+
+/** Blend two #rrggbb hex colors per channel. */
+function lerpHexColor(a: string, b: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  if (Number.isNaN(pa) || Number.isNaN(pb)) return t >= 1 ? b : a;
+  const r = Math.round(((pa >> 16) & 255) + (((pb >> 16) & 255) - ((pa >> 16) & 255)) * t);
+  const g = Math.round(((pa >> 8) & 255) + (((pb >> 8) & 255) - ((pa >> 8) & 255)) * t);
+  const bl = Math.round((pa & 255) + ((pb & 255) - (pa & 255)) * t);
+  return "#" + ((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1);
+}
+
+/**
+ * Generic value interpolation used for scene snapshots:
+ * numbers → linear lerp; booleans → step (hold `a` until the next keyframe);
+ * hex colors → per-channel blend, other strings → step; arrays/objects → recurse.
+ * A key missing on `b` holds `a`'s value.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function lerpValue(a: any, b: any, t: number): any {
+  if (typeof a === "number" && typeof b === "number") return a + (b - a) * t;
+  if (typeof a === "boolean" || typeof b === "boolean") return t >= 1 ? b : a;
+  if (typeof a === "string" && typeof b === "string") {
+    if (/^#[0-9a-fA-F]{6}$/.test(a) && /^#[0-9a-fA-F]{6}$/.test(b)) return lerpHexColor(a, b, t);
+    return t >= 1 ? b : a;
+  }
+  if (Array.isArray(a) && Array.isArray(b)) return a.map((v, i) => lerpValue(v, b[i], t));
+  if (a && b && typeof a === "object" && typeof b === "object") {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const out: any = { ...a };
+    for (const k of Object.keys(a)) out[k] = lerpValue(a[k], b[k], t);
+    return out;
+  }
+  return b === undefined ? a : b;
+}
+
+/** Interpolate two id-keyed entity arrays; entities only in one side are held. */
+function interpEntities<T extends { id: string }>(
+  aArr: T[] | undefined,
+  bArr: T[] | undefined,
+  t: number
+): T[] | undefined {
+  if (!aArr && !bArr) return undefined;
+  const aMap = new Map((aArr ?? []).map((e) => [e.id, e]));
+  const bMap = new Map((bArr ?? []).map((e) => [e.id, e]));
+  const out: T[] = (aArr ?? []).map((ea) => {
+    const eb = bMap.get(ea.id);
+    return eb ? (lerpValue(ea, eb, t) as T) : ea;
+  });
+  for (const eb of bArr ?? []) if (!aMap.has(eb.id)) out.push(eb);
+  return out;
+}
+
+/** Interpolate two scene snapshots at eased local time t∈[0,1]. */
+export function interpolateScene(a: SceneSnapshot, b: SceneSnapshot, t: number): SceneSnapshot {
+  const out: SceneSnapshot = {};
+  if (a.splatTransform || b.splatTransform) {
+    out.splatTransform = lerpValue(a.splatTransform ?? b.splatTransform, b.splatTransform ?? a.splatTransform, t);
+  }
+  if (a.orbitTarget || b.orbitTarget) {
+    out.orbitTarget = lerpValue(a.orbitTarget ?? b.orbitTarget, b.orbitTarget ?? a.orbitTarget, t) as [number, number, number];
+  }
+  out.meshes = interpEntities(a.meshes, b.meshes, t);
+  out.lights = interpEntities(a.lights, b.lights, t);
+  out.ibls = interpEntities(a.ibls, b.ibls, t);
+  return out;
+}
+
+/**
+ * Evaluate the scene snapshot at a frame, mirroring evaluateCameraPath's
+ * bracketing/clamping. Returns null when no keyframe carries scene data (so
+ * camera-only paths and pre-Stage-3 saves behave exactly as before).
+ */
+export function evaluateSceneAtFrame(path: CameraPath, frameIndex: number): SceneSnapshot | null {
+  const { keyframes, durationFrames } = path;
+  if (keyframes.length === 0 || !keyframes.some((k) => k.scene)) return null;
+  if (keyframes.length === 1) return keyframes[0].scene ?? null;
+
+  const t = frameToTime(frameIndex, durationFrames);
+  if (t <= keyframes[0].time) return keyframes[0].scene ?? null;
+  if (t >= keyframes[keyframes.length - 1].time) return keyframes[keyframes.length - 1].scene ?? null;
+
+  let segIndex = 0;
+  for (let i = 0; i < keyframes.length - 1; i++) {
+    if (t >= keyframes[i].time && t <= keyframes[i + 1].time) { segIndex = i; break; }
+  }
+  const kf0 = keyframes[segIndex];
+  const kf1 = keyframes[segIndex + 1];
+  const segLen = kf1.time - kf0.time;
+  const rawT = segLen > 0 ? (t - kf0.time) / segLen : 0;
+  const localT = (kf0.interpolation ?? "smooth") === "easeInOut" ? easeInOutCubic(rawT) : rawT;
+
+  if (kf0.scene && kf1.scene) return interpolateScene(kf0.scene, kf1.scene, localT);
+  return kf0.scene ?? kf1.scene ?? null;
+}
+
 // ─── Serialization (for JSON persistence) ───────────────────────
 
 export interface SerializedCameraPath {
@@ -260,6 +379,7 @@ export interface SerializedCameraPath {
     quaternion: [number, number, number, number];
     fov: number;
     interpolation?: InterpolationMode;
+    scene?: SceneSnapshot;
   }[];
   durationFrames: number;
   fps: number;
@@ -273,20 +393,35 @@ export function serializePath(path: CameraPath): SerializedCameraPath {
       quaternion: [kf.quaternion.x, kf.quaternion.y, kf.quaternion.z, kf.quaternion.w],
       fov: kf.fov,
       interpolation: kf.interpolation,
+      scene: kf.scene,
     })),
     durationFrames: path.durationFrames,
     fps: path.fps,
   };
 }
 
+/** Tolerant of both the serialized [x,y,z] array form and the legacy
+ *  JSON-flattened {x,y,z} object form (older saves stored raw Vector3s). */
+function toVec3(p: unknown): THREE.Vector3 {
+  if (Array.isArray(p)) return new THREE.Vector3(p[0] ?? 0, p[1] ?? 0, p[2] ?? 0);
+  const o = (p ?? {}) as { x?: number; y?: number; z?: number };
+  return new THREE.Vector3(o.x ?? 0, o.y ?? 0, o.z ?? 0);
+}
+function toQuat(q: unknown): THREE.Quaternion {
+  if (Array.isArray(q)) return new THREE.Quaternion(q[0] ?? 0, q[1] ?? 0, q[2] ?? 0, q[3] ?? 1);
+  const o = (q ?? {}) as { x?: number; y?: number; z?: number; w?: number };
+  return new THREE.Quaternion(o.x ?? 0, o.y ?? 0, o.z ?? 0, o.w ?? 1);
+}
+
 export function deserializePath(data: SerializedCameraPath): CameraPath {
   return {
     keyframes: data.keyframes.map((kf) => ({
       time: kf.time,
-      position: new THREE.Vector3(kf.position[0], kf.position[1], kf.position[2]),
-      quaternion: new THREE.Quaternion(kf.quaternion[0], kf.quaternion[1], kf.quaternion[2], kf.quaternion[3]),
+      position: toVec3(kf.position),
+      quaternion: toQuat(kf.quaternion),
       fov: kf.fov,
       interpolation: kf.interpolation,
+      scene: kf.scene,
     })),
     durationFrames: data.durationFrames,
     fps: data.fps,

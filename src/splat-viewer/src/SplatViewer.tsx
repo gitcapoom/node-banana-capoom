@@ -28,13 +28,16 @@ import {
   calculateCameraFOV,
   getCameraFilenameSegment,
 } from "./lib/cinemaCameraPresets";
-import type { CameraPath, CameraKeyframe, InterpolationMode } from "./cameraAnimation";
+import type { CameraPath, CameraKeyframe, InterpolationMode, SceneSnapshot, SerializedCameraPath } from "./cameraAnimation";
 import {
   createEmptyPath,
   addKeyframe,
   removeKeyframe,
   updateKeyframe,
   evaluateCameraPath,
+  evaluateSceneAtFrame,
+  serializePath,
+  deserializePath,
   frameToTime,
 } from "./cameraAnimation";
 import {
@@ -967,6 +970,9 @@ export default function SplatViewer() {
 
   // Animation refs
   const cameraPathRef = useRef(cameraPath);
+  // Holds the latest applySceneSnapshot so the animate loop (created once in
+  // initScene) calls the current one without needing it in its dependency array.
+  const applySceneSnapshotRef = useRef<(snap: SceneSnapshot) => void>(() => {});
   const currentFrameRef = useRef(0);
   const isPlayingRef = useRef(false);
   const isLoopingRef = useRef(false);
@@ -1888,6 +1894,10 @@ export default function SplatViewer() {
             rollRef.current = euler.z;
           }
 
+          // Apply keyframed scene state (splat/mesh/light transforms + visibility).
+          const sceneSnap = evaluateSceneAtFrame(path, frame);
+          if (sceneSnap) applySceneSnapshotRef.current(sceneSnap);
+
           // Batch state updates via postMessage to avoid excessive renders
           if (frame % 2 === 0) {
             // @ts-expect-error — __setCurrentFrame injected below
@@ -2362,6 +2372,10 @@ export default function SplatViewer() {
   useEffect(() => { meshEntriesRef.current = meshEntries; }, [meshEntries]);
   useEffect(() => { lightEntriesRef.current = lightEntries; }, [lightEntries]);
   useEffect(() => { iblEntriesRef.current = iblEntries; }, [iblEntries]);
+  // Mirror the splat transform so captureSceneSnapshot reads the live value with
+  // a stable identity (no stale closure when called from the export handler).
+  const transformRef = useRef(transform);
+  useEffect(() => { transformRef.current = transform; }, [transform]);
 
   const pushUndo = useCallback(() => {
     const stack = undoStackRef.current;
@@ -2425,7 +2439,7 @@ export default function SplatViewer() {
         px: cam.position.x, py: cam.position.y, pz: cam.position.z,
         qx: cam.quaternion.x, qy: cam.quaternion.y, qz: cam.quaternion.z, qw: cam.quaternion.w,
       } : undefined,
-      cameraPath,
+      cameraPath: serializePath(cameraPath),
       orbitTarget: controls ? { x: controls.target.x, y: controls.target.y, z: controls.target.z } : undefined,
     };
   }, [transform, cameraPath]);
@@ -2434,7 +2448,7 @@ export default function SplatViewer() {
     if (state.meshEntries) setMeshEntries(state.meshEntries);
     if (state.lightEntries) setLightEntries(state.lightEntries);
     if (state.iblEntries) setIblEntries(state.iblEntries);
-    if (state.cameraPath) setCameraPath(state.cameraPath as CameraPath);
+    if (state.cameraPath) setCameraPath(deserializePath(state.cameraPath as SerializedCameraPath));
     // Restore an embedded splat FIRST (skip auto-centering) so the transform and
     // camera below apply to the loaded mesh rather than being reset by the load.
     if (state.splatFileData) {
@@ -3181,9 +3195,102 @@ export default function SplatViewer() {
         pitchRef.current = euler.x;
         rollRef.current = euler.z;
       }
+      // Apply keyframed scene state at this frame too.
+      const sceneSnap = evaluateSceneAtFrame(cameraPath, clamped);
+      if (sceneSnap) applySceneSnapshotRef.current(sceneSnap);
     },
     [cameraPath]
   );
+
+  // Capture the full animatable scene state (everything but the camera pose) as
+  // plain JSON for a keyframe. Meshes are referenced by id — fileData is NOT
+  // re-embedded, so keyframes stay small.
+  const captureSceneSnapshot = useCallback((): SceneSnapshot => {
+    const controls = controlsRef.current;
+    return {
+      splatTransform: JSON.parse(JSON.stringify(transformRef.current)),
+      meshes: meshEntriesRef.current.map((m) => ({
+        id: m.id,
+        transform: JSON.parse(JSON.stringify(m.transform)),
+        visible: m.visible,
+      })),
+      lights: lightEntriesRef.current.map((l) => JSON.parse(JSON.stringify(l))),
+      ibls: iblEntriesRef.current.map((i) => JSON.parse(JSON.stringify(i))),
+      orbitTarget: controls ? [controls.target.x, controls.target.y, controls.target.z] : undefined,
+    };
+  }, []);
+
+  // Apply an interpolated snapshot directly to the Three objects (no React state)
+  // so playback/scrub/export stay smooth. Mirrors the meshEntries/lightEntries/
+  // splat-transform effects. IBL is captured but not yet applied live (per-frame
+  // re-grading is too expensive).
+  const applySceneSnapshot = useCallback((snap: SceneSnapshot) => {
+    if (snap.splatTransform) {
+      const mesh = splatMeshRef.current as THREE.Object3D | null;
+      const t = snap.splatTransform as typeof defaultTransform;
+      if (mesh) {
+        mesh.position.set(t.position.x, t.position.y, t.position.z);
+        const userQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+          THREE.MathUtils.degToRad(t.rotation.x),
+          THREE.MathUtils.degToRad(t.rotation.y),
+          THREE.MathUtils.degToRad(t.rotation.z),
+          "XYZ",
+        ));
+        if (splatIsPlyRef.current) {
+          const basePly = new THREE.Quaternion().setFromRotationMatrix(
+            worldFrameToSceneRotation(colmapWorldFrameRef.current));
+          mesh.quaternion.copy(basePly).multiply(userQuat);
+        } else {
+          mesh.quaternion.copy(userQuat);
+        }
+        mesh.scale.set(t.scale.x, t.scale.y, t.scale.z);
+      }
+    }
+    for (const m of snap.meshes ?? []) {
+      const obj = meshObjectsRef.current.get(m.id);
+      if (!obj) continue;
+      const t = m.transform as MeshTransform;
+      obj.visible = m.visible;
+      obj.position.set(t.position.x, t.position.y, t.position.z);
+      obj.rotation.set(
+        THREE.MathUtils.degToRad(t.rotation.x),
+        THREE.MathUtils.degToRad(t.rotation.y),
+        THREE.MathUtils.degToRad(t.rotation.z),
+        "XYZ",
+      );
+      obj.scale.setScalar(t.scale);
+    }
+    for (const l of (snap.lights ?? []) as unknown as LightEntry[]) {
+      const light = lightObjectsRef.current.get(l.id);
+      if (!light) continue;
+      light.visible = l.visible;
+      light.color.set(l.color);
+      light.intensity = l.intensity;
+      light.position.set(l.position.x, l.position.y, l.position.z);
+      if (l.type === "spot") {
+        const spot = light as THREE.SpotLight;
+        spot.angle = l.angle;
+        spot.penumbra = l.penumbra;
+        spot.target.position.set(l.targetPosition.x, l.targetPosition.y, l.targetPosition.z);
+        spot.target.updateMatrixWorld();
+      } else if (l.type === "rect") {
+        const rect = light as THREE.RectAreaLight;
+        rect.width = l.width;
+        rect.height = l.height;
+        rect.rotation.set(
+          THREE.MathUtils.degToRad(l.rotation.x),
+          THREE.MathUtils.degToRad(l.rotation.y),
+          THREE.MathUtils.degToRad(l.rotation.z),
+          "XYZ",
+        );
+      }
+    }
+    if (snap.orbitTarget && controlsRef.current) {
+      controlsRef.current.target.set(snap.orbitTarget[0], snap.orbitTarget[1], snap.orbitTarget[2]);
+    }
+  }, []);
+  // Keep the ref current so the animate loop always calls the latest apply.
+  applySceneSnapshotRef.current = applySceneSnapshot;
 
   const handleAddKeyframe = useCallback(() => {
     const camera = cameraRef.current;
@@ -3193,9 +3300,10 @@ export default function SplatViewer() {
       position: camera.position.clone(),
       quaternion: camera.quaternion.clone(),
       fov: camera.fov,
+      scene: captureSceneSnapshot(),
     };
     setCameraPath((prev) => addKeyframe(prev, kf));
-  }, [currentFrame, cameraPath.durationFrames]);
+  }, [currentFrame, cameraPath.durationFrames, captureSceneSnapshot]);
 
   const handleRemoveKeyframe = useCallback(
     (index: number) => {
@@ -3373,6 +3481,9 @@ export default function SplatViewer() {
       // Hoisted out of the try so the finally clause can dispose them even
       // if the export throws midway.
       const exportDisposers: Array<() => void> = [];
+      // Live (edit-time) scene captured before the export walks the timeline, so
+      // the finally can restore it afterward.
+      let editScene: SceneSnapshot | null = null;
 
       try {
         // Update path with export settings
@@ -3576,6 +3687,7 @@ export default function SplatViewer() {
           };
         }
 
+        editScene = captureSceneSnapshot();
         const result = await exportVideo({
           renderer,
           scene,
@@ -3589,6 +3701,10 @@ export default function SplatViewer() {
               ? captureDepthFrameForExport
               : undefined,
           postProcess: exportPostProcess,
+          applySceneAtFrame: (frame) => {
+            const snap = evaluateSceneAtFrame(exportPath, frame);
+            if (snap) applySceneSnapshot(snap);
+          },
           onProgress: (frame, total) => {
             setExportProgress({ frame, total });
           },
@@ -3659,6 +3775,8 @@ export default function SplatViewer() {
       } finally {
         setIsExporting(false);
         setExportProgress(null);
+        // Restore the live scene to its pre-export (edit) state.
+        if (editScene) applySceneSnapshot(editScene);
         // Dispose any post-process resources (shaders + RTs) allocated for
         // this export run. Live preview keeps its own separate instances.
         for (const fn of exportDisposers) {
@@ -3666,7 +3784,7 @@ export default function SplatViewer() {
         }
       }
     },
-    [cameraPath, worldName, sensor.widthMm, focalLength, captureDepthFrameForExport]
+    [cameraPath, worldName, sensor.widthMm, focalLength, captureDepthFrameForExport, captureSceneSnapshot, applySceneSnapshot]
   );
 
   // ─── COLMAP import handler ──────────────────────────────────────
