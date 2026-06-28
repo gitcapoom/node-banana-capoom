@@ -2662,8 +2662,10 @@ export default function SplatViewer() {
       const baseName =
         (worldName || "scene").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9-_]+/g, "_").replace(/^_+|_+$/g, "") || "scene";
       const cleanDir = dir.replace(/[\\/]+$/, "");
-      const splatTargetPath = `${cleanDir}/${baseName}.${ext}`;
-      const jsonTargetPath = `${cleanDir}/${baseName}.json`;
+      // Match the folder's own separator (UNC/network paths use backslashes).
+      const sep = cleanDir.includes("\\") ? "\\" : "/";
+      const splatTargetPath = `${cleanDir}${sep}${baseName}.${ext}`;
+      const jsonTargetPath = `${cleanDir}${sep}${baseName}.json`;
 
       // 1) Splat bytes (kept Blob for file loads, re-fetched for URL loads).
       const blob = "blob" in src ? src.blob : await (await fetch(src.url)).blob();

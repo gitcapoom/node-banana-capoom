@@ -3,15 +3,16 @@ import { stat } from "fs/promises";
 import { createReadStream } from "fs";
 import { Readable } from "stream";
 import path from "path";
-import os from "os";
+import { validateWorkflowPath } from "@/utils/pathValidation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Serves bytes of a local file for the splat viewer to load sidecar assets
-// (the splat referenced by a saved scene JSON). Localhost-only + restricted to
-// the user's home directory, mirroring open-file's guards. Streamed so a large
-// splat is never buffered whole in server memory.
+// (the splat referenced by a saved scene JSON). Localhost-only + traversal-
+// guarded via validateWorkflowPath, which allows network/UNC/mapped-drive
+// project paths (matching list-directory). Streamed so a large splat is never
+// buffered whole in server memory.
 
 function isLocalhostRequest(req: NextRequest): boolean {
   const forwarded = req.headers.get("x-forwarded-for");
@@ -43,16 +44,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: false, error: "path is required" }, { status: 400 });
   }
 
-  // Normalize + restrict to the user's home directory (prevents traversal).
-  const normalizedPath = path.resolve(inputPath);
-  const homeDir = os.homedir();
-  if (!normalizedPath.startsWith(homeDir + path.sep) && normalizedPath !== homeDir) {
-    return NextResponse.json({ success: false, error: "Path is outside allowed directory" }, { status: 403 });
+  const v = validateWorkflowPath(inputPath);
+  if (!v.valid) {
+    return NextResponse.json({ success: false, error: v.error || "Invalid path" }, { status: 400 });
   }
 
   let size = 0;
   try {
-    const stats = await stat(normalizedPath);
+    const stats = await stat(inputPath);
     if (!stats.isFile()) {
       return NextResponse.json({ success: false, error: "Path is not a file" }, { status: 400 });
     }
@@ -62,9 +61,9 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const nodeStream = createReadStream(normalizedPath);
+    const nodeStream = createReadStream(inputPath);
     const webStream = Readable.toWeb(nodeStream) as unknown as ReadableStream;
-    const ext = path.extname(normalizedPath).toLowerCase();
+    const ext = path.extname(inputPath).toLowerCase();
     return new NextResponse(webStream, {
       status: 200,
       headers: {

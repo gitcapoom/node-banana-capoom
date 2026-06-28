@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
-import os from "os";
+import { validateWorkflowPath } from "@/utils/pathValidation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Writes bytes to a local path for the splat viewer's "save scene" (sidecar
-// splat + lean JSON). Localhost-only + restricted to the user's home directory,
-// mirroring open-file/read-file. The client uploads multipart binary (NOT
-// base64), so saving a large splat never inflates memory ~5x the way an
-// embedded-base64 download does.
+// splat + lean JSON). Localhost-only + traversal-guarded via validateWorkflowPath
+// (allows network/UNC/mapped-drive project paths, matching list-directory). The
+// client uploads multipart binary (NOT base64), so saving a large splat never
+// inflates memory ~5x the way an embedded-base64 download does.
 
 function isLocalhostRequest(req: NextRequest): boolean {
   const forwarded = req.headers.get("x-forwarded-for");
@@ -40,17 +40,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "file is required" }, { status: 400 });
     }
 
-    const normalizedPath = path.resolve(targetPath);
-    const homeDir = os.homedir();
-    if (!normalizedPath.startsWith(homeDir + path.sep) && normalizedPath !== homeDir) {
-      return NextResponse.json({ success: false, error: "Path is outside allowed directory" }, { status: 403 });
+    const v = validateWorkflowPath(targetPath);
+    if (!v.valid) {
+      return NextResponse.json({ success: false, error: v.error || "Invalid path" }, { status: 400 });
     }
 
-    await mkdir(path.dirname(normalizedPath), { recursive: true });
+    await mkdir(path.dirname(targetPath), { recursive: true });
     const buf = Buffer.from(await file.arrayBuffer());
-    await writeFile(normalizedPath, buf);
+    await writeFile(targetPath, buf);
 
-    return NextResponse.json({ success: true, path: normalizedPath, size: buf.length });
+    return NextResponse.json({ success: true, path: targetPath, size: buf.length });
   } catch {
     return NextResponse.json({ success: false, error: "Failed to write file" }, { status: 500 });
   }

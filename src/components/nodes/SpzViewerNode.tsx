@@ -200,9 +200,12 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     });
     if (nodeData.spzUrl) params.set("url", nodeData.spzUrl);
 
-    // Default "Save Scene" target: <project>/outputs/GS.
+    // Default "Save Scene" target: <project>/outputs/GS, using the project
+    // path's own separator (it may be a UNC/network path with backslashes).
     if (saveDirectoryPath) {
-      params.set("gsDir", `${saveDirectoryPath.replace(/[\\/]+$/, "")}/outputs/GS`);
+      const base = saveDirectoryPath.replace(/[\\/]+$/, "");
+      const sep = base.includes("\\") ? "\\" : "/";
+      params.set("gsDir", `${base}${sep}outputs${sep}GS`);
     }
 
     // image2GS outputs a .ply. Its filename can default to "world.spz", which
