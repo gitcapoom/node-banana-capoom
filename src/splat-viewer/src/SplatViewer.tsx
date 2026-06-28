@@ -2303,9 +2303,14 @@ export default function SplatViewer() {
     if (!sceneRef.current) {
       // Yield so the viewer-mode canvas container mounts before initScene()
       // (it bails without containerRef), then wait for the renderer to be ready.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Leaving the upload screen mounts the canvas container; wait for it to
+      // actually appear (one tick isn't always enough) before initScene, which
+      // bails without it.
+      for (let i = 0; i < 60 && !containerRef.current; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       initScene();
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     const scene = sceneRef.current;
@@ -2405,9 +2410,14 @@ export default function SplatViewer() {
 
     if (!sceneRef.current) {
       // Yield so React commits the viewer-mode DOM, then init the renderer.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Leaving the upload screen mounts the canvas container; wait for it to
+      // actually appear (one tick isn't always enough) before initScene, which
+      // bails without it.
+      for (let i = 0; i < 60 && !containerRef.current; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       initScene();
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     const scene = sceneRef.current;
