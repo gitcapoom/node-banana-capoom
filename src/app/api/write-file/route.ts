@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { mkdir, writeFile } from "fs/promises";
+import { mkdir } from "fs/promises";
+import { createWriteStream } from "fs";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
+import type { ReadableStream as NodeWebReadableStream } from "stream/web";
 import path from "path";
 import { validateWorkflowPath } from "@/utils/pathValidation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Writes bytes to a local path for the splat viewer's "save scene" (sidecar
-// splat + lean JSON). Localhost-only + traversal-guarded via validateWorkflowPath
-// (allows network/UNC/mapped-drive project paths, matching list-directory). The
-// client uploads multipart binary (NOT base64), so saving a large splat never
-// inflates memory ~5x the way an embedded-base64 download does.
+// Writes a request body to a local path for the splat viewer's "save scene"
+// (sidecar splat + lean JSON). The target path is a query param; the body is the
+// raw bytes, streamed straight to disk — so a large splat is never buffered
+// whole in memory (no ~5x base64 spike, no FormData/arrayBuffer ceiling).
+// Localhost-only + traversal-guarded via validateWorkflowPath (allows
+// network/UNC/mapped-drive project paths, matching list-directory).
 
 function isLocalhostRequest(req: NextRequest): boolean {
   const forwarded = req.headers.get("x-forwarded-for");
@@ -29,28 +34,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: "Forbidden: localhost only" }, { status: 403 });
   }
 
+  const targetPath = req.nextUrl.searchParams.get("path");
+  if (!targetPath || typeof targetPath !== "string") {
+    return NextResponse.json({ success: false, error: "path is required" }, { status: 400 });
+  }
+  const v = validateWorkflowPath(targetPath);
+  if (!v.valid) {
+    return NextResponse.json({ success: false, error: v.error || "Invalid path" }, { status: 400 });
+  }
+  if (!req.body) {
+    return NextResponse.json({ success: false, error: "request body is empty" }, { status: 400 });
+  }
+
   try {
-    const form = await req.formData();
-    const targetPath = form.get("path");
-    const file = form.get("file");
-    if (typeof targetPath !== "string" || !targetPath) {
-      return NextResponse.json({ success: false, error: "path is required" }, { status: 400 });
-    }
-    if (!(file instanceof File)) {
-      return NextResponse.json({ success: false, error: "file is required" }, { status: 400 });
-    }
-
-    const v = validateWorkflowPath(targetPath);
-    if (!v.valid) {
-      return NextResponse.json({ success: false, error: v.error || "Invalid path" }, { status: 400 });
-    }
-
     await mkdir(path.dirname(targetPath), { recursive: true });
-    const buf = Buffer.from(await file.arrayBuffer());
-    await writeFile(targetPath, buf);
-
-    return NextResponse.json({ success: true, path: targetPath, size: buf.length });
-  } catch {
-    return NextResponse.json({ success: false, error: "Failed to write file" }, { status: 500 });
+    const nodeStream = Readable.fromWeb(req.body as unknown as NodeWebReadableStream);
+    await pipeline(nodeStream, createWriteStream(targetPath));
+    return NextResponse.json({ success: true, path: targetPath });
+  } catch (e) {
+    return NextResponse.json(
+      { success: false, error: e instanceof Error ? e.message : "Failed to write file" },
+      { status: 500 }
+    );
   }
 }
