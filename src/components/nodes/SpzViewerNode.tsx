@@ -192,25 +192,32 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   }, [id, regenerateNode]);
 
   const handleOpenViewer = useCallback(() => {
-    if (!nodeData.spzUrl) return;
-
+    // Works with OR without a splat — opening empty lets the user load a saved
+    // scene (sidecar JSON) from inside the viewer.
     const params = new URLSearchParams({
-      url: nodeData.spzUrl,
       name: nodeData.filename || "Gaussian Splat Viewer",
       worldId: id, // Use node ID for postMessage routing
     });
+    if (nodeData.spzUrl) params.set("url", nodeData.spzUrl);
+
+    // Default "Save Scene" target: <project>/outputs/GS.
+    if (saveDirectoryPath) {
+      params.set("gsDir", `${saveDirectoryPath.replace(/[\\/]+$/, "")}/outputs/GS`);
+    }
 
     // image2GS outputs a .ply. Its filename can default to "world.spz", which
     // makes the viewer treat it as SPZ and SKIP the PLY orientation (→ 180°-X
     // off). When the source is image2GS, force a .ply name so the viewer applies
     // the PLY world rotation.
-    const { edges, nodes } = useWorkflowStore.getState();
-    const inEdge = edges.find(
-      (e) => e.target === id && (e.targetHandle === "3d" || (e.targetHandle ?? "").startsWith("3d")),
-    );
-    const src = inEdge ? nodes.find((n) => n.id === inEdge.source) : undefined;
-    if (src?.type === "image2GS") {
-      params.set("name", "splat.ply");
+    if (nodeData.spzUrl) {
+      const { edges, nodes } = useWorkflowStore.getState();
+      const inEdge = edges.find(
+        (e) => e.target === id && (e.targetHandle === "3d" || (e.targetHandle ?? "").startsWith("3d")),
+      );
+      const src = inEdge ? nodes.find((n) => n.id === inEdge.source) : undefined;
+      if (src?.type === "image2GS") {
+        params.set("name", "splat.ply");
+      }
     }
 
     // Lens/Sensor come from a camera.json loaded directly on THIS node.
@@ -228,7 +235,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     const w = window.open(viewerUrl, `spz-viewer-${id}`, "width=1280,height=720,alwaysOnTop=yes");
     viewerWindowRef.current = w;
     updateNodeData(id, { viewerOpen: true });
-  }, [id, nodeData.spzUrl, nodeData.filename, nodeData.cameraJsonFocal, nodeData.cameraJsonAperture, nodeData.viewerState, updateNodeData]);
+  }, [id, nodeData.spzUrl, nodeData.filename, nodeData.cameraJsonFocal, nodeData.cameraJsonAperture, nodeData.viewerState, saveDirectoryPath, updateNodeData]);
 
   const handleLoadCameraJson = useCallback(
     async (file: File) => {
@@ -367,6 +374,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
 
         {/* Drop Zone / File Info */}
         {!hasFile ? (
+          <>
           <div
             onDrop={handleDrop}
             onDragOver={handleDragOver}
@@ -403,6 +411,15 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
               />
             </label>
           </div>
+          {/* Open the viewer with no splat, to load a previously saved scene */}
+          <button
+            onClick={handleOpenViewer}
+            className="mt-2 w-full bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[11px] font-medium py-1.5 px-3 rounded transition-colors"
+            title="Open the viewer empty, then load a saved scene (.json) from inside it"
+          >
+            Open empty viewer — load saved scene
+          </button>
+          </>
         ) : (
           <div className="space-y-2">
             {/* File info */}

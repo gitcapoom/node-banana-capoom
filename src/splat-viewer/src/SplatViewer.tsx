@@ -792,6 +792,10 @@ export default function SplatViewer() {
   // while an input is focused so typing isn't clobbered.
   const [camXform, setCamXform] = useState({ px: 0, py: 0, pz: 0, rx: 0, ry: 0, rz: 0 });
   const camInputFocusedRef = useRef(false);
+  // Sidecar "Save Scene" target dir (default <project>/outputs/GS, passed from
+  // the node as ?gsDir=; overridable via Browse). null → prompt to browse.
+  const [saveDir, setSaveDir] = useState<string | null>(null);
+  const [saveSceneStatus, setSaveSceneStatus] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [navMode, setNavMode] = useState<"orbit" | "fly">("fly");
 
@@ -1135,6 +1139,13 @@ export default function SplatViewer() {
     const sensorP = Number(params.get("sensor"));
     if (Number.isFinite(lensP) && lensP > 0) setCustomLensMm(lensP);
     if (Number.isFinite(sensorP) && sensorP > 0) setCustomSensorMm(sensorP);
+
+    // Default "Save Scene" folder: the node's <project>/outputs/GS, else the
+    // last-used folder.
+    const gsDirP = params.get("gsDir");
+    let lastDir: string | null = null;
+    try { lastDir = localStorage.getItem("node-banana-gs-save-dir"); } catch (_) { /* ignore */ }
+    setSaveDir(gsDirP || lastDir);
 
     // Restore viewer state and resolve the splat URL atomically.
     // If saved state has splatFileData, decode it to a fresh blob URL so
@@ -2251,6 +2262,18 @@ export default function SplatViewer() {
       dofTargetRef.current = null;
       depthLiveTargetRef.current = null;
       depthVisLiveTargetRef.current = null;
+      // Free the splat (GPU) + its retained source bytes, IBL cube targets, and
+      // the PMREM generator so a closed/reopened viewer doesn't leak VRAM.
+      if (splatMeshRef.current) {
+        (splatMeshRef.current as { dispose?: () => void })?.dispose?.();
+        splatMeshRef.current = null;
+      }
+      splatSourceRef.current = null;
+      for (const rt of iblRawCubeRTRef.current.values()) rt.dispose();
+      for (const tex of iblGradedPmremRef.current.values()) tex.dispose();
+      iblRawCubeRTRef.current.clear();
+      iblGradedPmremRef.current.clear();
+      pmremGeneratorRef.current?.dispose();
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -2479,6 +2502,7 @@ export default function SplatViewer() {
     orbitTarget?: { x: number; y: number; z: number };
     splatFileData?: string; // base64 data URL of the source splat — embedded on download only
     splatFileName?: string;
+    splatPath?: string;     // absolute path of a sidecar splat saved beside the JSON (outputs/GS)
   }
 
   const buildSaveState = useCallback((): ViewerSaveState => {
@@ -2511,6 +2535,18 @@ export default function SplatViewer() {
         const file = new File([blob], state.splatFileName || "scene.spz", { type: blob.type });
         await loadSplatFromFile(file, { skipCenter: true });
       } catch (e) { console.warn("Could not restore embedded splat:", e); }
+    } else if (state.splatPath) {
+      // Sidecar save: fetch the splat that lives beside the JSON (outputs/GS).
+      try {
+        const resp = await fetch(`/api/read-file?path=${encodeURIComponent(state.splatPath)}`);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const file = new File([blob], state.splatFileName || "scene.spz", { type: blob.type });
+          await loadSplatFromFile(file, { skipCenter: true });
+        } else {
+          setError("Saved splat file not found at its recorded path.");
+        }
+      } catch (e) { console.warn("Could not load sidecar splat:", e); }
     }
     if (state.transform) setTransform(state.transform);
     if (state.camera) {
@@ -2581,6 +2617,68 @@ export default function SplatViewer() {
     const json = JSON.stringify(state, null, 2);
     triggerDownload(new Blob([json], { type: "application/json" }), "splat-viewer-state.json");
   }, [buildSaveState]);
+
+  // Save the scene as a sidecar pair in `saveDir` (default outputs/GS): the splat
+  // as its own file (multipart binary — NO base64, so no ~5x save-time memory
+  // spike) + a lean JSON that references it by absolute path.
+  const saveSceneToFolder = useCallback(async () => {
+    const dir = (saveDir ?? "").trim();
+    if (!dir) { setSaveSceneStatus("Pick a folder first — Browse…"); return; }
+    const src = splatSourceRef.current;
+    if (!src) { setSaveSceneStatus("No splat loaded to save."); return; }
+    setSaveSceneStatus("Saving…");
+    try {
+      const ext = splatIsPlyRef.current ? "ply" : "spz";
+      const baseName =
+        (worldName || "scene").replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9-_]+/g, "_").replace(/^_+|_+$/g, "") || "scene";
+      const cleanDir = dir.replace(/[\\/]+$/, "");
+      const splatTargetPath = `${cleanDir}/${baseName}.${ext}`;
+      const jsonTargetPath = `${cleanDir}/${baseName}.json`;
+
+      // 1) Splat bytes (kept Blob for file loads, re-fetched for URL loads).
+      const blob = "blob" in src ? src.blob : await (await fetch(src.url)).blob();
+      const splatForm = new FormData();
+      splatForm.append("path", splatTargetPath);
+      splatForm.append("file", new File([blob], `${baseName}.${ext}`, { type: blob.type || "application/octet-stream" }));
+      const splatRes = await fetch("/api/write-file", { method: "POST", body: splatForm });
+      if (!splatRes.ok) throw new Error("could not write splat");
+      const splatJson = await splatRes.json();
+      const savedSplatPath: string = splatJson.path || splatTargetPath;
+
+      // 2) Lean state JSON referencing the splat by absolute path (no base64).
+      const state = buildSaveState();
+      state.splatPath = savedSplatPath;
+      state.splatFileName = `${baseName}.${ext}`;
+      const jsonForm = new FormData();
+      jsonForm.append("path", jsonTargetPath);
+      jsonForm.append("file", new File([JSON.stringify(state)], `${baseName}.json`, { type: "application/json" }));
+      const jsonRes = await fetch("/api/write-file", { method: "POST", body: jsonForm });
+      if (!jsonRes.ok) throw new Error("could not write scene JSON");
+
+      setSaveSceneStatus(`Saved → ${cleanDir}`);
+    } catch (e) {
+      setSaveSceneStatus(`Save failed: ${e instanceof Error ? e.message : "error"}`);
+    }
+  }, [saveDir, worldName, buildSaveState]);
+
+  // Pick a different save folder via the native dialog; remembered for next time.
+  const browseSaveDir = useCallback(async () => {
+    try {
+      const res = await fetch("/api/browse-directory");
+      const data = await res.json();
+      if (data?.success && !data.cancelled && data.path) {
+        setSaveDir(data.path);
+        try { localStorage.setItem("node-banana-gs-save-dir", data.path); } catch (_) { /* ignore */ }
+      }
+    } catch (_) { setSaveSceneStatus("Could not open the folder picker."); }
+  }, []);
+
+  // Auto-clear the save toast (but keep "Saving…" until it resolves).
+  useEffect(() => {
+    if (!saveSceneStatus || saveSceneStatus === "Saving…") return;
+    const t = window.setTimeout(() => setSaveSceneStatus(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [saveSceneStatus]);
 
   const loadSaveStateInputRef = useRef<HTMLInputElement>(null);
   const handleLoadSaveStateFile = useCallback((file: File) => {
@@ -2832,23 +2930,24 @@ export default function SplatViewer() {
           if (!scene) continue;
           const { id: eid, name, fileData, transform, visible } = entry;
           (async () => {
+            let blobUrl: string | null = null;
             try {
               const response = await fetch(fileData);
               const blob = await response.blob();
-              const blobUrl = URL.createObjectURL(blob);
+              blobUrl = URL.createObjectURL(blob);
+              const loadUrl = blobUrl; // const → narrows to string inside loader closures
               const isObj = name.toLowerCase().endsWith(".obj");
               let object: THREE.Object3D;
               if (isObj) {
                 const { OBJLoader } = await getOBJLoader();
                 const loader = new OBJLoader();
-                object = await new Promise<THREE.Object3D>((res, rej) => loader.load(blobUrl, res, undefined, rej));
+                object = await new Promise<THREE.Object3D>((res, rej) => loader.load(loadUrl, res, undefined, rej));
               } else {
                 const { GLTFLoader } = await getGLTFLoader();
                 const loader = new GLTFLoader();
-                const gltf = await new Promise<{ scene: THREE.Object3D }>((res, rej) => loader.load(blobUrl, res, undefined, rej));
+                const gltf = await new Promise<{ scene: THREE.Object3D }>((res, rej) => loader.load(loadUrl, res, undefined, rej));
                 object = gltf.scene;
               }
-              URL.revokeObjectURL(blobUrl);
               object.traverse((child) => {
                 const mesh = child as THREE.Mesh;
                 if (mesh.isMesh) {
@@ -2871,6 +2970,8 @@ export default function SplatViewer() {
               meshObjectsRef.current.set(eid, object);
             } catch (err) {
               console.warn("Failed to restore mesh:", name, err);
+            } finally {
+              if (blobUrl) URL.revokeObjectURL(blobUrl); // revoke even on load failure
             }
           })();
         }
@@ -4102,6 +4203,20 @@ export default function SplatViewer() {
             />
           </label>
 
+          {/* Restore a previously saved scene (sidecar or self-contained JSON) */}
+          <label className="mt-3 inline-flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-sm font-medium py-2.5 px-5 rounded-lg cursor-pointer transition-colors">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8 17H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v9a2 2 0 01-2 2h-3m-1-4l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            Load saved scene (.json)
+            <input
+              type="file"
+              accept=".json,application/json"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLoadSaveStateFile(f); e.target.value = ""; }}
+              className="hidden"
+            />
+          </label>
+
           {error && (
             <p className="text-red-400 text-xs mt-4">{error}</p>
           )}
@@ -4811,14 +4926,36 @@ export default function SplatViewer() {
                 </svg>
               </button>
 
-              {/* Save viewer state */}
+              {/* Save scene → outputs/GS (sidecar: splat file + lean JSON, no base64) */}
               <button
-                onClick={downloadSaveState}
+                onClick={saveSceneToFolder}
                 className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
-                title="Save viewer state (meshes, lights, IBL, camera)"
+                title={saveDir ? `Save scene → ${saveDir}` : "Save scene (choose a folder first)"}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+              </button>
+
+              {/* Choose save folder */}
+              <button
+                onClick={browseSaveDir}
+                className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
+                title="Choose the save folder"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                </svg>
+              </button>
+
+              {/* Download self-contained .json (portable — embeds the splat) */}
+              <button
+                onClick={downloadSaveState}
+                className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
+                title="Download self-contained .json (embeds the splat — large file)"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
                 </svg>
               </button>
 
@@ -4834,6 +4971,11 @@ export default function SplatViewer() {
               </button>
               <input ref={loadSaveStateInputRef} type="file" accept=".json" style={{ display: "none" }}
                 onChange={e => { const f = e.target.files?.[0]; if (f) handleLoadSaveStateFile(f); e.target.value = ""; }} />
+              {saveSceneStatus && (
+                <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-md bg-neutral-900/95 border border-neutral-700 text-[11px] text-neutral-200 shadow-lg pointer-events-none max-w-[80vw] truncate">
+                  {saveSceneStatus}
+                </div>
+              )}
 
               {/* Transform toggle */}
               <button
