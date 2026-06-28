@@ -52,6 +52,7 @@ import { exportVideo } from "./videoExport";
 import type { ExportSettings } from "./ExportDialog";
 import Timeline from "./Timeline";
 import ExportDialog from "./ExportDialog";
+import { DirectoryPicker } from "./DirectoryPicker";
 import MeshPanel from "./MeshPanel";
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -796,6 +797,7 @@ export default function SplatViewer() {
   // the node as ?gsDir=; overridable via Browse). null → prompt to browse.
   const [saveDir, setSaveDir] = useState<string | null>(null);
   const [saveSceneStatus, setSaveSceneStatus] = useState<string | null>(null);
+  const [showDirPicker, setShowDirPicker] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [navMode, setNavMode] = useState<"orbit" | "fly">("fly");
 
@@ -2689,16 +2691,11 @@ export default function SplatViewer() {
     }
   }, [saveDir, worldName, buildSaveState]);
 
-  // Pick a different save folder via the native dialog; remembered for next time.
-  const browseSaveDir = useCallback(async () => {
-    try {
-      const res = await fetch("/api/browse-directory");
-      const data = await res.json();
-      if (data?.success && !data.cancelled && data.path) {
-        setSaveDir(data.path);
-        try { localStorage.setItem("node-banana-gs-save-dir", data.path); } catch (_) { /* ignore */ }
-      }
-    } catch (_) { setSaveSceneStatus("Could not open the folder picker."); }
+  // Apply a folder chosen in the in-viewer picker; remembered for next time.
+  const handlePickSaveDir = useCallback((p: string) => {
+    setSaveDir(p);
+    try { localStorage.setItem("node-banana-gs-save-dir", p); } catch (_) { /* ignore */ }
+    setShowDirPicker(false);
   }, []);
 
   // Auto-clear the save toast (but keep "Saving…" until it resolves).
@@ -4967,7 +4964,7 @@ export default function SplatViewer() {
 
               {/* Choose save folder */}
               <button
-                onClick={browseSaveDir}
+                onClick={() => setShowDirPicker(true)}
                 className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
                 title="Choose the save folder"
               >
@@ -5003,6 +5000,13 @@ export default function SplatViewer() {
                 <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-md bg-neutral-900/95 border border-neutral-700 text-[11px] text-neutral-200 shadow-lg pointer-events-none max-w-[80vw] truncate">
                   {saveSceneStatus}
                 </div>
+              )}
+              {showDirPicker && (
+                <DirectoryPicker
+                  initialPath={saveDir || undefined}
+                  onSelect={handlePickSaveDir}
+                  onCancel={() => setShowDirPicker(false)}
+                />
               )}
 
               {/* Transform toggle */}
