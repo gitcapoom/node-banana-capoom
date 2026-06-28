@@ -2595,7 +2595,8 @@ export default function SplatViewer() {
       if (typeof co.lensIndex === "number") setLensIndex(co.lensIndex);
       if (typeof co.aspectIndex === "number") setAspectIndex(co.aspectIndex);
     }
-    if (state.cameraPath) setCameraPath(deserializePath(state.cameraPath as SerializedCameraPath));
+    const loadedPath = state.cameraPath ? deserializePath(state.cameraPath as SerializedCameraPath) : null;
+    if (loadedPath) setCameraPath(loadedPath);
     // Restore an embedded splat FIRST (skip auto-centering) so the transform and
     // camera below apply to the loaded mesh rather than being reset by the load.
     if (state.splatFileData) {
@@ -2653,6 +2654,26 @@ export default function SplatViewer() {
         yaw: yawRef.current, pitch: pitchRef.current, roll: rollRef.current,
       };
       setHasInitialCameraSnapshot(true);
+    }
+    // Apply the timeline's current frame (0 on load) so the scene reflects the
+    // first keyframe without a manual scrub. Brief wait so the splat-load has
+    // materialized meshes/lights/IBLs (their effects key on splatLoaded) and the
+    // snapshot lands on real objects.
+    if (loadedPath && loadedPath.keyframes.length > 0) {
+      await new Promise((r) => setTimeout(r, 200));
+      const frame = currentFrameRef.current;
+      const camEval = evaluateCameraPath(loadedPath, frame);
+      const cam = cameraRef.current;
+      if (camEval && cam) {
+        cam.position.copy(camEval.position);
+        cam.quaternion.copy(camEval.quaternion);
+        cam.fov = camEval.fov;
+        cam.updateProjectionMatrix();
+        const e = new THREE.Euler().setFromQuaternion(cam.quaternion, "YXZ");
+        yawRef.current = e.y; pitchRef.current = e.x; rollRef.current = e.z;
+      }
+      const sceneSnap = evaluateSceneAtFrame(loadedPath, frame);
+      if (sceneSnap) applySceneSnapshotRef.current(sceneSnap);
     }
   }, [loadSplatFromFile]);
 
@@ -2853,7 +2874,7 @@ export default function SplatViewer() {
     }
   }, []);
 
-  useEffect(() => { applyIblsToMeshes(); }, [iblEntries, applyIblsToMeshes]);
+  useEffect(() => { applyIblsToMeshes(); }, [iblEntries, applyIblsToMeshes, splatLoaded]);
 
   const captureIBL = useCallback(async (position: THREE.Vector3 | string) => {
     const scene = sceneRef.current;
@@ -2926,7 +2947,7 @@ export default function SplatViewer() {
     }
     applyIblsToMeshes();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [iblEntries]);
+  }, [iblEntries, splatLoaded]);
 
   // ─── Mesh overlay: load, transform, remove ──────────────────────
 
@@ -3062,7 +3083,7 @@ export default function SplatViewer() {
     }
     // Mesh positions changed — re-evaluate IBL volume influence
     applyIblsToMeshes();
-  }, [meshEntries, applyIblsToMeshes]);
+  }, [meshEntries, applyIblsToMeshes, splatLoaded]);
 
   const removeMesh = useCallback((id: string) => {
     const scene = sceneRef.current;
@@ -3174,7 +3195,7 @@ export default function SplatViewer() {
         (helper as THREE.PointLightHelper)?.update?.();
       }
     }
-  }, [lightEntries, createLightInScene]);
+  }, [lightEntries, createLightInScene, splatLoaded]);
 
   const removeLight = useCallback((id: string) => {
     const scene = sceneRef.current;
