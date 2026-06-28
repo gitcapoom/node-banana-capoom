@@ -2667,25 +2667,25 @@ export default function SplatViewer() {
       const splatTargetPath = `${cleanDir}${sep}${baseName}.${ext}`;
       const jsonTargetPath = `${cleanDir}${sep}${baseName}.json`;
 
-      // 1) Splat bytes (kept Blob for file loads, re-fetched for URL loads).
+      // 1) Splat bytes (kept Blob for file loads, re-fetched for URL loads),
+      //    streamed straight to disk as the raw request body.
       const blob = "blob" in src ? src.blob : await (await fetch(src.url)).blob();
-      const splatForm = new FormData();
-      splatForm.append("path", splatTargetPath);
-      splatForm.append("file", new File([blob], `${baseName}.${ext}`, { type: blob.type || "application/octet-stream" }));
-      const splatRes = await fetch("/api/write-file", { method: "POST", body: splatForm });
-      if (!splatRes.ok) throw new Error("could not write splat");
-      const splatJson = await splatRes.json();
+      const splatRes = await fetch(`/api/write-file?path=${encodeURIComponent(splatTargetPath)}`, { method: "POST", body: blob });
+      const splatJson = await splatRes.json().catch(() => null);
+      if (!splatRes.ok || !splatJson?.success) {
+        throw new Error(`could not write splat — ${splatJson?.error || `HTTP ${splatRes.status}`} · ${splatTargetPath}`);
+      }
       const savedSplatPath: string = splatJson.path || splatTargetPath;
 
       // 2) Lean state JSON referencing the splat by absolute path (no base64).
       const state = buildSaveState();
       state.splatPath = savedSplatPath;
       state.splatFileName = `${baseName}.${ext}`;
-      const jsonForm = new FormData();
-      jsonForm.append("path", jsonTargetPath);
-      jsonForm.append("file", new File([JSON.stringify(state)], `${baseName}.json`, { type: "application/json" }));
-      const jsonRes = await fetch("/api/write-file", { method: "POST", body: jsonForm });
-      if (!jsonRes.ok) throw new Error("could not write scene JSON");
+      const jsonRes = await fetch(`/api/write-file?path=${encodeURIComponent(jsonTargetPath)}`, { method: "POST", body: JSON.stringify(state) });
+      const jsonResult = await jsonRes.json().catch(() => null);
+      if (!jsonRes.ok || !jsonResult?.success) {
+        throw new Error(`could not write scene JSON — ${jsonResult?.error || `HTTP ${jsonRes.status}`}`);
+      }
 
       setSaveSceneStatus(`Saved → ${cleanDir}`);
     } catch (e) {
