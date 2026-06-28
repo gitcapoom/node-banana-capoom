@@ -793,6 +793,11 @@ export default function SplatViewer() {
   // while an input is focused so typing isn't clobbered.
   const [camXform, setCamXform] = useState({ px: 0, py: 0, pz: 0, rx: 0, ry: 0, rz: 0 });
   const camInputFocusedRef = useRef(false);
+  // Live mirrors of the FOV inputs so the panel poll can derive the lens from a
+  // keyframe-driven camera.fov without stale-closure values.
+  const sensorWidthRef = useRef(0);
+  const aspectRef = useRef(1);
+  const focalLengthRef = useRef(0);
   // Sidecar "Save Scene" target dir (default <project>/outputs/GS, passed from
   // the node as ?gsDir=; overridable via Browse). null → prompt to browse.
   const [saveDir, setSaveDir] = useState<string | null>(null);
@@ -1084,6 +1089,17 @@ export default function SplatViewer() {
         return (d(prev.px, nv.px) || d(prev.py, nv.py) || d(prev.pz, nv.pz) ||
           d(prev.rx, nv.rx) || d(prev.ry, nv.ry) || d(prev.rz, nv.rz)) ? nv : prev;
       });
+      // Reflect a keyframe-driven FOV as the displayed lens: focal =
+      // sensorWidth / (2·aspect·tan(vFov/2)). Sensor can't be derived from FOV,
+      // so it stays. Epsilon-guarded so a static camera (fov already == the
+      // lens/sensor-derived vFov) leaves the lens/preset untouched.
+      const sw = sensorWidthRef.current, ar = aspectRef.current;
+      if (sw > 0 && ar > 0) {
+        const derivedFocal = sw / (2 * ar * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2));
+        if (Number.isFinite(derivedFocal) && derivedFocal > 0 && Math.abs(derivedFocal - focalLengthRef.current) > 0.05) {
+          setCustomLensMm(Math.round(derivedFocal * 100) / 100);
+        }
+      }
     };
     sync();
     const id = window.setInterval(sync, 150);
@@ -1130,6 +1146,9 @@ export default function SplatViewer() {
   const focalLength = customLensMm ?? LENS_FOCAL_LENGTHS[lensIndex];
   const aspectRatio = ASPECT_RATIO_PRESETS[aspectIndex];
   const vFov = calculateCameraFOV(sensor.widthMm, focalLength, aspectRatio.ratio);
+  sensorWidthRef.current = sensor.widthMm;
+  aspectRef.current = aspectRatio.ratio;
+  focalLengthRef.current = focalLength;
   const selectedAspectRef = useRef(aspectRatio.ratio);
 
   // ─── Parse URL params on mount ──────────────────────────────────
@@ -3184,7 +3203,9 @@ export default function SplatViewer() {
 
   useEffect(() => {
     selectedAspectRef.current = aspectRatio.ratio;
-    if (!cameraRef.current) return;
+    // During playback the loop owns camera.fov (keyframed); don't fight it when
+    // the panel poll nudges the derived lens.
+    if (!cameraRef.current || isPlayingRef.current) return;
     cameraRef.current.fov = vFov;
     cameraRef.current.aspect = aspectRatio.ratio;
     cameraRef.current.updateProjectionMatrix();
@@ -4438,6 +4459,8 @@ export default function SplatViewer() {
                     step="0.1"
                     min="1"
                     value={Number(sensor.widthMm.toFixed(2))}
+                    onFocus={() => { camInputFocusedRef.current = true; }}
+                    onBlur={() => { camInputFocusedRef.current = false; }}
                     onChange={(e) => setCustomSensorMm(e.target.value === "" ? null : Number(e.target.value))}
                     className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-2 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
                   />
@@ -4451,6 +4474,8 @@ export default function SplatViewer() {
                     step="1"
                     min="1"
                     value={focalLength}
+                    onFocus={() => { camInputFocusedRef.current = true; }}
+                    onBlur={() => { camInputFocusedRef.current = false; }}
                     onChange={(e) => setCustomLensMm(e.target.value === "" ? null : Number(e.target.value))}
                     className="w-full bg-neutral-800 text-neutral-200 text-[11px] rounded px-2 py-1 border border-neutral-700 focus:border-indigo-500 focus:outline-none"
                   />
