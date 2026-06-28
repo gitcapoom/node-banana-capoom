@@ -805,6 +805,12 @@ export default function SplatViewer() {
   // The project folder (passed from the node); camera.json / 3D_Renders defaults
   // are derived one level up from it.
   const projectDirRef = useRef<string | null>(null);
+  // Show/hide light helpers (the octahedron/cone gizmos) in the viewport.
+  // Default hidden; toggle persists. (Renders/depth already exclude them.)
+  const [showHelpers, setShowHelpers] = useState<boolean>(() => {
+    try { return localStorage.getItem("node-banana-show-light-helpers") === "true"; } catch { return false; }
+  });
+  const showHelpersRef = useRef(false);
   const [fileDialog, setFileDialog] = useState<{
     mode: "save" | "open";
     initialPath?: string;
@@ -2515,6 +2521,15 @@ export default function SplatViewer() {
   // a stable identity (no stale closure when called from the export handler).
   const transformRef = useRef(transform);
   useEffect(() => { transformRef.current = transform; }, [transform]);
+  // Light-helper visibility toggle → apply to existing helpers + persist.
+  useEffect(() => {
+    showHelpersRef.current = showHelpers;
+    try { localStorage.setItem("node-banana-show-light-helpers", String(showHelpers)); } catch (_) { /* ignore */ }
+    for (const [id, helper] of lightHelpersRef.current) {
+      const entry = lightEntriesRef.current.find((e) => e.id === id);
+      helper.visible = showHelpers && (entry?.visible ?? true);
+    }
+  }, [showHelpers]);
 
   const pushUndo = useCallback(() => {
     const stack = undoStackRef.current;
@@ -2879,6 +2894,10 @@ export default function SplatViewer() {
     // Render the scene to a PNG blob at W×H (transparent background for comp).
     const renderRgb = async (): Promise<Blob> => {
       const rt = new THREE.WebGLRenderTarget(W, H, { format: THREE.RGBAFormat, type: THREE.UnsignedByteType });
+      // Encode linear→sRGB on write so the off-screen render matches the canvas
+      // (renderer.outputColorSpace only applies to the default framebuffer).
+      // Without this, lit meshes come out gamma-dark.
+      rt.texture.colorSpace = THREE.SRGBColorSpace;
       camera.aspect = aspect; camera.updateProjectionMatrix();
       renderer.setRenderTarget(rt);
       renderer.setClearColor(0x000000, 0);
@@ -3351,6 +3370,7 @@ export default function SplatViewer() {
       helper.position.copy(light.position);
     }
     scene.add(helper);
+    helper.visible = showHelpersRef.current && entry.visible;
     lightHelpersRef.current.set(entry.id, helper);
     lightHelperToIdRef.current.set(helper, entry.id);
   }, []);
@@ -3398,7 +3418,7 @@ export default function SplatViewer() {
         }
       }
       if (helper) {
-        helper.visible = entry.visible;
+        helper.visible = showHelpersRef.current && entry.visible;
         (helper as THREE.PointLightHelper)?.update?.();
       }
     }
@@ -5314,6 +5334,21 @@ export default function SplatViewer() {
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M7 21L3 9m18 12L17 9M12 3v18M3 9h18" />
+                </svg>
+              </button>
+
+              {/* Light helpers toggle (octahedron/cone gizmos) */}
+              <button
+                onClick={() => setShowHelpers((v) => !v)}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
+                  showHelpers
+                    ? "bg-indigo-600 text-white"
+                    : "bg-neutral-800/80 text-neutral-400 hover:text-white"
+                }`}
+                title="Show/hide light helpers"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 18h6M10 21h4M12 3a6 6 0 00-3.6 10.8c.4.3.6.8.6 1.2v.5h6v-.5c0-.4.2-.9.6-1.2A6 6 0 0012 3z" />
                 </svg>
               </button>
 
