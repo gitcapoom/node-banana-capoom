@@ -802,7 +802,16 @@ export default function SplatViewer() {
   // the node as ?gsDir=; overridable via Browse). null → prompt to browse.
   const [saveDir, setSaveDir] = useState<string | null>(null);
   const [saveSceneStatus, setSaveSceneStatus] = useState<string | null>(null);
-  const [fileDialog, setFileDialog] = useState<"save" | "open" | null>(null);
+  // The project folder (passed from the node); camera.json / 3D_Renders defaults
+  // are derived one level up from it.
+  const projectDirRef = useRef<string | null>(null);
+  const [fileDialog, setFileDialog] = useState<{
+    mode: "save" | "open";
+    initialPath?: string;
+    defaultFilename?: string;
+    extension?: string;
+    onConfirm: (a: string, b?: string) => void;
+  } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [navMode, setNavMode] = useState<"orbit" | "fly">("fly");
 
@@ -1169,6 +1178,7 @@ export default function SplatViewer() {
     // Default "Save Scene" folder: the node's <project>/outputs/GS, else the
     // last-used folder.
     const gsDirP = params.get("gsDir");
+    projectDirRef.current = params.get("projectDir");
     let lastDir: string | null = null;
     try { lastDir = localStorage.getItem("node-banana-gs-save-dir"); } catch (_) { /* ignore */ }
     setSaveDir(gsDirP || lastDir);
@@ -2777,6 +2787,98 @@ export default function SplatViewer() {
     }
   }, [applySaveState, saveStateToLocalStorage]);
 
+  // ─── Camera.json export (current frame, external world frame) ──────
+
+  // Parent of the project folder — camera.json / 3D_Renders default location.
+  const baseDir = useCallback((): string | null => {
+    const p = projectDirRef.current;
+    if (!p) return null;
+    const clean = p.replace(/[\\/]+$/, "");
+    const i = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+    return i > 0 ? clean.slice(0, i) : clean;
+  }, []);
+
+  // Camera pose at the current timeline frame (keyframed if a path exists).
+  const getCurrentFrameCamera = useCallback((): { position: THREE.Vector3; quaternion: THREE.Quaternion; fov: number } | null => {
+    const path = cameraPathRef.current;
+    if (path && path.keyframes.length > 0) {
+      const ev = evaluateCameraPath(path, currentFrameRef.current);
+      if (ev) return { position: ev.position.clone(), quaternion: ev.quaternion.clone(), fov: ev.fov };
+    }
+    const cam = cameraRef.current;
+    return cam ? { position: cam.position.clone(), quaternion: cam.quaternion.clone(), fov: cam.fov } : null;
+  }, []);
+
+  // Build a camera.json (same schema as the pipeline example) from the current
+  // frame: translation/rotation in the external world frame (COLMAP track frame
+  // minus the COLMAP camera-axes flip), focal from the frame's FOV.
+  const buildCameraJson = useCallback((cameraName: string) => {
+    const fc = getCurrentFrameCamera();
+    if (!fc) return null;
+    const sceneToWorld = worldFrameToSceneRotation(colmapWorldFrameRef.current).clone().transpose();
+    const posWorld = fc.position.clone().applyMatrix4(sceneToWorld);
+    const Rc2wWorld = new THREE.Matrix4()
+      .multiplyMatrices(sceneToWorld, new THREE.Matrix4().makeRotationFromQuaternion(fc.quaternion));
+    const e = new THREE.Euler().setFromRotationMatrix(Rc2wWorld, "XYZ");
+    const deg = (r: number) => Math.round(THREE.MathUtils.radToDeg(r) * 1e6) / 1e6;
+    const aspect = aspectRef.current || 1;
+    const sensorMm = sensorWidthRef.current || 36;
+    const focal = sensorMm / (2 * aspect * Math.tan(THREE.MathUtils.degToRad(fc.fov) / 2));
+    return {
+      camera_name: cameraName,
+      translation: { x: posWorld.x, y: posWorld.y, z: posWorld.z },
+      rotation: { x: deg(e.x), y: deg(e.y), z: deg(e.z) },
+      transform_order: "srt",
+      rotation_order: "xyz",
+      focal_length: Math.round(focal * 1000) / 1000,
+      aperture: Math.round(sensorMm * 1000) / 1000,
+    };
+  }, [getCurrentFrameCamera]);
+
+  // Default camera_name = the two path segments above the project (e.g. 01_25_02).
+  const defaultCameraName = useCallback((): string => {
+    const b = baseDir();
+    if (b) {
+      const parts = b.replace(/\\/g, "/").split("/").filter(Boolean);
+      const joined = parts.slice(-2).join("_");
+      if (joined) return joined;
+    }
+    return (worldName || "camera").replace(/\.[^.]+$/, "");
+  }, [baseDir, worldName]);
+
+  const saveCameraJson = useCallback(async (dir: string, filename: string) => {
+    const cam = buildCameraJson(defaultCameraName());
+    if (!cam) { setSaveSceneStatus("No camera to save."); setFileDialog(null); return; }
+    const cleanDir = dir.replace(/[\\/]+$/, "");
+    const sep = cleanDir.includes("\\") ? "\\" : "/";
+    const name = (filename.replace(/\.json$/i, "") || "camera") + ".json";
+    setSaveSceneStatus("Saving camera…");
+    try {
+      const r = await fetch(`/api/write-file?path=${encodeURIComponent(`${cleanDir}${sep}${name}`)}`, { method: "POST", body: JSON.stringify(cam, null, 2) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.success) throw new Error(j?.error || `HTTP ${r.status}`);
+      setSaveSceneStatus(`Saved ${name}`);
+    } catch (e) {
+      setSaveSceneStatus(`Camera save failed: ${e instanceof Error ? e.message : "error"}`);
+    } finally { setFileDialog(null); }
+  }, [buildCameraJson, defaultCameraName]);
+
+  // ─── Dialog openers ───────────────────────────────────────────────
+  const openSaveScene = useCallback(() => setFileDialog({
+    mode: "save", initialPath: saveDir ?? undefined,
+    defaultFilename: (worldName || "scene").replace(/\.[^.]+$/, ""), extension: ".json",
+    onConfirm: (dir, name) => saveScene(dir, name || "scene"),
+  }), [saveDir, worldName, saveScene]);
+  const openOpenScene = useCallback(() => setFileDialog({
+    mode: "open", initialPath: saveDir ?? undefined, extension: ".json",
+    onConfirm: (p) => loadScene(p),
+  }), [saveDir, loadScene]);
+  const openSaveCamera = useCallback(() => setFileDialog({
+    mode: "save", initialPath: baseDir() ?? saveDir ?? undefined,
+    defaultFilename: "camera", extension: ".json",
+    onConfirm: (dir, name) => saveCameraJson(dir, name || "camera"),
+  }), [baseDir, saveDir, saveCameraJson]);
+
   // (mount restore merged into the URL-params effect above)
 
   // Auto-save: localStorage (no fileData) + postMessage full state to parent window
@@ -4291,7 +4393,7 @@ export default function SplatViewer() {
 
           {/* Restore a previously saved scene (.json) via the file dialog */}
           <button
-            onClick={() => setFileDialog("open")}
+            onClick={openOpenScene}
             className="mt-3 inline-flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-sm font-medium py-2.5 px-5 rounded-lg cursor-pointer transition-colors"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -4309,12 +4411,12 @@ export default function SplatViewer() {
           </p>
           {fileDialog && (
             <FileDialog
-              mode={fileDialog}
-              initialPath={saveDir || undefined}
-              extension=".json"
-              defaultFilename={(worldName || "scene").replace(/\.[^.]+$/, "")}
-              onSave={saveScene}
-              onOpen={loadScene}
+              mode={fileDialog.mode}
+              initialPath={fileDialog.initialPath}
+              extension={fileDialog.extension ?? ".json"}
+              defaultFilename={fileDialog.defaultFilename}
+              onSave={(dir, name) => fileDialog.onConfirm(dir, name)}
+              onOpen={(p) => fileDialog.onConfirm(p)}
               onCancel={() => setFileDialog(null)}
             />
           )}
@@ -5026,7 +5128,7 @@ export default function SplatViewer() {
 
               {/* Save scene — opens a save dialog (choose folder + name) */}
               <button
-                onClick={() => setFileDialog("save")}
+                onClick={openSaveScene}
                 className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
                 title="Save scene…"
               >
@@ -5037,12 +5139,23 @@ export default function SplatViewer() {
 
               {/* Open scene — opens a file dialog (.json) */}
               <button
-                onClick={() => setFileDialog("open")}
+                onClick={openOpenScene}
                 className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
                 title="Open scene…"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 17H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v9a2 2 0 01-2 2h-3m-1-4l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+              </button>
+
+              {/* Save camera.json (current frame, external world frame) */}
+              <button
+                onClick={openSaveCamera}
+                className="w-9 h-9 rounded-lg flex items-center justify-center bg-neutral-800/80 text-neutral-400 hover:text-white transition-colors"
+                title="Save camera.json (current frame)"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 6h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2z" />
                 </svg>
               </button>
               {saveSceneStatus && (
@@ -5052,12 +5165,12 @@ export default function SplatViewer() {
               )}
               {fileDialog && (
                 <FileDialog
-                  mode={fileDialog}
-                  initialPath={saveDir || undefined}
-                  extension=".json"
-                  defaultFilename={(worldName || "scene").replace(/\.[^.]+$/, "")}
-                  onSave={saveScene}
-                  onOpen={loadScene}
+                  mode={fileDialog.mode}
+                  initialPath={fileDialog.initialPath}
+                  extension={fileDialog.extension ?? ".json"}
+                  defaultFilename={fileDialog.defaultFilename}
+                  onSave={(dir, name) => fileDialog.onConfirm(dir, name)}
+                  onOpen={(p) => fileDialog.onConfirm(p)}
                   onCancel={() => setFileDialog(null)}
                 />
               )}
