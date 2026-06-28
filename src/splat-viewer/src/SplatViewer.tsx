@@ -102,6 +102,7 @@ interface MeshEntry {
   visible: boolean;
   transform: MeshTransform;
   fileData?: string; // base64 data URL for state restoration
+  overlay?: boolean; // render on top of the whole scene (through the splat), DCC locator-style
 }
 
 const defaultMeshTransform: MeshTransform = {
@@ -109,6 +110,42 @@ const defaultMeshTransform: MeshTransform = {
   rotation: { x: 0, y: 0, z: 0 },
   scale: 1,
 };
+
+/**
+ * Force an object (and all its descendants) to render on top of the scene,
+ * ignoring the depth buffer — used for editor overlays (origin axes, light
+ * helpers, locator meshes) so they stay visible *through* the Gaussian splat.
+ *
+ * The splat is a transparent object at renderOrder 1; an opaque overlay would
+ * draw in the opaque pass (before it) and get covered, so overlays are forced
+ * transparent + high renderOrder so they paint last. Toggling off restores the
+ * material's captured original state (and leaves never-overlaid materials
+ * untouched, so transparent props aren't clobbered on unrelated re-applies).
+ */
+function setRenderOnTop(obj: THREE.Object3D, on: boolean, renderOrder = 999) {
+  obj.traverse((child) => {
+    child.renderOrder = on ? renderOrder : 0;
+    const mat = (child as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) {
+      const ud = m.userData as { __origDepth?: { transparent: boolean; depthTest: boolean; depthWrite: boolean } };
+      if (on) {
+        if (!ud.__origDepth) ud.__origDepth = { transparent: m.transparent, depthTest: m.depthTest, depthWrite: m.depthWrite };
+        m.transparent = true;
+        m.depthTest = false;
+        m.depthWrite = false;
+        m.needsUpdate = true;
+      } else if (ud.__origDepth) {
+        m.transparent = ud.__origDepth.transparent;
+        m.depthTest = ud.__origDepth.depthTest;
+        m.depthWrite = ud.__origDepth.depthWrite;
+        delete ud.__origDepth;
+        m.needsUpdate = true;
+      }
+      // off + never-overlaid → leave the material exactly as loaded
+    }
+  });
+}
 
 type LightType = "point" | "spot" | "rect";
 
@@ -1703,6 +1740,8 @@ export default function SplatViewer() {
     axesMat.transparent = true;
     axesMat.opacity = 0.9;
     axesMat.depthWrite = false;
+    axesMat.depthTest = false;       // draw through the splat (renderOrder 1)
+    axesHelper.renderOrder = 999;    // ...and paint after it
     scene.add(axesHelper);
     axesHelperRef.current = axesHelper;
 
@@ -3276,7 +3315,7 @@ export default function SplatViewer() {
           // Re-create Three.js mesh from stored base64 data URL
           const scene = sceneRef.current;
           if (!scene) continue;
-          const { id: eid, name, fileData, transform, visible } = entry;
+          const { id: eid, name, fileData, transform, visible, overlay } = entry;
           (async () => {
             let blobUrl: string | null = null;
             try {
@@ -3305,6 +3344,7 @@ export default function SplatViewer() {
                 }
               });
               object.renderOrder = 0;
+              if (overlay) setRenderOnTop(object, true);
               object.visible = visible;
               object.position.set(transform.position.x, transform.position.y, transform.position.z);
               object.rotation.set(
@@ -3334,6 +3374,7 @@ export default function SplatViewer() {
         "XYZ",
       );
       obj.scale.setScalar(entry.transform.scale);
+      setRenderOnTop(obj, !!entry.overlay); // overlay flag: draw through the splat
     }
     // Mesh positions changed — re-evaluate IBL volume influence
     applyIblsToMeshes();
@@ -3361,6 +3402,13 @@ export default function SplatViewer() {
     pushUndo();
     setMeshEntries(prev => prev.filter(e => e.id !== id));
   }, [selectedOverlayId, pushUndo]);
+
+  // Toggle "always on top" for a mesh — the apply effect re-runs and calls
+  // setRenderOnTop on the live object (draw through the splat, locator-style).
+  const toggleMeshOverlay = useCallback((id: string) => {
+    pushUndo();
+    setMeshEntries(prev => prev.map(e => (e.id === id ? { ...e, overlay: !e.overlay } : e)));
+  }, [pushUndo]);
 
 
   // ─── Light overlays ──────────────────────────────────────────────
@@ -3398,6 +3446,7 @@ export default function SplatViewer() {
       helper.position.copy(light.position);
     }
     scene.add(helper);
+    setRenderOnTop(helper, true); // light helpers stay visible through the splat
     helper.visible = showHelpersRef.current && entry.visible;
     lightHelpersRef.current.set(entry.id, helper);
     lightHelperToIdRef.current.set(helper, entry.id);
@@ -5201,6 +5250,7 @@ export default function SplatViewer() {
                 onGizmoModeChange={setGizmoMode}
                 onMeshTransformChange={(id, t) => setMeshEntries(prev => prev.map(e => e.id === id ? { ...e, transform: t } : e))}
                 onMeshVisibilityToggle={(id) => setMeshEntries(prev => prev.map(e => e.id === id ? { ...e, visible: !e.visible } : e))}
+                onMeshOverlayToggle={toggleMeshOverlay}
                 onRemoveMesh={removeMesh}
                 onCaptureIblFromMesh={(meshId) => captureIBL(meshId)}
                 onAddMesh={() => meshFileInputRef.current?.click()}
