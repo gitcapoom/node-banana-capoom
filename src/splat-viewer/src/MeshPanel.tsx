@@ -15,6 +15,7 @@ interface MeshEntry {
   visible: boolean;
   transform: MeshTransform;
   fileData?: string;
+  overlay?: boolean;
 }
 
 type LightType = "point" | "spot" | "rect";
@@ -64,6 +65,7 @@ interface MeshPanelProps {
   onGizmoSpaceChange: (space: "world" | "local") => void;
   onMeshTransformChange: (id: string, t: MeshTransform) => void;
   onMeshVisibilityToggle: (id: string) => void;
+  onMeshOverlayToggle: (id: string) => void;
   onRemoveMesh: (id: string) => void;
   onCaptureIblFromMesh: (meshId: string) => void;
   onAddMesh: () => void;
@@ -169,6 +171,13 @@ const XIcon = () => (
     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
   </svg>
 );
+// "Always on top" — stacked layers, drawn through everything (locator-style)
+const TopIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l9 5-9 5-9-5 9-5z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l9 5 9-5M3 16.5l9 5 9-5" opacity={0.5} />
+  </svg>
+);
 const ChevronIcon = ({ open }: { open: boolean }) => (
   <svg className={`w-3 h-3 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
@@ -188,7 +197,7 @@ export default function MeshPanel({
   selectedId, selectedSpotTargetId, gizmoMode, gizmoSpace,
   onSelectMesh, onSelectLight, onSelectSpotTarget,
   onGizmoModeChange, onGizmoSpaceChange,
-  onMeshTransformChange, onMeshVisibilityToggle, onRemoveMesh, onCaptureIblFromMesh, onAddMesh,
+  onMeshTransformChange, onMeshVisibilityToggle, onMeshOverlayToggle, onRemoveMesh, onCaptureIblFromMesh, onAddMesh,
   onAddLight, onLightChange, onRemoveLight,
   onIblChange, onCaptureIblAtCamera, onRemoveIbl,
 }: MeshPanelProps) {
@@ -248,6 +257,11 @@ export default function MeshPanel({
                   </button>
                   <button onClick={() => onSelectMesh(entry.id)} className="flex-1 text-left text-[10px] text-neutral-200 truncate hover:text-white">
                     {entry.name}
+                  </button>
+                  <button onClick={() => onMeshOverlayToggle(entry.id)}
+                    title={entry.overlay ? "Always on top: ON (click to clip behind splat)" : "Always on top: OFF (draw through splat)"}
+                    className={`shrink-0 ${entry.overlay ? "text-amber-400" : "text-neutral-600 hover:text-neutral-300"}`}>
+                    <TopIcon />
                   </button>
                   <button onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)} className="text-neutral-500 hover:text-white shrink-0">
                     <ChevronIcon open={expandedId === entry.id} />
