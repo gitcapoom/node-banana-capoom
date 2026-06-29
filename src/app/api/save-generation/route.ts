@@ -315,23 +315,27 @@ export async function POST(request: NextRequest) {
     // Compute content hash for deduplication
     const contentHash = computeContentHash(buffer);
 
-    // Check for existing file with same hash (deduplication)
-    const existingFile = await findExistingFileByHash(directoryPath, contentHash, extension);
-    if (existingFile) {
-      const existingPath = path.join(directoryPath, existingFile);
-      logger.info('file.save', 'Generation deduplicated: existing file found', {
-        contentHash,
-        existingFile,
-        filePath: existingPath,
-      });
+    // Check for existing file with same hash (deduplication). Skip this for a
+    // user-provided filename — an explicit name is honored verbatim (and
+    // overwrites), never silently replaced by a hash-matched earlier file.
+    if (!customFilename) {
+      const existingFile = await findExistingFileByHash(directoryPath, contentHash, extension);
+      if (existingFile) {
+        const existingPath = path.join(directoryPath, existingFile);
+        logger.info('file.save', 'Generation deduplicated: existing file found', {
+          contentHash,
+          existingFile,
+          filePath: existingPath,
+        });
 
-      return NextResponse.json({
-        success: true,
-        filePath: existingPath,
-        filename: existingFile,
-        imageId: existingFile.replace(`.${extension}`, ''),
-        isDuplicate: true,
-      });
+        return NextResponse.json({
+          success: true,
+          filePath: existingPath,
+          filename: existingFile,
+          imageId: existingFile.replace(`.${extension}`, ''),
+          isDuplicate: true,
+        });
+      }
     }
 
     // Generate filename - use custom filename if provided, otherwise use prompt snippet
@@ -342,7 +346,8 @@ export async function POST(request: NextRequest) {
         .replace(/[^a-zA-Z0-9-_]/g, "_")
         .replace(/_+/g, "_")
         .replace(/^_|_$/g, "");
-      filename = `${sanitizedFilename}_${contentHash}.${extension}`;
+      // Honor the user's name exactly — no content-hash suffix.
+      filename = `${sanitizedFilename}.${extension}`;
     } else {
       const promptSnippet = prompt
         ? prompt
