@@ -43,14 +43,25 @@ function parseFrontmatter(raw: string): { name?: string; description?: string; b
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
   if (!m) return { body: raw };
   const body = raw.slice(m[0].length);
+  const lines = m[1].split(/\r?\n/);
   const out: { name?: string; description?: string } = {};
-  for (const line of m[1].split(/\r?\n/)) {
-    const kv = line.match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
+  for (let i = 0; i < lines.length; i++) {
+    const kv = lines[i].match(/^([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
     if (!kv) continue;
     const key = kv[1].toLowerCase();
     if (key !== "name" && key !== "description") continue;
     let val = kv[2].trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+    if (/^[>|][+-]?\d*$/.test(val)) {
+      // YAML block scalar (folded `>` / literal `|`): value is the indented
+      // lines that follow. Join to a single line — good enough for a tooltip.
+      const parts: string[] = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trim() === "") { parts.push(""); continue; }
+        if (/^\s/.test(lines[j])) { parts.push(lines[j].trim()); i = j; }
+        else break;
+      }
+      val = parts.join(" ").replace(/\s+/g, " ").trim();
+    } else if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
     out[key as "name" | "description"] = val;
