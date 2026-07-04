@@ -176,7 +176,12 @@ export function ZoomPanView({ children, panMode = "free", className, hint }: Zoo
         style={{
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
           transformOrigin: "center center",
-          willChange: "transform",
+          // NOTE: deliberately NOT `will-change: transform`. That pins the layer
+          // to a texture rasterized once at the fit size, so zooming in just
+          // GPU-upscales a blurry copy — the source's real pixels never appear.
+          // Without it, the browser re-rasterizes from the full-res image at the
+          // current zoom, so wheel-zoom reveals actual pixels. Pan is a pure
+          // translate (no re-raster), so dragging stays smooth.
           width: "100%",
           height: "100%",
         }}
