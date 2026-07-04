@@ -46,6 +46,9 @@ logs/*.json
 # model outputs (never commit binary generation results)
 generations/
 
+# prompt-skill library (user-curated .md skills, local per install)
+prompt-skills/
+
 # .claude
 .claude/
 

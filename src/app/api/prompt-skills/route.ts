@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFile, readdir, mkdir } from "fs/promises";
 import path from "path";
-import os from "os";
 import { validateWorkflowPath } from "@/utils/pathValidation";
 
 export const runtime = "nodejs";
@@ -14,9 +13,11 @@ export const dynamic = "force-dynamic";
  * skill's body into its system prompt. Two per-entry layouts are accepted:
  *   - a bare `<name>.md` file, or
  *   - a `<name>/SKILL.md` folder (Anthropic Agent-Skills layout).
- * Default folder: ~/.node-banana/prompt-skills (created on first scan so the
- * user has somewhere to drop files). A `path` query param overrides it
- * (traversal-guarded via validateWorkflowPath; must already exist).
+ * Default folder: <project>/prompt-skills (i.e. process.cwd() — the app's
+ * install dir; git-ignored, created on first scan so the user has somewhere to
+ * drop files). A `path` query param overrides it (traversal-guarded via
+ * validateWorkflowPath; must already exist) — use it to point at a shared
+ * folder across the dev/deploy installs.
  *
  * This only ever reads the *instruction text* — bundled scripts/resources and
  * any agent-only directives in the body are irrelevant to a plain LLM call.
@@ -85,7 +86,7 @@ export async function GET(req: NextRequest) {
     }
     folder = override;
   } else {
-    folder = path.join(os.homedir(), ".node-banana", "prompt-skills");
+    folder = path.join(process.cwd(), "prompt-skills");
     try { await mkdir(folder, { recursive: true }); } catch { /* best effort — still try to read */ }
   }
 

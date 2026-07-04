@@ -163,7 +163,7 @@ export function PromptSkillPicker({
       {error && <span className="text-[10px] text-red-400" title={error}>Skills error: {error}</span>}
       {!loading && !error && skills.length === 0 && (
         <span className="text-[10px] text-neutral-500 break-all" title={resolvedPath}>
-          No skills yet. Drop .md files in: {resolvedPath || "~/.node-banana/prompt-skills"}
+          No skills yet. Drop .md files in: {resolvedPath || "<project>/prompt-skills"}
         </span>
       )}
     </div>
