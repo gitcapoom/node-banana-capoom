@@ -11,6 +11,7 @@ import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
 import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { DynamicInputHandles } from "./DynamicInputHandles";
+import { PromptSkillPicker } from "./PromptSkillPicker";
 
 // LLM providers — the model list for each is fetched live via the
 // `useLlmModelLists` hook (shared with ControlPanel).
@@ -117,10 +118,23 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
 
   const handleSystemPromptChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      updateNodeData(id, { systemPrompt: e.target.value });
+      // Hand-editing detaches from the loaded skill (the text is now the user's).
+      updateNodeData(id, { systemPrompt: e.target.value, promptSkillName: undefined });
     },
     [id, updateNodeData]
   );
+
+  // ─── Prompt-skill library ─────────────────────────────────────
+  const handleApplySkill = useCallback(
+    (skill: { name: string; body: string }) => {
+      updateNodeData(id, { systemPrompt: skill.body, promptSkillName: skill.name });
+    },
+    [id, updateNodeData]
+  );
+
+  const handleClearSkill = useCallback(() => {
+    updateNodeData(id, { systemPrompt: "", promptSkillName: undefined });
+  }, [id, updateNodeData]);
 
   const handleMaxHistoryChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -303,6 +317,23 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
               </div>
             )}
 
+            {/* ─── System prompt + prompt skill (applies in both modes) ─── */}
+            <div className="border-t border-neutral-800 pt-1.5 mt-1 flex flex-col gap-1">
+              <label className="text-[10px] text-neutral-500">System prompt</label>
+              <PromptSkillPicker
+                activeSkillName={nodeData.promptSkillName}
+                onApply={handleApplySkill}
+                onClear={handleClearSkill}
+              />
+              <textarea
+                value={nodeData.systemPrompt ?? ""}
+                onChange={handleSystemPromptChange}
+                placeholder="(optional) instructions — or load a prompt skill above"
+                rows={2}
+                className="nodrag nopan w-full text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white resize-y min-h-[36px] max-h-[120px]"
+              />
+            </div>
+
             {/* ─── Conversation mode ───────────────────────── */}
             <div className="border-t border-neutral-800 pt-1.5 mt-1">
               <label className="flex items-center gap-2 cursor-pointer">
@@ -321,17 +352,6 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
               </label>
               {conversationMode && (
                 <div className="mt-1.5 space-y-1.5">
-                  {/* System prompt */}
-                  <div className="flex flex-col gap-0.5">
-                    <label className="text-[10px] text-neutral-500">System prompt</label>
-                    <textarea
-                      value={nodeData.systemPrompt ?? ""}
-                      onChange={handleSystemPromptChange}
-                      placeholder="(optional) e.g. You are a concise, factual assistant."
-                      rows={2}
-                      className="nodrag nopan w-full text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white resize-y min-h-[36px] max-h-[120px]"
-                    />
-                  </div>
                   {/* Max history + clear */}
                   <div className="flex items-center gap-2">
                     <label className="text-[10px] text-neutral-500 shrink-0">Max turns</label>

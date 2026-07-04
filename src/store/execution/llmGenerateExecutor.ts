@@ -127,7 +127,7 @@ export async function executeLlmGenerate(
       headers,
       body: JSON.stringify({
         messages: outboundMessages,
-        ...(useConversation && nodeData.systemPrompt ? { system: nodeData.systemPrompt } : {}),
+        ...(nodeData.systemPrompt ? { system: nodeData.systemPrompt } : {}),
         provider: nodeData.provider,
         model: nodeData.model,
         temperature: nodeData.temperature,

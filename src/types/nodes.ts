@@ -730,8 +730,13 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   conversationMode?: boolean;
   /** Optional system prompt prepended to every request as the provider's
    *  native system slot. Stored separately from `conversation` because
-   *  all three providers carry it in a dedicated field. */
+   *  all three providers carry it in a dedicated field. Sent in both one-shot
+   *  and conversation mode. */
   systemPrompt?: string;
+  /** Name of the prompt skill whose instructions were loaded into
+   *  `systemPrompt` (from the prompt-skill library). Cosmetic — shown as the
+   *  active skill; cleared when the user edits the system prompt by hand. */
+  promptSkillName?: string;
   /** Persistent multi-turn history. Each Run appends one user turn (with
    *  the current text/image inputs) and one assistant turn. Carries
    *  through workflow save/load. */
