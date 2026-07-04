@@ -8,6 +8,7 @@ import { NodeType, NanoBananaNodeData, UpscaleGridNodeData, LLMGenerateNodeData,
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { ModelParameters } from "./ModelParameters";
+import { PromptSkillPicker } from "./PromptSkillPicker";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
 import { CubicBezierEditor } from "@/components/CubicBezierEditor";
@@ -1334,10 +1335,22 @@ function LLMControls({ node }: { node: Node }) {
 
   const handleSystemPromptChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      updateNodeData(node.id, { systemPrompt: e.target.value });
+      // Hand-editing detaches from the loaded skill (the text is now the user's).
+      updateNodeData(node.id, { systemPrompt: e.target.value, promptSkillName: undefined });
     },
     [node.id, updateNodeData]
   );
+
+  const handleApplySkill = useCallback(
+    (skill: { name: string; body: string }) => {
+      updateNodeData(node.id, { systemPrompt: skill.body, promptSkillName: skill.name });
+    },
+    [node.id, updateNodeData]
+  );
+
+  const handleClearSkill = useCallback(() => {
+    updateNodeData(node.id, { systemPrompt: "", promptSkillName: undefined });
+  }, [node.id, updateNodeData]);
 
   const handleMaxHistoryChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1477,6 +1490,23 @@ function LLMControls({ node }: { node: Node }) {
         </div>
       )}
 
+      {/* ─── System prompt + prompt skill (applies in both modes) ─── */}
+      <div className="border-t border-neutral-700 pt-3 space-y-2">
+        <label className="block text-[10px] text-neutral-500">System prompt</label>
+        <PromptSkillPicker
+          activeSkillName={nodeData.promptSkillName}
+          onApply={handleApplySkill}
+          onClear={handleClearSkill}
+        />
+        <textarea
+          value={nodeData.systemPrompt ?? ""}
+          onChange={handleSystemPromptChange}
+          placeholder="(optional) instructions — or load a prompt skill above"
+          rows={2}
+          className="nodrag nopan w-full text-xs py-1 px-2 bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y min-h-[48px] max-h-[160px]"
+        />
+      </div>
+
       {/* ─── Conversation mode ─────────────────────────────── */}
       <div className="border-t border-neutral-700 pt-3">
         <label className="flex items-center gap-2 cursor-pointer">
@@ -1495,16 +1525,6 @@ function LLMControls({ node }: { node: Node }) {
         </label>
         {conversationMode && (
           <div className="mt-2 space-y-2">
-            <div>
-              <label className="block text-[10px] text-neutral-500 mb-1">System prompt</label>
-              <textarea
-                value={nodeData.systemPrompt ?? ""}
-                onChange={handleSystemPromptChange}
-                placeholder="(optional) e.g. You are a concise, factual assistant."
-                rows={2}
-                className="nodrag nopan w-full text-xs py-1 px-2 bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y min-h-[48px] max-h-[160px]"
-              />
-            </div>
             <div className="flex items-center gap-2">
               <label className="text-[10px] text-neutral-500 shrink-0">Max turns</label>
               <input
