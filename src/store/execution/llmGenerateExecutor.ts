@@ -22,15 +22,19 @@ export interface LlmGenerateOptions {
  * = everything else (shown in the transcript). If the skill didn't emit a
  * block, fall back to using the whole reply as the prompt.
  */
-export function parseLoopbackReply(raw: string): { conversation: string; prompt: string } {
+export function parseLoopbackReply(raw: string): { conversation: string; prompt: string | null } {
   const m = raw.match(/<image_prompt>([\s\S]*?)<\/image_prompt>/i);
   if (m && m.index !== undefined) {
     const prompt = m[1].trim();
     const conversation = (raw.slice(0, m.index) + raw.slice(m.index + m[0].length)).trim();
-    return { conversation: conversation || "(image prompt updated)", prompt };
+    return { conversation: conversation || "(image prompt updated)", prompt: prompt || null };
   }
-  console.warn("[llmGenerateExecutor] Loopback reply had no <image_prompt> block; using the full reply as the prompt.");
-  return { conversation: raw.trim(), prompt: raw.trim() };
+  // No block — the reply is assessment-only (usually cut off before the prompt,
+  // or the model skipped the tags). Do NOT use the assessment AS the prompt:
+  // that would feed the critique prose to the image generator. Signal null so
+  // the caller keeps the previous prompt instead of clobbering it.
+  console.warn("[llmGenerateExecutor] Loopback reply had no <image_prompt> block; keeping the previous prompt.");
+  return { conversation: raw.trim(), prompt: null };
 }
 
 export async function executeLlmGenerate(
@@ -258,18 +262,27 @@ export async function executeLlmGenerate(
         // prompt (`prompt` handle → image node). The transcript stores the
         // conversational text only.
         const { conversation: convoText, prompt } = parseLoopbackReply(result.text);
+        // When the reply had no <image_prompt> block, keep the PREVIOUS prompt
+        // (never overwrite it with the assessment prose) and flag it so the user
+        // knows to retry / raise Max tokens.
+        const promptMissing = prompt === null;
+        const keptPrompt = promptMissing ? (nodeData.outputPrompt ?? null) : prompt;
+        const assistantText = promptMissing
+          ? `${convoText}\n\n⚠ No image prompt was produced — the reply may have been cut off before the <image_prompt> block. The Image prompt was left unchanged; Send again, or raise Max tokens.`
+          : convoText;
         const assistantTurn: ConversationTurn = {
           role: "assistant",
-          text: convoText,
+          text: assistantText,
           timestamp: Date.now(),
         };
         updateNodeData(node.id, {
-          outputText: convoText,
-          outputPrompt: prompt,
+          outputText: assistantText,
+          outputPrompt: keptPrompt,
           conversation: [...persistedConversation, assistantTurn],
           // Chatbot-style: clear the compose box after a successful send so the
-          // same direction isn't silently reused next turn.
-          composeInput: "",
+          // same direction isn't silently reused — but keep it when no prompt
+          // came back, so the user can just Send again without retyping.
+          ...(promptMissing ? {} : { composeInput: "" }),
           status: "complete",
           error: null,
         });
