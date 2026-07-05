@@ -14,6 +14,24 @@ export interface LlmGenerateOptions {
   useStoredFallback?: boolean;
 }
 
+/**
+ * Loopback replies carry two things: the conversational text and a clean image
+ * prompt wrapped in <image_prompt>…</image_prompt> (see loopbackSkill.ts). Split
+ * them: `prompt` = the block's inner text (feeds the image node); `conversation`
+ * = everything else (shown in the transcript). If the skill didn't emit a
+ * block, fall back to using the whole reply as the prompt.
+ */
+export function parseLoopbackReply(raw: string): { conversation: string; prompt: string } {
+  const m = raw.match(/<image_prompt>([\s\S]*?)<\/image_prompt>/i);
+  if (m && m.index !== undefined) {
+    const prompt = m[1].trim();
+    const conversation = (raw.slice(0, m.index) + raw.slice(m.index + m[0].length)).trim();
+    return { conversation: conversation || "(image prompt updated)", prompt };
+  }
+  console.warn("[llmGenerateExecutor] Loopback reply had no <image_prompt> block; using the full reply as the prompt.");
+  return { conversation: raw.trim(), prompt: raw.trim() };
+}
+
 export async function executeLlmGenerate(
   ctx: NodeExecutionContext,
   options: LlmGenerateOptions = {}
@@ -41,6 +59,15 @@ export async function executeLlmGenerate(
   } else {
     images = inputs.images;
     text = inputs.text ?? nodeData.inputPrompt;
+  }
+
+  // Loopback mode: the feedback image (previous generation, from the
+  // `image-feedback` handle) is always prepended as Image 1, ahead of any
+  // external reference images — the loopback skill references it by that
+  // position.
+  const loopbackMode = nodeData.loopbackMode === true;
+  if (loopbackMode && inputs.feedbackImage) {
+    images = [inputs.feedbackImage, ...images];
   }
 
   // Defensive validation — the image-handle on this node accepts any edge
@@ -97,8 +124,16 @@ export async function executeLlmGenerate(
     ? priorConversation.slice(Math.max(0, priorConversation.length - cap * 2))
     : priorConversation;
 
+  // In loopback mode, send prior turns as text-only so the ONLY images the
+  // model sees are the current turn's (feedback = Image 1, then references),
+  // keeping the skill's "Image 1 is the feedback" reference unambiguous and
+  // saving image tokens. The persisted transcript still keeps its thumbnails.
+  const historyToSend = loopbackMode
+    ? slicedPrior.map(({ images: _img, ...rest }) => rest)
+    : slicedPrior;
+
   const outboundMessages: ConversationTurn[] = useConversation
-    ? [...slicedPrior, newUserTurn]
+    ? [...historyToSend, newUserTurn]
     : [newUserTurn];
 
   // In conversation mode, immediately persist the new user turn so the
@@ -159,19 +194,38 @@ export async function executeLlmGenerate(
     const result = await response.json();
 
     if (result.success && result.text) {
-      const assistantTurn: ConversationTurn = {
-        role: "assistant",
-        text: result.text,
-        timestamp: Date.now(),
-      };
-      updateNodeData(node.id, {
-        outputText: result.text,
-        ...(useConversation
-          ? { conversation: [...persistedConversation, assistantTurn] }
-          : {}),
-        status: "complete",
-        error: null,
-      });
+      if (loopbackMode) {
+        // Two outputs: conversation (transcript + `text` handle) and the clean
+        // prompt (`prompt` handle → image node). The transcript stores the
+        // conversational text only.
+        const { conversation: convoText, prompt } = parseLoopbackReply(result.text);
+        const assistantTurn: ConversationTurn = {
+          role: "assistant",
+          text: convoText,
+          timestamp: Date.now(),
+        };
+        updateNodeData(node.id, {
+          outputText: convoText,
+          outputPrompt: prompt,
+          conversation: [...persistedConversation, assistantTurn],
+          status: "complete",
+          error: null,
+        });
+      } else {
+        const assistantTurn: ConversationTurn = {
+          role: "assistant",
+          text: result.text,
+          timestamp: Date.now(),
+        };
+        updateNodeData(node.id, {
+          outputText: result.text,
+          ...(useConversation
+            ? { conversation: [...persistedConversation, assistantTurn] }
+            : {}),
+          status: "complete",
+          error: null,
+        });
+      }
     } else {
       updateNodeData(node.id, {
         status: "error",
