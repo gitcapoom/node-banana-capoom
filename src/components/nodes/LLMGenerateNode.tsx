@@ -497,6 +497,21 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
           title="Clean image prompt → image generator"
         />
       )}
+      {/* References passthrough output (loopback only): the ordered image list
+          the LLM saw (feedback first, then references) → the image generator,
+          in ONE edge. Keeps the prompt's "Image 1 / Image 2 / …" aligned with
+          what the generator actually receives. */}
+      {loopbackMode && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="images"
+          data-handletype="image"
+          style={{ top: "15%" }}
+          className="!bg-blue-500 !border-blue-700"
+          title="References passthrough — the same ordered images the LLM saw (feedback first, then references) → wire to the image generator's image input"
+        />
+      )}
       {/* Loopback handle labels — make the loop wiring obvious at a glance.
           (Dynamic pins render their own input labels, so only add the
           input labels here in the static case to avoid duplicates.) */}
@@ -520,6 +535,9 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
           </div>
           <div className="absolute text-[9px] font-semibold whitespace-nowrap pointer-events-none text-emerald-400" style={{ left: "calc(100% + 9px)", top: "65%", transform: "translateY(-50%)" }}>
             Image prompt →
+          </div>
+          <div className="absolute text-[9px] font-medium whitespace-nowrap pointer-events-none text-blue-400" style={{ left: "calc(100% + 9px)", top: "15%", transform: "translateY(-50%)" }}>
+            Images →
           </div>
         </>
       )}

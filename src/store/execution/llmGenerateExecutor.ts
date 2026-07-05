@@ -53,7 +53,16 @@ export async function executeLlmGenerate(
   let images: string[];
   let text: string | null;
 
-  if (useStoredFallback) {
+  const loopbackMode = nodeData.loopbackMode === true;
+
+  if (loopbackMode) {
+    // Loopback: references are LIVE inputs only. Do NOT fall back to the stored
+    // inputImages — that's the combined [feedback, ...refs] list from the last
+    // run, so re-prepending the feedback below would make the list grow every
+    // run (and the `images` passthrough would forward that growing pile).
+    images = inputs.images;
+    text = inputs.text ?? nodeData.inputPrompt;
+  } else if (useStoredFallback) {
     images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
     text = inputs.text ?? nodeData.inputPrompt;
   } else {
@@ -64,8 +73,9 @@ export async function executeLlmGenerate(
   // Loopback mode: the feedback image (previous generation, from the
   // `image-feedback` handle) is always prepended as Image 1, ahead of any
   // external reference images — the loopback skill references it by that
-  // position.
-  const loopbackMode = nodeData.loopbackMode === true;
+  // position. This combined ordered list is what we store as `inputImages` and
+  // what the node's `images` passthrough output forwards to the generator, so
+  // the prompt's "Image 1 / Image 2 / …" line up with what the generator sees.
   if (loopbackMode && inputs.feedbackImage) {
     images = [inputs.feedbackImage, ...images];
   }
@@ -73,8 +83,10 @@ export async function executeLlmGenerate(
   // Loopback: make each turn a coherent "review & assess" exchange in the
   // transcript. Turn 1 (no feedback image) uses the connected goal text; later
   // iterations inject an explicit review/assess question — plus any NEW steering
-  // the user typed into the connected input since the last completed run.
-  const loopbackConnectedText = loopbackMode ? (text ?? "").trim() : "";
+  // the user typed into the connected input since the last completed run. Read
+  // the goal from the LIVE connected input, not the fallback `text` (which after
+  // a run holds the injected "Review and assess…" string).
+  const loopbackConnectedText = loopbackMode ? (inputs.text ?? "").trim() : "";
   if (loopbackMode) {
     const steered =
       loopbackConnectedText.length > 0 &&
