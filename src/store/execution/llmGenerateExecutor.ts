@@ -128,9 +128,21 @@ export async function executeLlmGenerate(
   // model sees are the current turn's (feedback = Image 1, then references),
   // keeping the skill's "Image 1 is the feedback" reference unambiguous and
   // saving image tokens. The persisted transcript still keeps its thumbnails.
-  const historyToSend = loopbackMode
+  let historyToSend = loopbackMode
     ? slicedPrior.map(({ images: _img, ...rest }) => rest)
     : slicedPrior;
+
+  // Loopback: pin the ORIGINAL request (the first user turn) to the front so
+  // the compare-to-intent target is never lost when Max-turns truncates older
+  // history. Text-only, and only when the cap actually dropped it.
+  if (loopbackMode && cap > 0 && priorConversation.length > 0) {
+    const original = priorConversation[0];
+    const alreadyIncluded = slicedPrior.length > 0 && slicedPrior[0] === original;
+    if (!alreadyIncluded) {
+      const { images: _origImg, ...originalTextOnly } = original;
+      historyToSend = [originalTextOnly, ...historyToSend];
+    }
+  }
 
   const outboundMessages: ConversationTurn[] = useConversation
     ? [...historyToSend, newUserTurn]
