@@ -521,13 +521,28 @@ export function getConnectedInputsPure(
       // Loopback references passthrough. A single edge from a loopback LLM's
       // `images` output carries the WHOLE ordered image list the LLM saw
       // (feedback first, then references) — i.e. exactly the "Image 1 / Image 2
-      // / …" its prompt refers to. Spread them into images[] in that order so
-      // the image generator receives the same positions the prompt names.
+      // / …" its prompt refers to.
+      //
+      // Delivery differs by pin model:
+      //  • Classic pins (static handles): the generic images[] array natively
+      //    carries multiple images, and the provider maps it to the model's
+      //    image param — so images.push is enough.
+      //  • Dynamic pins: each pin is ONE slot and the provider builds its
+      //    request from dynamicInputs (ignoring images[] on Fal). A single edge
+      //    can't fan across slots, so we deliberately fill the WHOLE target
+      //    array field from this one edge — set dynamicInputs[field] to the
+      //    ordered list. (This is the intended "single edge = all references".)
+      // We do both so it works regardless of the model's dispatch path.
       if (sourceNode.type === "llmGenerate" && edge.sourceHandle === "images") {
         const llmData = sourceNode.data as LLMGenerateNodeData;
-        for (const img of llmData.inputImages ?? []) {
-          if (typeof img === "string" && img) images.push(img);
+        const list = (llmData.inputImages ?? []).filter(
+          (s): s is string => typeof s === "string" && s.length > 0
+        );
+        const dyn = parseDynPin(edge.targetHandle);
+        if (dyn && dyn.field !== "primary") {
+          dynamicInputs[remapFieldPath(dyn.field)] = list;
         }
+        for (const img of list) images.push(img);
         return;
       }
 
