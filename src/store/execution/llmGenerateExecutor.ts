@@ -80,21 +80,30 @@ export async function executeLlmGenerate(
     if (inputs.feedbackImage) refList = [inputs.feedbackImage, ...refList];
     passthroughList = refList;
 
+    const goalText = (inputs.text ?? "").trim();
     if (loopbackAction === "converse") {
       // Prompt-focused: no images. Answer the input prompt and refine the output
       // prompt from it + the transcript.
       images = [];
-      text = (inputs.text ?? "").trim() || "Refine the image prompt toward the goal.";
+      text = goalText || "Refine the image prompt toward the goal.";
     } else {
       // Assess: send ONLY the loopback image so the model concentrates on that
       // single render — attention split across several images noticeably
       // degrades fine-detail (texture/color/artifact) judgement. The references
       // still reach the generator via the passthrough; the model refers to them
-      // by position without needing to re-see them here.
+      // by position without needing to re-see them here. Always fold in the
+      // input prompt so the model assesses against the CURRENT goal/direction,
+      // not a stale one from history.
       images = inputs.feedbackImage ? [inputs.feedbackImage] : [];
-      text = inputs.feedbackImage
-        ? "Review and assess ONLY the latest generated image (Image 1) against the goal, then give an improved, corrected prompt."
-        : "There is no generated image to assess yet — propose an initial image prompt toward the goal.";
+      if (!inputs.feedbackImage) {
+        text = goalText
+          ? `There is no generated image yet. Propose an initial image prompt for this goal:\n\n${goalText}`
+          : "There is no generated image to assess yet — propose an initial image prompt toward the goal.";
+      } else {
+        text = goalText
+          ? `Review and assess ONLY the latest generated image (Image 1) against this goal/direction, then give an improved, corrected prompt:\n\n${goalText}`
+          : "Review and assess ONLY the latest generated image (Image 1) against the goal, then give an improved, corrected prompt.";
+      }
     }
   } else if (useStoredFallback) {
     images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;

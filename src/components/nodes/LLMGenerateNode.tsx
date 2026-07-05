@@ -564,10 +564,12 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                   transcriptRef={transcriptRef}
                 />
               </div>
-              {/* Standalone clean-prompt panel — read-only, copyable; also feeds the `prompt` output */}
+              {/* Standalone image-prompt panel — editable; feeds the `prompt`
+                  output to the generator. Edits persist until the next Assess /
+                  Converse run overwrites the prompt. */}
               <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/60 max-h-[40%] flex flex-col">
                 <div className="flex items-center justify-between px-2 pt-1">
-                  <span className="text-[9px] uppercase tracking-wide text-emerald-400/80">Image prompt</span>
+                  <span className="text-[9px] uppercase tracking-wide text-emerald-400/80">Image prompt (editable)</span>
                   <button
                     onClick={handleCopyPrompt}
                     disabled={!nodeData.outputPrompt}
@@ -577,10 +579,13 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                     {copiedPrompt ? "Copied" : "Copy"}
                   </button>
                 </div>
-                <div className="nodrag nopan nowheel select-text cursor-text overflow-auto px-2 pb-1.5">
-                  <p className="text-[10px] text-neutral-300 whitespace-pre-wrap break-words">
-                    {nodeData.outputPrompt || <span className="text-neutral-600 italic">Run to generate the image prompt…</span>}
-                  </p>
+                <div className="px-2 pb-1.5 flex-1 min-h-0">
+                  <textarea
+                    value={nodeData.outputPrompt ?? ""}
+                    onChange={(e) => updateNodeData(id, { outputPrompt: e.target.value })}
+                    placeholder="Run Assess or Converse to generate the image prompt — or type / edit it here…"
+                    className="nodrag nopan nowheel select-text cursor-text w-full h-full min-h-[44px] resize-none text-[10px] text-neutral-200 bg-neutral-950/50 rounded px-1.5 py-1 whitespace-pre-wrap break-words focus:outline-none focus:ring-1 focus:ring-emerald-700/60"
+                  />
                 </div>
               </div>
               {/* Two explicit actions (handleAssess / handleConverse). Neither
