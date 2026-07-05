@@ -483,7 +483,7 @@ interface WorkflowStore {
   _abortController: AbortController | null;  // Internal: for cancellation
   _buildExecutionContext: (node: WorkflowNode, signal?: AbortSignal) => NodeExecutionContext;
   executeWorkflow: (startFromNodeId?: string) => Promise<void>;
-  regenerateNode: (nodeId: string, options?: { loopbackAction?: "assess" | "converse" }) => Promise<void>;
+  regenerateNode: (nodeId: string) => Promise<void>;
   /** Load full-res for a node + its upstream from disk (lazy on open). Used by
    *  GPU editors (color / comp) to populate the live preview on double-click. */
   loadNodeFullResInputs: (nodeId: string) => Promise<void>;
@@ -1675,7 +1675,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     set({ maxConcurrentCalls: clamped });
   },
 
-  regenerateNode: async (nodeId: string, options?: { loopbackAction?: "assess" | "converse" }) => {
+  regenerateNode: async (nodeId: string) => {
     const { nodes, edges, updateNodeData, currentNodeIds } = get();
 
     // Per-node gating: refuse only when *this* node is currently in
@@ -1740,7 +1740,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       } else if (node.type === "array") {
         await executeArray(executionCtx);
       } else if (node.type === "llmGenerate") {
-        await executeLlmGenerate(executionCtx, { ...regenOptions, loopbackAction: options?.loopbackAction });
+        await executeLlmGenerate(executionCtx, regenOptions);
       } else if (node.type === "generateVideo") {
         await executeGenerateVideo(executionCtx, regenOptions);
       } else if (node.type === "generate3d") {

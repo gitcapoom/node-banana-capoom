@@ -43,19 +43,10 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     regenerateNode(id);
   }, [id, regenerateNode]);
 
-  // Loopback has two explicit actions (neither generates — you run the
-  // generator node yourself):
-  //  • Assess   — look at the latest generated (feedback) image and critique it,
-  //               refining the prompt from what it sees.
-  //  • Converse — work off the input prompt only (no image) and refine the
-  //               output prompt from it.
-  const handleAssess = useCallback(() => {
-    regenerateNode(id, { loopbackAction: "assess" });
-  }, [id, regenerateNode]);
-
-  const handleConverse = useCallback(() => {
-    regenerateNode(id, { loopbackAction: "converse" });
-  }, [id, regenerateNode]);
+  // Loopback: a single "Send" action (= handleRegenerate). It shows the model
+  // the latest render (if any) + references, folds in the compose-box direction,
+  // assesses the render when there is one, and returns a refined prompt. It does
+  // NOT generate — the user runs the generator node directly.
 
   // Loopback wiring status — the assess step only works when the image
   // generator's output is fed back into the fuchsia feedback input, and the
@@ -588,10 +579,10 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                   />
                 </div>
               </div>
-              {/* Chatbot compose box + the two send actions (handleAssess /
-                  handleConverse). The box clears after each successful send so
-                  the previous direction can't be silently re-sent. Neither
-                  action generates — the user runs the generator node directly. */}
+              {/* Chatbot compose box + a single Send action (handleRegenerate).
+                  The box clears after each successful send so the previous
+                  direction can't be silently re-sent. Send does NOT generate —
+                  the user runs the generator node directly. */}
               <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/70 px-2 py-1.5 space-y-1.5">
                 <textarea
                   value={nodeData.composeInput ?? ""}
@@ -600,25 +591,15 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                   rows={2}
                   className="nodrag nopan nowheel select-text cursor-text w-full resize-none text-[10px] text-neutral-200 bg-neutral-950/50 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-600/60 placeholder:text-neutral-600"
                 />
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={handleAssess}
-                    disabled={!canRun}
-                    title={blockedReason || "Assess — critique the latest generated image (feedback) against the goal + references, and refine the prompt"}
-                    className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-1"
-                  >
-                    <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                    {isExecuting ? "Running…" : "Assess"}
-                  </button>
-                  <button
-                    onClick={handleConverse}
-                    disabled={!canRun}
-                    title={blockedReason || "Converse — refine the output prompt from your typed direction (uses the images as context)"}
-                    className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-neutral-800 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-neutral-200 transition-colors"
-                  >
-                    {isExecuting ? "Running…" : "Converse"}
-                  </button>
-                </div>
+                <button
+                  onClick={handleRegenerate}
+                  disabled={!canRun}
+                  title={blockedReason || "Send — assess the latest generated image (if any) against the goal + references, fold in your direction, and refine the prompt. Does not generate — run the generator node yourself."}
+                  className="nodrag nopan w-full text-[10px] py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-1"
+                >
+                  <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z" /></svg>
+                  {isExecuting ? "Running…" : "Send"}
+                </button>
               </div>
             </div>
           ) : (
