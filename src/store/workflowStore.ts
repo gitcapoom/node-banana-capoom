@@ -177,6 +177,10 @@ function stripGenerationOutputs(nodeType: string, data: Record<string, unknown>)
     case "llmGenerate":
       return {
         ...data,
+        // A generous default output cap — maxTokens is a ceiling, not a fixed
+        // cost, so this only prevents truncation (e.g. loopback assessment +
+        // <image_prompt> block) without adding cost for normal replies.
+        maxTokens: (data as { maxTokens?: number }).maxTokens ?? 8192,
         inputPrompt: null,
         inputImages: [],
         inputImageRefs: undefined,

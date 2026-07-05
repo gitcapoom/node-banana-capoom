@@ -137,12 +137,16 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     (mode: "off" | "conversation" | "loopback") => {
       if (mode === "loopback") {
         // Loopback relies on the built-in skill's two-output protocol, so
-        // auto-apply it as the (editable) system prompt.
+        // auto-apply it as the (editable) system prompt. Also ensure a generous
+        // output cap — the assessment + <image_prompt> block truncates at low
+        // limits (and maxTokens is a ceiling, not a cost, so raising it is free
+        // for normal replies). Never lowers a higher value the user chose.
         updateNodeData(id, {
           conversationMode: true,
           loopbackMode: true,
           systemPrompt: LOOPBACK_SKILL,
           promptSkillName: LOOPBACK_SKILL_NAME,
+          maxTokens: Math.max(nodeData.maxTokens ?? 0, 16384),
         });
       } else if (mode === "conversation") {
         updateNodeData(id, { conversationMode: true, loopbackMode: false });
@@ -150,7 +154,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
         updateNodeData(id, { conversationMode: false, loopbackMode: false });
       }
     },
-    [id, updateNodeData]
+    [id, updateNodeData, nodeData.maxTokens]
   );
 
   const [copiedPrompt, setCopiedPrompt] = useState(false);
@@ -335,14 +339,14 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
             {/* Max Tokens */}
             <div className="flex flex-col gap-0.5">
               <label className="text-[11px] text-neutral-400">
-                Max Tokens: {(nodeData.maxTokens || 2048).toLocaleString()}
+                Max Tokens: {(nodeData.maxTokens || 8192).toLocaleString()}
               </label>
               <input
                 type="range"
                 min="256"
-                max="16384"
+                max="32768"
                 step="256"
-                value={nodeData.maxTokens || 2048}
+                value={nodeData.maxTokens || 8192}
                 onChange={handleMaxTokensChange}
                 className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
               />

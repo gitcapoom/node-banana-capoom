@@ -544,7 +544,7 @@ export async function POST(request: NextRequest) {
       provider,
       model,
       temperature = 0.7,
-      maxTokens = 1024,
+      maxTokens = 4096,
       reasoning = "off",
     } = body;
 
