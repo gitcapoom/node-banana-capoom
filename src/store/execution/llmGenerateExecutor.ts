@@ -62,10 +62,17 @@ export async function executeLlmGenerate(
   let passthroughList: string[] | null = null;
 
   if (loopbackMode) {
+    // On a FRESH conversation (no turns yet) ignore whatever sits on the
+    // feedback pin — it's a stale render left over from a previous session or a
+    // still-connected generator, NOT this conversation's output. Starting clean
+    // means drafting from the goal + references, not "assessing" a stale image.
+    const isFreshConversation = (nodeData.conversation ?? []).length === 0;
+    const feedbackImage = isFreshConversation ? null : inputs.feedbackImage;
+
     // References are LIVE inputs only (not the stored combined list, which would
     // grow every run). Feedback image is Image 1, ahead of the references.
     let refList = [...inputs.images];
-    if (inputs.feedbackImage) refList = [inputs.feedbackImage, ...refList];
+    if (feedbackImage) refList = [feedbackImage, ...refList];
     passthroughList = refList;
 
     // One action ("Send"): the model sees the latest render (Image 1, if any)
@@ -76,7 +83,7 @@ export async function executeLlmGenerate(
     // and always returns a refined prompt.
     const goalText = (nodeData.composeInput ?? "").trim() || (inputs.text ?? "").trim();
     images = refList;
-    if (!inputs.feedbackImage) {
+    if (!feedbackImage) {
       text = goalText
         ? `No image has been generated yet. Using the reference images, draft an image prompt for this direction:\n\n${goalText}`
         : "No image has been generated yet — draft an initial image prompt from the goal and the reference images.";

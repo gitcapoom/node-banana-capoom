@@ -84,6 +84,19 @@ describe("migrateEdgeHandles", () => {
     ]);
   });
 
+  it("never migrates the special image-feedback / image-bg handles (loopback wire survives reload)", () => {
+    const nodes = [node("llm", "llmGenerate")];
+    const edges = [
+      edge("e1", "llm", "image-feedback"), // loopback feedback wire — must stay put
+      edge("e2", "llm", "image-bg"), // background image — must stay put
+      edge("e3", "llm", "image"), // a real reference — SHOULD migrate
+    ];
+    const dyn = migrateEdgeHandles(nodes, edges, "dynamic");
+    expect(handles(dyn)).toEqual(["image-feedback", "image-bg", "dynpin__image__primary__0"]);
+    // and the special handles survive the reverse pass too
+    expect(handles(migrateEdgeHandles(nodes, dyn, "classic"))).toEqual(["image-feedback", "image-bg", "image"]);
+  });
+
   it("leaves nested element slots and non-generator edges untouched", () => {
     const nodes = [node("gen", "generateVideo"), node("out", "output")];
     const edges = [
