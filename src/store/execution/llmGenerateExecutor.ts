@@ -87,22 +87,19 @@ export async function executeLlmGenerate(
       images = [];
       text = goalText || "Refine the image prompt toward the goal.";
     } else {
-      // Assess: send ONLY the loopback image so the model concentrates on that
-      // single render — attention split across several images noticeably
-      // degrades fine-detail (texture/color/artifact) judgement. The references
-      // still reach the generator via the passthrough; the model refers to them
-      // by position without needing to re-see them here. Always fold in the
-      // input prompt so the model assesses against the CURRENT goal/direction,
-      // not a stale one from history.
-      images = inputs.feedbackImage ? [inputs.feedbackImage] : [];
+      // Assess: the model sees the latest render (Image 1) AND the reference
+      // images (Images 2+), plus the input prompt as the goal — so it can judge
+      // the render's fidelity to both the goal text and the visual references.
+      // (The skill focuses the detailed texture/color critique on Image 1.)
+      images = refList;
       if (!inputs.feedbackImage) {
         text = goalText
-          ? `There is no generated image yet. Propose an initial image prompt for this goal:\n\n${goalText}`
-          : "There is no generated image to assess yet — propose an initial image prompt toward the goal.";
+          ? `There is no generated image yet. Using the reference images as the target, propose an initial image prompt for this goal:\n\n${goalText}`
+          : "There is no generated image to assess yet — propose an initial image prompt toward the goal using the reference images.";
       } else {
         text = goalText
-          ? `Review and assess ONLY the latest generated image (Image 1) against this goal/direction, then give an improved, corrected prompt:\n\n${goalText}`
-          : "Review and assess ONLY the latest generated image (Image 1) against the goal, then give an improved, corrected prompt.";
+          ? `Assess the latest generated image (Image 1) against this goal/direction AND the reference images (Images 2+), then give an improved, corrected prompt:\n\n${goalText}`
+          : "Assess the latest generated image (Image 1) against the goal and the reference images (Images 2+), then give an improved, corrected prompt.";
       }
     }
   } else if (useStoredFallback) {
