@@ -7,6 +7,7 @@
 
 import type { LLMGenerateNodeData, ConversationTurn } from "@/types";
 import { buildLlmHeaders } from "@/store/utils/buildApiHeaders";
+import { LOOPBACK_SKILL, LOOPBACK_SKILL_NAME } from "./loopbackSkill";
 import type { NodeExecutionContext } from "./types";
 
 export interface LlmGenerateOptions {
@@ -198,13 +199,25 @@ export async function executeLlmGenerate(
 
   const headers = buildLlmHeaders(nodeData.provider, providerSettings);
 
+  // The built-in loopback skill is the single source of truth: when the node is
+  // still using it (promptSkillName marker — cleared the instant the user edits
+  // the system prompt), always send the CURRENT skill text, not the copy that
+  // was snapshotted into systemPrompt when loopback was first enabled. Without
+  // this, skill improvements never reach nodes created before the update unless
+  // the user re-toggles the mode. User edits are respected (edit clears the
+  // marker, so we fall back to their stored systemPrompt).
+  const effectiveSystem =
+    loopbackMode && nodeData.promptSkillName === LOOPBACK_SKILL_NAME
+      ? LOOPBACK_SKILL
+      : nodeData.systemPrompt;
+
   try {
     const response = await fetch("/api/llm", {
       method: "POST",
       headers,
       body: JSON.stringify({
         messages: outboundMessages,
-        ...(nodeData.systemPrompt ? { system: nodeData.systemPrompt } : {}),
+        ...(effectiveSystem ? { system: effectiveSystem } : {}),
         provider: nodeData.provider,
         model: nodeData.model,
         temperature: nodeData.temperature,
