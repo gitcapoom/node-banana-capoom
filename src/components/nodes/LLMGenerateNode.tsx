@@ -11,6 +11,7 @@ import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
 import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { DynamicInputHandles } from "./DynamicInputHandles";
+import { LOOPBACK_SKILL, LOOPBACK_SKILL_NAME } from "@/store/execution/loopbackSkill";
 import { PromptSkillPicker } from "./PromptSkillPicker";
 
 // LLM providers — the model list for each is fetched live via the
@@ -111,10 +112,42 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
   // ─── Conversation mode handlers ───────────────────────────────
   const conversation = nodeData.conversation ?? [];
   const conversationMode = nodeData.conversationMode === true;
+  const loopbackMode = nodeData.loopbackMode === true;
+  // 3-way mode derived from the two booleans (loopback implies conversation).
+  const chatMode: "off" | "conversation" | "loopback" =
+    loopbackMode ? "loopback" : conversationMode ? "conversation" : "off";
 
-  const handleToggleConversationMode = useCallback(() => {
-    updateNodeData(id, { conversationMode: !conversationMode });
-  }, [id, conversationMode, updateNodeData]);
+  const handleSetMode = useCallback(
+    (mode: "off" | "conversation" | "loopback") => {
+      if (mode === "loopback") {
+        // Loopback relies on the built-in skill's two-output protocol, so
+        // auto-apply it as the (editable) system prompt.
+        updateNodeData(id, {
+          conversationMode: true,
+          loopbackMode: true,
+          systemPrompt: LOOPBACK_SKILL,
+          promptSkillName: LOOPBACK_SKILL_NAME,
+        });
+      } else if (mode === "conversation") {
+        updateNodeData(id, { conversationMode: true, loopbackMode: false });
+      } else {
+        updateNodeData(id, { conversationMode: false, loopbackMode: false });
+      }
+    },
+    [id, updateNodeData]
+  );
+
+  const [copiedPrompt, setCopiedPrompt] = useState(false);
+  const handleCopyPrompt = useCallback(async () => {
+    if (!nodeData.outputPrompt) return;
+    try {
+      await navigator.clipboard.writeText(nodeData.outputPrompt);
+      setCopiedPrompt(true);
+      setTimeout(() => setCopiedPrompt(false), 1500);
+    } catch (err) {
+      console.error("Failed to copy prompt:", err);
+    }
+  }, [nodeData.outputPrompt]);
 
   const handleSystemPromptChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -336,20 +369,26 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
 
             {/* ─── Conversation mode ───────────────────────── */}
             <div className="border-t border-neutral-800 pt-1.5 mt-1">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={conversationMode}
-                  onChange={handleToggleConversationMode}
-                  className="nodrag accent-blue-500"
-                />
-                <span className="text-[11px] text-neutral-300">Conversation mode</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-neutral-300 shrink-0">Mode</span>
+                <div className="nodrag nopan flex rounded-md overflow-hidden border border-neutral-700">
+                  {([["off", "One-shot"], ["conversation", "Chat"], ["loopback", "Loopback"]] as const).map(([m, label]) => (
+                    <button
+                      key={m}
+                      onClick={() => handleSetMode(m)}
+                      title={m === "loopback" ? "Conversation + image feedback loop (2 outputs: chat + clean prompt)" : undefined}
+                      className={`text-[10px] px-2 py-0.5 transition-colors ${chatMode === m ? "bg-indigo-600 text-white" : "bg-neutral-800 text-neutral-400 hover:text-white"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 {conversationMode && conversation.length > 0 && (
                   <span className="text-[10px] text-neutral-500 ml-auto">
                     {conversation.filter(t => t.role === "user").length} turn{conversation.filter(t => t.role === "user").length === 1 ? "" : "s"}
                   </span>
                 )}
-              </label>
+              </div>
               {conversationMode && (
                 <div className="mt-1.5 space-y-1.5">
                   {/* Max history + clear */}
@@ -401,24 +440,83 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
           />
         </>
       )}
-      {/* Text output */}
+      {/* Feedback image input (loopback only) — the previous generation = Image 1 */}
+      {loopbackMode && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          id="image-feedback"
+          style={{ top: "15%" }}
+          data-handletype="image"
+          className="!bg-fuchsia-500 !border-fuchsia-700"
+          title="Feedback image — the previous generation (Image 1)"
+        />
+      )}
+      {/* Conversation / text output */}
       <Handle
         type="source"
         position={Position.Right}
         id="text"
         data-handletype="text"
+        style={loopbackMode ? { top: "35%" } : undefined}
+        title={loopbackMode ? "Conversation text" : undefined}
       />
+      {/* Clean image-prompt output (loopback only) → image node */}
+      {loopbackMode && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="prompt"
+          data-handletype="text"
+          style={{ top: "65%" }}
+          className="!bg-emerald-500 !border-emerald-700"
+          title="Clean image prompt → image generator"
+        />
+      )}
 
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
         {conversationMode ? (
-          // ─── Conversation transcript view ───────────────────────
-          <ConversationTranscript
-            conversation={conversation}
-            status={nodeData.status}
-            error={nodeData.error}
-            onRemoveTurn={handleRemoveTurn}
-            transcriptRef={transcriptRef}
-          />
+          // ─── Conversation transcript (loopback adds a standalone prompt panel) ───
+          loopbackMode ? (
+            <div className="w-full h-full flex flex-col min-h-0">
+              <div className="flex-1 min-h-0">
+                <ConversationTranscript
+                  conversation={conversation}
+                  status={nodeData.status}
+                  error={nodeData.error}
+                  onRemoveTurn={handleRemoveTurn}
+                  transcriptRef={transcriptRef}
+                />
+              </div>
+              {/* Standalone clean-prompt panel — read-only, copyable; also feeds the `prompt` output */}
+              <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/60 max-h-[40%] flex flex-col">
+                <div className="flex items-center justify-between px-2 pt-1">
+                  <span className="text-[9px] uppercase tracking-wide text-emerald-400/80">Image prompt</span>
+                  <button
+                    onClick={handleCopyPrompt}
+                    disabled={!nodeData.outputPrompt}
+                    className="nodrag nopan text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white disabled:opacity-40 transition-colors"
+                    title="Copy prompt"
+                  >
+                    {copiedPrompt ? "Copied" : "Copy"}
+                  </button>
+                </div>
+                <div className="nodrag nopan nowheel select-text cursor-text overflow-auto px-2 pb-1.5">
+                  <p className="text-[10px] text-neutral-300 whitespace-pre-wrap break-words">
+                    {nodeData.outputPrompt || <span className="text-neutral-600 italic">Run to generate the image prompt…</span>}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <ConversationTranscript
+              conversation={conversation}
+              status={nodeData.status}
+              error={nodeData.error}
+              onRemoveTurn={handleRemoveTurn}
+              transcriptRef={transcriptRef}
+            />
+          )
         ) : nodeData.status === "loading" ? (
           <div className="w-full h-full bg-neutral-900/40 flex items-center justify-center">
             <svg

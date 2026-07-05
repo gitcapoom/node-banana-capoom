@@ -1792,11 +1792,23 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       // (e.g. glbViewer needs to fetch+load 3D model from upstream nanoBanana)
       const { edges: currentEdges } = get();
       const downstreamEdges = currentEdges.filter(e => e.source === nodeId);
+      // Loopback auto-step: after a loopback LLM run, also regenerate the image
+      // node wired to its `prompt` output so the new image is ready to feed
+      // back as Image 1 next turn. Bounded — the image node's own downstream
+      // auto-run (below, per node) covers viewers/outputs but never llmGenerate,
+      // so the feedback back-edge does not re-trigger the LLM (no loop).
+      const isLoopbackLlm =
+        node.type === "llmGenerate" && (node.data as { loopbackMode?: boolean }).loopbackMode === true;
       for (const edge of downstreamEdges) {
         const targetNode = get().nodes.find(n => n.id === edge.target);
         if (!targetNode) continue;
         const targetCtx = get()._buildExecutionContext(targetNode);
         switch (targetNode.type) {
+          case "nanoBanana":
+            if (isLoopbackLlm && edge.sourceHandle === "prompt") {
+              await executeNanoBanana(targetCtx, regenOptions);
+            }
+            break;
           case "glbViewer":
             await executeGlbViewer(targetCtx);
             break;

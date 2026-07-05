@@ -9,6 +9,7 @@ import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { ModelParameters } from "./ModelParameters";
 import { PromptSkillPicker } from "./PromptSkillPicker";
+import { LOOPBACK_SKILL, LOOPBACK_SKILL_NAME } from "@/store/execution/loopbackSkill";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
 import { CubicBezierEditor } from "@/components/CubicBezierEditor";
@@ -1328,10 +1329,27 @@ function LLMControls({ node }: { node: Node }) {
   // ─── Conversation handlers (mirror LLMGenerateNode's inline panel) ──
   const conversation = nodeData.conversation ?? [];
   const conversationMode = nodeData.conversationMode === true;
+  const loopbackMode = nodeData.loopbackMode === true;
+  const chatMode: "off" | "conversation" | "loopback" =
+    loopbackMode ? "loopback" : conversationMode ? "conversation" : "off";
 
-  const handleToggleConversationMode = useCallback(() => {
-    updateNodeData(node.id, { conversationMode: !conversationMode });
-  }, [node.id, conversationMode, updateNodeData]);
+  const handleSetMode = useCallback(
+    (mode: "off" | "conversation" | "loopback") => {
+      if (mode === "loopback") {
+        updateNodeData(node.id, {
+          conversationMode: true,
+          loopbackMode: true,
+          systemPrompt: LOOPBACK_SKILL,
+          promptSkillName: LOOPBACK_SKILL_NAME,
+        });
+      } else if (mode === "conversation") {
+        updateNodeData(node.id, { conversationMode: true, loopbackMode: false });
+      } else {
+        updateNodeData(node.id, { conversationMode: false, loopbackMode: false });
+      }
+    },
+    [node.id, updateNodeData]
+  );
 
   const handleSystemPromptChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -1509,20 +1527,26 @@ function LLMControls({ node }: { node: Node }) {
 
       {/* ─── Conversation mode ─────────────────────────────── */}
       <div className="border-t border-neutral-700 pt-3">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={conversationMode}
-            onChange={handleToggleConversationMode}
-            className="nodrag accent-blue-500"
-          />
-          <span className="text-xs font-medium text-neutral-300">Conversation mode</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-neutral-300 shrink-0">Mode</span>
+          <div className="nodrag flex rounded-md overflow-hidden border border-neutral-600">
+            {([["off", "One-shot"], ["conversation", "Chat"], ["loopback", "Loopback"]] as const).map(([m, label]) => (
+              <button
+                key={m}
+                onClick={() => handleSetMode(m)}
+                title={m === "loopback" ? "Conversation + image feedback loop (2 outputs: chat + clean prompt)" : undefined}
+                className={`text-[11px] px-2 py-0.5 transition-colors ${chatMode === m ? "bg-indigo-600 text-white" : "bg-neutral-700 text-neutral-400 hover:text-white"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {conversationMode && conversation.length > 0 && (
             <span className="text-[10px] text-neutral-500 ml-auto">
               {conversation.filter(t => t.role === "user").length} turn{conversation.filter(t => t.role === "user").length === 1 ? "" : "s"}
             </span>
           )}
-        </label>
+        </div>
         {conversationMode && (
           <div className="mt-2 space-y-2">
             <div className="flex items-center gap-2">

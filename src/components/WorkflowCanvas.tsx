@@ -211,7 +211,10 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "generateAudio":
       return { inputs: ["text"], outputs: ["audio"] };
     case "llmGenerate":
-      return { inputs: ["text", "image"], outputs: ["text"] };
+      // `image-feedback` (loopback feedback image) + `prompt` (loopback clean
+      // prompt output) are only rendered in loopback mode, but listing them
+      // here lets batch-connect validation accept edges to/from them.
+      return { inputs: ["text", "image", "image-feedback"], outputs: ["text", "prompt"] };
     case "splitGrid":
       return { inputs: ["image"], outputs: ["reference"] };
     case "output":

@@ -51,6 +51,9 @@ export interface ConnectedInputs {
   text: string | null;
   dynamicInputs: Record<string, string | string[]>;
   easeCurve: { bezierHandles: [number, number, number, number]; easingPreset: string | null; outputDuration: number } | null;
+  /** Loopback: the image on the `image-feedback` handle (the previous
+   *  generation), kept out of `images[]` so the executor can place it first. */
+  feedbackImage?: string | null;
 }
 
 /**
@@ -134,7 +137,12 @@ export function getSourceOutput(
     const pcData = sourceNode.data as PromptConstructorNodeData;
     return { type: "text", value: pcData.outputText ?? pcData.template ?? null };
   } else if (sourceNode.type === "llmGenerate") {
-    return { type: "text", value: (sourceNode.data as LLMGenerateNodeData).outputText };
+    const llmData = sourceNode.data as LLMGenerateNodeData;
+    // Loopback mode exposes a second text output: the clean image prompt.
+    if (sourceHandleId === "prompt") {
+      return { type: "text", value: llmData.outputPrompt ?? null };
+    }
+    return { type: "text", value: llmData.outputText };
   } else if (sourceNode.type === "videoFrameGrab") {
     return { type: "image", value: (sourceNode.data as VideoFrameGrabNodeData).outputImage };
   } else if (sourceNode.type === "glbViewer") {
@@ -234,6 +242,7 @@ export function getConnectedInputsPure(
   const audio: string[] = [];
   let model3d: string | null = null;
   let text: string | null = null;
+  let feedbackImage: string | null = null;
   const dynamicInputs: Record<string, string | string[]> = {};
   const dynamicPinsOn = getDynamicPinsEnabled();
   let easeCurve: ConnectedInputs["easeCurve"] = null;
@@ -521,6 +530,13 @@ export function getConnectedInputsPure(
       // Background image handle — visual only, not a model input
       if (handleId === "image-bg") return;
 
+      // Loopback feedback image (the previous generation). Kept separate from
+      // images[] so the executor can place it as Image 1; last one wins.
+      if (handleId === "image-feedback") {
+        feedbackImage = typeof value === "string" ? value : String(value);
+        return;
+      }
+
       // New dynamic-pin model: dynpin__{type}__{field}__{slot}. Each slot is
       // one value of a (possibly array) field. Route it back into the same
       // images[]/dynamicInputs[field] arrays the rest of the pipeline expects,
@@ -664,7 +680,7 @@ export function getConnectedInputsPure(
     text = resolved;
   }
 
-  return { images, videos, audio, model3d, text, dynamicInputs, easeCurve };
+  return { images, videos, audio, model3d, text, dynamicInputs, easeCurve, feedbackImage };
 }
 
 /**

@@ -705,6 +705,10 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   inputImages: string[];
   inputImageRefs?: string[]; // External image references for storage optimization
   outputText: string | null;
+  /** Loopback mode: the clean image-generation prompt (no conversational text),
+   *  parsed from the assistant reply's <image_prompt> block. Sourced by the
+   *  `prompt` output handle; shown in the node's standalone prompt panel. */
+  outputPrompt?: string | null;
   provider: LLMProvider;
   model: LLMModelType;
   temperature: number;
@@ -728,6 +732,11 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   /** When true, the node remembers turns and sends the full transcript
    *  on every run. Default false → one-shot like before. */
   conversationMode?: boolean;
+  /** Loopback conversation mode (implies conversationMode): adds a feedback
+   *  image input (the last image-gen output, always Image 1), a second `prompt`
+   *  output, and the two-output <image_prompt> protocol. Running the node also
+   *  auto-triggers the connected image node (one-click auto-step). */
+  loopbackMode?: boolean;
   /** Optional system prompt prepended to every request as the provider's
    *  native system slot. Stored separately from `conversation` because
    *  all three providers carry it in a dedicated field. Sent in both one-shot
