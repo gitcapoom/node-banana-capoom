@@ -1572,6 +1572,17 @@ function LLMControls({ node }: { node: Node }) {
         )}
       </div>
 
+      {loopbackMode && (
+        <div className="mb-1.5">
+          <textarea
+            value={nodeData.composeInput ?? ""}
+            onChange={(e) => updateNodeData(node.id, { composeInput: e.target.value })}
+            placeholder="Type a direction for the next Assess / Converse… (clears after sending)"
+            rows={2}
+            className="nodrag nopan w-full resize-y text-xs py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-600 text-white placeholder:text-neutral-600"
+          />
+        </div>
+      )}
       <div className="flex justify-end gap-1.5">
         {loopbackMode ? (
           <>

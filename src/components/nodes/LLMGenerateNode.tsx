@@ -588,26 +588,37 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                   />
                 </div>
               </div>
-              {/* Two explicit actions (handleAssess / handleConverse). Neither
-                  generates — the user runs the generator node directly. */}
-              <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/70 px-2 py-1.5 flex items-center gap-1.5">
-                <button
-                  onClick={handleAssess}
-                  disabled={!canRun}
-                  title={blockedReason || "Assess — look at the latest generated image (feedback) and critique it, refining the prompt from what it sees"}
-                  className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-1"
-                >
-                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                  {isExecuting ? "Running…" : "Assess"}
-                </button>
-                <button
-                  onClick={handleConverse}
-                  disabled={!canRun}
-                  title={blockedReason || "Converse — answer the input prompt and refine the output prompt from it (no image)"}
-                  className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-neutral-800 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-neutral-200 transition-colors"
-                >
-                  {isExecuting ? "Running…" : "Converse"}
-                </button>
+              {/* Chatbot compose box + the two send actions (handleAssess /
+                  handleConverse). The box clears after each successful send so
+                  the previous direction can't be silently re-sent. Neither
+                  action generates — the user runs the generator node directly. */}
+              <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/70 px-2 py-1.5 space-y-1.5">
+                <textarea
+                  value={nodeData.composeInput ?? ""}
+                  onChange={(e) => updateNodeData(id, { composeInput: e.target.value })}
+                  placeholder="Type a direction for the next Assess / Converse… (clears after sending)"
+                  rows={2}
+                  className="nodrag nopan nowheel select-text cursor-text w-full resize-none text-[10px] text-neutral-200 bg-neutral-950/50 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-600/60 placeholder:text-neutral-600"
+                />
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={handleAssess}
+                    disabled={!canRun}
+                    title={blockedReason || "Assess — critique the latest generated image (feedback) against the goal + references, and refine the prompt"}
+                    className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-1"
+                  >
+                    <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                    {isExecuting ? "Running…" : "Assess"}
+                  </button>
+                  <button
+                    onClick={handleConverse}
+                    disabled={!canRun}
+                    title={blockedReason || "Converse — refine the output prompt from your typed direction (uses the images as context)"}
+                    className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-neutral-800 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-neutral-200 transition-colors"
+                  >
+                    {isExecuting ? "Running…" : "Converse"}
+                  </button>
+                </div>
               </div>
             </div>
           ) : (

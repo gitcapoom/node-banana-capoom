@@ -80,7 +80,10 @@ export async function executeLlmGenerate(
     if (inputs.feedbackImage) refList = [inputs.feedbackImage, ...refList];
     passthroughList = refList;
 
-    const goalText = (inputs.text ?? "").trim();
+    // Per-turn direction: the in-node compose box first (chatbot-style — cleared
+    // after each run so the previous prompt can't be silently re-sent), falling
+    // back to the connected text input when the box is empty.
+    const goalText = (nodeData.composeInput ?? "").trim() || (inputs.text ?? "").trim();
     if (loopbackAction === "converse") {
       // Prompt-focused, but the model still SEES the images (feedback render if
       // any = Image 1, then the references = Images 2+) — same set/order as the
@@ -280,6 +283,9 @@ export async function executeLlmGenerate(
           outputText: convoText,
           outputPrompt: prompt,
           conversation: [...persistedConversation, assistantTurn],
+          // Chatbot-style: clear the compose box after a successful send so the
+          // same direction isn't silently reused next turn.
+          composeInput: "",
           status: "complete",
           error: null,
         });
