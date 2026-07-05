@@ -1572,16 +1572,38 @@ function LLMControls({ node }: { node: Node }) {
         )}
       </div>
 
-      <div className="flex justify-end">
-        <button
-          onClick={() => regenerateNode(node.id)}
-          disabled={!canRun}
-          title={blockedReason || undefined}
-          className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
-        >
-          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-          {isExecuting ? "Running..." : "Run"}
-        </button>
+      <div className="flex justify-end gap-1.5">
+        {loopbackMode ? (
+          <>
+            <button
+              onClick={() => regenerateNode(node.id, { loopbackAutoStep: false })}
+              disabled={!canRun}
+              title={blockedReason || "Converse — run the LLM to assess / refine the prompt WITHOUT regenerating the image"}
+              className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-indigo-700 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            >
+              {isExecuting ? "Running..." : "Converse"}
+            </button>
+            <button
+              onClick={() => regenerateNode(node.id, { loopbackAutoStep: true })}
+              disabled={!canRun}
+              title={blockedReason || "Loop — assess the latest image, write a new prompt, AND regenerate the image (output feeds back)"}
+              className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 border border-emerald-800 rounded text-white font-medium disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            >
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+              {isExecuting ? "Running..." : "Loop"}
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={() => regenerateNode(node.id)}
+            disabled={!canRun}
+            title={blockedReason || undefined}
+            className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+          >
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+            {isExecuting ? "Running..." : "Run"}
+          </button>
+        )}
       </div>
     </div>
   );

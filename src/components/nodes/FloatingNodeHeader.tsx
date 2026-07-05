@@ -83,6 +83,9 @@ interface FloatingNodeHeaderProps {
   selected: boolean;
   onExpandNode?: (nodeId: string, nodeType: string) => void;
   onRunNode?: (nodeId: string) => void;
+  /** Hide the header's generic Run button when the node renders its own run
+   *  controls (e.g. loopback LLM nodes have explicit Converse / Loop buttons). */
+  hideRunButton?: boolean;
   headerAction?: ReactNode;
   headerButtons?: ReactNode;
   provider?: ProviderType;
@@ -105,6 +108,7 @@ export const FloatingNodeHeader = memo(function FloatingNodeHeader({
   selected,
   onExpandNode,
   onRunNode,
+  hideRunButton = false,
   headerAction,
   headerButtons,
   provider,
@@ -559,7 +563,7 @@ export const FloatingNodeHeader = memo(function FloatingNodeHeader({
           )}
 
           {/* Run Button */}
-          {canRun && onRunNode && (
+          {canRun && onRunNode && !hideRunButton && (
             <div className="relative shrink-0 group">
               <button
                 onClick={() => onRunNode(id)}

@@ -483,7 +483,7 @@ interface WorkflowStore {
   _abortController: AbortController | null;  // Internal: for cancellation
   _buildExecutionContext: (node: WorkflowNode, signal?: AbortSignal) => NodeExecutionContext;
   executeWorkflow: (startFromNodeId?: string) => Promise<void>;
-  regenerateNode: (nodeId: string) => Promise<void>;
+  regenerateNode: (nodeId: string, options?: { loopbackAutoStep?: boolean }) => Promise<void>;
   /** Load full-res for a node + its upstream from disk (lazy on open). Used by
    *  GPU editors (color / comp) to populate the live preview on double-click. */
   loadNodeFullResInputs: (nodeId: string) => Promise<void>;
@@ -1675,7 +1675,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     set({ maxConcurrentCalls: clamped });
   },
 
-  regenerateNode: async (nodeId: string) => {
+  regenerateNode: async (nodeId: string, options?: { loopbackAutoStep?: boolean }) => {
     const { nodes, edges, updateNodeData, currentNodeIds } = get();
 
     // Per-node gating: refuse only when *this* node is currently in
@@ -1792,20 +1792,23 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       // (e.g. glbViewer needs to fetch+load 3D model from upstream nanoBanana)
       const { edges: currentEdges } = get();
       const downstreamEdges = currentEdges.filter(e => e.source === nodeId);
-      // Loopback one-click auto-step: after a loopback LLM run, also regenerate
-      // the image node wired to its `prompt` output, so one press assesses the
-      // current image AND produces the next one (which feeds back next press).
+      // Loopback auto-step: after a loopback LLM run, also regenerate the image
+      // node wired to its `prompt` output, so ONE press assesses the current
+      // image AND produces the next one (which feeds back next press). The
+      // "Converse only" button opts out via loopbackAutoStep:false — it runs the
+      // LLM (assess/refine) without spending a generation.
       // Bounded — the image node's own downstream auto-run (this same switch)
       // never re-runs llmGenerate, so the feedback back-edge doesn't loop.
       const isLoopbackLlm =
         node.type === "llmGenerate" && (node.data as { loopbackMode?: boolean }).loopbackMode === true;
+      const doLoopbackAutoStep = isLoopbackLlm && (options?.loopbackAutoStep ?? true);
       for (const edge of downstreamEdges) {
         const targetNode = get().nodes.find(n => n.id === edge.target);
         if (!targetNode) continue;
         const targetCtx = get()._buildExecutionContext(targetNode);
         switch (targetNode.type) {
           case "nanoBanana":
-            if (isLoopbackLlm && edge.sourceHandle === "prompt") {
+            if (doLoopbackAutoStep && edge.sourceHandle === "prompt") {
               await executeNanoBanana(targetCtx, regenOptions);
             }
             break;
