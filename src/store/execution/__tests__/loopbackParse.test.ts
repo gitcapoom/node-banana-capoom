@@ -35,10 +35,15 @@ describe("parseLoopbackReply — loopback two-output split", () => {
     expect(conversation).toBe("(image prompt updated)");
   });
 
-  it("falls back to the full reply as the prompt when no block is present", () => {
-    const raw = "a plain prompt with no tags";
+  it("returns prompt=null (keep previous) when no block is present", () => {
+    const raw = "an assessment with no image_prompt tags";
     const { conversation, prompt } = parseLoopbackReply(raw);
-    expect(prompt).toBe(raw);
+    expect(prompt).toBeNull(); // never feed the assessment prose to the generator
     expect(conversation).toBe(raw);
+  });
+
+  it("returns prompt=null when the block is present but empty", () => {
+    const { prompt } = parseLoopbackReply("some prose <image_prompt>  </image_prompt>");
+    expect(prompt).toBeNull();
   });
 });
