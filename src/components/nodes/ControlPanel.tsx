@@ -1341,6 +1341,10 @@ function LLMControls({ node }: { node: Node }) {
           loopbackMode: true,
           systemPrompt: LOOPBACK_SKILL,
           promptSkillName: LOOPBACK_SKILL_NAME,
+          // Ensure a generous output cap so the assessment + <image_prompt>
+          // block doesn't truncate (maxTokens is a ceiling, not a cost). Never
+          // lowers a higher value.
+          maxTokens: Math.max(nodeData.maxTokens ?? 0, 16384),
         });
       } else if (mode === "conversation") {
         updateNodeData(node.id, { conversationMode: true, loopbackMode: false });
@@ -1348,7 +1352,7 @@ function LLMControls({ node }: { node: Node }) {
         updateNodeData(node.id, { conversationMode: false, loopbackMode: false });
       }
     },
-    [node.id, updateNodeData]
+    [node.id, updateNodeData, nodeData.maxTokens]
   );
 
   const handleSystemPromptChange = useCallback(
@@ -1478,14 +1482,14 @@ function LLMControls({ node }: { node: Node }) {
 
       <div>
         <label className="block text-xs font-medium text-neutral-300 mb-1">
-          Max Tokens: {(nodeData.maxTokens || 2048).toLocaleString()}
+          Max Tokens: {(nodeData.maxTokens || 8192).toLocaleString()}
         </label>
         <input
           type="range"
           min="256"
-          max="16384"
+          max="32768"
           step="256"
-          value={nodeData.maxTokens || 2048}
+          value={nodeData.maxTokens || 8192}
           onChange={handleMaxTokensChange}
           className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
         />
