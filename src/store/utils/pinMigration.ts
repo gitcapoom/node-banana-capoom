@@ -126,6 +126,13 @@ export function migrateEdgeHandles(
     const handle = e.targetHandle;
     if (!handle) return e;
 
+    // Special static handles that are NOT model inputs and are always rendered
+    // by this exact id in every mode — never migrate them. Without this, a
+    // loopback feedback wire (image-feedback) resolves to the generic "primary"
+    // field and gets rewritten to a plain reference pin on the classic→dynamic
+    // pass that runs at load, so the feedback connection is lost after restart.
+    if (handle === "image-feedback" || handle === "image-bg") return e;
+
     // Router: image-first bundle. Only image edges convert; in classic mode they
     // collapse back to the single multi-edge "image" handle (no image-N).
     if (node.type === "router") {
