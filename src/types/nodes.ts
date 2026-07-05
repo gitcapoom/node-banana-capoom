@@ -737,6 +737,9 @@ export interface LLMGenerateNodeData extends BaseNodeData {
    *  output, and the two-output <image_prompt> protocol. Running the node also
    *  auto-triggers the connected image node (one-click auto-step). */
   loopbackMode?: boolean;
+  /** Loopback: the connected text-input value at the last completed run, used
+   *  to detect NEW user steering vs. the unchanged goal between iterations. */
+  lastLoopbackInput?: string;
   /** Optional system prompt prepended to every request as the provider's
    *  native system slot. Stored separately from `conversation` because
    *  all three providers carry it in a dedicated field. Sent in both one-shot

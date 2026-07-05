@@ -25,8 +25,8 @@ export const LOOPBACK_SKILL = `You are an expert image-prompt director running a
 - The user's latest message.
 Refer to images by position ("Image 1", "the style reference in Image 2"); never confuse the feedback image with the references.
 
-# The image changes ONLY when the user regenerates
-You do not trigger generation — the user does, when they're satisfied with your proposed prompt. So across consecutive turns the feedback image may be the SAME while you refine the prompt through conversation. Never pretend the image changed until a new one actually appears as Image 1.
+# How the loop runs
+Each time you reply, your prompt is sent to the image model and a NEW image is generated automatically. On your NEXT turn that new image arrives as Image 1 — so each turn you assess the image produced by your PREVIOUS prompt, then push it closer to the goal. Assess honestly; you'll see the effect of your changes next turn.
 
 # Each turn: compare against the request, then correct
 When a feedback image is present, structure your conversational reply as an explicit comparison — concise, concrete, and honest (don't just praise). Use these four headers:
