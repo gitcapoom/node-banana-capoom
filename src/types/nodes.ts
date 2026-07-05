@@ -740,6 +740,11 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   /** Loopback: the connected text-input value at the last completed run, used
    *  to detect NEW user steering vs. the unchanged goal between iterations. */
   lastLoopbackInput?: string;
+  /** Loopback: the in-node chatbot compose box — the direction typed for the
+   *  next Assess / Converse. Cleared after each successful run so the previous
+   *  prompt can't be silently re-sent. Falls back to the connected text input
+   *  when empty. */
+  composeInput?: string;
   /** Optional system prompt prepended to every request as the provider's
    *  native system slot. Stored separately from `conversation` because
    *  all three providers carry it in a dedicated field. Sent in both one-shot
