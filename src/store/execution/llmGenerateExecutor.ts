@@ -13,13 +13,6 @@ import type { NodeExecutionContext } from "./types";
 export interface LlmGenerateOptions {
   /** When true, falls back to stored inputImages/inputPrompt if no connections provide them. */
   useStoredFallback?: boolean;
-  /**
-   * Loopback action, from the node's two buttons:
-   *  - "assess"   → look at the latest generated (feedback) image and critique it.
-   *  - "converse" → work off the input prompt only (no image) and refine the prompt.
-   * Ignored outside loopback mode. Defaults to "assess".
-   */
-  loopbackAction?: "assess" | "converse";
 }
 
 /**
@@ -62,15 +55,10 @@ export async function executeLlmGenerate(
   let text: string | null;
 
   const loopbackMode = nodeData.loopbackMode === true;
-  // Loopback exposes two explicit actions (the node's Assess / Converse
-  // buttons). Neither generates the image — the user runs the generator node
-  // directly. Default to "assess" for any non-button run.
-  const loopbackAction: "assess" | "converse" = options.loopbackAction ?? "assess";
 
   // Loopback only: the full ordered list (feedback first, then live references)
-  // that the node's `images` passthrough forwards to the generator. Always
-  // stored as inputImages regardless of action, so a text-only Converse turn
-  // never strips the generator's references.
+  // that the node's `images` passthrough forwards to the generator. Stored as
+  // inputImages so the generator always gets the same set the model saw.
   let passthroughList: string[] | null = null;
 
   if (loopbackMode) {
@@ -80,33 +68,22 @@ export async function executeLlmGenerate(
     if (inputs.feedbackImage) refList = [inputs.feedbackImage, ...refList];
     passthroughList = refList;
 
-    // Per-turn direction: the in-node compose box first (chatbot-style — cleared
-    // after each run so the previous prompt can't be silently re-sent), falling
-    // back to the connected text input when the box is empty.
+    // One action ("Send"): the model sees the latest render (Image 1, if any)
+    // plus the references (Images 2+), and folds in the per-turn direction from
+    // the in-node compose box (chatbot-style — cleared after each run so the
+    // previous prompt can't be silently re-sent), falling back to the connected
+    // text input when the box is empty. It assesses the render when there is one
+    // and always returns a refined prompt.
     const goalText = (nodeData.composeInput ?? "").trim() || (inputs.text ?? "").trim();
-    if (loopbackAction === "converse") {
-      // Prompt-focused, but the model still SEES the images (feedback render if
-      // any = Image 1, then the references = Images 2+) — same set/order as the
-      // generator receives. Writing the prompt blind to the references produces
-      // nonsense, especially in the first phase before anything is generated;
-      // seeing them also keeps the prompt's positional references aligned.
-      images = refList;
-      text = goalText || "Refine the image prompt toward the goal, drawing on the reference images.";
+    images = refList;
+    if (!inputs.feedbackImage) {
+      text = goalText
+        ? `No image has been generated yet. Using the reference images, draft an image prompt for this direction:\n\n${goalText}`
+        : "No image has been generated yet — draft an initial image prompt from the goal and the reference images.";
     } else {
-      // Assess: the model sees the latest render (Image 1) AND the reference
-      // images (Images 2+), plus the input prompt as the goal — so it can judge
-      // the render's fidelity to both the goal text and the visual references.
-      // (The skill focuses the detailed texture/color critique on Image 1.)
-      images = refList;
-      if (!inputs.feedbackImage) {
-        text = goalText
-          ? `There is no generated image yet. Using the reference images as the target, propose an initial image prompt for this goal:\n\n${goalText}`
-          : "There is no generated image to assess yet — propose an initial image prompt toward the goal using the reference images.";
-      } else {
-        text = goalText
-          ? `Assess the latest generated image (Image 1) against this goal/direction AND the reference images (Images 2+), then give an improved, corrected prompt:\n\n${goalText}`
-          : "Assess the latest generated image (Image 1) against the goal and the reference images (Images 2+), then give an improved, corrected prompt.";
-      }
+      text = goalText
+        ? `Assess the latest generated image (Image 1) against the goal and the reference images (Images 2+), apply this direction, and give an improved, corrected prompt:\n\n${goalText}`
+        : "Assess the latest generated image (Image 1) against the goal and the reference images (Images 2+), then give an improved, corrected prompt.";
     }
   } else if (useStoredFallback) {
     images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
