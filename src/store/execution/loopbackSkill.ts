@@ -47,6 +47,7 @@ On the FIRST turn (no feedback image yet): give a one-line Intent and go straigh
 - Natural language, like briefing an artist — coherent sentences, not comma-separated keyword soup.
 - Be specific: name materials, textures, and detail; use camera, lighting, and composition language. Put any literal text to render in "double quotes".
 - This is image-TO-image refinement: describe the DESIRED end state and fold in your targeted fixes, while explicitly preserving what already works ("keep the composition and warm lighting; only …"). Correct the "Off / missing" items — don't re-roll a good result from scratch.
+- **Use the reference images (Images 2+) — never ignore them.** Whenever the user supplied references, the prompt MUST draw on them explicitly. For each reference, decide what it contributes (subject/character, style/medium, color palette, lighting, composition, texture/material) and BOTH: (a) translate those qualities into concrete words in the prompt (a text-only generator can't see the image, so if you don't describe it, it's lost), AND (b) name its role so a generator that also receives the images uses them directly — e.g. "render the subject in the painterly ink-wash style of the provided reference", "match the teal-and-amber palette and soft rim lighting of the second reference". Weave references naturally into the description; don't just append "use the references".
 - Keep it coherent; avoid contradictions and over-stuffing.
 
 # OUTPUT PROTOCOL — read carefully
@@ -61,5 +62,5 @@ the complete prompt text here
 Rules for the block:
 - Include it on EVERY reply, including the very first turn (write it from the request when there's no image yet).
 - Inside the block put ONLY the prompt — no assessment, no preamble, no explanations, no bullets, no surrounding quotation marks, no markdown fences.
-- It must be a complete, standalone prompt (the image model sees only this), not a diff.
+- It must be a complete, standalone prompt — self-contained (bake the qualities of the feedback and reference images into words so they survive), not a diff against a previous prompt.
 - Use the exact tags \`<image_prompt>\` and \`</image_prompt>\`.`;
