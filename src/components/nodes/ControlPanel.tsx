@@ -1576,21 +1576,21 @@ function LLMControls({ node }: { node: Node }) {
         {loopbackMode ? (
           <>
             <button
-              onClick={() => regenerateNode(node.id, { loopbackAutoStep: false })}
+              onClick={() => regenerateNode(node.id, { loopbackAction: "assess" })}
               disabled={!canRun}
-              title={blockedReason || "Converse — run the LLM to assess / refine the prompt WITHOUT regenerating the image"}
+              title={blockedReason || "Assess — look at the latest generated image (feedback) and critique it, refining the prompt from what it sees"}
+              className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 border border-emerald-800 rounded text-white font-medium disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            >
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+              {isExecuting ? "Running..." : "Assess"}
+            </button>
+            <button
+              onClick={() => regenerateNode(node.id, { loopbackAction: "converse" })}
+              disabled={!canRun}
+              title={blockedReason || "Converse — answer the input prompt and refine the output prompt from it (no image)"}
               className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-indigo-700 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
             >
               {isExecuting ? "Running..." : "Converse"}
-            </button>
-            <button
-              onClick={() => regenerateNode(node.id, { loopbackAutoStep: true })}
-              disabled={!canRun}
-              title={blockedReason || "Loop — assess the latest image, write a new prompt, AND regenerate the image (output feeds back)"}
-              className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 border border-emerald-800 rounded text-white font-medium disabled:opacity-40 disabled:pointer-events-none transition-colors"
-            >
-              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-              {isExecuting ? "Running..." : "Loop"}
             </button>
           </>
         ) : (

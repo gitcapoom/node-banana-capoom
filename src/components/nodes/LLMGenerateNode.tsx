@@ -43,17 +43,18 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     regenerateNode(id);
   }, [id, regenerateNode]);
 
-  // Loopback has two explicit run actions:
-  //  • Loop     — assess the latest image, produce a new prompt, AND regenerate
-  //               the wired image node (the output feeds back next press).
-  //  • Converse — run the LLM only (assess / refine the prompt through chat)
-  //               without spending an image generation.
-  const handleLoop = useCallback(() => {
-    regenerateNode(id, { loopbackAutoStep: true });
+  // Loopback has two explicit actions (neither generates — you run the
+  // generator node yourself):
+  //  • Assess   — look at the latest generated (feedback) image and critique it,
+  //               refining the prompt from what it sees.
+  //  • Converse — work off the input prompt only (no image) and refine the
+  //               output prompt from it.
+  const handleAssess = useCallback(() => {
+    regenerateNode(id, { loopbackAction: "assess" });
   }, [id, regenerateNode]);
 
   const handleConverse = useCallback(() => {
-    regenerateNode(id, { loopbackAutoStep: false });
+    regenerateNode(id, { loopbackAction: "converse" });
   }, [id, regenerateNode]);
 
   // Loopback wiring status — the assess step only works when the image
@@ -550,8 +551,8 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
               {(!feedbackConnected || !promptConnected) && (
                 <div className="shrink-0 px-2 py-1 bg-amber-900/40 border-b border-amber-800/50 text-[9px] text-amber-300/90 leading-tight">
                   {!feedbackConnected
-                    ? "⟳ Wire the image generator's output back into the fuchsia feedback input (top-left) so each Loop can assess the latest image."
-                    : "Wire the emerald prompt output into the image generator so Loop can regenerate it."}
+                    ? "⟳ Wire the generator's output back into the fuchsia Feedback input (top-left) so Assess can see the latest image."
+                    : "Wire the emerald Image prompt output into the generator so it uses the refined prompt (you run the generator yourself)."}
                 </div>
               )}
               <div className="flex-1 min-h-0">
@@ -582,24 +583,25 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                   </p>
                 </div>
               </div>
-              {/* Two explicit run actions (see handleLoop / handleConverse) */}
+              {/* Two explicit actions (handleAssess / handleConverse). Neither
+                  generates — the user runs the generator node directly. */}
               <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/70 px-2 py-1.5 flex items-center gap-1.5">
+                <button
+                  onClick={handleAssess}
+                  disabled={!canRun}
+                  title={blockedReason || "Assess — look at the latest generated image (feedback) and critique it, refining the prompt from what it sees"}
+                  className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-1"
+                >
+                  <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                  {isExecuting ? "Running…" : "Assess"}
+                </button>
                 <button
                   onClick={handleConverse}
                   disabled={!canRun}
-                  title={blockedReason || "Converse — run the LLM to assess / refine the prompt WITHOUT regenerating the image"}
+                  title={blockedReason || "Converse — answer the input prompt and refine the output prompt from it (no image)"}
                   className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-neutral-800 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-neutral-200 transition-colors"
                 >
                   {isExecuting ? "Running…" : "Converse"}
-                </button>
-                <button
-                  onClick={handleLoop}
-                  disabled={!canRun}
-                  title={blockedReason || "Loop — assess the latest image, write a new prompt, AND regenerate the image (output feeds back)"}
-                  className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-1"
-                >
-                  <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                  {isExecuting ? "Running…" : "Loop"}
                 </button>
               </div>
             </div>
