@@ -82,10 +82,13 @@ export async function executeLlmGenerate(
 
     const goalText = (inputs.text ?? "").trim();
     if (loopbackAction === "converse") {
-      // Prompt-focused: no images. Answer the input prompt and refine the output
-      // prompt from it + the transcript.
-      images = [];
-      text = goalText || "Refine the image prompt toward the goal.";
+      // Prompt-focused, but the model still SEES the images (feedback render if
+      // any = Image 1, then the references = Images 2+) — same set/order as the
+      // generator receives. Writing the prompt blind to the references produces
+      // nonsense, especially in the first phase before anything is generated;
+      // seeing them also keeps the prompt's positional references aligned.
+      images = refList;
+      text = goalText || "Refine the image prompt toward the goal, drawing on the reference images.";
     } else {
       // Assess: the model sees the latest render (Image 1) AND the reference
       // images (Images 2+), plus the input prompt as the goal — so it can judge
