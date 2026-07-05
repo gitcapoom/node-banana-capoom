@@ -70,6 +70,24 @@ export async function executeLlmGenerate(
     images = [inputs.feedbackImage, ...images];
   }
 
+  // Loopback: make each turn a coherent "review & assess" exchange in the
+  // transcript. Turn 1 (no feedback image) uses the connected goal text; later
+  // iterations inject an explicit review/assess question — plus any NEW steering
+  // the user typed into the connected input since the last completed run.
+  const loopbackConnectedText = loopbackMode ? (text ?? "").trim() : "";
+  if (loopbackMode) {
+    const steered =
+      loopbackConnectedText.length > 0 &&
+      loopbackConnectedText !== (nodeData.lastLoopbackInput ?? "").trim();
+    if (!inputs.feedbackImage) {
+      text = loopbackConnectedText || "Create the first image toward the goal.";
+    } else if (steered) {
+      text = `Review and assess the latest generated image (Image 1) against the goal, then apply this new direction and give an improved, corrected prompt:\n\n${loopbackConnectedText}`;
+    } else {
+      text = "Review and assess the latest generated image (Image 1) against the goal, then give an improved, corrected prompt.";
+    }
+  }
+
   // Defensive validation — the image-handle on this node accepts any edge
   // (React Flow doesn't strictly type-check connections), so a text-typed
   // source wired to it would land its prose into `images` and the
@@ -220,6 +238,7 @@ export async function executeLlmGenerate(
           outputText: convoText,
           outputPrompt: prompt,
           conversation: [...persistedConversation, assistantTurn],
+          lastLoopbackInput: loopbackConnectedText,
           status: "complete",
           error: null,
         });
