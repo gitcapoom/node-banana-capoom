@@ -258,7 +258,7 @@ async function generateWithGoogle(
 
 type OpenAIContentBlock =
   | { type: "text"; text: string }
-  | { type: "image_url"; image_url: { url: string } };
+  | { type: "image_url"; image_url: { url: string; detail?: "low" | "high" | "auto" } };
 type OpenAIMessage = {
   role: "system" | "user" | "assistant";
   content: string | OpenAIContentBlock[];
@@ -312,7 +312,10 @@ async function generateWithOpenAI(
         const sized = await enforceImageSize(img, PROVIDER_IMAGE_LIMITS.openai, "openai");
         imageBlocks.push({
           type: "image_url",
-          image_url: { url: normalizeImageDataUrl(sized) },
+          // "high" makes OpenAI tile the image at full resolution instead of
+          // the coarse "auto"/low pass — needed for judging fine texture,
+          // color, and micro-detail (loopback Assess relies on this).
+          image_url: { url: normalizeImageDataUrl(sized), detail: "high" },
         });
       }
       apiMessages.push({
