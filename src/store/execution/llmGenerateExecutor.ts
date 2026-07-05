@@ -13,6 +13,13 @@ import type { NodeExecutionContext } from "./types";
 export interface LlmGenerateOptions {
   /** When true, falls back to stored inputImages/inputPrompt if no connections provide them. */
   useStoredFallback?: boolean;
+  /**
+   * Loopback action, from the node's two buttons:
+   *  - "assess"   → look at the latest generated (feedback) image and critique it.
+   *  - "converse" → work off the input prompt only (no image) and refine the prompt.
+   * Ignored outside loopback mode. Defaults to "assess".
+   */
+  loopbackAction?: "assess" | "converse";
 }
 
 /**
@@ -55,50 +62,43 @@ export async function executeLlmGenerate(
   let text: string | null;
 
   const loopbackMode = nodeData.loopbackMode === true;
+  // Loopback exposes two explicit actions (the node's Assess / Converse
+  // buttons). Neither generates the image — the user runs the generator node
+  // directly. Default to "assess" for any non-button run.
+  const loopbackAction: "assess" | "converse" = options.loopbackAction ?? "assess";
+
+  // Loopback only: the full ordered list (feedback first, then live references)
+  // that the node's `images` passthrough forwards to the generator. Always
+  // stored as inputImages regardless of action, so a text-only Converse turn
+  // never strips the generator's references.
+  let passthroughList: string[] | null = null;
 
   if (loopbackMode) {
-    // Loopback: references are LIVE inputs only. Do NOT fall back to the stored
-    // inputImages — that's the combined [feedback, ...refs] list from the last
-    // run, so re-prepending the feedback below would make the list grow every
-    // run (and the `images` passthrough would forward that growing pile).
-    images = inputs.images;
-    text = inputs.text ?? nodeData.inputPrompt;
+    // References are LIVE inputs only (not the stored combined list, which would
+    // grow every run). Feedback image is Image 1, ahead of the references.
+    let refList = [...inputs.images];
+    if (inputs.feedbackImage) refList = [inputs.feedbackImage, ...refList];
+    passthroughList = refList;
+
+    if (loopbackAction === "converse") {
+      // Prompt-focused: no images. Answer the input prompt and refine the output
+      // prompt from it + the transcript.
+      images = [];
+      text = (inputs.text ?? "").trim() || "Refine the image prompt toward the goal.";
+    } else {
+      // Assess: look at the latest generated (loopback) image (Image 1) and
+      // critique it against the goal, then give a corrected prompt.
+      images = refList;
+      text = inputs.feedbackImage
+        ? "Review and assess the latest generated image (Image 1) against the goal, then give an improved, corrected prompt."
+        : "There is no generated image to assess yet — propose an initial image prompt toward the goal.";
+    }
   } else if (useStoredFallback) {
     images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
     text = inputs.text ?? nodeData.inputPrompt;
   } else {
     images = inputs.images;
     text = inputs.text ?? nodeData.inputPrompt;
-  }
-
-  // Loopback mode: the feedback image (previous generation, from the
-  // `image-feedback` handle) is always prepended as Image 1, ahead of any
-  // external reference images — the loopback skill references it by that
-  // position. This combined ordered list is what we store as `inputImages` and
-  // what the node's `images` passthrough output forwards to the generator, so
-  // the prompt's "Image 1 / Image 2 / …" line up with what the generator sees.
-  if (loopbackMode && inputs.feedbackImage) {
-    images = [inputs.feedbackImage, ...images];
-  }
-
-  // Loopback: make each turn a coherent "review & assess" exchange in the
-  // transcript. Turn 1 (no feedback image) uses the connected goal text; later
-  // iterations inject an explicit review/assess question — plus any NEW steering
-  // the user typed into the connected input since the last completed run. Read
-  // the goal from the LIVE connected input, not the fallback `text` (which after
-  // a run holds the injected "Review and assess…" string).
-  const loopbackConnectedText = loopbackMode ? (inputs.text ?? "").trim() : "";
-  if (loopbackMode) {
-    const steered =
-      loopbackConnectedText.length > 0 &&
-      loopbackConnectedText !== (nodeData.lastLoopbackInput ?? "").trim();
-    if (!inputs.feedbackImage) {
-      text = loopbackConnectedText || "Create the first image toward the goal.";
-    } else if (steered) {
-      text = `Review and assess the latest generated image (Image 1) against the goal, then apply this new direction and give an improved, corrected prompt:\n\n${loopbackConnectedText}`;
-    } else {
-      text = "Review and assess the latest generated image (Image 1) against the goal, then give an improved, corrected prompt.";
-    }
   }
 
   // Defensive validation — the image-handle on this node accepts any edge
@@ -117,6 +117,8 @@ export async function executeLlmGenerate(
   const rawImageCount = images.length;
   images = images.filter(isLikelyImageUrl);
   const droppedCount = rawImageCount - images.length;
+  // Keep the passthrough list clean too (it's forwarded to the generator).
+  if (passthroughList) passthroughList = passthroughList.filter(isLikelyImageUrl);
 
   if (!text) {
     updateNodeData(node.id, {
@@ -188,7 +190,10 @@ export async function executeLlmGenerate(
 
   updateNodeData(node.id, {
     inputPrompt: text,
-    inputImages: images,
+    // In loopback, store the full feedback+references list (what the `images`
+    // passthrough forwards) rather than just what this turn sent to the LLM —
+    // so a text-only Converse turn doesn't blank out the generator's images.
+    inputImages: loopbackMode ? (passthroughList ?? []) : images,
     ...(useConversation ? { conversation: persistedConversation } : {}),
     status: "loading",
     loadingStartedAt: Date.now(),
@@ -263,7 +268,6 @@ export async function executeLlmGenerate(
           outputText: convoText,
           outputPrompt: prompt,
           conversation: [...persistedConversation, assistantTurn],
-          lastLoopbackInput: loopbackConnectedText,
           status: "complete",
           error: null,
         });
