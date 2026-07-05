@@ -497,6 +497,32 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
           title="Clean image prompt → image generator"
         />
       )}
+      {/* Loopback handle labels — make the loop wiring obvious at a glance.
+          (Dynamic pins render their own input labels, so only add the
+          input labels here in the static case to avoid duplicates.) */}
+      {loopbackMode && (
+        <>
+          <div className="absolute text-[9px] font-semibold whitespace-nowrap pointer-events-none text-fuchsia-400" style={{ right: "calc(100% + 9px)", top: "15%", transform: "translateY(-50%)" }}>
+            ⟳ Feedback
+          </div>
+          {!dynamicPinsOn && (
+            <>
+              <div className="absolute text-[9px] font-medium whitespace-nowrap pointer-events-none text-blue-400" style={{ right: "calc(100% + 9px)", top: "35%", transform: "translateY(-50%)" }}>
+                References
+              </div>
+              <div className="absolute text-[9px] font-medium whitespace-nowrap pointer-events-none text-amber-400" style={{ right: "calc(100% + 9px)", top: "65%", transform: "translateY(-50%)" }}>
+                Goal
+              </div>
+            </>
+          )}
+          <div className="absolute text-[9px] font-medium whitespace-nowrap pointer-events-none text-amber-400" style={{ left: "calc(100% + 9px)", top: "35%", transform: "translateY(-50%)" }}>
+            Chat
+          </div>
+          <div className="absolute text-[9px] font-semibold whitespace-nowrap pointer-events-none text-emerald-400" style={{ left: "calc(100% + 9px)", top: "65%", transform: "translateY(-50%)" }}>
+            Image prompt →
+          </div>
+        </>
+      )}
 
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
         {conversationMode ? (
