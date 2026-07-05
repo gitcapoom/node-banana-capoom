@@ -4,6 +4,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
+import { ZoomPanView } from "../ZoomPanView";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { OutputGalleryNodeData } from "@/types";
 import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
@@ -159,15 +160,20 @@ export function OutputGalleryNode({ id, data, selected }: NodeProps<OutputGaller
       {lightboxIndex !== null && typeof document !== "undefined" &&
         createPortal(
           <div
-            className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-8"
+            className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center"
             onClick={closeLightbox}
           >
-            <div className="relative max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
-              <img
-                src={displayImages[lightboxIndex]}
-                alt={`Gallery image ${lightboxIndex + 1}`}
-                className="max-w-full max-h-[90vh] object-contain rounded"
-              />
+            <div className="relative w-[90vw] h-[85vh]" onClick={(e) => e.stopPropagation()}>
+              <ZoomPanView className="w-full h-full rounded" panMode="free">
+                <div className="w-full h-full flex items-center justify-center">
+                  <img
+                    src={displayImages[lightboxIndex]}
+                    alt={`Gallery image ${lightboxIndex + 1}`}
+                    className="max-w-full max-h-full object-contain"
+                    draggable={false}
+                  />
+                </div>
+              </ZoomPanView>
 
               {/* Close button */}
               <button
@@ -214,8 +220,8 @@ export function OutputGalleryNode({ id, data, selected }: NodeProps<OutputGaller
                 </button>
               )}
 
-              {/* Image counter */}
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-black/50 rounded text-white text-xs font-medium">
+              {/* Image counter — top-center to clear ZoomPanView's bottom badge */}
+              <div className="absolute top-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-black/50 rounded text-white text-xs font-medium">
                 {lightboxIndex + 1} / {displayImages.length}
               </div>
             </div>
