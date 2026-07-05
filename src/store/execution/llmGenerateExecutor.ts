@@ -86,11 +86,14 @@ export async function executeLlmGenerate(
       images = [];
       text = (inputs.text ?? "").trim() || "Refine the image prompt toward the goal.";
     } else {
-      // Assess: look at the latest generated (loopback) image (Image 1) and
-      // critique it against the goal, then give a corrected prompt.
-      images = refList;
+      // Assess: send ONLY the loopback image so the model concentrates on that
+      // single render — attention split across several images noticeably
+      // degrades fine-detail (texture/color/artifact) judgement. The references
+      // still reach the generator via the passthrough; the model refers to them
+      // by position without needing to re-see them here.
+      images = inputs.feedbackImage ? [inputs.feedbackImage] : [];
       text = inputs.feedbackImage
-        ? "Review and assess the latest generated image (Image 1) against the goal, then give an improved, corrected prompt."
+        ? "Review and assess ONLY the latest generated image (Image 1) against the goal, then give an improved, corrected prompt."
         : "There is no generated image to assess yet — propose an initial image prompt toward the goal.";
     }
   } else if (useStoredFallback) {
