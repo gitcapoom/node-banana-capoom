@@ -518,6 +518,19 @@ export function getConnectedInputsPure(
         return;
       }
 
+      // Loopback references passthrough. A single edge from a loopback LLM's
+      // `images` output carries the WHOLE ordered image list the LLM saw
+      // (feedback first, then references) — i.e. exactly the "Image 1 / Image 2
+      // / …" its prompt refers to. Spread them into images[] in that order so
+      // the image generator receives the same positions the prompt names.
+      if (sourceNode.type === "llmGenerate" && edge.sourceHandle === "images") {
+        const llmData = sourceNode.data as LLMGenerateNodeData;
+        for (const img of llmData.inputImages ?? []) {
+          if (typeof img === "string" && img) images.push(img);
+        }
+        return;
+      }
+
       const handleId = edge.targetHandle;
       const { type, value } = getSourceOutput(
         sourceNode,
