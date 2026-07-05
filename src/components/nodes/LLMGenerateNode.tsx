@@ -43,6 +43,30 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     regenerateNode(id);
   }, [id, regenerateNode]);
 
+  // Loopback has two explicit run actions:
+  //  • Loop     — assess the latest image, produce a new prompt, AND regenerate
+  //               the wired image node (the output feeds back next press).
+  //  • Converse — run the LLM only (assess / refine the prompt through chat)
+  //               without spending an image generation.
+  const handleLoop = useCallback(() => {
+    regenerateNode(id, { loopbackAutoStep: true });
+  }, [id, regenerateNode]);
+
+  const handleConverse = useCallback(() => {
+    regenerateNode(id, { loopbackAutoStep: false });
+  }, [id, regenerateNode]);
+
+  // Loopback wiring status — the assess step only works when the image
+  // generator's output is fed back into the fuchsia feedback input, and the
+  // Loop's auto-regenerate only works when the emerald prompt output drives an
+  // image node. Surface a hint when either is missing (explains "no assess loop").
+  const feedbackConnected = useWorkflowStore((state) =>
+    state.edges.some((e) => e.target === id && e.targetHandle === "image-feedback")
+  );
+  const promptConnected = useWorkflowStore((state) =>
+    state.edges.some((e) => e.source === id && e.sourceHandle === "prompt")
+  );
+
   const handleClearOutput = useCallback(() => {
     updateNodeData(id, { outputText: null, status: "idle", error: null });
   }, [id, updateNodeData]);
@@ -479,6 +503,13 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
           // ─── Conversation transcript (loopback adds a standalone prompt panel) ───
           loopbackMode ? (
             <div className="w-full h-full flex flex-col min-h-0">
+              {(!feedbackConnected || !promptConnected) && (
+                <div className="shrink-0 px-2 py-1 bg-amber-900/40 border-b border-amber-800/50 text-[9px] text-amber-300/90 leading-tight">
+                  {!feedbackConnected
+                    ? "⟳ Wire the image generator's output back into the fuchsia feedback input (top-left) so each Loop can assess the latest image."
+                    : "Wire the emerald prompt output into the image generator so Loop can regenerate it."}
+                </div>
+              )}
               <div className="flex-1 min-h-0">
                 <ConversationTranscript
                   conversation={conversation}
@@ -506,6 +537,26 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                     {nodeData.outputPrompt || <span className="text-neutral-600 italic">Run to generate the image prompt…</span>}
                   </p>
                 </div>
+              </div>
+              {/* Two explicit run actions (see handleLoop / handleConverse) */}
+              <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/70 px-2 py-1.5 flex items-center gap-1.5">
+                <button
+                  onClick={handleConverse}
+                  disabled={!canRun}
+                  title={blockedReason || "Converse — run the LLM to assess / refine the prompt WITHOUT regenerating the image"}
+                  className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-neutral-800 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-neutral-200 transition-colors"
+                >
+                  {isExecuting ? "Running…" : "Converse"}
+                </button>
+                <button
+                  onClick={handleLoop}
+                  disabled={!canRun}
+                  title={blockedReason || "Loop — assess the latest image, write a new prompt, AND regenerate the image (output feeds back)"}
+                  className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-1"
+                >
+                  <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                  {isExecuting ? "Running…" : "Loop"}
+                </button>
               </div>
             </div>
           ) : (

@@ -2632,6 +2632,7 @@ export function WorkflowCanvas() {
                 onCustomTitleChange={handleCustomTitleChange}
                 onCommentChange={handleCommentChange}
                 onRunNode={handleRunNode}
+                hideRunButton={node.type === "llmGenerate" && (node.data as any)?.loopbackMode === true}
                 onExpandNode={handleExpandNode}
               />
             );
