@@ -458,7 +458,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
             )}
           </div>
         ) : nodeData.outputText ? (
-          <div className="group/text relative w-full h-full bg-neutral-900/40 p-2 overflow-auto nowheel">
+          <div className="group/text relative w-full h-full bg-neutral-900/40 p-2 overflow-auto nowheel nodrag nopan select-text cursor-text">
             <p className="text-[10px] text-neutral-300 whitespace-pre-wrap break-words">
               {nodeData.outputText}
             </p>
@@ -546,7 +546,7 @@ function ConversationTranscript({
       ) : (
         <div
           ref={transcriptRef}
-          className="w-full h-full overflow-auto nowheel py-1 px-1.5 space-y-1"
+          className="w-full h-full overflow-auto nowheel nodrag nopan select-text cursor-text py-1 px-1.5 space-y-1"
         >
           {conversation.map((turn, i) => (
             <ConversationRow
