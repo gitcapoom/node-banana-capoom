@@ -73,6 +73,27 @@ export function DynamicInputHandles({
     )
   );
 
+  // Fields on THIS node fed by a loopback references passthrough — a single
+  // edge from a loopback LLM's `images` output that fills the WHOLE array field
+  // at once. For such a field we collapse to just that one pin (below), hiding
+  // the other slots and the trailing "add" pin so no conflicting per-slot image
+  // can be wired on top of the array. Maps field path → the passthrough's
+  // target handle id.
+  const passthroughByField = useWorkflowStore(
+    useShallow((s) => {
+      const map: Record<string, string> = {};
+      for (const e of s.edges) {
+        if (e.target !== nodeId || e.sourceHandle !== "images" || !e.targetHandle) continue;
+        const src = s.nodes.find((n) => n.id === e.source);
+        if (src?.type === "llmGenerate" && (src.data as { loopbackMode?: boolean }).loopbackMode) {
+          const dyn = parseDynPin(e.targetHandle);
+          if (dyn) map[dyn.field] = e.targetHandle;
+        }
+      }
+      return map;
+    })
+  );
+
   // Build the concrete pin list. Scalar fields get one pin; multi/array fields
   // grow one pin per connection plus a trailing empty pin; repeatable groups
   // (e.g. Kling `elements`) render per-item sub-groups that grow by item.
@@ -102,6 +123,14 @@ export function DynamicInputHandles({
     if (!multi) {
       const id = dynPinId(type, fieldPath, 0);
       pins.push({ id, type, label, empty: isEmpty(id) });
+      return;
+    }
+    // A loopback references passthrough occupies this whole array field via one
+    // edge — render ONLY that pin (no other slots, no trailing "add" pin) so the
+    // array can't be mixed with conflicting per-slot images.
+    const passthroughHandle = passthroughByField[fieldPath];
+    if (passthroughHandle) {
+      pins.push({ id: passthroughHandle, type, label: `${label} · loopback array`, empty: false });
       return;
     }
     const slots = connectedSlots(type, fieldPath);
