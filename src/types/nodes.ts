@@ -745,6 +745,12 @@ export interface LLMGenerateNodeData extends BaseNodeData {
    *  prompt can't be silently re-sent. Falls back to the connected text input
    *  when empty. */
   composeInput?: string;
+  /** Loopback: the FIRST image prompt produced in the current conversation —
+   *  the canonical full spec derived from the original request. Pinned into the
+   *  context every turn (alongside the original request) as a drift anchor. Set
+   *  on the conversation's first successful run; a fresh conversation replaces
+   *  it. */
+  initialPrompt?: string;
   /** Optional system prompt prepended to every request as the provider's
    *  native system slot. Stored separately from `conversation` because
    *  all three providers carry it in a dedicated field. Sent in both one-shot
