@@ -76,28 +76,29 @@ export async function executeLlmGenerate(
     // from the goal + references, not "assessing" a stale image.
     const feedbackImage = isFreshConversation ? null : inputs.feedbackImage;
 
-    // References are LIVE inputs only (not the stored combined list, which would
-    // grow every run). Feedback image is Image 1, ahead of the references.
-    let refList = [...inputs.images];
-    if (feedbackImage) refList = [feedbackImage, ...refList];
-    passthroughList = refList;
+    // DIAGNOSTIC-ONLY render: the references (live inputs) are the ONLY images
+    // the generator ever receives (Image 1, 2, …) — that's what the `images`
+    // passthrough forwards. The render is NEVER sent to the generator (so there
+    // is no sticky-pixel drift anchor); it goes only to the LLM, appended LAST,
+    // purely so the LLM can judge what worked / didn't and fold that into the
+    // prompt in words. References keep the SAME numbering (Image 1+) whether or
+    // not a render exists.
+    const references = [...inputs.images];
+    passthroughList = references;
+    images = feedbackImage ? [...references, feedbackImage] : references;
 
-    // One action ("Send"): the model sees the latest render (Image 1, if any)
-    // plus the references (Images 2+), and folds in the per-turn direction from
-    // the in-node compose box (chatbot-style — cleared after each run so the
-    // previous prompt can't be silently re-sent), falling back to the connected
-    // text input when the box is empty. It assesses the render when there is one
-    // and always returns a refined prompt.
+    // One action ("Send"): fold in the per-turn direction from the in-node
+    // compose box (chatbot-style — cleared after each run so the previous prompt
+    // can't be silently re-sent), falling back to the connected text input.
     const goalText = (nodeData.composeInput ?? "").trim() || (inputs.text ?? "").trim();
-    images = refList;
     if (!feedbackImage) {
       text = goalText
-        ? `No image has been generated yet. Using the reference images, draft an image prompt for this direction:\n\n${goalText}`
-        : "No image has been generated yet — draft an initial image prompt from the goal and the reference images.";
+        ? `No image has been generated yet. Using the reference images (Image 1+), draft an image prompt for this direction:\n\n${goalText}`
+        : "No image has been generated yet — draft an initial image prompt from the goal and the reference images (Image 1+).";
     } else {
       text = goalText
-        ? `Assess the latest generated image (Image 1) against the goal and the reference images (Images 2+), apply this direction, and give an improved, corrected prompt:\n\n${goalText}`
-        : "Assess the latest generated image (Image 1) against the goal and the reference images (Images 2+), then give an improved, corrected prompt.";
+        ? `Assess the RENDER UNDER REVIEW (the LAST attached image) against the goal and the reference images (Image 1+) — what worked, what didn't. The generator will NOT see the render, so describe anything worth keeping in words. Apply this direction and give an improved, corrected prompt:\n\n${goalText}`
+        : "Assess the RENDER UNDER REVIEW (the LAST attached image) against the goal and the reference images (Image 1+) — what worked, what didn't. The generator will NOT see the render, so describe anything worth keeping in words. Then give an improved, corrected prompt.";
     }
   } else if (useStoredFallback) {
     images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
