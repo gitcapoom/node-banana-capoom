@@ -227,6 +227,14 @@ export async function executeLlmGenerate(
     if (specParts.length > 0) {
       effectiveSystem = `${effectiveSystem ?? ""}\n\n# THE SPEC — hold to this every turn; a constraint changes only if the user explicitly says so\n${specParts.join("\n\n")}`;
     }
+    // The CURRENT WORKING PROMPT (last turn's prompt) — the model refines THIS
+    // forward (textual continuity), so accumulated good detail carries over
+    // instead of relying on re-observing the render each turn. THE SPEC still
+    // anchors it against drift.
+    const workingPrompt = nodeData.outputPrompt?.trim();
+    if (workingPrompt) {
+      effectiveSystem = `${effectiveSystem ?? ""}\n\n# CURRENT WORKING PROMPT — refine THIS forward: carry it over verbatim, fold in this turn's fixes, and audit it against THE SPEC (pull back any drift). Do NOT rewrite from scratch or shrink it to just the tweak.\n${workingPrompt}`;
+    }
   }
 
   try {
