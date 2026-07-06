@@ -59,6 +59,10 @@ export async function executeLlmGenerate(
   let text: string | null;
 
   const loopbackMode = nodeData.loopbackMode === true;
+  // A conversation with no turns yet is "fresh": we ignore any stale feedback
+  // image, and (on success) capture this run's prompt as the canonical initial
+  // prompt for the conversation.
+  const isFreshConversation = (nodeData.conversation ?? []).length === 0;
 
   // Loopback only: the full ordered list (feedback first, then live references)
   // that the node's `images` passthrough forwards to the generator. Stored as
@@ -66,11 +70,10 @@ export async function executeLlmGenerate(
   let passthroughList: string[] | null = null;
 
   if (loopbackMode) {
-    // On a FRESH conversation (no turns yet) ignore whatever sits on the
-    // feedback pin — it's a stale render left over from a previous session or a
-    // still-connected generator, NOT this conversation's output. Starting clean
-    // means drafting from the goal + references, not "assessing" a stale image.
-    const isFreshConversation = (nodeData.conversation ?? []).length === 0;
+    // On a FRESH conversation ignore whatever sits on the feedback pin — it's a
+    // stale render left over from a previous session or a still-connected
+    // generator, NOT this conversation's output. Starting clean means drafting
+    // from the goal + references, not "assessing" a stale image.
     const feedbackImage = isFreshConversation ? null : inputs.feedbackImage;
 
     // References are LIVE inputs only (not the stored combined list, which would
@@ -164,21 +167,12 @@ export async function executeLlmGenerate(
   // model sees are the current turn's (feedback = Image 1, then references),
   // keeping the skill's "Image 1 is the feedback" reference unambiguous and
   // saving image tokens. The persisted transcript still keeps its thumbnails.
-  let historyToSend = loopbackMode
+  // The original request + initial prompt survive truncation via THE SPEC
+  // appended to the system prompt (see effectiveSystem below), so no pinning
+  // is needed here.
+  const historyToSend = loopbackMode
     ? slicedPrior.map(({ images: _img, ...rest }) => rest)
     : slicedPrior;
-
-  // Loopback: pin the ORIGINAL request (the first user turn) to the front so
-  // the compare-to-intent target is never lost when Max-turns truncates older
-  // history. Text-only, and only when the cap actually dropped it.
-  if (loopbackMode && cap > 0 && priorConversation.length > 0) {
-    const original = priorConversation[0];
-    const alreadyIncluded = slicedPrior.length > 0 && slicedPrior[0] === original;
-    if (!alreadyIncluded) {
-      const { images: _origImg, ...originalTextOnly } = original;
-      historyToSend = [originalTextOnly, ...historyToSend];
-    }
-  }
 
   const outboundMessages: ConversationTurn[] = useConversation
     ? [...historyToSend, newUserTurn]
@@ -214,10 +208,25 @@ export async function executeLlmGenerate(
   // this, skill improvements never reach nodes created before the update unless
   // the user re-toggles the mode. User edits are respected (edit clears the
   // marker, so we fall back to their stored systemPrompt).
-  const effectiveSystem =
+  let effectiveSystem =
     loopbackMode && nodeData.promptSkillName === LOOPBACK_SKILL_NAME
       ? LOOPBACK_SKILL
       : nodeData.systemPrompt;
+
+  // Loopback drift anchor: append THE SPEC — the original request plus the
+  // canonical initial prompt — to the system context every turn. In the system
+  // slot it can't be truncated by the Max-turns cap and is clearly authoritative,
+  // so the model re-aligns to it instead of drifting with the latest render.
+  // (Only once the conversation has begun; the fresh first turn has neither yet.)
+  if (loopbackMode && !isFreshConversation) {
+    const specParts: string[] = [];
+    const originalRequest = priorConversation[0]?.text?.trim();
+    if (originalRequest) specParts.push(`## Original request (the north star)\n${originalRequest}`);
+    if (nodeData.initialPrompt) specParts.push(`## Canonical initial prompt (the full spec first derived from that request)\n${nodeData.initialPrompt}`);
+    if (specParts.length > 0) {
+      effectiveSystem = `${effectiveSystem ?? ""}\n\n# THE SPEC — hold to this every turn; a constraint changes only if the user explicitly says so\n${specParts.join("\n\n")}`;
+    }
+  }
 
   try {
     const response = await fetch("/api/llm", {
@@ -283,6 +292,9 @@ export async function executeLlmGenerate(
           // same direction isn't silently reused — but keep it when no prompt
           // came back, so the user can just Send again without retyping.
           ...(promptMissing ? {} : { composeInput: "" }),
+          // Capture the conversation's FIRST prompt as the canonical initial
+          // prompt (the drift anchor); a fresh conversation replaces it.
+          ...(isFreshConversation && prompt ? { initialPrompt: prompt } : {}),
           status: "complete",
           error: null,
         });
