@@ -50,6 +50,16 @@ export function AnnotationModal() {
   } = useAnnotationStore();
 
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const incrementModalCount = useWorkflowStore((state) => state.incrementModalCount);
+  const decrementModalCount = useWorkflowStore((state) => state.decrementModalCount);
+
+  // Register with the workflow modal count while open so the canvas underneath
+  // goes inert (esp. React Flow's Delete/Backspace node deletion).
+  useEffect(() => {
+    if (!isModalOpen) return;
+    incrementModalCount();
+    return () => decrementModalCount();
+  }, [isModalOpen, incrementModalCount, decrementModalCount]);
 
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);

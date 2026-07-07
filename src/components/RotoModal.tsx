@@ -112,6 +112,17 @@ export function RotoModal() {
   } = useRotoStore();
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const nodes = useWorkflowStore((s) => s.nodes);
+  const incrementModalCount = useWorkflowStore((s) => s.incrementModalCount);
+  const decrementModalCount = useWorkflowStore((s) => s.decrementModalCount);
+
+  // Register with the workflow modal count while open so the canvas underneath
+  // goes inert — critically, React Flow's Delete/Backspace handler is disabled,
+  // so deleting a roto point never also deletes the selected node on the canvas.
+  useEffect(() => {
+    if (!isModalOpen) return;
+    incrementModalCount();
+    return () => decrementModalCount();
+  }, [isModalOpen, incrementModalCount, decrementModalCount]);
 
   const stageRef = useRef<Konva.Stage>(null);
   const containerRef = useRef<HTMLDivElement>(null);
