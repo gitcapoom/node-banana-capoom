@@ -23,7 +23,10 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
   useEffect(() => {
     const inputs = getConnectedInputs(id);
     if (inputs.images.length > 0 && inputs.images[0] !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: inputs.images[0] });
+      // Clear the stale full-res ref too: it still points at the PREVIOUS input's
+      // file. Left set, the next externalize pass sees a valid existing ref,
+      // discards this new base64, and reloads the old image (matches executeRoto).
+      updateNodeData(id, { sourceImage: inputs.images[0], sourceImageRef: undefined });
     }
   }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
 
