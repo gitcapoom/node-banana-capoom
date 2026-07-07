@@ -2455,7 +2455,7 @@ export function WorkflowCanvas() {
         isValidConnection={isValidConnection}
         fitView
         onlyRenderVisibleElements
-        deleteKeyCode={["Backspace", "Delete"]}
+        deleteKeyCode={isModalOpen ? null : ["Backspace", "Delete"]}
         multiSelectionKeyCode="Shift"
         selectionOnDrag={
           canvasNavigationSettings.selectionMode === "altDrag" || canvasNavigationSettings.selectionMode === "shiftDrag"

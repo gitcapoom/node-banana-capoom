@@ -6,6 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { useRotoStore } from "@/store/rotoStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useFullResField } from "@/hooks/useFullResField";
+import { ensureFullResForNodes } from "@/store/execution/hydrateForRun";
 import { rasterizeRoto } from "@/utils/rasterizeRoto";
 import { RotoNodeData } from "@/types";
 
@@ -17,13 +18,18 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
   const edges = useWorkflowStore((state) => state.edges);
+  const nodes = useWorkflowStore((state) => state.nodes);
+  const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const { ensure } = useFullResField();
 
   // Reactively mirror the upstream image into sourceImage.
   useEffect(() => {
     const inputs = getConnectedInputs(id);
     if (inputs.images.length > 0 && inputs.images[0] !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: inputs.images[0] });
+      // Clear the stale full-res ref too: it still points at the PREVIOUS input's
+      // file. Left set, the next externalize pass sees a valid existing ref,
+      // discards this new base64, and reloads the old image (matches executeRoto).
+      updateNodeData(id, { sourceImage: inputs.images[0], sourceImageRef: undefined });
     }
   }, [edges, id, getConnectedInputs, nodeData.sourceImage, updateNodeData]);
 
@@ -49,14 +55,30 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
   }, [id, nodeData.outputMask, nodeData.outputMaskThumb, nodeData.shapes, nodeData.imageWidth, nodeData.imageHeight, nodeData.invert, updateNodeData]);
 
   const handleEdit = useCallback(async () => {
-    // Load full-res source on demand — it's lazily null after reopening.
-    const imageToEdit = await ensure({ id, field: "sourceImage", ref: nodeData.sourceImageRef, current: nodeData.sourceImage, folder: "inputs" });
+    // Resolve the LIVE upstream image at edit time. The cached sourceImage can
+    // lag the current input: the reactive mirror above only fires on edge
+    // changes, not when the upstream's own image content changes, so trusting
+    // the cache is what surfaces the "old input" inside the editor. Hydrate the
+    // node's inputs first so a lazily-externalized upstream resolves to full-res.
+    await ensureFullResForNodes([id], nodes, edges, updateNodeData, saveDirectoryPath);
+    const liveInput = getConnectedInputs(id).images[0] ?? null;
+    let imageToEdit: string | null = liveInput;
+    if (liveInput) {
+      // Live upstream wins; sync node data and drop the stale ref so a later
+      // externalize pass can't resurrect the previous input.
+      if (liveInput !== nodeData.sourceImage) {
+        updateNodeData(id, { sourceImage: liveInput, sourceImageRef: undefined });
+      }
+    } else {
+      // No connected input (disconnected / manually cached): load on demand.
+      imageToEdit = await ensure({ id, field: "sourceImage", ref: nodeData.sourceImageRef, current: nodeData.sourceImage, folder: "inputs" });
+    }
     if (!imageToEdit) {
       alert("No image available. Connect an image input.");
       return;
     }
     openModal(id, imageToEdit, nodeData.shapes);
-  }, [id, ensure, nodeData.sourceImage, nodeData.sourceImageRef, nodeData.shapes, openModal]);
+  }, [id, ensure, nodes, edges, getConnectedInputs, updateNodeData, saveDirectoryPath, nodeData.sourceImage, nodeData.sourceImageRef, nodeData.shapes, openModal]);
 
   const handleRemove = useCallback(() => {
     updateNodeData(id, { sourceImage: null, shapes: [], outputMask: null });

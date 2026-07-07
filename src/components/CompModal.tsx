@@ -43,6 +43,16 @@ export function CompModal() {
   const node = useWorkflowStore((s) => s.nodes.find((n) => n.id === sourceNodeId));
   const edges = useWorkflowStore((s) => s.edges);
   const nodes = useWorkflowStore((s) => s.nodes);
+  const incrementModalCount = useWorkflowStore((s) => s.incrementModalCount);
+  const decrementModalCount = useWorkflowStore((s) => s.decrementModalCount);
+
+  // Register with the workflow modal count while open so the canvas underneath
+  // goes inert (esp. React Flow's Delete/Backspace node deletion).
+  useEffect(() => {
+    if (!isModalOpen) return;
+    incrementModalCount();
+    return () => decrementModalCount();
+  }, [isModalOpen, incrementModalCount, decrementModalCount]);
 
   const stageRef = useRef<Konva.Stage>(null);
   const imageNodeRef = useRef<Konva.Image>(null);
