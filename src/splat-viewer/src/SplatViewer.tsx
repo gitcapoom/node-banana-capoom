@@ -917,6 +917,7 @@ export default function SplatViewer() {
   // Camera-translation scale (cm ↔ m). Multiplies imported COLMAP positions
   // and rescales any keyframes/live-camera position when changed.
   const [cameraScale, setCameraScale] = useState(1.0);
+  const [userFarClip, setUserFarClip] = useState<number | null>(null);
 
   // Convention of the COLMAP world frame for import/export. Default "y-down"
   // matches the raw COLMAP / OpenCV spec; switch to "z-up" for Blender /
@@ -1032,6 +1033,18 @@ export default function SplatViewer() {
   useEffect(() => { distortionScaleRef.current = distortionScale; }, [distortionScale]);
   const cameraScaleRef = useRef<number>(cameraScale);
   useEffect(() => { cameraScaleRef.current = cameraScale; }, [cameraScale]);
+
+  // Apply far clip live whenever the user changes it.
+  useEffect(() => {
+    const cam = cameraRef.current;
+    if (!cam) return;
+    const far = userFarClip ?? cam.far;
+    cam.far = far;
+    cam.updateProjectionMatrix();
+    const dm = depthMaterialRef.current;
+    if (dm) dm.uniforms.cameraFar.value = far;
+  }, [userFarClip]);
+
   const colmapWorldFrameRef = useRef<ColmapWorldFrame>(colmapWorldFrame);
   useEffect(() => { colmapWorldFrameRef.current = colmapWorldFrame; }, [colmapWorldFrame]);
   // Sync helper visibility with toggles.
@@ -1292,7 +1305,7 @@ export default function SplatViewer() {
       camera.position.set(0, 0, 0);
       camera.lookAt(target);
       camera.near = 0.001;
-      camera.far = 1000;
+      camera.far = userFarClip ?? 10000;
       camera.updateProjectionMatrix();
       const dm = depthMaterialRef.current;
       if (dm) {
@@ -1352,10 +1365,10 @@ export default function SplatViewer() {
       // Adapt near/far to the splat's actual extent. Defaults of (0.01, 1000)
       // clip cm-scale splats up close and VP-scale splats far away. Use the
       // framing distance as the reference scale: near at 1/1000 of distance,
-      // far at 100×, with floors so we don't go below the original defaults
-      // for typical metre-scale splats.
+      // far at 1000× (sky splats sit well beyond the scene bbox so we need
+      // generous headroom). User override wins when set.
       camera.near = Math.max(0.001, distance / 1000);
-      camera.far = Math.max(1000, distance * 100);
+      camera.far = userFarClip ?? Math.max(1000, distance * 1000);
       camera.updateProjectionMatrix();
 
       // Keep the depth-visualization shader's uniforms in sync — it reads
@@ -1391,7 +1404,7 @@ export default function SplatViewer() {
       controlsRef.current.target.set(0, 1.5, -1);
       controlsRef.current.update();
     }
-  }, []);
+  }, [userFarClip]);
 
   /**
    * Frame the camera on the currently selected overlay (mesh or light) — like
@@ -5093,6 +5106,33 @@ export default function SplatViewer() {
                     className="w-[64px] shrink-0 text-[9px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none tabular-nums"
                   />
                 </div>
+                {/* Far clip — lets the user push the far plane out to show
+                    sky/distant splats that sit beyond the auto-fitted range. */}
+                <div className="mt-2 flex items-center gap-2">
+                  <label className="text-[9px] text-neutral-500 shrink-0">Far clip</label>
+                  <input
+                    type="number"
+                    min={1}
+                    step={100}
+                    placeholder="auto"
+                    value={userFarClip ?? ""}
+                    onChange={(e) => {
+                      const n = parseFloat(e.target.value);
+                      setUserFarClip(Number.isFinite(n) && n > 0 ? n : null);
+                    }}
+                    className="w-[72px] text-[9px] py-0.5 px-1 rounded bg-neutral-800 text-neutral-200 border border-neutral-700 focus:border-indigo-500 focus:outline-none tabular-nums"
+                  />
+                  {userFarClip !== null && (
+                    <button
+                      onClick={() => setUserFarClip(null)}
+                      className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 hover:text-neutral-200 transition-colors"
+                      title="Reset to auto"
+                    >
+                      ↺
+                    </button>
+                  )}
+                </div>
+
                 {/* COLMAP world-frame convention. Applied on both import
                     (source → scene) and export (scene → file), so round-trips
                     stay consistent. Switching at runtime rotates the loaded
