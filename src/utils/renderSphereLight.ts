@@ -43,12 +43,11 @@ const BG_HEX = 0x6e6e6e;        // backdrop
 const SPHERE_HEX = 0xcccccc;    // sphere albedo
 const AMBIENT = 0.4;            // fill light (keeps the dark side from going black)
 const SHADOW_OPACITY = 0.55;    // cast-shadow darkness (independent of light intensity)
-const H = 2.15;                 // ortho half-frame (sphere radius 1 → ~46% of frame)
 
 interface Pool {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
-  camera: THREE.OrthographicCamera;
+  camera: THREE.PerspectiveCamera;
   key: THREE.DirectionalLight;
   size: number;
 }
@@ -73,36 +72,34 @@ function getPool(size: number): Pool {
 
   const scene = new THREE.Scene();
 
-  const camera = new THREE.OrthographicCamera(-H, H, H, -H, 0.1, 100);
-  camera.position.set(0, 0, 12);
-  camera.lookAt(0, 0, 0);
+  // 3/4 view: camera above + to the side, looking slightly toward the base, so
+  // the ground shadow reads in perspective and an azimuthal (Y-axis) light orbit
+  // sweeps the shadow AROUND the sphere (a straight-on camera hid that).
+  const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+  const camDir = new THREE.Vector3(0.453, 0.423, 0.785); // azimuth +30°, elevation +25°
+  camera.position.copy(camDir).multiplyScalar(8.3);
+  camera.lookAt(0, -0.2, 0);
 
   const sphere = new THREE.Mesh(
     new THREE.SphereGeometry(1, 96, 64),
     new THREE.MeshStandardMaterial({ color: SPHERE_HEX, roughness: 1, metalness: 0 }),
   );
   sphere.castShadow = true;
+  sphere.position.set(0, 0, 0); // radius 1, bottom rests on the ground (y = -1)
   scene.add(sphere);
 
-  // Unlit background plane — constant grey, unaffected by the key light (stable
-  // backdrop regardless of light direction/intensity).
-  const bgPlane = new THREE.Mesh(
-    new THREE.PlaneGeometry(H * 6, H * 6),
-    new THREE.MeshBasicMaterial({ color: BG_HEX }),
-  );
-  bgPlane.position.set(0, 0, -2);
-  scene.add(bgPlane);
-
-  // Shadow catcher — a transparent plane just behind the sphere showing ONLY the
-  // cast shadow; darkness set by opacity, not by how much the key lights it, so
-  // the backdrop can't blow out.
-  const shadowCatcher = new THREE.Mesh(
-    new THREE.PlaneGeometry(H * 6, H * 6),
+  // Ground: a horizontal shadow catcher at the sphere's base. Transparent
+  // (ShadowMaterial) over the uniform grey clear colour → a seamless grey studio
+  // where only the cast shadow anchors the sphere. Its darkness is set by
+  // opacity, independent of light intensity.
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(60, 60),
     new THREE.ShadowMaterial({ opacity: SHADOW_OPACITY }),
   );
-  shadowCatcher.position.set(0, 0, -1.01);
-  shadowCatcher.receiveShadow = true;
-  scene.add(shadowCatcher);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.set(0, -1, 0);
+  ground.receiveShadow = true;
+  scene.add(ground);
 
   scene.add(new THREE.AmbientLight(0xffffff, AMBIENT));
 
@@ -114,11 +111,11 @@ function getPool(size: number): Pool {
   key.shadow.bias = -0.0005;
   const c = key.shadow.camera;
   c.near = 0.5;
-  c.far = 30;
-  c.left = -3;
-  c.right = 3;
-  c.top = 3;
-  c.bottom = -3;
+  c.far = 40;
+  c.left = -5;
+  c.right = 5;
+  c.top = 5;
+  c.bottom = -5;
   scene.add(key);
   scene.add(key.target);
 
