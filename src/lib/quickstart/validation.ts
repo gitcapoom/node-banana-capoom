@@ -53,6 +53,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "cubemapFaces",
   "colorGrade",
   "panoShift",
+  "sphereLightRender",
 ];
 
 const VALID_HANDLE_TYPES = ["image", "text", "audio", "video", "easeCurve", "3d", "reference"];
@@ -104,6 +105,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   hsvCorrect: { width: 280, height: 380 },
   contrastAdjust: { width: 280, height: 380 },
   panoShift: { width: 320, height: 280 },
+  sphereLightRender: { width: 300, height: 420 },
 };
 
 /**
@@ -671,6 +673,13 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
       return {
         sourceImage: null,
         shiftX: 0,
+        outputImage: null,
+      };
+    case "sphereLightRender":
+      return {
+        rotation: -36,
+        elevation: 27,
+        intensity: 3.0,
         outputImage: null,
       };
   }

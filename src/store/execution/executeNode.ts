@@ -23,6 +23,7 @@ import {
   executeSpzViewer,
   executeImageCrop,
   executeMirror,
+  executeSphereLightRender,
   executeReformat,
   executeCubemapEquirect,
   executeCubemapFaces,
@@ -161,6 +162,9 @@ export async function executeNode(
       break;
     case "mirror":
       await executeMirror(ctx);
+      break;
+    case "sphereLightRender":
+      await executeSphereLightRender(ctx);
       break;
     case "reformat":
       await executeReformat(ctx);

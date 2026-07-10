@@ -42,6 +42,7 @@ export const ALL_NODES_CATEGORIES: NodeCatalogCategory[] = [
       { type: "llmGenerate", label: "LLM Generate" },
       { type: "worldLabsPano", label: "Generate Panorama" },
       { type: "worldLabsWorld", label: "Generate World" },
+      { type: "sphereLightRender", label: "Sphere Light Render" },
     ],
   },
   {

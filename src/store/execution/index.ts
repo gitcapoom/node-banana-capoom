@@ -12,6 +12,7 @@ export {
   executeAnnotation,
   executeArray,
   executeMaskPainter,
+  executeSphereLightRender,
   executePrompt,
   executePromptConstructor,
   executeOutput,
