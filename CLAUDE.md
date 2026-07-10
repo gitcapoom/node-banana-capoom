@@ -317,37 +317,81 @@ All routes in `src/app/api/`:
 
 ## Splat Viewer (`src/splat-viewer/`)
 
-The viewer is a standalone Vite app that also lives as a git subtree, shared into node-banana at `src/splat-viewer/` and served at `/viewer`. The source of truth is [`gitcapoom/splat-viewer`](https://github.com/gitcapoom/splat-viewer).
+A standalone Vite + React + Three.js app vendored into node-banana as a **git subtree**, served at `/viewer`. The source of truth is the separate repo **[gitcapoom/splat-viewer](https://github.com/gitcapoom/splat-viewer)** — `src/splat-viewer/` here is a squashed mirror of it.
 
-**Architecture invariant:** `src/splat-viewer/src/` must use only relative imports and npm packages — no `@/` or `next/` — so it compiles under both the Vite root and Next.js.
+### Architecture invariant
+
+Everything under `src/splat-viewer/src/` must use **only relative imports (`./…`, `../…`) and npm-package imports** — never `@/…` aliases and never `next/…` imports. This is what lets the same source compile under both Vite (standalone viewer) and Next.js (embedded in node-banana). A single `@/` or `next/` import will break one of the two builds. There is a viewer-local copy of some shared modules (e.g. `src/splat-viewer/src/lib/cinemaCameraPresets.ts` duplicates the repo-root `src/utils/cinemaCameraPresets.ts`) precisely to preserve this isolation — keep them in sync manually when the math changes.
+
+### IMPORTANT — subtree workflow
+
+- **All viewer code changes happen in the gitcapoom/splat-viewer repo**, not here.
+- Pull updates into node-banana with:
+  ```bash
+  git subtree pull --prefix=src/splat-viewer https://github.com/gitcapoom/splat-viewer.git main --squash
+  ```
+- **Never edit `src/splat-viewer/` directly inside node-banana** — local edits will be clobbered by the next subtree pull and diverge from the source of truth.
+- **Never `git subtree push`** — it walks the full repository history and times out. Push changes to gitcapoom/splat-viewer through that repo's own working copy, then pull them here.
 
 ### Features
-- SPZ / PLY loading (URL param, drag-drop, file picker)
-- Cinematic camera presets (sensor, focal length, aspect ratio)
-- Keyframe animation with canvas timeline (Catmull-Rom, linear, easeInOut)
-- Video export via WebCodecs + mp4-muxer (RGB or depth, up to 4K/100 Mbps)
-- Real-time depth-of-field (thin-lens CoC) and lens distortion (Brown-Conrady)
-- COLMAP camera import/export (cameras.txt + images.txt, multiple world-frame conventions)
-- **Camera Reset** — restores the exact pose snapshotted at load time
-- **Far clip control** — manual far-plane override (fixes black sky on large splats; auto default is `distance × 1000`)
+
+**Loading**
+- Loads Gaussian splats (`.spz`, `.ply`) and polygon meshes (`.glb`, `.obj`).
+- Input via drag-and-drop, file picker, or URL parameter.
+
+**Camera optics & cinema presets**
+- Physically-based camera: horizontal FOV = `2·atan(sensorWidth/(2·focal))`; vertical FOV (Three.js `camera.fov`) = `2·atan(tan(hFOV/2)/aspect)`.
+- Sensor presets (7): Super 35mm (default), Full Frame, ARRI Alexa LF, RED Monstro VV, IMAX 65mm, Micro Four Thirds, APS-C.
+- Lens focal lengths (13 primes): 14/18/21/24/28/35 (default)/40/50/75/85/100/135/200 mm.
+- Aspect-ratio presets (6): 2.39:1 Scope, 1.85:1 Flat, 16:9 (default), 4:3, 1.43:1 IMAX, 1:1 Square.
+- UI label helpers `getCameraSummary()` and `getCameraFilenameSegment()`.
+
+**Navigation & scene helpers**
+- Fly mode (WASD + Q/E up/down, Shift boost, mouse-look) and Orbit mode; toggle with `F`. Frame button re-fits to the splat; ground-grid and origin-axes toggles.
+- Camera reset (restores the exact load-time pose), adjustable far-clip plane (auto `distance × 1000`), camera-scale slider (cm↔m), and a coordinate-system selector.
+- Screenshot capture of the current view (button-only; optional same-origin `postMessage` capture-back for node-banana).
+
+**Scene management panel (`MeshPanel.tsx`)** — floating three-tab card (Meshes / Lights / IBL, each with live counts):
+- *Meshes*: add `.glb`/`.obj` (button or drop), per-row visibility, select, "always on top" overlay toggle (draw-through vs clip behind splat), expand, delete; expanded row exposes Position XYZ, Rotation° XYZ, single uniform Scale (min 0.0001), and "Capture IBL from mesh".
+- *Gizmo toolbar* (when selected): Translate/Rotate/Scale (T/R/S) + World/Local (W/L) space toggle.
+- *Lights*: add Point / Spot / Rect; common controls Color, Intensity (0–100), Position XYZ. Spot adds Move Light/Target selector, lock-together, Target XYZ, Angle° (1–89), Penumbra (0–1). Rect adds Width/Height (min 0.1), Rotation° XYZ.
+- *IBL*: image-based-lighting probes captured from a mesh or at the camera; per-probe Position XYZ, Radius (0–50, `0` = ∞ global), Ramp falloff (finite radius only), Intensity (0–5), and Lift/Gain/Gamma HDR color-grade sliders (negative-capable).
+- `MeshPanel` is a pure controlled component — all state lives in the parent `SplatViewer.tsx`; inputs carry `nodrag nopan`.
+
+**Keyframe animation timeline (`Timeline.tsx` + `cameraAnimation.ts`)**
+- Per-keyframe camera position (Vector3) + rotation (Quaternion) + vertical FOV, at a normalized time in [0,1].
+- Per-segment interpolation mode keyed off the segment's **starting** keyframe: step / linear / easeInOut / smooth. Position uses Catmull-Rom spline (smooth/easeInOut) or lerp; rotation always SLERP; FOV lerp.
+- Full per-keyframe `SceneSnapshot` (splat/mesh/light/IBL transforms, visibility, orbit target) animates geometry alongside the camera; `evaluateSceneAtFrame` is backward-compatible (returns null for camera-only/legacy saves). IBLs are serialized but **not** applied live during playback (too costly per frame).
+- Canvas timeline (DPR-aware, ResizeObserver): scrub, drag keyframe diamonds, select; play/stop, loop, prev/next keyframe, add/delete keyframe; editable duration (min 2, max 9999 frames) and FPS dropdown (12/24/25/30/60). JSON serialize/deserialize (tolerant of legacy object forms).
+- Keyboard: `K` add keyframe, `Del`/`Backspace` delete selected, `T` toggle timeline, `H` toggle panels, `Ctrl/Cmd+Z` undo.
+
+**Depth of field**
+- Real-time thin-lens circle-of-confusion post-pass driven by live aperture/focus/sensor settings; scatter-as-gather weighting, 24-tap golden-angle Vogel disk; `showCoC` debug heatmap. Also bakeable per-frame during export. On/Off toggle + Reset in the Camera panel.
+
+**Lens distortion**
+- Forward Brown-Conrady (OpenCV) post-pass via inverse mapping (5 Newton iterations); radial `k1,k2` + tangential `p1,p2` (no `k3`/fisheye). Out-of-bounds samples rendered opaque black. `computeFovMargin()` estimates extra FOV coverage (capped ×2), overridden by measured `DISTORTION_SCALE` when present. On/Off toggle + Reset in the Camera panel.
+
+**Video / depth export (`ExportDialog` + `videoExport.ts`)**
+- Camera-path export animating along keyframes; output modes RGB / Depth / Both.
+- Resolutions 1280×720, 1920×1080 (default), 3840×2160; FPS 12/24/25/30/60; frame count (min 2, max 9999) with live duration readout.
+- Quality presets (all H.264): 20 Mbps (default) / 50 Mbps HQ / 100 Mbps Max.
+- Optional Bake DoF pass (off by default, ~1× extra render cost) and lens-distortion post-pass.
+- Encoders: WebCodecs `VideoEncoder` + mp4-muxer (avc1.640028, keyframe every 2 s), automatic fallback to MediaRecorder. Global depth-range scan for consistent depth normalization, even-dimension enforcement, full camera-state restore, WebGL vertical flip on read-back. Requires ≥2 keyframes and >0 frames (enforced in UI and backend).
+
+**COLMAP import / export (`colmapIO.ts`)**
+- Export: `cameras.txt` + `images.txt` + empty `points3D.txt` zipped via JSZip (shared PINHOLE camera, per-frame `R_w2c`/`t` poses, `frame_NNNNN.png` names) — interoperable with COLMAP / 3DGS trainers / NerfStudio.
+- Import: reads `cameras.txt` + `images.txt` (+ optional Nodos `extras.txt` sidecar) into a `CameraPath`, one keyframe per pose (sorted by IMAGE_ID, times uniform over [0,1]); derives FOV from intrinsics (fallback 60°). Parses PINHOLE/SIMPLE_PINHOLE/OPENCV/RADIAL/SIMPLE_RADIAL, extracts `k1,k2,p1,p2` and `DISTORTION_SCALE`.
+- World-frame conventions: y-up (identity), y-down (Rx 180°, **default**, raw COLMAP/OpenCV), z-up (Rx −90°, Blender/Unreal). Camera-axis change RDF↔RUB via `D = diag(1,-1,-1)`.
 
 ### Build & deploy (OTOSERVE10 Caddy)
+
 ```bash
 cd src/splat-viewer
 npm install
-npm run build   # outputs dist/ with relative paths (base: "./")
-# copy dist/* to D:\Projects\AD\_viewer\
+npm run build        # Vite build with base "./"
 ```
-Served at `http://OTOSERVE10:8080/_viewer/`. No Caddyfile changes needed.
 
-### Subtree sync
-```bash
-# pull from splat-viewer repo into node-banana
-git subtree pull --prefix=src/splat-viewer https://github.com/gitcapoom/splat-viewer.git main --squash
-
-# push node-banana edits back to splat-viewer repo
-git subtree push --prefix=src/splat-viewer https://github.com/gitcapoom/splat-viewer.git main
-```
+Copy the built `dist/*` to `D:\Projects\AD\_viewer\` on **OTOSERVE10**. Served at **http://OTOSERVE10:8080/_viewer/**. No Caddyfile changes needed — the relative-path build is a drop-in under any subpath.
 
 ## WorldLabs Integration
 
