@@ -35,6 +35,7 @@ export { CompNode } from "./CompNode";
 export { VideoInputNode } from "./VideoInputNode";
 export { ImageCropNode } from "./ImageCropNode";
 export { MirrorNode } from "./MirrorNode";
+export { SphereLightRenderNode } from "./SphereLightRenderNode";
 export { ReformatNode } from "./ReformatNode";
 export { CubemapEquirectNode } from "./CubemapEquirectNode";
 export { CubemapFacesNode } from "./CubemapFacesNode";

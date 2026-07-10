@@ -73,6 +73,7 @@ export type NodeType =
   | "hsvCorrect"
   | "contrastAdjust"
   | "panoShift"
+  | "sphereLightRender"
   | "upscaleGrid";
 
 /**
@@ -975,6 +976,21 @@ export interface GLBViewerNodeData extends BaseNodeData {
 }
 
 /**
+ * Sphere Light Render node — self-contained lighting reference generator.
+ * Renders a grey matte sphere lit by a single light from a configurable
+ * direction (azimuth `rotation` + `elevation`) at `intensity`, on a neutral
+ * backdrop with a cast shadow. No inputs; outputs the rendered image so it can
+ * guide generation lighting / relighting downstream. Rendered locally.
+ */
+export interface SphereLightRenderNodeData extends BaseNodeData {
+  rotation: number;   // light azimuth, degrees (-180..180)
+  elevation: number;  // light elevation, degrees (-90..90)
+  intensity: number;  // diffuse light strength (0..10)
+  outputImage: string | null;   // base64 PNG of the rendered sphere
+  outputImageRef?: string;      // external ref for outputImage (storage optimization)
+}
+
+/**
  * SPZ/PLY Viewer node - opens external 3D Gaussian Splat viewer, captures screenshots
  */
 export interface SpzViewerNodeData extends BaseNodeData {
@@ -1071,6 +1087,7 @@ export type WorkflowNodeData =
   | HsvCorrectNodeData
   | ContrastAdjustNodeData
   | PanoShiftNodeData
+  | SphereLightRenderNodeData
   | UpscaleGridNodeData;
 
 /**

@@ -62,6 +62,7 @@ import {
   VideoInputNode,
   ImageCropNode,
   MirrorNode,
+  SphereLightRenderNode,
   ReformatNode,
   CubemapEquirectNode,
   CubemapFacesNode,
@@ -141,6 +142,7 @@ const nodeTypes: NodeTypes = {
   videoInput: VideoInputNode,
   imageCrop: ImageCropNode,
   mirror: MirrorNode,
+  sphereLightRender: SphereLightRenderNode,
   reformat: ReformatNode,
   cubemapEquirect: CubemapEquirectNode,
   cubemapFaces: CubemapFacesNode,
@@ -272,6 +274,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image"], outputs: ["image"] };
     case "mirror":
       return { inputs: ["image"], outputs: ["image"] };
+    case "sphereLightRender":
+      return { inputs: [], outputs: ["image"] };
     case "reformat":
       return { inputs: ["image"], outputs: ["image"] };
     case "cubemapEquirect":
@@ -591,6 +595,7 @@ export function WorkflowCanvas() {
     glbViewer: '3D Viewer',
     imageCrop: 'Image Crop',
     mirror: 'Mirror',
+    sphereLightRender: 'Sphere Light Render',
     reformat: 'Reformat',
     cubemapEquirect: 'Cube ⇄ Pano',
     cubemapFaces: 'Cube ⇄ Faces',
@@ -1843,6 +1848,7 @@ export function WorkflowCanvas() {
             videoInput: { width: 320, height: 300 },
             imageCrop: { width: 300, height: 280 },
             mirror: { width: 300, height: 300 },
+            sphereLightRender: { width: 300, height: 420 },
             reformat: { width: 280, height: 300 },
             cubemapEquirect: { width: 320, height: 320 },
             cubemapFaces: { width: 340, height: 360 },
@@ -2586,6 +2592,8 @@ export function WorkflowCanvas() {
                 return "#2dd4bf"; // teal-400 (composite / float)
               case "videoInput":
                 return "#8b5cf6"; // violet-600 (video input)
+              case "sphereLightRender":
+                return "#fbbf24"; // amber-400 (light / sun render)
               default:
                 return "#94a3b8";
             }

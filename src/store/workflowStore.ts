@@ -74,6 +74,7 @@ import {
   executeAnnotation,
   executeArray,
   executeMaskPainter,
+  executeSphereLightRender,
   executePrompt,
   executePromptConstructor,
   executeOutput,
@@ -1790,6 +1791,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         return;
       } else if (node.type === "maskPainter") {
         await executeMaskPainter(executionCtx);
+      } else if (node.type === "sphereLightRender") {
+        await executeSphereLightRender(executionCtx);
       }
 
       // After regeneration, execute directly connected downstream consumer nodes

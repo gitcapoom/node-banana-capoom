@@ -23,6 +23,7 @@ import type {
   CubemapFacesNodeData,
   ColorGradeNodeData,
   PanoShiftNodeData,
+  SphereLightRenderNodeData,
 } from "@/types";
 import type { NodeExecutionContext } from "./types";
 import { parseTextToArray } from "@/utils/arrayParser";
@@ -32,6 +33,7 @@ import { mirrorImage } from "@/utils/mirrorImage";
 import { applyCubemapEquirect, splitCubemap, combineCubemap, CUBE_FACES, type CubeFace } from "@/utils/cubemapEquirect";
 import { coerceChannel } from "@/utils/colorGrade";
 import { shiftImageX } from "@/utils/panoShift";
+import { renderSphereLight } from "@/utils/renderSphereLight";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { ensureFullResForNodes } from "@/store/execution/hydrateForRun";
 
@@ -654,6 +656,25 @@ export async function executeMirror(ctx: NodeExecutionContext): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Mirror node ${node.id} failed:`, message);
     updateNodeData(node.id, { error: message });
+  }
+}
+
+/** Sphere Light Render: renders a grey lit sphere locally from the node's
+ *  rotation/elevation/intensity params (no inputs). */
+export async function executeSphereLightRender(ctx: NodeExecutionContext): Promise<void> {
+  const { node, updateNodeData, getFreshNode } = ctx;
+  const d = (getFreshNode(node.id) ?? node).data as SphereLightRenderNodeData;
+  try {
+    const url = renderSphereLight({ rotation: d.rotation, elevation: d.elevation, intensity: d.intensity }, 512);
+    if (!url) {
+      updateNodeData(node.id, { status: "error", error: "Sphere render unavailable (no canvas)" });
+      return;
+    }
+    updateNodeData(node.id, { outputImage: url, outputImageRef: undefined, status: "complete", error: null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] SphereLightRender node ${node.id} failed:`, message);
+    updateNodeData(node.id, { status: "error", error: message });
   }
 }
 

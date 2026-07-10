@@ -23,6 +23,7 @@ import {
   EaseCurveNodeData,
   VideoTrimNodeData,
   VideoFrameGrabNodeData,
+  SphereLightRenderNodeData,
   RouterNodeData,
   SwitchNodeData,
   ConditionalSwitchNodeData,
@@ -102,6 +103,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   hsvCorrect: { width: 280, height: 380 },
   contrastAdjust: { width: 280, height: 380 },
   panoShift: { width: 320, height: 280 },
+  sphereLightRender: { width: 300, height: 420 },
   upscaleGrid: { width: 300, height: 320 },
 };
 
@@ -567,6 +569,13 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         shiftX: 0,
         outputImage: null,
       } as PanoShiftNodeData;
+    case "sphereLightRender":
+      return {
+        rotation: -36,
+        elevation: 27,
+        intensity: 3.0,
+        outputImage: null,
+      } as SphereLightRenderNodeData;
     case "upscaleGrid": {
       const nodeDefaults = loadNodeDefaults();
       const legacyDefaults = loadGenerateImageDefaults();
