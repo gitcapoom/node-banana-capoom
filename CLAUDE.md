@@ -315,6 +315,40 @@ All routes in `src/app/api/`:
 | `/viewer/[worldId]` | World-specific 3D viewer |
 | `/viewer/pano` | Equirectangular panorama viewer with perspective crop capture |
 
+## Splat Viewer (`src/splat-viewer/`)
+
+The viewer is a standalone Vite app that also lives as a git subtree, shared into node-banana at `src/splat-viewer/` and served at `/viewer`. The source of truth is [`gitcapoom/splat-viewer`](https://github.com/gitcapoom/splat-viewer).
+
+**Architecture invariant:** `src/splat-viewer/src/` must use only relative imports and npm packages — no `@/` or `next/` — so it compiles under both the Vite root and Next.js.
+
+### Features
+- SPZ / PLY loading (URL param, drag-drop, file picker)
+- Cinematic camera presets (sensor, focal length, aspect ratio)
+- Keyframe animation with canvas timeline (Catmull-Rom, linear, easeInOut)
+- Video export via WebCodecs + mp4-muxer (RGB or depth, up to 4K/100 Mbps)
+- Real-time depth-of-field (thin-lens CoC) and lens distortion (Brown-Conrady)
+- COLMAP camera import/export (cameras.txt + images.txt, multiple world-frame conventions)
+- **Camera Reset** — restores the exact pose snapshotted at load time
+- **Far clip control** — manual far-plane override (fixes black sky on large splats; auto default is `distance × 1000`)
+
+### Build & deploy (OTOSERVE10 Caddy)
+```bash
+cd src/splat-viewer
+npm install
+npm run build   # outputs dist/ with relative paths (base: "./")
+# copy dist/* to D:\Projects\AD\_viewer\
+```
+Served at `http://OTOSERVE10:8080/_viewer/`. No Caddyfile changes needed.
+
+### Subtree sync
+```bash
+# pull from splat-viewer repo into node-banana
+git subtree pull --prefix=src/splat-viewer https://github.com/gitcapoom/splat-viewer.git main --squash
+
+# push node-banana edits back to splat-viewer repo
+git subtree push --prefix=src/splat-viewer https://github.com/gitcapoom/splat-viewer.git main
+```
+
 ## WorldLabs Integration
 
 The WorldLabs Marble API enables 3D world generation from images and text. The workflow is split into two node types:
