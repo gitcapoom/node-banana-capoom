@@ -92,7 +92,7 @@ export function SphereLightRenderNode({ id, data, selected }: NodeProps<SphereLi
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" title="render" />
 
       <LightSlider label="rotation" value={rotation} min={-180} max={180} step={1} format={(v) => `${Math.round(v)}`} onChange={(v) => set({ rotation: v })} />
-      <LightSlider label="elevation" value={elevation} min={-90} max={90} step={1} format={(v) => `${Math.round(v)}`} onChange={(v) => set({ elevation: v })} />
+      <LightSlider label="elevation" value={elevation} min={0} max={90} step={1} format={(v) => `${Math.round(v)}`} onChange={(v) => set({ elevation: v })} />
       <LightSlider label="intensity" value={intensity} min={0} max={10} step={0.1} format={(v) => v.toFixed(1)} onChange={(v) => set({ intensity: v })} />
 
       <div className="relative w-full flex-1 min-h-0 rounded-md overflow-hidden bg-neutral-900/40 flex items-center justify-center">

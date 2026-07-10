@@ -984,7 +984,7 @@ export interface GLBViewerNodeData extends BaseNodeData {
  */
 export interface SphereLightRenderNodeData extends BaseNodeData {
   rotation: number;   // light azimuth, degrees (-180..180)
-  elevation: number;  // light elevation, degrees (-90..90)
+  elevation: number;  // light elevation, degrees (0..90, above the horizon)
   intensity: number;  // diffuse light strength (0..10)
   outputImage: string | null;   // base64 PNG of the rendered sphere
   outputImageRef?: string;      // external ref for outputImage (storage optimization)
