@@ -207,6 +207,8 @@ describe("ImageInputNode", () => {
           imageRef: undefined,
           filename: "test.png",
           dimensions: { width: 1024, height: 768 },
+          // Auto-derived node title: stripped filename (no prior custom title)
+          customTitle: "test",
         });
       });
     });
@@ -380,6 +382,9 @@ describe("ImageInputNode", () => {
         imageRef: undefined,
         filename: null,
         dimensions: null,
+        // Mirrored/flipped render copy is also cleared on remove
+        outputImage: null,
+        outputImageRef: undefined,
       });
     });
   });

@@ -185,7 +185,7 @@ describe("GenerateAudioNode", () => {
 
       const spinner = container.querySelector(".animate-spin");
       expect(spinner).toBeInTheDocument();
-      expect(screen.getByText("Generating audio...")).toBeInTheDocument();
+      expect(screen.getByText("Generating audio…")).toBeInTheDocument();
     });
   });
 

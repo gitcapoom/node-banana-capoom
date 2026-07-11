@@ -29,6 +29,25 @@ vi.mock("@/components/CostIndicator", () => ({
   CostIndicator: () => <div data-testid="cost-indicator">$0.00</div>,
 }));
 
+// Mock FileOpenDialog - the real dialog browses the server filesystem via
+// /api/list-directory; stub it with buttons that trigger its callbacks.
+vi.mock("@/components/FileOpenDialog", () => ({
+  FileOpenDialog: ({
+    onFileSelected,
+    onCancel,
+  }: {
+    onFileSelected: (filePath: string) => void;
+    onCancel: () => void;
+  }) => (
+    <div data-testid="file-open-dialog">
+      <button onClick={() => onFileSelected("C:/workflows/test.json")}>
+        Select test file
+      </button>
+      <button onClick={() => onCancel()}>Cancel dialog</button>
+    </div>
+  ),
+}));
+
 // Mock functions for comment navigation
 const mockGetNodesWithComments = vi.fn();
 const mockGetUnviewedCommentCount = vi.fn();
@@ -250,24 +269,23 @@ describe("Header", () => {
       expect(openButton).toBeInTheDocument();
     });
 
-    it("should have hidden file input for loading workflows", () => {
-      const { container } = render(<Header />);
-      const fileInput = container.querySelector('input[type="file"]');
-      expect(fileInput).toBeInTheDocument();
-      expect(fileInput).toHaveAttribute("accept", ".json");
-      expect(fileInput).toHaveClass("hidden");
+    it("should open the file dialog when open button is clicked", () => {
+      render(<Header />);
+
+      expect(screen.queryByTestId("file-open-dialog")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTitle("Open project"));
+
+      expect(screen.getByTestId("file-open-dialog")).toBeInTheDocument();
     });
 
-    it("should trigger file input click when open button is clicked", () => {
-      const { container } = render(<Header />);
-      const openButton = screen.getByTitle("Open project");
-      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    it("should close the file dialog when cancelled", () => {
+      render(<Header />);
 
-      // Mock click on file input
-      const clickSpy = vi.spyOn(fileInput, "click");
-      fireEvent.click(openButton);
+      fireEvent.click(screen.getByTitle("Open project"));
+      fireEvent.click(screen.getByText("Cancel dialog"));
 
-      expect(clickSpy).toHaveBeenCalled();
+      expect(screen.queryByTestId("file-open-dialog")).not.toBeInTheDocument();
     });
   });
 
@@ -408,22 +426,55 @@ describe("Header", () => {
   });
 
   describe("File Loading", () => {
-    it("should not call loadWorkflow when no file is selected", () => {
-      const { container } = render(<Header />);
-      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    it("should not call loadWorkflow when the dialog is cancelled", () => {
+      render(<Header />);
 
-      // Trigger file change with empty files
-      fireEvent.change(fileInput, { target: { files: [] } });
+      fireEvent.click(screen.getByTitle("Open project"));
+      fireEvent.click(screen.getByText("Cancel dialog"));
 
       expect(mockLoadWorkflow).not.toHaveBeenCalled();
     });
 
-    it("should reset file input value after file selection to allow re-selecting same file", () => {
-      const { container } = render(<Header />);
-      const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    it("should load workflow and configure project when a valid file is selected", async () => {
+      const validWorkflow = {
+        id: "wf-1",
+        version: 1,
+        name: "Loaded Workflow",
+        nodes: [],
+        edges: [],
+      };
 
-      // File input should accept .json files
-      expect(fileInput).toHaveAttribute("accept", ".json");
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            success: true,
+            workflow: validWorkflow,
+            directoryPath: "C:/workflows",
+            fileName: "test.json",
+          }),
+      });
+      globalThis.fetch = mockFetch;
+
+      render(<Header />);
+
+      fireEvent.click(screen.getByTitle("Open project"));
+      fireEvent.click(screen.getByText("Select test file"));
+
+      await vi.waitFor(() => {
+        expect(mockLoadWorkflow).toHaveBeenCalledWith(validWorkflow, "C:/workflows");
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith("/api/workflow", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath: "C:/workflows/test.json" }),
+      });
+      expect(mockSetWorkflowMetadata).toHaveBeenCalledWith(
+        "wf-1",
+        "Loaded Workflow",
+        "C:/workflows"
+      );
     });
   });
 

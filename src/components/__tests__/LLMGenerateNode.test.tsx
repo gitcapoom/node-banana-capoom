@@ -36,6 +36,9 @@ describe("LLMGenerateNode", () => {
         currentNodeIds: [],
         groups: {},
         nodes: [],
+        edges: [],
+        providerSettings: { providers: {} },
+        setHoveredNodeId: vi.fn(),
         getNodesWithComments: vi.fn(() => []),
         markCommentViewed: vi.fn(),
         setNavigationTarget: vi.fn(),
@@ -185,15 +188,52 @@ describe("LLMGenerateNode", () => {
       expect(mockRegenerateNode).toHaveBeenCalledWith("test-llm-1");
     });
 
-    it("should disable regenerate button when workflow is running", () => {
+    it("should disable regenerate button when this node is executing", () => {
+      // Per-node run gating (useCanRun): the button is blocked when this
+      // node's id is in currentNodeIds, not by the global isRunning flag.
       mockUseWorkflowStore.mockImplementation((selector) => {
         const state = {
           updateNodeData: mockUpdateNodeData,
           regenerateNode: mockRegenerateNode,
           isRunning: true,
-          currentNodeIds: [],
+          currentNodeIds: ["test-llm-1"],
           groups: {},
           nodes: [],
+          edges: [],
+          providerSettings: { providers: {} },
+          setHoveredNodeId: vi.fn(),
+          getNodesWithComments: vi.fn(() => []),
+          markCommentViewed: vi.fn(),
+          setNavigationTarget: vi.fn(),
+        };
+        return selector(state);
+      });
+
+      render(
+        <TestWrapper>
+          <LLMGenerateNode {...createNodeProps({ outputText: "Some output" })} />
+        </TestWrapper>
+      );
+
+      // When blocked, the button's title carries the blocked reason.
+      const regenerateButton = screen.getByTitle("Already running");
+      expect(regenerateButton).toBeDisabled();
+    });
+
+    it("should keep regenerate button enabled when an unrelated node is executing", () => {
+      // The point of per-node gating: in-flight work elsewhere in the
+      // graph must not block this node (no upstream dependency on it).
+      mockUseWorkflowStore.mockImplementation((selector) => {
+        const state = {
+          updateNodeData: mockUpdateNodeData,
+          regenerateNode: mockRegenerateNode,
+          isRunning: true,
+          currentNodeIds: ["some-other-node"],
+          groups: {},
+          nodes: [],
+          edges: [],
+          providerSettings: { providers: {} },
+          setHoveredNodeId: vi.fn(),
           getNodesWithComments: vi.fn(() => []),
           markCommentViewed: vi.fn(),
           setNavigationTarget: vi.fn(),
@@ -208,7 +248,7 @@ describe("LLMGenerateNode", () => {
       );
 
       const regenerateButton = screen.getByTitle("Regenerate");
-      expect(regenerateButton).toBeDisabled();
+      expect(regenerateButton).not.toBeDisabled();
     });
   });
 

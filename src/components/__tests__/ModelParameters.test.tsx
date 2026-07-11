@@ -315,7 +315,7 @@ describe("ModelParameters", () => {
   });
 
   describe("Number Input", () => {
-    it("should render number input for number parameters", async () => {
+    it("should render decimal text input for number parameters", async () => {
       (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -327,9 +327,29 @@ describe("ModelParameters", () => {
       render(<ModelParameters {...defaultProps} />);
 
       await waitFor(() => {
+        const input = screen.getByRole("textbox");
+        expect(input).toBeInTheDocument();
+        expect(input).toHaveAttribute("type", "text");
+        expect(input).toHaveAttribute("inputmode", "decimal");
+      });
+    });
+
+    it("should render numeric spinbutton for integer parameters", async () => {
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            parameters: [createMockParameter({ name: "steps", type: "integer" })],
+          }),
+      });
+
+      render(<ModelParameters {...defaultProps} />);
+
+      await waitFor(() => {
         const input = screen.getByRole("spinbutton");
         expect(input).toBeInTheDocument();
         expect(input).toHaveAttribute("type", "number");
+        expect(input).toHaveAttribute("inputmode", "numeric");
       });
     });
 
