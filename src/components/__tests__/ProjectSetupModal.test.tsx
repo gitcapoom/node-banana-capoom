@@ -9,15 +9,25 @@ const mockUpdateProviderApiKey = vi.fn();
 const mockToggleProvider = vi.fn();
 const mockUseWorkflowStore = vi.fn();
 
-vi.mock("@/store/workflowStore", () => ({
-  useWorkflowStore: (selector?: (state: unknown) => unknown) => {
-    if (selector) {
-      return mockUseWorkflowStore(selector);
+vi.mock("@/store/workflowStore", () => {
+  const useWorkflowStore = Object.assign(
+    (selector?: (state: unknown) => unknown) => {
+      if (selector) {
+        return mockUseWorkflowStore(selector);
+      }
+      return mockUseWorkflowStore((s: unknown) => s);
+    },
+    {
+      // The component calls useWorkflowStore.getState() when saving in
+      // settings mode; route it through the same mock state.
+      getState: () => mockUseWorkflowStore((s: unknown) => s),
     }
-    return mockUseWorkflowStore((s: unknown) => s);
-  },
-  generateWorkflowId: () => "mock-workflow-id",
-}));
+  );
+  return {
+    useWorkflowStore,
+    generateWorkflowId: () => "mock-workflow-id",
+  };
+});
 
 // Mock fetch
 const mockFetch = vi.fn();
@@ -41,16 +51,31 @@ Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
 });
 
-// Default provider settings
+// Default provider settings (Record<ProviderType, ProviderConfig> — must cover every provider)
 const defaultProviderSettings: ProviderSettings = {
   providers: {
     gemini: { id: "gemini", name: "Gemini", enabled: true, apiKey: null, apiKeyEnvVar: "GEMINI_API_KEY" },
     openai: { id: "openai", name: "OpenAI", enabled: false, apiKey: null },
+    anthropic: { id: "anthropic", name: "Anthropic", enabled: false, apiKey: null },
     replicate: { id: "replicate", name: "Replicate", enabled: false, apiKey: null },
     fal: { id: "fal", name: "fal.ai", enabled: false, apiKey: null },
     kie: { id: "kie", name: "Kie.ai", enabled: false, apiKey: null },
     wavespeed: { id: "wavespeed", name: "WaveSpeed", enabled: false, apiKey: null },
+    worldlabs: { id: "worldlabs", name: "World Labs", enabled: false, apiKey: null },
+    muapi: { id: "muapi", name: "muapi.ai", enabled: false, apiKey: null },
   },
+};
+
+// /api/env-status response with no env-configured providers
+const envStatusAllFalse = {
+  gemini: false,
+  openai: false,
+  anthropic: false,
+  replicate: false,
+  fal: false,
+  kie: false,
+  wavespeed: false,
+  worldlabs: false,
 };
 
 // Default store state factory
@@ -70,6 +95,14 @@ const createDefaultState = (overrides = {}) => ({
   ...overrides,
 });
 
+// Referentially-stable store state for the current test.
+// IMPORTANT: the component's pre-fill useEffect depends on providerSettings /
+// canvasNavigationSettings by reference. If the selector returned a fresh
+// createDefaultState() object on every call, the effect would re-fire on every
+// render, call setState, and loop forever (worker OOM). Tests that need
+// different state must reassign `mockState` BEFORE rendering.
+let mockState = createDefaultState();
+
 describe("ProjectSetupModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -78,7 +111,7 @@ describe("ProjectSetupModal", () => {
       if (url === "/api/env-status") {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
+          json: () => Promise.resolve(envStatusAllFalse),
         });
       }
       // Default success response for other APIs
@@ -87,9 +120,8 @@ describe("ProjectSetupModal", () => {
         json: () => Promise.resolve({ success: true }),
       });
     });
-    mockUseWorkflowStore.mockImplementation((selector) => {
-      return selector(createDefaultState());
-    });
+    mockState = createDefaultState();
+    mockUseWorkflowStore.mockImplementation((selector) => selector(mockState));
   });
 
   afterEach(() => {
@@ -139,7 +171,7 @@ describe("ProjectSetupModal", () => {
   });
 
   describe("Tab Navigation", () => {
-    it("should render Project and Providers tabs", () => {
+    it("should render Project, Providers, Node Defaults, and Canvas tabs", () => {
       render(
         <ProjectSetupModal
           isOpen={true}
@@ -151,6 +183,8 @@ describe("ProjectSetupModal", () => {
 
       expect(screen.getByText("Project")).toBeInTheDocument();
       expect(screen.getByText("Providers")).toBeInTheDocument();
+      expect(screen.getByText("Node Defaults")).toBeInTheDocument();
+      expect(screen.getByText("Canvas")).toBeInTheDocument();
     });
 
     it("should start on Project tab in new mode", () => {
@@ -182,8 +216,11 @@ describe("ProjectSetupModal", () => {
       // Should show provider names
       expect(screen.getByText("Google Gemini")).toBeInTheDocument();
       expect(screen.getByText("OpenAI")).toBeInTheDocument();
+      expect(screen.getByText("Anthropic")).toBeInTheDocument();
       expect(screen.getByText("Replicate")).toBeInTheDocument();
       expect(screen.getByText("fal.ai")).toBeInTheDocument();
+      expect(screen.getByText("Kie.ai")).toBeInTheDocument();
+      expect(screen.getByText("WaveSpeed")).toBeInTheDocument();
     });
   });
 
@@ -232,7 +269,7 @@ describe("ProjectSetupModal", () => {
       expect(screen.getByText("Project Directory")).toBeInTheDocument();
     });
 
-    it("should render embed images checkbox", () => {
+    it("should render embed images toggle", () => {
       render(
         <ProjectSetupModal
           isOpen={true}
@@ -243,17 +280,16 @@ describe("ProjectSetupModal", () => {
       );
 
       expect(screen.getByText("Embed images as base64")).toBeInTheDocument();
+      expect(screen.getByRole("switch", { name: /embed images as base64/i })).toBeInTheDocument();
     });
   });
 
   describe("Project Tab - Settings Mode", () => {
     it("should pre-fill form with existing values in settings mode", () => {
-      mockUseWorkflowStore.mockImplementation((selector) => {
-        return selector(createDefaultState({
-          workflowName: "My Existing Project",
-          saveDirectoryPath: "/path/to/project",
-          useExternalImageStorage: false,
-        }));
+      mockState = createDefaultState({
+        workflowName: "My Existing Project",
+        saveDirectoryPath: "/path/to/project",
+        useExternalImageStorage: false,
       });
 
       render(
@@ -273,11 +309,9 @@ describe("ProjectSetupModal", () => {
     });
 
     it("should render Save button in settings mode", () => {
-      mockUseWorkflowStore.mockImplementation((selector) => {
-        return selector(createDefaultState({
-          workflowName: "My Project",
-          saveDirectoryPath: "/path/to/project",
-        }));
+      mockState = createDefaultState({
+        workflowName: "My Project",
+        saveDirectoryPath: "/path/to/project",
       });
 
       render(
@@ -349,7 +383,7 @@ describe("ProjectSetupModal", () => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve(envStatusAllFalse),
           });
         }
         if (url.startsWith("/api/workflow")) {
@@ -432,7 +466,7 @@ describe("ProjectSetupModal", () => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve(envStatusAllFalse),
           });
         }
         if (url.startsWith("/api/workflow")) {
@@ -479,7 +513,7 @@ describe("ProjectSetupModal", () => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve(envStatusAllFalse),
           });
         }
         if (url.startsWith("/api/workflow")) {
@@ -528,7 +562,7 @@ describe("ProjectSetupModal", () => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve(envStatusAllFalse),
           });
         }
         if (url.startsWith("/api/workflow")) {
@@ -573,7 +607,7 @@ describe("ProjectSetupModal", () => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve(envStatusAllFalse),
           });
         }
         if (url.startsWith("/api/workflow")) {
@@ -616,22 +650,35 @@ describe("ProjectSetupModal", () => {
   });
 
   describe("Browse Button", () => {
-    it("should call browse-directory API when Browse is clicked", async () => {
+    // Browsing now opens the in-app FileOpenDialog (directory mode), which
+    // lists folders via /api/list-directory. The old native-dialog
+    // /api/browse-directory flow was removed.
+    const mockBrowseFetch = (listedPath: string) => {
       mockFetch.mockImplementation((url: string) => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve(envStatusAllFalse),
           });
         }
-        if (url === "/api/browse-directory") {
+        if (url.startsWith("/api/list-directory")) {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ success: true, path: "/selected/path" }),
+            json: () => Promise.resolve({ success: true, path: listedPath, entries: [] }),
+          });
+        }
+        if (url.startsWith("/api/workflow")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ exists: false, isDirectory: false }),
           });
         }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
       });
+    };
+
+    it("should open the directory chooser and list directories when Browse is clicked", async () => {
+      mockBrowseFetch("/selected/path");
 
       render(
         <ProjectSetupModal
@@ -644,27 +691,17 @@ describe("ProjectSetupModal", () => {
 
       fireEvent.click(screen.getByText("Browse"));
 
+      expect(screen.getByText("Choose Directory")).toBeInTheDocument();
+
       await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalledWith("/api/browse-directory");
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining("/api/list-directory")
+        );
       });
     });
 
     it("should keep selected parent path in input after browse", async () => {
-      mockFetch.mockImplementation((url: string) => {
-        if (url === "/api/env-status") {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
-          });
-        }
-        if (url === "/api/browse-directory") {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ success: true, path: "/selected/path" }),
-          });
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
-      });
+      mockBrowseFetch("/selected/path");
 
       render(
         <ProjectSetupModal
@@ -675,30 +712,27 @@ describe("ProjectSetupModal", () => {
         />
       );
 
+      // Even with a project name typed, browsing keeps the parent path as-is
+      fireEvent.change(screen.getByPlaceholderText("my-project"), {
+        target: { value: "Foo" },
+      });
+
       fireEvent.click(screen.getByText("Browse"));
 
+      // Wait for the dialog to load the directory listing
       await waitFor(() => {
-        const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
-        expect(directoryInput.value).toBe("/selected/path");
+        expect(screen.getByText("/selected/path")).toBeInTheDocument();
       });
+
+      fireEvent.click(screen.getByText("Select Folder"));
+
+      expect(screen.queryByText("Choose Directory")).not.toBeInTheDocument();
+      const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
+      expect(directoryInput.value).toBe("/selected/path");
     });
 
     it("should keep selected path when project name is empty", async () => {
-      mockFetch.mockImplementation((url: string) => {
-        if (url === "/api/env-status") {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
-          });
-        }
-        if (url === "/api/browse-directory") {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ success: true, path: "/selected/path" }),
-          });
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
-      });
+      mockBrowseFetch("/selected/path");
 
       render(
         <ProjectSetupModal
@@ -712,21 +746,25 @@ describe("ProjectSetupModal", () => {
       fireEvent.click(screen.getByText("Browse"));
 
       await waitFor(() => {
-        const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
-        expect(directoryInput.value).toBe("/selected/path");
+        expect(screen.getByText("/selected/path")).toBeInTheDocument();
       });
+
+      fireEvent.click(screen.getByText("Select Folder"));
+
+      const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
+      expect(directoryInput.value).toBe("/selected/path");
     });
 
-    it("should show '...' while browsing", async () => {
+    it("should show a loading spinner while the directory listing loads", async () => {
       let resolvePromise: ((value: unknown) => void) | undefined;
       mockFetch.mockImplementation((url: string) => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve(envStatusAllFalse),
           });
         }
-        if (url === "/api/browse-directory") {
+        if (url.startsWith("/api/list-directory")) {
           return new Promise((resolve) => {
             resolvePromise = resolve;
           });
@@ -745,30 +783,21 @@ describe("ProjectSetupModal", () => {
 
       fireEvent.click(screen.getByText("Browse"));
 
-      expect(screen.getByText("...")).toBeInTheDocument();
+      expect(screen.getByText("Choose Directory")).toBeInTheDocument();
+      expect(document.querySelector(".animate-spin")).not.toBeNull();
 
       resolvePromise!({
         ok: true,
-        json: () => Promise.resolve({ success: true, cancelled: true }),
+        json: () => Promise.resolve({ success: true, path: "/selected/path", entries: [] }),
+      });
+
+      await waitFor(() => {
+        expect(document.querySelector(".animate-spin")).toBeNull();
       });
     });
 
     it("should handle cancelled browse dialog", async () => {
-      mockFetch.mockImplementation((url: string) => {
-        if (url === "/api/env-status") {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
-          });
-        }
-        if (url === "/api/browse-directory") {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ success: true, cancelled: true }),
-          });
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
-      });
+      mockBrowseFetch("/original/path");
 
       render(
         <ProjectSetupModal
@@ -784,35 +813,20 @@ describe("ProjectSetupModal", () => {
       fireEvent.change(directoryInput, { target: { value: "/original/path" } });
 
       fireEvent.click(screen.getByText("Browse"));
+      expect(screen.getByText("Choose Directory")).toBeInTheDocument();
+
+      // Escape cancels the dialog
+      fireEvent.keyDown(screen.getByText("Choose Directory"), { key: "Escape" });
 
       await waitFor(() => {
-        // Should keep original value when cancelled
-        expect(directoryInput.value).toBe("/original/path");
+        expect(screen.queryByText("Choose Directory")).not.toBeInTheDocument();
       });
+      // Should keep original value when cancelled
+      expect(directoryInput.value).toBe("/original/path");
     });
 
     it("should save using latest project name when renamed after browse", async () => {
-      mockFetch.mockImplementation((url: string) => {
-        if (url === "/api/env-status") {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
-          });
-        }
-        if (url === "/api/browse-directory") {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ success: true, path: "/selected/path" }),
-          });
-        }
-        if (url.startsWith("/api/workflow")) {
-          return Promise.resolve({
-            ok: true,
-            json: () => Promise.resolve({ exists: false, isDirectory: false }),
-          });
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
-      });
+      mockBrowseFetch("/selected/path");
 
       const onSave = vi.fn();
 
@@ -832,9 +846,13 @@ describe("ProjectSetupModal", () => {
       fireEvent.click(screen.getByText("Browse"));
 
       await waitFor(() => {
-        const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
-        expect(directoryInput.value).toBe("/selected/path");
+        expect(screen.getByText("/selected/path")).toBeInTheDocument();
       });
+
+      fireEvent.click(screen.getByText("Select Folder"));
+
+      const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
+      expect(directoryInput.value).toBe("/selected/path");
 
       fireEvent.change(screen.getByPlaceholderText("my-project"), {
         target: { value: "Bar" },
@@ -895,7 +913,7 @@ describe("ProjectSetupModal", () => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: false, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve(envStatusAllFalse),
           });
         }
         if (url.startsWith("/api/workflow")) {
@@ -953,8 +971,11 @@ describe("ProjectSetupModal", () => {
       await waitFor(() => {
         expect(screen.getByText("Google Gemini")).toBeInTheDocument();
         expect(screen.getByText("OpenAI")).toBeInTheDocument();
+        expect(screen.getByText("Anthropic")).toBeInTheDocument();
         expect(screen.getByText("Replicate")).toBeInTheDocument();
         expect(screen.getByText("fal.ai")).toBeInTheDocument();
+        expect(screen.getByText("Kie.ai")).toBeInTheDocument();
+        expect(screen.getByText("WaveSpeed")).toBeInTheDocument();
       });
     });
 
@@ -974,7 +995,10 @@ describe("ProjectSetupModal", () => {
         // Check for placeholder texts
         expect(screen.getByPlaceholderText("AIza...")).toBeInTheDocument();
         expect(screen.getByPlaceholderText("sk-...")).toBeInTheDocument();
+        expect(screen.getByPlaceholderText("sk-ant-...")).toBeInTheDocument();
         expect(screen.getByPlaceholderText("r8_...")).toBeInTheDocument();
+        // fal.ai, Kie.ai, and WaveSpeed share a generic placeholder
+        expect(screen.getAllByPlaceholderText("...")).toHaveLength(3);
       });
     });
 
@@ -983,7 +1007,7 @@ describe("ProjectSetupModal", () => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: true, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve({ ...envStatusAllFalse, gemini: true }),
           });
         }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
@@ -1010,7 +1034,7 @@ describe("ProjectSetupModal", () => {
         if (url === "/api/env-status") {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve({ gemini: true, openai: false, replicate: false, fal: false }),
+            json: () => Promise.resolve({ ...envStatusAllFalse, gemini: true }),
           });
         }
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
