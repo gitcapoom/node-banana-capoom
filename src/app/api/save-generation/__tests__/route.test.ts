@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 import * as crypto from "crypto";
+import * as path from "path";
 
 // Mock fs/promises before importing the route
 const mockStat = vi.fn();
@@ -30,9 +31,12 @@ const originalFetch = global.fetch;
 import { POST, getExtensionFromUrl } from "../route";
 
 // Helper to create mock NextRequest for POST
+// The route inspects the content-type header to branch between JSON and
+// multipart/form-data bodies, so the mock must include headers.
 function createMockPostRequest(body: unknown): NextRequest {
   return {
     json: vi.fn().mockResolvedValue(body),
+    headers: new Headers({ "content-type": "application/json" }),
   } as unknown as NextRequest;
 }
 
@@ -84,7 +88,7 @@ describe("/api/save-generation route", () => {
       expect(data.isDuplicate).toBe(false);
       expect(data.filename).toContain(expectedHash);
       expect(data.filename.endsWith(".png")).toBe(true);
-      expect(data.filePath).toContain("/test/generations/");
+      expect(data.filePath).toBe(path.join("/test/generations", data.filename));
       expect(mockWriteFile).toHaveBeenCalled();
     });
 
@@ -418,7 +422,6 @@ describe("/api/save-generation route", () => {
     it("should use custom filename when provided", async () => {
       const imageContent = "content-for-custom-filename";
       const base64Image = createBase64DataUrl(imageContent, "image/png");
-      const expectedHash = computeExpectedHash(Buffer.from(imageContent));
 
       mockStat.mockResolvedValue({
         isDirectory: () => true,
@@ -436,13 +439,13 @@ describe("/api/save-generation route", () => {
       const data = await response.json();
 
       expect(data.success).toBe(true);
-      expect(data.filename).toBe(`my-custom-output_${expectedHash}.png`);
+      // Custom filenames are honored verbatim — no content-hash suffix
+      expect(data.filename).toBe("my-custom-output.png");
     });
 
     it("should sanitize custom filename", async () => {
       const imageContent = "content-for-sanitize-custom";
       const base64Image = createBase64DataUrl(imageContent, "image/png");
-      const expectedHash = computeExpectedHash(Buffer.from(imageContent));
 
       mockStat.mockResolvedValue({
         isDirectory: () => true,
@@ -461,7 +464,7 @@ describe("/api/save-generation route", () => {
 
       expect(data.success).toBe(true);
       // Special chars should be replaced with underscores, multiple underscores collapsed
-      expect(data.filename).toBe(`My_File_Name_${expectedHash}.png`);
+      expect(data.filename).toBe("My_File_Name.png");
     });
 
     it("should create directory when createDirectory is true", async () => {
