@@ -21,6 +21,10 @@ function getExtensionFromMime(mimeType: string): string {
     "model/vnd.usdz+zip": "usdz",
     "model/fbx": "fbx",
     "model/stl": "stl",
+    // Gaussian splats (SpzViewerNode drop persistence) — the .ply extension is
+    // load-bearing: the viewer keys PLY world-orientation off the filename.
+    "model/ply": "ply",
+    "model/spz": "spz",
     "audio/mpeg": "mp3",
     "audio/wav": "wav",
     "audio/ogg": "ogg",
