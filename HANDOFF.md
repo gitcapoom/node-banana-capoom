@@ -3,8 +3,8 @@
 _Last updated: 2026-07-10. Written to preserve context across a token-limit boundary._
 
 ## Repo / deploy topology
-- **Dev repo:** `C:\Users\capoom\node-banana-capoom` — branch `develop`, `npm run dev` (:3000).
-- **Deploy repo:** `C:\Users\capoom\node-banana-capoom-deploy` — branch `master` (:3001). Same GitHub remote (`gitcapoom/node-banana-capoom`).
+- **Dev repo:** `C:\Users\capoom\node-banana-capoom` — branch `develop`, `npm run dev` (**:3001**, `PORT=3001` in `.env.local`).
+- **Deploy repo:** `C:\Users\capoom\node-banana-capoom-deploy` — branch `master` (**:3000**, production default). Same GitHub remote (`gitcapoom/node-banana-capoom`).
 - **Git workflow (IMPORTANT):** Work directly on `develop` (no feature branches/PRs this project). Deploy = **cherry-pick** `develop`'s commits onto the deploy repo's `master`, **never merge**.
 - **Verified deploy procedure (used this session):**
   1. In dev: `git push origin develop`
@@ -98,32 +98,30 @@ A self-contained **lighting-reference generator**: renders a grey matte sphere l
 
 ---
 
-## Splat viewer distribution — DECISION (2026-07-11): move to Option A (reverse-proxy). NOT YET IMPLEMENTED.
+## Splat viewer distribution — Option A (reverse-proxy). IMPLEMENTED 2026-07-11.
 
-**Decision:** stop compiling the splat viewer into node-banana. Instead consume the ONE hosted build (served by the render-tracking-viewer's Caddy on OTOSERVE10) by **reverse-proxying it under node-banana's own origin**. Same-origin is preserved, so `blob:` splat URLs, the `sessionStorage` handoff, and `postMessage` capture-back keep working unchanged. This supersedes the current git-dependency setup, which stays in place and working until the switch is made.
-
-Why the reverse-proxy (not a plain iframe to the OTOSERVE10 URL): a cross-origin viewer can't read node-banana's `blob:` URLs / `sessionStorage` and can't `postMessage` back without an origin-allowlisted protocol. The proxy makes the hosted viewer appear to come from node-banana's own origin, so all of that keeps working with zero viewer changes.
+node-banana no longer compiles the splat viewer in. It consumes the ONE hosted build (served by the render-tracking-viewer's Caddy on OTOSERVE10) by **reverse-proxying it under node-banana's own origin**. Same-origin is preserved, so `blob:` splat URLs, the `sessionStorage` handoff, `postMessage` capture-back, AND the viewer's relative fetches to node-banana's `/api/list-directory`, `/api/read-file`, `/api/write-file`, `/api/save-generation` all keep working unchanged.
 
 ### Topology (the shared model)
 - **Host:** render-tracking-viewer's Caddy serves `D:/Projects/AD` at `http://OTOSERVE10:8080`. The splat-viewer build lives at `D:/Projects/AD/_viewer/` → `http://OTOSERVE10:8080/_viewer/`.
-- **Build/deploy clone:** `C:\caddy\splat-viewer-src` (a clone of `gitcapoom/splat-viewer`) → `git pull` + `npm run build` → copy `dist/*` to `D:/Projects/AD/_viewer/`.
-- **render-tracking-viewer** already consumes `/_viewer/` same-origin (its `viewer.html` overlay). node-banana is the only consumer that still needs migrating.
-- Same pattern is planned for the **vp-projector** viewer at `/_projector/` (not served yet).
+- **Build/deploy clone:** `C:\caddy\splat-viewer-src` → `C:\caddy\deploy-splat-viewer.ps1` (fetch+reset to origin/main, `npm ci`, `npx vite build` — bypasses the broken `npm run build` tsc step — then copy dist into `D:/Projects/AD/_viewer/`).
+- **render-tracking-viewer** consumes `/_viewer/` same-origin (its `viewer.html` overlay). node-banana consumes it via the proxy below. Same pattern planned for the **vp-projector** viewer at `/_projector/` (not served yet).
 
-### Implementation steps (future session)
-1. `next.config.ts` — add a rewrite so node-banana serves the hosted viewer under its own origin:
-   ```ts
-   async rewrites() {
-     return [{ source: "/viewer/:path*", destination: "http://OTOSERVE10:8080/_viewer/:path*" }];
-   }
-   ```
-   **Caveat:** node-banana's OWN routes `/viewer/pano` and `/viewer/[worldId]` must keep working. Next checks filesystem routes before `afterFiles` rewrites, so those app routes win; only bare `/viewer` (+ its asset subpaths) should hit the proxy. So **remove `src/app/viewer/page.tsx`** to un-shadow the root `/viewer`. The viewer build uses relative asset paths (`base: "./"`), so `/viewer/assets/*` proxies to `/_viewer/assets/*` correctly.
-2. Confirm a splat still loads: `window.open('/viewer?url=blob:...')` opens same-origin (node-banana) → `blob:` fetchable, capture-back `postMessage` still same-origin.
-3. Once confirmed, remove the git-dependency wiring (keep until step 2 passes, as fallback):
-   - `"splat-viewer"` from `package.json` dependencies
-   - `transpilePackages: ["splat-viewer"]` from `next.config.ts`
-   - `@source ".../node_modules/splat-viewer/src"` from `src/app/globals.css`
-4. The deploy repo (`master`) needs the same rewrite; no npm dependency after removal.
+### What was implemented (differs from the original plan in two ways)
+`next.config.ts`:
+```ts
+{ source: "/viewer",        destination: `${SPLAT_VIEWER_ORIGIN}/_viewer/index.html` }
+{ source: "/assets/:path*", destination: `${SPLAT_VIEWER_ORIGIN}/_viewer/assets/:path*` }
+```
+`SPLAT_VIEWER_ORIGIN` env overrides the default `http://OTOSERVE10:8080`. Cache staleness: next.config `headers()` does NOT apply to externally-rewritten responses (verified empirically), so the openers (SpzViewerNode / WorldLabsWorldNode) append a `_cb=Date.now()` cache-buster to the /viewer URL — same pattern as the render-tracking viewer — and the build's assets are content-hashed.
+
+Deviations from the originally sketched `/viewer/:path*` catch-all — both were bugs in the plan:
+1. **A catch-all `/viewer/:path*` would shadow `/viewer/[worldId]`** — afterFiles rewrites run BEFORE dynamic routes (only static routes like `/viewer/pano` beat rewrites). Scoping to exactly `/viewer` leaves both app routes intact.
+2. **Assets resolve to root `/assets/*`, not `/viewer/assets/*`** — the build's asset URLs are relative (`./assets/…`, `base:"./"`) and the document URL is `/viewer` (no trailing slash), so the browser resolves them against `/`. Hence the root-level `/assets/:path*` proxy (safe: node-banana has no `public/assets` and no `/assets` route).
+
+Also removed: `src/app/viewer/page.tsx` (the git-dep wrapper), `"splat-viewer"` + `"mp4-muxer"` from `package.json` (mp4-muxer was only the viewer's dep — zero node-banana imports), `transpilePackages` from `next.config.ts`, the `@source` line from `globals.css`.
+
+`/viewer/[worldId]` is ORPHANED (no code opens it — verified by audit 2026-07-11) but kept for now.
 
 ### Tradeoff to remember
 Shared build = a viewer regression hits all consumers at once. Use versioned host paths (`/_viewer/vN/`) so an app can pin a known-good build.

@@ -230,6 +230,11 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     if (typeof nodeData.cameraJsonFocal === "number") params.set("lens", String(nodeData.cameraJsonFocal));
     if (typeof nodeData.cameraJsonAperture === "number") params.set("sensor", String(nodeData.cameraJsonAperture));
 
+    // Cache-buster: /viewer proxies the hosted build's index.html, which is
+    // served without Cache-Control — force a fresh copy so redeployed viewer
+    // builds show up on next open (same pattern as the render-tracking viewer).
+    params.set("_cb", String(Date.now()));
+
     // Persist viewer state to sessionStorage so the viewer can restore it on open
     if (nodeData.viewerState) {
       try {
