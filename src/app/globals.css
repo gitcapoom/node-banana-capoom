@@ -1,5 +1,10 @@
 @import "tailwindcss";
 
+/* splat-viewer is an external package (node_modules), which Tailwind v4
+   skips during automatic source detection. Scan it explicitly so the
+   viewer's utility classes are generated. */
+@source "../../node_modules/splat-viewer/src";
+
 @theme {
   --color-canvas-bg: #171717;
 }

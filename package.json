@@ -34,6 +34,7 @@
     "react-konva": "^19.2.1",
     "react-markdown": "^10.1.0",
     "sharp": "^0.34.5",
+    "splat-viewer": "github:gitcapoom/splat-viewer#main",
     "tailwindcss": "^4.1.17",
     "three": "^0.182.0",
     "zustand": "^5.0.9"

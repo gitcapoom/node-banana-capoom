@@ -315,23 +315,22 @@ All routes in `src/app/api/`:
 | `/viewer/[worldId]` | World-specific 3D viewer |
 | `/viewer/pano` | Equirectangular panorama viewer with perspective crop capture |
 
-## Splat Viewer (`src/splat-viewer/`)
+## Splat Viewer (dependency)
 
-A standalone Vite + React + Three.js app vendored into node-banana as a **git subtree**, served at `/viewer`. The source of truth is the separate repo **[gitcapoom/splat-viewer](https://github.com/gitcapoom/splat-viewer)** — `src/splat-viewer/` here is a squashed mirror of it.
+The viewer is a **separate standalone project — [gitcapoom/splat-viewer](https://github.com/gitcapoom/splat-viewer)** — that node-banana consumes as a **git dependency**. node-banana does NOT contain the viewer source; it only concerns itself with how it accesses the viewer.
 
-### Architecture invariant
+- `package.json` → `"splat-viewer": "github:gitcapoom/splat-viewer#main"`.
+- The package's entry is TS/TSX **source** (`exports` → `src/SplatViewer.tsx`), so Next transpiles it via `transpilePackages: ["splat-viewer"]` in `next.config.ts`.
+- react / react-dom / three / @sparkjsdev/spark are **peerDependencies** of the package — node-banana supplies the single copy (a duplicate React breaks hooks; a duplicate three breaks `instanceof`).
+- Tailwind v4 skips `node_modules` during auto source-detection, so `globals.css` has `@source "../../node_modules/splat-viewer/src";` to generate the viewer's utility classes.
 
-Everything under `src/splat-viewer/src/` must use **only relative imports (`./…`, `../…`) and npm-package imports** — never `@/…` aliases and never `next/…` imports. This is what lets the same source compile under both Vite (standalone viewer) and Next.js (embedded in node-banana). A single `@/` or `next/` import will break one of the two builds. There is a viewer-local copy of some shared modules (e.g. `src/splat-viewer/src/lib/cinemaCameraPresets.ts` duplicates the repo-root `src/utils/cinemaCameraPresets.ts`) precisely to preserve this isolation — keep them in sync manually when the math changes.
+### How node-banana accesses it
+- `src/app/viewer/page.tsx` is a thin client route that renders `import SplatViewer from "splat-viewer"` **same-origin** at `/viewer` — this is what keeps `blob:` splat URLs and the `postMessage` capture-back working.
+- Nodes open it by URL: `window.open('/viewer?url=…')` (e.g. `SpzViewerNode`, `WorldLabsWorldNode`, `Image2GSNode`). `/viewer/pano` and `/viewer/[worldId]` are node-banana's own routes.
 
-### IMPORTANT — subtree workflow
-
-- **All viewer code changes happen in the gitcapoom/splat-viewer repo**, not here.
-- Pull updates into node-banana with:
-  ```bash
-  git subtree pull --prefix=src/splat-viewer https://github.com/gitcapoom/splat-viewer.git main --squash
-  ```
-- **Never edit `src/splat-viewer/` directly inside node-banana** — local edits will be clobbered by the next subtree pull and diverge from the source of truth.
-- **Never `git subtree push`** — it walks the full repository history and times out. Push changes to gitcapoom/splat-viewer through that repo's own working copy, then pull them here.
+### Updating the viewer
+- **All viewer changes happen in the gitcapoom/splat-viewer repo**, never in node-banana.
+- To pick up viewer updates here: `npm update splat-viewer` (re-fetches `main`), then commit the changed `package-lock.json`. Pin to a specific commit by changing the ref (`#<sha>`) if you need reproducibility.
 
 ### Features
 
@@ -385,13 +384,7 @@ Everything under `src/splat-viewer/src/` must use **only relative imports (`./�
 
 ### Standalone build
 
-```bash
-cd src/splat-viewer
-npm install
-npm run build        # Vite build with base "./"
-```
-
-Produces a path-relative `dist/` that can be served from any static host under any subpath. Deployment/hosting of the standalone build is a downstream consumer's concern, not part of this repo. (Inside node-banana the viewer is served by Next.js at `/viewer`; no standalone build is needed for that path.)
+The standalone Vite build lives in the **splat-viewer repo**, not here (node-banana consumes the package via git dependency and serves it through Next.js at `/viewer` — no standalone build is needed for that path). To work on the viewer itself, clone `gitcapoom/splat-viewer` and run `npm install && npm run build` there.
 
 ## WorldLabs Integration
 
