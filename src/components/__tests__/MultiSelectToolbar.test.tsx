@@ -17,14 +17,17 @@ const mockCreateGroup = vi.fn();
 const mockRemoveNodesFromGroup = vi.fn();
 const mockUseWorkflowStore = vi.fn();
 
-vi.mock("@/store/workflowStore", () => ({
-  useWorkflowStore: (selector?: (state: unknown) => unknown) => {
+vi.mock("@/store/workflowStore", () => {
+  const useWorkflowStore = (selector?: (state: unknown) => unknown) => {
     if (selector) {
       return mockUseWorkflowStore(selector);
     }
     return mockUseWorkflowStore((s: unknown) => s);
-  },
-}));
+  };
+  // The download handler reads fresh nodes via useWorkflowStore.getState().
+  useWorkflowStore.getState = () => mockUseWorkflowStore((s: unknown) => s);
+  return { useWorkflowStore };
+});
 
 // Mock useReactFlow
 const mockGetViewport = vi.fn(() => ({ x: 0, y: 0, zoom: 1 }));
@@ -61,6 +64,7 @@ const createDefaultState = (overrides = {}) => ({
   onNodesChange: mockOnNodesChange,
   createGroup: mockCreateGroup,
   removeNodesFromGroup: mockRemoveNodesFromGroup,
+  loadNodeFullResInputs: vi.fn(async () => {}),
   ...overrides,
 });
 
