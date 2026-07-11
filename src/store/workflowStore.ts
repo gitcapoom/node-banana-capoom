@@ -696,6 +696,31 @@ function clearStaleInputImages(
   }
 }
 
+// Node types whose components render the first schema input of a type as the
+// bare handle ("image"/"text"; extras are "image-1"+, never "image-0"/"text-0").
+// Edges saved with the old indexed-from-0 format cause React Flow error #008.
+// Scoped by target type: panoEditor legitimately renders a static "image-0".
+const BARE_FIRST_HANDLE_NODE_TYPES = new Set(["nanoBanana", "generateVideo", "generate3d", "upscaleGrid"]);
+
+function migrateLegacyIndexedHandles(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowEdge[] {
+  const targetIds = new Set(
+    nodes.filter((n) => BARE_FIRST_HANDLE_NODE_TYPES.has(n.type as string)).map((n) => n.id)
+  );
+  return edges.map((edge) => {
+    if (!targetIds.has(edge.target)) return edge;
+    const th = edge.targetHandle;
+    if (th === "image-0" || th === "text-0") {
+      const baseHandle = th === "image-0" ? "image" : "text";
+      return {
+        ...edge,
+        targetHandle: baseHandle,
+        id: `edge-${edge.source}-${edge.target}-${edge.sourceHandle || "default"}-${baseHandle}`,
+      };
+    }
+    return edge;
+  });
+}
+
 const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   nodes: [],
   edges: [],
@@ -2231,25 +2256,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       return node;
     }) as WorkflowNode[];
 
-    // Migrate legacy indexed handle IDs on edges targeting nanoBanana nodes.
-    // GenerateImageNode always renders "image"/"text" handles (not "image-0"/"text-0"),
-    // so edges saved with the old indexed format cause React Flow error #008.
-    const nanoBananaNodeIds = new Set(
-      workflow.nodes.filter((n) => n.type === "nanoBanana").map((n) => n.id)
-    );
-    workflow.edges = workflow.edges.map((edge) => {
-      if (!nanoBananaNodeIds.has(edge.target)) return edge;
-      const th = edge.targetHandle;
-      if (th === "image-0" || th === "text-0") {
-        const baseHandle = th === "image-0" ? "image" : "text";
-        return {
-          ...edge,
-          targetHandle: baseHandle,
-          id: `edge-${edge.source}-${edge.target}-${edge.sourceHandle || "default"}-${baseHandle}`,
-        };
-      }
-      return edge;
-    });
+    // Migrate legacy indexed handle IDs ("image-0"/"text-0") on edges
+    // targeting generator nodes — see migrateLegacyIndexedHandles.
+    workflow.edges = migrateLegacyIndexedHandles(workflow.nodes, workflow.edges);
 
     // Migrate legacy output node handle IDs: "image"/"audio"/"3d" → "universal"
     // Output nodes now use a single "universal" handle instead of separate typed handles.
@@ -2556,7 +2565,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       selected: false,
     }));
 
-    // 4. Migrate legacy output node handle IDs before remapping
+    // 4. Migrate legacy handle IDs before remapping: output nodes' typed
+    // handles → "universal", and generator nodes' indexed "image-0"/"text-0"
+    // → bare handles (imported files can predate both conventions).
     const outputNodeIds = new Set(
       workflow.nodes.filter((n) => n.type === "output").map((n) => n.id)
     );
@@ -2568,6 +2579,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       }
       return edge;
     });
+    workflow.edges = migrateLegacyIndexedHandles(workflow.nodes, workflow.edges);
 
     // 5. Remap edge source/target IDs
     const newEdges: WorkflowEdge[] = workflow.edges

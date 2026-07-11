@@ -506,6 +506,35 @@ describe("getConnectedInputsPure", () => {
     expect(result.dynamicInputs).toEqual({ image_url: "data:image/png;base64,a" });
   });
 
+  it("should map legacy index-0 handles (image-0/text-0) to the first schema input", () => {
+    // Pre-migration saves indexed handles from 0 ("image-0" = first input).
+    // Edges in that format can still reach here via paths that bypass the
+    // loadWorkflow migration (importWorkflow, paste), so the index-0 alias
+    // must keep resolving to the first schema input of its type.
+    const nodes = [
+      makeNode("img", "imageInput", { image: "data:image/png;base64,a" }),
+      makeNode("p", "prompt", { prompt: "hello" }),
+      makeNode("gen", "generateVideo", {
+        inputSchema: [
+          { name: "image_url", type: "image" },
+          { name: "prompt", type: "text" },
+        ],
+      }),
+    ];
+    const edges = [
+      makeEdge("img", "gen", "image-0"),
+      { ...makeEdge("p", "gen", "text-0"), id: "p-gen-text", sourceHandle: "text" } as WorkflowEdge,
+    ];
+    const result = getConnectedInputsPure("gen", nodes, edges);
+    expect(result.dynamicInputs).toEqual({
+      image_url: "data:image/png;base64,a",
+      prompt: "hello",
+    });
+    // Generic routing (prefix matching) must keep working alongside the mapping
+    expect(result.images).toEqual(["data:image/png;base64,a"]);
+    expect(result.text).toBe("hello");
+  });
+
   it("should extract easeCurve data", () => {
     const nodes = [
       makeNode("ec", "easeCurve", {
