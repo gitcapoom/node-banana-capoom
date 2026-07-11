@@ -101,7 +101,7 @@ describe("/api/llm route", () => {
       expect(data.text).toBe("Generated response from Gemini");
       expect(mockGenerateContent).toHaveBeenCalledWith({
         model: "gemini-2.5-flash",
-        contents: "Test prompt",
+        contents: [{ role: "user", parts: [{ text: "Test prompt" }] }],
         config: {
           temperature: 0.7,
           maxOutputTokens: 1024,
@@ -137,12 +137,17 @@ describe("/api/llm route", () => {
         model: "gemini-2.5-flash",
         contents: [
           {
-            inlineData: {
-              mimeType: "image/png",
-              data: "iVBORw0KGgo=",
-            },
+            role: "user",
+            parts: [
+              {
+                inlineData: {
+                  mimeType: "image/png",
+                  data: "iVBORw0KGgo=",
+                },
+              },
+              { text: "Describe this image" },
+            ],
           },
-          { text: "Describe this image" },
         ],
         config: {
           temperature: 0.7,
@@ -164,7 +169,7 @@ describe("/api/llm route", () => {
 
       expect(response.status).toBe(400);
       expect(data.success).toBe(false);
-      expect(data.error).toBe("Prompt is required");
+      expect(data.error).toBe("Prompt or messages are required");
     });
 
     it("should reject missing API key (no env var, no header)", async () => {
@@ -273,7 +278,7 @@ describe("/api/llm route", () => {
       expect(data.error).toBe("No text in Google AI response");
     });
 
-    it("should handle image without data URL prefix", async () => {
+    it("should filter out image without data URL prefix", async () => {
       process.env.GEMINI_API_KEY = "test-gemini-key";
 
       mockGenerateContent.mockResolvedValueOnce({
@@ -293,21 +298,14 @@ describe("/api/llm route", () => {
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
 
-      // Verify fallback to PNG mime type
+      // Raw base64 without a data URL prefix fails the image-URL validity
+      // check, so the request goes through as text-only.
       expect(mockGenerateContent).toHaveBeenCalledWith({
         model: "gemini-2.5-flash",
-        contents: [
-          {
-            inlineData: {
-              mimeType: "image/png",
-              data: "iVBORw0KGgoAAAANSUhEUgAAAAUA",
-            },
-          },
-          { text: "Describe this" },
-        ],
+        contents: [{ role: "user", parts: [{ text: "Describe this" }] }],
         config: {
           temperature: 0.7,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 4096,
         },
       });
     });
@@ -357,7 +355,7 @@ describe("/api/llm route", () => {
             model: "gpt-4.1-mini",
             messages: [{ role: "user", content: "Test prompt" }],
             temperature: 0.7,
-            max_tokens: 1024,
+            max_completion_tokens: 1024,
           }),
         })
       );
@@ -402,12 +400,12 @@ describe("/api/llm route", () => {
                 role: "user",
                 content: [
                   { type: "text", text: "Describe this image" },
-                  { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } },
+                  { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=", detail: "high" } },
                 ],
               },
             ],
             temperature: 0.7,
-            max_tokens: 1024,
+            max_completion_tokens: 1024,
           }),
         })
       );
@@ -627,7 +625,7 @@ describe("/api/llm route", () => {
           },
           body: JSON.stringify({
             model: "claude-sonnet-4-5-20250929",
-            messages: [{ role: "user", content: [{ type: "text", text: "Test prompt" }] }],
+            messages: [{ role: "user", content: "Test prompt" }],
             temperature: 0.7,
             max_tokens: 1024,
           }),
@@ -820,7 +818,7 @@ describe("/api/llm route", () => {
       expect(data.error).toBe("No text in Anthropic response");
     });
 
-    it("should handle image without data URL prefix", async () => {
+    it("should filter out image without data URL prefix", async () => {
       process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
 
       mockFetch.mockResolvedValueOnce({
@@ -844,26 +842,16 @@ describe("/api/llm route", () => {
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
 
-      // Verify fallback to PNG mime type
+      // Raw base64 without a data URL prefix fails the image-URL validity
+      // check, so the request goes through as a plain-text message.
       expect(mockFetch).toHaveBeenCalledWith(
         "https://api.anthropic.com/v1/messages",
         expect.objectContaining({
           body: JSON.stringify({
             model: "claude-sonnet-4-5-20250929",
-            messages: [
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "image",
-                    source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgoAAAANSUhEUgAAAAUA" },
-                  },
-                  { type: "text", text: "Describe this" },
-                ],
-              },
-            ],
+            messages: [{ role: "user", content: "Describe this" }],
             temperature: 0.7,
-            max_tokens: 1024,
+            max_tokens: 4096,
           }),
         })
       );

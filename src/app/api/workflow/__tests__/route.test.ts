@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
+import * as path from "path";
 
 // Mock fs/promises before importing the route
 const mockStat = vi.fn();
@@ -22,6 +23,11 @@ vi.mock("@/utils/logger", () => ({
 }));
 
 import { POST, GET } from "../route";
+
+// validateWorkflowPath compares each path against its path.resolve() form,
+// so a POSIX-style "/test/dir" fails on Windows ("C:/test/dir" mismatch).
+// Build test paths through the platform's own resolution instead.
+const TEST_DIR = path.resolve("/test/dir");
 
 // Helper to create mock NextRequest for POST
 function createMockPostRequest(body: unknown): NextRequest {
@@ -62,7 +68,7 @@ describe("/api/workflow route", () => {
       mockWriteFile.mockResolvedValue(undefined);
 
       const request = createMockPostRequest({
-        directoryPath: "/test/dir",
+        directoryPath: TEST_DIR,
         filename: "my-workflow",
         workflow: mockWorkflow,
       });
@@ -71,9 +77,9 @@ describe("/api/workflow route", () => {
       const data = await response.json();
 
       expect(data.success).toBe(true);
-      expect(data.filePath).toBe("/test/dir/my-workflow.json");
+      expect(data.filePath).toBe(path.join(TEST_DIR, "my-workflow.json"));
       expect(mockWriteFile).toHaveBeenCalledWith(
-        "/test/dir/my-workflow.json",
+        path.join(TEST_DIR, "my-workflow.json"),
         JSON.stringify(mockWorkflow, null, 2),
         "utf-8"
       );
@@ -89,7 +95,7 @@ describe("/api/workflow route", () => {
       mockWriteFile.mockResolvedValue(undefined);
 
       const request = createMockPostRequest({
-        directoryPath: "/test/dir",
+        directoryPath: TEST_DIR,
         filename: "my workflow!@#$%",
         workflow: mockWorkflow,
       });
@@ -98,7 +104,7 @@ describe("/api/workflow route", () => {
       const data = await response.json();
 
       expect(data.success).toBe(true);
-      expect(data.filePath).toBe("/test/dir/my_workflow_____.json");
+      expect(data.filePath).toBe(path.join(TEST_DIR, "my_workflow_____.json"));
     });
 
     it("should create inputs and generations subfolders", async () => {
@@ -111,15 +117,15 @@ describe("/api/workflow route", () => {
       mockWriteFile.mockResolvedValue(undefined);
 
       const request = createMockPostRequest({
-        directoryPath: "/test/dir",
+        directoryPath: TEST_DIR,
         filename: "workflow",
         workflow: mockWorkflow,
       });
 
       await POST(request);
 
-      expect(mockMkdir).toHaveBeenCalledWith("/test/dir/inputs", { recursive: true });
-      expect(mockMkdir).toHaveBeenCalledWith("/test/dir/generations", { recursive: true });
+      expect(mockMkdir).toHaveBeenCalledWith(path.join(TEST_DIR, "inputs"), { recursive: true });
+      expect(mockMkdir).toHaveBeenCalledWith(path.join(TEST_DIR, "generations"), { recursive: true });
     });
 
     it("should reject missing directoryPath", async () => {
@@ -138,7 +144,7 @@ describe("/api/workflow route", () => {
 
     it("should reject missing filename", async () => {
       const request = createMockPostRequest({
-        directoryPath: "/test/dir",
+        directoryPath: TEST_DIR,
         workflow: { nodes: [], edges: [] },
       });
 
@@ -152,7 +158,7 @@ describe("/api/workflow route", () => {
 
     it("should reject missing workflow", async () => {
       const request = createMockPostRequest({
-        directoryPath: "/test/dir",
+        directoryPath: TEST_DIR,
         filename: "workflow",
       });
 
@@ -170,7 +176,7 @@ describe("/api/workflow route", () => {
       });
 
       const request = createMockPostRequest({
-        directoryPath: "/test/file.txt",
+        directoryPath: path.resolve("/test/file.txt"),
         filename: "workflow",
         workflow: { nodes: [], edges: [] },
       });
@@ -185,12 +191,13 @@ describe("/api/workflow route", () => {
 
     it("should create non-existent directory and continue saving", async () => {
       const mockWorkflow = { nodes: [], edges: [] };
+      const nonexistentDir = path.resolve("/nonexistent/dir");
       mockStat.mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
       mockMkdir.mockResolvedValue(undefined);
       mockWriteFile.mockResolvedValue(undefined);
 
       const request = createMockPostRequest({
-        directoryPath: "/nonexistent/dir",
+        directoryPath: nonexistentDir,
         filename: "workflow",
         workflow: mockWorkflow,
       });
@@ -199,9 +206,9 @@ describe("/api/workflow route", () => {
       const data = await response.json();
 
       expect(data.success).toBe(true);
-      expect(mockMkdir).toHaveBeenCalledWith("/nonexistent/dir", { recursive: true });
+      expect(mockMkdir).toHaveBeenCalledWith(nonexistentDir, { recursive: true });
       expect(mockWriteFile).toHaveBeenCalledWith(
-        "/nonexistent/dir/workflow.json",
+        path.join(nonexistentDir, "workflow.json"),
         JSON.stringify(mockWorkflow, null, 2),
         "utf-8"
       );
@@ -217,7 +224,7 @@ describe("/api/workflow route", () => {
       mockWriteFile.mockResolvedValue(undefined);
 
       const request = createMockPostRequest({
-        directoryPath: "/test/dir",
+        directoryPath: TEST_DIR,
         filename: "workflow",
         workflow: mockWorkflow,
       });
@@ -226,7 +233,7 @@ describe("/api/workflow route", () => {
       const data = await response.json();
 
       expect(data.success).toBe(true);
-      expect(data.filePath).toBe("/test/dir/workflow.json");
+      expect(data.filePath).toBe(path.join(TEST_DIR, "workflow.json"));
     });
 
     it("should return 500 on write failure", async () => {
@@ -237,7 +244,7 @@ describe("/api/workflow route", () => {
       mockWriteFile.mockRejectedValue(new Error("Disk full"));
 
       const request = createMockPostRequest({
-        directoryPath: "/test/dir",
+        directoryPath: TEST_DIR,
         filename: "workflow",
         workflow: { nodes: [], edges: [] },
       });
@@ -292,7 +299,14 @@ describe("/api/workflow route", () => {
 
       expect(response.status).toBe(400);
       expect(data.success).toBe(false);
-      expect(data.error).toBe("Access to /etc is not allowed");
+      // On POSIX "/etc/workflows" survives path.resolve unchanged and hits
+      // the dangerous-prefix blocklist; on Windows it resolves to
+      // "C:/etc/workflows" and is rejected earlier by the traversal check.
+      expect(data.error).toBe(
+        process.platform === "win32"
+          ? "Path contains traversal sequences"
+          : "Access to /etc is not allowed"
+      );
     });
   });
 
@@ -302,7 +316,7 @@ describe("/api/workflow route", () => {
         isDirectory: () => true,
       });
 
-      const request = createMockGetRequest({ path: "/test/dir" });
+      const request = createMockGetRequest({ path: TEST_DIR });
       const response = await GET(request);
       const data = await response.json();
 
@@ -316,7 +330,7 @@ describe("/api/workflow route", () => {
         isDirectory: () => false,
       });
 
-      const request = createMockGetRequest({ path: "/test/file.txt" });
+      const request = createMockGetRequest({ path: path.resolve("/test/file.txt") });
       const response = await GET(request);
       const data = await response.json();
 
@@ -328,7 +342,7 @@ describe("/api/workflow route", () => {
     it("should return exists: false for non-existent path", async () => {
       mockStat.mockRejectedValue(new Error("ENOENT"));
 
-      const request = createMockGetRequest({ path: "/nonexistent" });
+      const request = createMockGetRequest({ path: path.resolve("/nonexistent") });
       const response = await GET(request);
       const data = await response.json();
 

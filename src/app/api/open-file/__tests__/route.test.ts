@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import path from "path";
 
 // Use vi.hoisted so mock fns are available during vi.mock() hoisting
 const { mockExecFileAsync, mockStat, mockPlatform, mockHomedir } = vi.hoisted(() => ({
@@ -14,7 +15,9 @@ vi.mock(import("child_process"), async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    execFile: vi.fn(),
+    // Cast: the real execFile carries a __promisify__ property the plain
+    // vi.fn() lacks; runtime behavior is unaffected (promisify is mocked).
+    execFile: vi.fn() as unknown as typeof actual.execFile,
   };
 });
 
@@ -22,7 +25,8 @@ vi.mock(import("util"), async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
-    promisify: () => mockExecFileAsync,
+    // Cast: the real promisify carries a `custom` symbol property.
+    promisify: (() => mockExecFileAsync) as unknown as typeof actual.promisify,
   };
 });
 
@@ -50,6 +54,11 @@ vi.mock(import("os"), async (importOriginal) => {
 
 import { POST } from "../route";
 
+// The route runs incoming paths through path.resolve() and compares against
+// os.homedir(), so build test paths with the same platform-aware APIs (on
+// Windows "/Users/testuser" resolves to "C:\\Users\\testuser").
+const HOME = path.resolve("/Users/testuser");
+
 // Helper to create mock NextRequest
 function createMockRequest(
   body: unknown,
@@ -65,13 +74,13 @@ describe("/api/open-file route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPlatform.mockReturnValue("darwin");
-    mockHomedir.mockReturnValue("/Users/testuser");
+    mockHomedir.mockReturnValue(HOME);
   });
 
   describe("localhost guard", () => {
     it("should return 403 for non-localhost x-forwarded-for", async () => {
       const request = createMockRequest(
-        { filePath: "/Users/testuser/file.glb" },
+        { filePath: path.join(HOME, "file.glb") },
         { "x-forwarded-for": "203.0.113.50", host: "localhost:3000" }
       );
 
@@ -84,7 +93,7 @@ describe("/api/open-file route", () => {
 
     it("should return 403 for non-localhost host header", async () => {
       const request = createMockRequest(
-        { filePath: "/Users/testuser/file.glb" },
+        { filePath: path.join(HOME, "file.glb") },
         { host: "example.com" }
       );
 
@@ -100,7 +109,7 @@ describe("/api/open-file route", () => {
       mockExecFileAsync.mockResolvedValue({ stdout: "", stderr: "" });
 
       const request = createMockRequest(
-        { filePath: "/Users/testuser/file.glb" },
+        { filePath: path.join(HOME, "file.glb") },
         { "x-forwarded-for": "127.0.0.1", host: "localhost:3000" }
       );
 
@@ -116,7 +125,7 @@ describe("/api/open-file route", () => {
       mockExecFileAsync.mockResolvedValue({ stdout: "", stderr: "" });
 
       const request = createMockRequest(
-        { filePath: "/Users/testuser/file.glb" },
+        { filePath: path.join(HOME, "file.glb") },
         { "x-forwarded-for": "::1", host: "localhost:3000" }
       );
 
@@ -132,7 +141,7 @@ describe("/api/open-file route", () => {
       mockExecFileAsync.mockResolvedValue({ stdout: "", stderr: "" });
 
       const request = createMockRequest(
-        { filePath: "/Users/testuser/file.glb" },
+        { filePath: path.join(HOME, "file.glb") },
         { host: "localhost:3000" }
       );
 
@@ -193,7 +202,7 @@ describe("/api/open-file route", () => {
       mockStat.mockResolvedValue({ isFile: () => false });
 
       const request = createMockRequest({
-        filePath: "/Users/testuser/generations",
+        filePath: path.join(HOME, "generations"),
       });
 
       const response = await POST(request);
@@ -207,7 +216,7 @@ describe("/api/open-file route", () => {
       mockStat.mockRejectedValue(new Error("ENOENT"));
 
       const request = createMockRequest({
-        filePath: "/Users/testuser/nonexistent.glb",
+        filePath: path.join(HOME, "nonexistent.glb"),
       });
 
       const response = await POST(request);
@@ -225,7 +234,7 @@ describe("/api/open-file route", () => {
       mockExecFileAsync.mockResolvedValue({ stdout: "", stderr: "" });
 
       const request = createMockRequest({
-        filePath: "/Users/testuser/generations/model.glb",
+        filePath: path.join(HOME, "generations", "model.glb"),
       });
 
       const response = await POST(request);
@@ -235,7 +244,7 @@ describe("/api/open-file route", () => {
       expect(data.success).toBe(true);
       expect(mockExecFileAsync).toHaveBeenCalledWith("open", [
         "-R",
-        "/Users/testuser/generations/model.glb",
+        path.join(HOME, "generations", "model.glb"),
       ]);
     });
 
@@ -245,7 +254,7 @@ describe("/api/open-file route", () => {
       mockExecFileAsync.mockResolvedValue({ stdout: "", stderr: "" });
 
       const request = createMockRequest({
-        filePath: "/Users/testuser/generations/model.glb",
+        filePath: path.join(HOME, "generations", "model.glb"),
       });
 
       const response = await POST(request);
@@ -254,7 +263,7 @@ describe("/api/open-file route", () => {
       expect(response.status).toBe(200);
       expect(data.success).toBe(true);
       expect(mockExecFileAsync).toHaveBeenCalledWith("xdg-open", [
-        "/Users/testuser/generations",
+        path.join(HOME, "generations"),
       ]);
     });
 
@@ -263,7 +272,7 @@ describe("/api/open-file route", () => {
       mockExecFileAsync.mockRejectedValue(new Error("Command not found"));
 
       const request = createMockRequest({
-        filePath: "/Users/testuser/generations/model.glb",
+        filePath: path.join(HOME, "generations", "model.glb"),
       });
 
       const response = await POST(request);
