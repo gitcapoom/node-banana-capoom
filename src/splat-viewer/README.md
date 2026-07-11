@@ -177,14 +177,13 @@ Viewer shortcuts are suppressed while typing in an input/select/textarea.
 
 > Capture/screenshot is button-only — there is no keyboard shortcut for it.
 
-## Build & deploy
+## Build
 
 ```bash
 npm run build   # outputs dist/ with relative asset paths (base: "./")
 ```
 
-Copy `dist/*` into the Caddy-served directory (e.g. `D:\Projects\AD\_viewer\` on OTOSERVE10).
-No Caddyfile changes needed — the build uses relative paths and works as a drop-in under any subpath.
+The build is self-contained and path-relative, so `dist/` can be served from any static host, including under an arbitrary subpath. Keep `base: "./"` in `vite.config.ts` for subpath hosting to work.
 
 ## Architecture invariant
 `src/` must use **only relative imports + npm packages** — no `@/` or `next/`
