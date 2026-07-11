@@ -996,6 +996,9 @@ export interface SphereLightRenderNodeData extends BaseNodeData {
 export interface SpzViewerNodeData extends BaseNodeData {
   spzUrl: string | null;         // SPZ/PLY file URL (HTTP or blob)
   filename: string | null;       // Display name
+  /** Persisted copy of a drag-dropped splat under <project>/inputs — blob:
+   *  URLs die on reload, so this id re-hydrates spzUrl on workflow open. */
+  splatFileId?: string | null;
   capturedImage: string | null;  // Latest captured screenshot from viewer
   capturedImageRef?: string;     // External ref for capturedImage
   capturedDepthImage: string | null; // Depth map from latest capture (grayscale)

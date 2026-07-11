@@ -185,6 +185,48 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     }
   }, [edges, nodes, id, getConnectedInputs, nodeData.spzUrl, nodeData.filename, updateNodeData]);
 
+  // ─── Re-hydrate a drag-dropped splat after a workflow reload ─
+  // blob: URLs die with the page, so a reopened workflow carries a dead
+  // spzUrl. The drop handler persisted the file under <project>/inputs
+  // (splatFileId) — mint a fresh blob URL from it. One-shot; skipped when a
+  // 3d input is connected (the upstream re-hydrates itself and the auto-adopt
+  // effect above takes precedence) or when spzUrl is a still-valid http URL.
+  const splatHydrationRef = useRef(false);
+  useEffect(() => {
+    if (splatHydrationRef.current) return;
+    if (!nodeData.splatFileId || !saveDirectoryPath) return;
+    if (nodeData.spzUrl && !nodeData.spzUrl.startsWith("blob:")) return;
+    const has3dInput = edges.some(
+      (e) => e.target === id && (e.targetHandle ?? "").startsWith("3d"),
+    );
+    if (has3dInput) {
+      splatHydrationRef.current = true;
+      return;
+    }
+    splatHydrationRef.current = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/load-generation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            directoryPath: `${saveDirectoryPath}/inputs`,
+            imageId: nodeData.splatFileId,
+          }),
+        });
+        const result = await res.json();
+        const dataUrl: string | undefined = result.model3d || result.image;
+        if (!result.success || !dataUrl) return;
+        // Same as the drop path: Spark fetches /viewer?url=… — a blob: URL is
+        // short and fetchable, unlike a multi-MB data: URL.
+        const blob = await (await fetch(dataUrl)).blob();
+        updateNodeData(id, { spzUrl: URL.createObjectURL(blob) });
+      } catch (e) {
+        console.warn("[SpzViewer] Failed to re-hydrate dropped splat:", e);
+      }
+    })();
+  }, [id, edges, nodeData.splatFileId, nodeData.spzUrl, saveDirectoryPath, updateNodeData]);
+
   // ─── Handlers ──────────────────────────────────────────────
 
   const handleRun = useCallback(() => {
@@ -266,6 +308,42 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     return ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
   }, []);
 
+  // Persist a dropped splat under <project>/inputs so it survives a workflow
+  // reload (the blob: URL below dies with the page). Fire-and-forget — the
+  // blob URL is usable immediately; splatFileId lands when the save completes.
+  const persistDroppedSplat = useCallback(
+    async (file: File) => {
+      if (!saveDirectoryPath) return;
+      try {
+        const ext = file.name.toLowerCase().endsWith(".spz") ? "spz" : "ply";
+        const rawDataUrl: string = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result as string);
+          r.onerror = () => reject(r.error);
+          r.readAsDataURL(file);
+        });
+        // FileReader reports application/octet-stream — rewrite the mime so
+        // save-generation keeps the .ply/.spz extension (the viewer keys PLY
+        // world-orientation off the filename).
+        const dataUrl = rawDataUrl.replace(/^data:[^;]*;base64,/, `data:model/${ext};base64,`);
+        const res = await fetch("/api/save-generation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            directoryPath: `${saveDirectoryPath}/inputs`,
+            model3d: dataUrl,
+            createDirectory: true,
+          }),
+        });
+        const result = await res.json();
+        if (result.imageId) updateNodeData(id, { splatFileId: result.imageId });
+      } catch (e) {
+        console.warn("[SpzViewer] Failed to persist dropped splat:", e);
+      }
+    },
+    [id, saveDirectoryPath, updateNodeData],
+  );
+
   const processFile = useCallback(
     (file: File) => {
       if (!isAcceptedFile(file.name)) {
@@ -277,15 +355,20 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
         URL.revokeObjectURL(nodeData.spzUrl);
       }
 
+      // A fresh drop supersedes any pending reload-hydration this mount.
+      splatHydrationRef.current = true;
+
       const url = URL.createObjectURL(file);
       updateNodeData(id, {
         spzUrl: url,
         filename: file.name,
+        splatFileId: null, // stale id must not rehydrate the previous splat
         capturedImage: null,
         capturedDepthImage: null,
       });
+      void persistDroppedSplat(file);
     },
-    [id, nodeData.spzUrl, updateNodeData, isAcceptedFile]
+    [id, nodeData.spzUrl, updateNodeData, isAcceptedFile, persistDroppedSplat]
   );
 
   const handleDrop = useCallback(
