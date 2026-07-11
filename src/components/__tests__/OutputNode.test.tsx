@@ -105,14 +105,14 @@ describe("OutputNode", () => {
       expect(screen.queryByTitle("Download")).not.toBeInTheDocument();
     });
 
-    it("should render input handle for image", () => {
+    it("should render single universal input handle", () => {
       const { container } = render(
         <TestWrapper>
           <OutputNode {...createNodeProps()} />
         </TestWrapper>
       );
 
-      const handle = container.querySelector('[data-handletype="image"]');
+      const handle = container.querySelector('[data-handletype="universal"]');
       expect(handle).toBeInTheDocument();
     });
   });
@@ -159,9 +159,8 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const video = document.querySelector("video");
-      expect(video).toBeInTheDocument();
-      expect(video).toHaveAttribute("src", "data:video/mp4;base64,xyz789");
+      expect(screen.getByText("Video")).toBeInTheDocument();
+      expect(screen.queryByAltText("Output")).not.toBeInTheDocument();
     });
 
     it("should detect video when data.contentType is 'video'", () => {
@@ -174,8 +173,8 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const video = document.querySelector("video");
-      expect(video).toBeInTheDocument();
+      expect(screen.getByText("Video")).toBeInTheDocument();
+      expect(screen.queryByAltText("Output")).not.toBeInTheDocument();
     });
 
     it("should detect video when data.image starts with 'data:video/'", () => {
@@ -185,9 +184,8 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const video = document.querySelector("video");
-      expect(video).toBeInTheDocument();
-      expect(video).toHaveAttribute("src", "data:video/mp4;base64,abc123");
+      expect(screen.getByText("Video")).toBeInTheDocument();
+      expect(screen.queryByAltText("Output")).not.toBeInTheDocument();
     });
 
     it("should detect video when data.image contains '.mp4'", () => {
@@ -197,8 +195,8 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const video = document.querySelector("video");
-      expect(video).toBeInTheDocument();
+      expect(screen.getByText("Video")).toBeInTheDocument();
+      expect(screen.queryByAltText("Output")).not.toBeInTheDocument();
     });
 
     it("should detect video when data.image contains '.webm'", () => {
@@ -208,8 +206,8 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const video = document.querySelector("video");
-      expect(video).toBeInTheDocument();
+      expect(screen.getByText("Video")).toBeInTheDocument();
+      expect(screen.queryByAltText("Output")).not.toBeInTheDocument();
     });
 
     it("should render image when no video indicators are present", () => {
@@ -221,7 +219,7 @@ describe("OutputNode", () => {
 
       const img = screen.getByAltText("Output");
       expect(img).toBeInTheDocument();
-      expect(document.querySelector("video")).not.toBeInTheDocument();
+      expect(screen.queryByText("Video")).not.toBeInTheDocument();
     });
 
     it("should prioritize data.video over data.image", () => {
@@ -234,55 +232,63 @@ describe("OutputNode", () => {
         </TestWrapper>
       );
 
-      const video = document.querySelector("video");
-      expect(video).toBeInTheDocument();
-      expect(video).toHaveAttribute("src", "data:video/mp4;base64,video123");
+      expect(screen.getByText("Video")).toBeInTheDocument();
+      expect(screen.queryByAltText("Output")).not.toBeInTheDocument();
     });
   });
 
-  describe("Video Controls Rendering", () => {
-    it("should render video with controls attribute", () => {
+  describe("Video Placeholder Rendering", () => {
+    // Video content renders a placeholder icon instead of an embedded
+    // <video> player — the inline player was intentionally removed.
+    it("should not render an embedded video player", () => {
       render(
         <TestWrapper>
           <OutputNode {...createNodeProps({ video: "data:video/mp4;base64,xyz" })} />
         </TestWrapper>
       );
 
-      const video = document.querySelector("video");
-      expect(video).toHaveAttribute("controls");
+      expect(document.querySelector("video")).not.toBeInTheDocument();
+      expect(screen.getByText("Video")).toBeInTheDocument();
     });
 
-    it("should render video with loop attribute", () => {
+    it("should still render the download button for video content", () => {
       render(
         <TestWrapper>
           <OutputNode {...createNodeProps({ video: "data:video/mp4;base64,xyz" })} />
         </TestWrapper>
       );
 
-      const video = document.querySelector("video");
-      expect(video).toHaveAttribute("loop");
+      expect(screen.getByTitle("Download")).toBeInTheDocument();
     });
 
-    it("should render video with muted attribute", () => {
+    it("should download the video when both video and image are present", () => {
+      // contentSrc prioritizes video over image; with the inline player
+      // gone, the download anchor is where that priority is observable.
+      const hrefs: string[] = [];
+      const filenames: string[] = [];
+      const clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(function (this: HTMLAnchorElement) {
+          hrefs.push(this.href);
+          filenames.push(this.download);
+        });
+
       render(
         <TestWrapper>
-          <OutputNode {...createNodeProps({ video: "data:video/mp4;base64,xyz" })} />
+          <OutputNode {...createNodeProps({
+            video: "data:video/mp4;base64,video123",
+            image: "data:image/png;base64,image456"
+          })} />
         </TestWrapper>
       );
 
-      const video = document.querySelector("video");
-      expect(video?.muted).toBe(true);
-    });
+      fireEvent.click(screen.getByTitle("Download"));
 
-    it("should render video with playsInline attribute", () => {
-      render(
-        <TestWrapper>
-          <OutputNode {...createNodeProps({ video: "data:video/mp4;base64,xyz" })} />
-        </TestWrapper>
-      );
+      expect(hrefs).toHaveLength(1);
+      expect(hrefs[0]).toContain("data:video/mp4;base64,video123");
+      expect(filenames[0]).toMatch(/\.mp4$/);
 
-      const video = document.querySelector("video");
-      expect(video).toHaveAttribute("playsinline");
+      clickSpy.mockRestore();
     });
   });
 
@@ -349,45 +355,38 @@ describe("OutputNode", () => {
       expect(screen.queryByAltText("Output full size")).not.toBeInTheDocument();
     });
 
-    it("should show video in lightbox when video content is clicked", () => {
+    it("should not open lightbox for video content (images only)", () => {
       render(
         <TestWrapper>
           <OutputNode {...createNodeProps({ video: "data:video/mp4;base64,xyz" })} />
         </TestWrapper>
       );
 
-      // Find the clickable area (parent of video)
-      const video = document.querySelector("video");
-      const clickableArea = video?.closest(".cursor-pointer");
-      expect(clickableArea).toBeInTheDocument();
+      // The video placeholder has no clickable lightbox area
+      const placeholder = screen.getByText("Video");
+      fireEvent.click(placeholder);
 
-      fireEvent.click(clickableArea!);
-
-      // Lightbox should have a video element
-      const lightboxVideos = document.querySelectorAll("video");
-      // There should now be 2 videos - one in node, one in lightbox
-      expect(lightboxVideos.length).toBe(2);
+      // No lightbox overlay should appear
+      expect(document.querySelector(".fixed.inset-0")).not.toBeInTheDocument();
+      expect(screen.queryByAltText("Output full size")).not.toBeInTheDocument();
     });
 
-    it("should not close lightbox when clicking on video controls", () => {
+    it("should close lightbox when pressing Escape", () => {
       render(
         <TestWrapper>
-          <OutputNode {...createNodeProps({ video: "data:video/mp4;base64,xyz" })} />
+          <OutputNode {...createNodeProps({ image: "data:image/png;base64,abc123" })} />
         </TestWrapper>
       );
 
       // Open lightbox
-      const video = document.querySelector("video");
-      const clickableArea = video?.closest(".cursor-pointer");
+      const img = screen.getByAltText("Output");
+      const clickableArea = img.closest(".cursor-pointer");
       fireEvent.click(clickableArea!);
+      expect(screen.getByAltText("Output full size")).toBeInTheDocument();
 
-      // Click directly on video (should stopPropagation)
-      const lightboxVideo = document.querySelectorAll("video")[1];
-      fireEvent.click(lightboxVideo);
+      fireEvent.keyDown(window, { key: "Escape" });
 
-      // Lightbox should still be open (2 videos present)
-      const allVideos = document.querySelectorAll("video");
-      expect(allVideos.length).toBe(2);
+      expect(screen.queryByAltText("Output full size")).not.toBeInTheDocument();
     });
   });
 

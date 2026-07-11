@@ -245,9 +245,9 @@ describe("ConnectionDropMenu", () => {
     it("should wrap around when navigating past last item", () => {
       render(<ConnectionDropMenu {...defaultProps} handleType="text" connectionType="source" />);
 
-      // Text source labels: Prompt, Prompt Constructor, Array, Generate Image, Generate Video, Generate Audio, LLM Generate, Router, Switch, Conditional Switch (10 items)
-      // Navigate down 10 times to wrap to first
-      for (let i = 0; i < 10; i++) {
+      // Text source labels: Prompt, Prompt Constructor, Array, Generate Image, Generate Video, Generate Audio, LLM Generate, Generate Panorama, Pano Edit, Router, Switch, Conditional Switch (12 items)
+      // Navigate down 12 times to wrap to first
+      for (let i = 0; i < 12; i++) {
         fireEvent.keyDown(document, { key: "ArrowDown" });
       }
 

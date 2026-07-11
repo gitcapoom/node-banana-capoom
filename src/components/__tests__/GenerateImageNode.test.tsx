@@ -114,6 +114,7 @@ describe("GenerateImageNode", () => {
         currentNodeIds: [],
         groups: {},
         nodes: [],
+        edges: [],
         recentModels: [],
         trackModelUsage: vi.fn(),
         getNodesWithComments: vi.fn(() => []),

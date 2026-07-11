@@ -88,6 +88,7 @@ function setMockStoreState(overrides: Record<string, unknown> = {}) {
     removeEdge: mockRemoveEdge,
     edges: [],
     nodes: [],
+    currentNodeIds: [],
     isRunning: false,
     hoveredNodeId: null,
     ...overrides,
