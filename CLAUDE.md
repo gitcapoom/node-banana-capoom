@@ -383,7 +383,7 @@ Everything under `src/splat-viewer/src/` must use **only relative imports (`./�
 - Import: reads `cameras.txt` + `images.txt` (+ optional Nodos `extras.txt` sidecar) into a `CameraPath`, one keyframe per pose (sorted by IMAGE_ID, times uniform over [0,1]); derives FOV from intrinsics (fallback 60°). Parses PINHOLE/SIMPLE_PINHOLE/OPENCV/RADIAL/SIMPLE_RADIAL, extracts `k1,k2,p1,p2` and `DISTORTION_SCALE`.
 - World-frame conventions: y-up (identity), y-down (Rx 180°, **default**, raw COLMAP/OpenCV), z-up (Rx −90°, Blender/Unreal). Camera-axis change RDF↔RUB via `D = diag(1,-1,-1)`.
 
-### Build & deploy (OTOSERVE10 Caddy)
+### Standalone build
 
 ```bash
 cd src/splat-viewer
@@ -391,7 +391,7 @@ npm install
 npm run build        # Vite build with base "./"
 ```
 
-Copy the built `dist/*` to `D:\Projects\AD\_viewer\` on **OTOSERVE10**. Served at **http://OTOSERVE10:8080/_viewer/**. No Caddyfile changes needed — the relative-path build is a drop-in under any subpath.
+Produces a path-relative `dist/` that can be served from any static host under any subpath. Deployment/hosting of the standalone build is a downstream consumer's concern, not part of this repo. (Inside node-banana the viewer is served by Next.js at `/viewer`; no standalone build is needed for that path.)
 
 ## WorldLabs Integration
 
