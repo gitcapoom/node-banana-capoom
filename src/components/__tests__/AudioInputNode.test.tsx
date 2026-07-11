@@ -81,6 +81,7 @@ vi.mock("@/hooks/useAudioVisualization", () => ({
 }));
 
 import { AudioInputNode } from "@/components/nodes/AudioInputNode";
+import { makeNodeProps } from "@/test/nodeProps";
 
 /** Set up mock store state */
 function setMockStoreState(overrides: Record<string, unknown> = {}) {
@@ -111,7 +112,7 @@ const createNodeData = (
   ...overrides,
 });
 
-const createNodeProps = (data: Partial<AudioInputNodeData> = {}) => ({
+const createNodeProps = (data: Partial<AudioInputNodeData> = {}) => makeNodeProps({
   id: "test-audio-1",
   type: "audioInput" as const,
   data: createNodeData(data),

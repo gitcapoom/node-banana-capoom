@@ -24,6 +24,7 @@ const createDefaultNodeData = (): SplitGridNodeData => ({
     resolution: "1K",
     model: "nano-banana",
     useGoogleSearch: false,
+    useImageSearch: false,
   },
   sourceImage: null,
   childNodeIds: [],
@@ -469,6 +470,7 @@ describe("SplitGridSettingsModal", () => {
         resolution: "2K",
         model: "nano-banana-pro",
         useGoogleSearch: true,
+        useImageSearch: false,
       };
 
       render(

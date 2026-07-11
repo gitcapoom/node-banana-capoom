@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { LLMGenerateNode } from "@/components/nodes/LLMGenerateNode";
+import { makeNodeProps } from "@/test/nodeProps";
 import { ReactFlowProvider } from "@xyflow/react";
 import { LLMGenerateNodeData } from "@/types";
 
@@ -64,7 +65,7 @@ describe("LLMGenerateNode", () => {
     ...overrides,
   });
 
-  const createNodeProps = (data: Partial<LLMGenerateNodeData> = {}) => ({
+  const createNodeProps = (data: Partial<LLMGenerateNodeData> = {}) => makeNodeProps({
     id: "test-llm-1",
     type: "llmGenerate" as const,
     data: createNodeData(data),

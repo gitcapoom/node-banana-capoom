@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { SplitGridNode } from "@/components/nodes/SplitGridNode";
+import { makeNodeProps } from "@/test/nodeProps";
 import { ReactFlowProvider } from "@xyflow/react";
 import { SplitGridNodeData } from "@/types";
 
@@ -68,6 +69,7 @@ describe("SplitGridNode", () => {
       resolution: "1K",
       model: "nano-banana",
       useGoogleSearch: false,
+      useImageSearch: false,
     },
     childNodeIds: [],
     gridRows: 2,
@@ -78,7 +80,7 @@ describe("SplitGridNode", () => {
     ...overrides,
   });
 
-  const createNodeProps = (data: Partial<SplitGridNodeData> = {}) => ({
+  const createNodeProps = (data: Partial<SplitGridNodeData> = {}) => makeNodeProps({
     id: "split-grid-node-1",
     type: "splitGrid" as const,
     data: createDefaultNodeData(data),

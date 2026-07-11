@@ -72,6 +72,7 @@ vi.mock("@/components/nodes/BaseNode", () => {
 });
 
 import { VideoStitchNode } from "@/components/nodes/VideoStitchNode";
+import { makeNodeProps } from "@/test/nodeProps";
 
 /** Set up mock store state, merging overrides onto the base state. */
 function setMockStoreState(overrides: Record<string, unknown> = {}) {
@@ -96,6 +97,7 @@ const createNodeData = (overrides: Partial<VideoStitchNodeData> = {}): VideoStit
   clips: [],
   clipOrder: [],
   outputVideo: null,
+  loopCount: 1,
   status: "idle",
   error: null,
   progress: 0,
@@ -103,7 +105,7 @@ const createNodeData = (overrides: Partial<VideoStitchNodeData> = {}): VideoStit
   ...overrides,
 });
 
-const createNodeProps = (data: Partial<VideoStitchNodeData> = {}) => ({
+const createNodeProps = (data: Partial<VideoStitchNodeData> = {}) => makeNodeProps({
   id: "test-stitch-1",
   type: "videoStitch" as const,
   data: createNodeData(data),

@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { FloatingActionBar } from "@/components/FloatingActionBar";
 import { ReactFlowProvider } from "@xyflow/react";
-import { ProviderSettings } from "@/types";
 
 // Mock the workflow store
 const mockAddNode = vi.fn();
@@ -58,18 +57,6 @@ global.fetch = mockFetch;
 function TestWrapper({ children }: { children: React.ReactNode }) {
   return <ReactFlowProvider>{children}</ReactFlowProvider>;
 }
-
-// Default provider settings
-const defaultProviderSettings: ProviderSettings = {
-  providers: {
-    gemini: { id: "gemini", name: "Gemini", enabled: true, apiKey: null, apiKeyEnvVar: "GEMINI_API_KEY" },
-    openai: { id: "openai", name: "OpenAI", enabled: false, apiKey: null },
-    replicate: { id: "replicate", name: "Replicate", enabled: false, apiKey: null },
-    fal: { id: "fal", name: "fal.ai", enabled: true, apiKey: null },
-    kie: { id: "kie", name: "Kie.ai", enabled: false, apiKey: null },
-    wavespeed: { id: "wavespeed", name: "WaveSpeed", enabled: false, apiKey: null },
-  },
-};
 
 // Default store state factory
 const createDefaultState = (overrides = {}) => ({

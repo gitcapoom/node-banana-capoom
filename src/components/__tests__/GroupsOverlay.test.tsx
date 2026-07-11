@@ -1,7 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { GroupBackgroundsPortal, GroupControlsOverlay, GroupsOverlay } from "@/components/GroupsOverlay";
-import { Group } from "@/types";
+import { GroupColor } from "@/types";
+
+// Shape of the mock groups used by these tests (the store's NodeGroup minus
+// `id`, plus the legacy `nodeIds` list).
+type Group = {
+  name: string;
+  color: GroupColor;
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+  nodeIds: string[];
+  locked: boolean;
+};
 
 // Mock ReactFlow hooks and components
 vi.mock("@xyflow/react", () => ({

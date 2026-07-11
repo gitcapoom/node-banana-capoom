@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { GenerateAudioNode } from "@/components/nodes/GenerateAudioNode";
+import { makeNodeProps } from "@/test/nodeProps";
 import { ReactFlowProvider } from "@xyflow/react";
 import { GenerateAudioNodeData, ProviderSettings } from "@/types";
 
@@ -90,10 +91,13 @@ const defaultProviderSettings: ProviderSettings = {
   providers: {
     gemini: { id: "gemini", name: "Gemini", enabled: true, apiKey: null, apiKeyEnvVar: "GEMINI_API_KEY" },
     openai: { id: "openai", name: "OpenAI", enabled: false, apiKey: null },
+    anthropic: { id: "anthropic", name: "Anthropic", enabled: false, apiKey: null, apiKeyEnvVar: "ANTHROPIC_API_KEY" },
     replicate: { id: "replicate", name: "Replicate", enabled: false, apiKey: null },
     fal: { id: "fal", name: "fal.ai", enabled: true, apiKey: null },
     kie: { id: "kie", name: "Kie.ai", enabled: false, apiKey: null },
     wavespeed: { id: "wavespeed", name: "WaveSpeed", enabled: false, apiKey: null },
+    worldlabs: { id: "worldlabs", name: "World Labs", enabled: false, apiKey: null, apiKeyEnvVar: "WORLDLABS_API_KEY" },
+    muapi: { id: "muapi", name: "muapi.ai", enabled: false, apiKey: null, apiKeyEnvVar: "MUAPI_API_KEY" },
   },
 };
 
@@ -144,7 +148,7 @@ describe("GenerateAudioNode", () => {
     ...overrides,
   });
 
-  const createNodeProps = (data: Partial<GenerateAudioNodeData> = {}) => ({
+  const createNodeProps = (data: Partial<GenerateAudioNodeData> = {}) => makeNodeProps({
     id: "test-audio-1",
     type: "generateAudio" as const,
     data: createNodeData(data),

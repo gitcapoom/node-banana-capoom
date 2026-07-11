@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { OutputNode } from "@/components/nodes/OutputNode";
+import { makeNodeProps } from "@/test/nodeProps";
 import { ReactFlowProvider } from "@xyflow/react";
 
 // Mock the workflow store
@@ -74,7 +75,7 @@ describe("OutputNode", () => {
     contentType?: "image" | "video";
     customTitle?: string;
     comment?: string;
-  }> = {}) => ({
+  }> = {}) => makeNodeProps({
     id: "output-node-1",
     type: "output" as const,
     data: {

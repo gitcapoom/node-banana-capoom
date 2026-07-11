@@ -280,7 +280,7 @@ describe("createChatTools", () => {
     it("execute returns { answer } when called", async () => {
       const tools = createChatTools(nodeIds);
 
-      const result = await tools.answerQuestion.execute(
+      const result = await tools.answerQuestion.execute!(
         { answer: "Use the Resolution dropdown on the Generate node." },
         { toolCallId: "test", messages: [], abortSignal: undefined as any }
       );
@@ -301,7 +301,7 @@ describe("createChatTools", () => {
     it("execute returns { description } when called", async () => {
       const tools = createChatTools(nodeIds);
 
-      const result = await tools.createWorkflow.execute(
+      const result = await tools.createWorkflow.execute!(
         { description: "A workflow for batch image processing" },
         { toolCallId: "test", messages: [], abortSignal: undefined as any }
       );
@@ -327,13 +327,13 @@ describe("createChatTools", () => {
         { type: "removeNode" as const, nodeId: "out-1" },
       ];
 
-      const result = await tools.editWorkflow.execute(
+      const result = (await tools.editWorkflow.execute!(
         {
           operations: testOps,
           explanation: "Added prompt and removed output",
         },
         { toolCallId: "test", messages: [], abortSignal: undefined as any }
-      );
+      )) as { operations: typeof testOps; explanation: string };
 
       expect(result).toHaveProperty("operations");
       expect(result).toHaveProperty("explanation");

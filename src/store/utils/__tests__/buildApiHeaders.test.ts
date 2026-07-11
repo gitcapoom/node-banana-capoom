@@ -12,7 +12,7 @@ function makeSettings(overrides: Partial<Record<string, { apiKey: string | null 
     openai: { id: "openai", name: "OpenAI", enabled: true, apiKey: null },
   };
   for (const [key, val] of Object.entries(overrides)) {
-    if (defaults[key]) {
+    if (defaults[key] && val) {
       defaults[key].apiKey = val.apiKey;
     }
   }
