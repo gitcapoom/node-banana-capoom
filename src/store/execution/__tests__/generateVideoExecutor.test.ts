@@ -6,6 +6,16 @@ import type { WorkflowNode } from "@/types";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+// The executor probes isSSEResponse(response), which reads
+// response.headers — plain JSON mocks must carry a content-type header.
+function jsonResponse(payload: unknown) {
+  return {
+    ok: true,
+    headers: new Headers({ "content-type": "application/json" }),
+    json: () => Promise.resolve(payload),
+  };
+}
+
 const defaultProviderSettings = {
   providers: {
     gemini: { apiKey: "" },
@@ -97,10 +107,9 @@ describe("executeGenerateVideo", () => {
 
   it("should set loading status before API call", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, video: "data:video/mp4;base64,output" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, video: "data:video/mp4;base64,output" })
+    );
 
     const ctx = makeCtx(node);
     await executeGenerateVideo(ctx);
@@ -114,10 +123,9 @@ describe("executeGenerateVideo", () => {
 
   it("should call /api/generate with mediaType=video", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, video: "data:video/mp4;base64,output" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, video: "data:video/mp4;base64,output" })
+    );
 
     const ctx = makeCtx(node);
     await executeGenerateVideo(ctx);
@@ -129,10 +137,9 @@ describe("executeGenerateVideo", () => {
 
   it("should update node with video result on success", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, video: "data:video/mp4;base64,output" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, video: "data:video/mp4;base64,output" })
+    );
 
     const ctx = makeCtx(node);
     await executeGenerateVideo(ctx);
@@ -147,10 +154,9 @@ describe("executeGenerateVideo", () => {
 
   it("should handle videoUrl field in response", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, videoUrl: "https://cdn.fal.media/video.mp4" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, videoUrl: "https://cdn.fal.media/video.mp4" })
+    );
 
     const ctx = makeCtx(node);
     await executeGenerateVideo(ctx);
@@ -164,10 +170,9 @@ describe("executeGenerateVideo", () => {
 
   it("should handle image fallback response", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,preview" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,preview" })
+    );
 
     const ctx = makeCtx(node);
     await executeGenerateVideo(ctx);
@@ -183,10 +188,9 @@ describe("executeGenerateVideo", () => {
     const node = makeNode({
       selectedModel: { provider: "fal", modelId: "fal-vid", displayName: "Fal" },
     });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, video: "data:video/mp4;base64,out", cost: 0.25 }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, video: "data:video/mp4;base64,out", cost: 0.25 })
+    );
 
     const ctx = makeCtx(node, {
       getFreshNode: vi.fn().mockReturnValue(node),
@@ -211,10 +215,9 @@ describe("executeGenerateVideo", () => {
 
   it("should throw on API failure", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: false, error: "Bad video" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: false, error: "Bad video" })
+    );
 
     const ctx = makeCtx(node);
     await expect(executeGenerateVideo(ctx)).rejects.toThrow("Bad video");
@@ -236,10 +239,9 @@ describe("executeGenerateVideo", () => {
       }),
       getFreshNode: vi.fn().mockReturnValue(node),
     });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, video: "data:video/mp4;base64,out" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, video: "data:video/mp4;base64,out" })
+    );
 
     await executeGenerateVideo(ctx, { useStoredFallback: true });
 
@@ -256,10 +258,9 @@ describe("executeGenerateVideo", () => {
       model: "m",
     }));
     const node = makeNode({ videoHistory: existingHistory });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, video: "data:video/mp4;base64,out" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, video: "data:video/mp4;base64,out" })
+    );
 
     const ctx = makeCtx(node, {
       getFreshNode: vi.fn().mockReturnValue(node),

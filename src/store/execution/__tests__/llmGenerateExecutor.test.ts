@@ -129,7 +129,10 @@ describe("executeLlmGenerate", () => {
     );
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.prompt).toBe("test llm prompt");
+    // Prompt is sent as a single user turn in the messages array
+    expect(body.messages).toHaveLength(1);
+    expect(body.messages[0].role).toBe("user");
+    expect(body.messages[0].text).toBe("test llm prompt");
     expect(body.provider).toBe("google");
     expect(body.model).toBe("gemini-2.5-flash");
     expect(body.temperature).toBe(0.7);
@@ -156,7 +159,7 @@ describe("executeLlmGenerate", () => {
     await executeLlmGenerate(ctx);
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.images).toEqual(["data:image/png;base64,img1"]);
+    expect(body.messages[0].images).toEqual(["data:image/png;base64,img1"]);
   });
 
   it("should not include images field when none connected", async () => {
@@ -170,7 +173,7 @@ describe("executeLlmGenerate", () => {
     await executeLlmGenerate(ctx);
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.images).toBeUndefined();
+    expect(body.messages[0].images).toBeUndefined();
   });
 
   it("should update node with result text on success", async () => {
@@ -214,8 +217,10 @@ describe("executeLlmGenerate", () => {
   });
 
   it("should use stored fallback in regenerate mode", async () => {
+    // Stored images must look like real image URLs — the executor drops
+    // values that don't (defensive filter against mis-wired text sources).
     const node = makeNode({
-      inputImages: ["stored.png"],
+      inputImages: ["data:image/png;base64,stored"],
       inputPrompt: "stored llm prompt",
     });
     const ctx = makeCtx(node, {
@@ -236,7 +241,7 @@ describe("executeLlmGenerate", () => {
     await executeLlmGenerate(ctx, { useStoredFallback: true });
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-    expect(body.prompt).toBe("stored llm prompt");
-    expect(body.images).toEqual(["stored.png"]);
+    expect(body.messages[0].text).toBe("stored llm prompt");
+    expect(body.messages[0].images).toEqual(["data:image/png;base64,stored"]);
   });
 });

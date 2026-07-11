@@ -7,6 +7,16 @@ import type { WorkflowNode } from "@/types";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+// The executor probes isSSEResponse(response), which reads
+// response.headers — plain JSON mocks must carry a content-type header.
+function jsonResponse(payload: unknown) {
+  return {
+    ok: true,
+    headers: new Headers({ "content-type": "application/json" }),
+    json: () => Promise.resolve(payload),
+  };
+}
+
 // Mock calculateGenerationCost
 vi.mock("@/utils/costCalculator", () => ({
   calculateGenerationCost: vi.fn().mockReturnValue(0.05),
@@ -112,10 +122,9 @@ describe("executeNanoBanana", () => {
 
   it("should set loading status before API call", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result" })
+    );
 
     const ctx = makeCtx(node);
     await executeNanoBanana(ctx);
@@ -130,10 +139,9 @@ describe("executeNanoBanana", () => {
 
   it("should call /api/generate with correct payload", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result" })
+    );
 
     const ctx = makeCtx(node);
     await executeNanoBanana(ctx);
@@ -149,10 +157,9 @@ describe("executeNanoBanana", () => {
 
   it("should update node with result on success", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result" })
+    );
 
     const ctx = makeCtx(node);
     await executeNanoBanana(ctx);
@@ -167,10 +174,9 @@ describe("executeNanoBanana", () => {
 
   it("should add to global history on success", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result" })
+    );
 
     const ctx = makeCtx(node);
     await executeNanoBanana(ctx);
@@ -185,10 +191,9 @@ describe("executeNanoBanana", () => {
 
   it("should track cost for gemini provider", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result", cost: 0.05 }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result", cost: 0.05 })
+    );
 
     const ctx = makeCtx(node);
     await executeNanoBanana(ctx);
@@ -200,10 +205,9 @@ describe("executeNanoBanana", () => {
     const node = makeNode({
       selectedModel: { provider: "fal", modelId: "fal-model", displayName: "Fal" },
     });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result", cost: 0.10 }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result", cost: 0.10 })
+    );
 
     const ctx = makeCtx(node, {
       getFreshNode: vi.fn().mockReturnValue(node),
@@ -234,10 +238,9 @@ describe("executeNanoBanana", () => {
 
   it("should throw on API failure (success=false)", async () => {
     const node = makeNode();
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: false, error: "Bad prompt" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: false, error: "Bad prompt" })
+    );
 
     const ctx = makeCtx(node);
     await expect(executeNanoBanana(ctx)).rejects.toThrow("Bad prompt");
@@ -255,10 +258,9 @@ describe("executeNanoBanana", () => {
         easeCurve: null,
       }),
     });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result" })
+    );
 
     await executeNanoBanana(ctx);
 
@@ -282,10 +284,9 @@ describe("executeNanoBanana", () => {
         easeCurve: null,
       }),
     });
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result" })
+    );
 
     await executeNanoBanana(ctx);
 
@@ -309,10 +310,9 @@ describe("executeNanoBanana", () => {
       }),
     });
     // Enable regenerate mode: fallback to stored inputs
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result" })
+    );
 
     await executeNanoBanana(ctx, { useStoredFallback: true });
 
@@ -336,10 +336,9 @@ describe("executeNanoBanana", () => {
       getNodes: vi.fn().mockReturnValue([node, galleryNode]),
     });
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ success: true, image: "data:image/png;base64,result" }),
-    });
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,result" })
+    );
 
     await executeNanoBanana(ctx);
 
