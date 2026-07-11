@@ -311,28 +311,28 @@ All routes in `src/app/api/`:
 
 | Route | Purpose |
 |-------|---------|
-| `/viewer` | SPZ/PLY 3D Gaussian Splatting viewer (URL param or file upload) |
+| `/viewer` | SPZ/PLY 3D Gaussian Splatting viewer (reverse-proxied hosted build; URL param or file upload) |
 | `/viewer/[worldId]` | World-specific 3D viewer |
 | `/viewer/pano` | Equirectangular panorama viewer with perspective crop capture |
 
-## Splat Viewer (dependency)
+## Splat Viewer (hosted build, reverse-proxied)
 
-> **Planned change — DECIDED 2026-07-11, not yet implemented (Option A).** node-banana will stop compiling the viewer in and instead **reverse-proxy** the one hosted build (`http://OTOSERVE10:8080/_viewer/`, served by the render-tracking-viewer Caddy) under its own `/viewer` origin — so `blob:`/`sessionStorage`/`postMessage` keep working. See the "Splat viewer distribution" section in `HANDOFF.md` for the migration steps. Until then, the git-dependency setup below is what's live.
+The viewer is a **separate standalone project — [gitcapoom/splat-viewer](https://github.com/gitcapoom/splat-viewer)**. node-banana contains NO viewer source and NO viewer dependency (Option A distribution, implemented 2026-07-11): it consumes the **one hosted Vite build** served by the render-tracking-viewer's Caddy at `http://OTOSERVE10:8080/_viewer/`, **reverse-proxied under node-banana's own origin** via `rewrites()` in `next.config.ts`:
 
-The viewer is a **separate standalone project — [gitcapoom/splat-viewer](https://github.com/gitcapoom/splat-viewer)** — that node-banana consumes as a **git dependency**. node-banana does NOT contain the viewer source; it only concerns itself with how it accesses the viewer.
+- `/viewer` → `${SPLAT_VIEWER_ORIGIN}/_viewer/index.html` (scoped to exactly `/viewer` — a catch-all would shadow the dynamic `/viewer/[worldId]` app route, since afterFiles rewrites run before dynamic routes; static `/viewer/pano` wins over rewrites regardless).
+- `/assets/:path*` → `${SPLAT_VIEWER_ORIGIN}/_viewer/assets/:path*` (the build uses relative asset paths, `base:"./"`; at the document URL `/viewer` they resolve to root-level `/assets/*`).
+- `SPLAT_VIEWER_ORIGIN` env var overrides the host (default `http://OTOSERVE10:8080`).
+- Cache staleness: `headers()` does NOT apply to externally-rewritten responses, so the openers append `_cb=Date.now()` to the `/viewer` URL (same pattern as the render-tracking viewer); assets are content-hashed.
 
-- `package.json` → `"splat-viewer": "github:gitcapoom/splat-viewer#main"`.
-- The package's entry is TS/TSX **source** (`exports` → `src/SplatViewer.tsx`), so Next transpiles it via `transpilePackages: ["splat-viewer"]` in `next.config.ts`.
-- react / react-dom / three / @sparkjsdev/spark are **peerDependencies** of the package — node-banana supplies the single copy (a duplicate React breaks hooks; a duplicate three breaks `instanceof`).
-- Tailwind v4 skips `node_modules` during auto source-detection, so `globals.css` has `@source "../../node_modules/splat-viewer/src";` to generate the viewer's utility classes.
+Why the reverse-proxy (not a plain link/iframe to the OTOSERVE10 URL): the proxied viewer appears same-origin, so `blob:` splat URLs minted on the canvas stay fetchable, the `sessionStorage` state handoff (`splat-viewer-state-${worldId}`) still reaches the popup, the viewer's `postMessage` capture-back (both sides pin `window.location.origin`) still lands, and the viewer's relative fetches to `/api/list-directory`, `/api/read-file`, `/api/write-file`, `/api/save-generation` hit node-banana's own API routes.
 
 ### How node-banana accesses it
-- `src/app/viewer/page.tsx` is a thin client route that renders `import SplatViewer from "splat-viewer"` **same-origin** at `/viewer` — this is what keeps `blob:` splat URLs and the `postMessage` capture-back working.
-- Nodes open it by URL: `window.open('/viewer?url=…')` (e.g. `SpzViewerNode`, `WorldLabsWorldNode`, `Image2GSNode`). `/viewer/pano` and `/viewer/[worldId]` are node-banana's own routes.
+- Nodes open it by URL: `window.open('/viewer?url=…&worldId=…')` (`SpzViewerNode`, `WorldLabsWorldNode`; `Image2GSNode` feeds blob: URLs into `SpzViewerNode` over the `3d` handle). `/viewer/pano` and `/viewer/[worldId]` are node-banana's own app routes, untouched by the proxy.
+- Viewer URL params: `url`, `name`, `worldId`, `lens`, `sensor`, `gsDir`, `projectDir`.
 
 ### Updating the viewer
 - **All viewer changes happen in the gitcapoom/splat-viewer repo**, never in node-banana.
-- To pick up viewer updates here: `npm update splat-viewer` (re-fetches `main`), then commit the changed `package-lock.json`. Pin to a specific commit by changing the ref (`#<sha>`) if you need reproducibility.
+- To ship a viewer update: redeploy the hosted build on OTOSERVE10 (`C:\caddy\deploy-splat-viewer.ps1` — pulls main, builds, copies into `D:/Projects/AD/_viewer/`). Every consumer picks it up on next open; node-banana needs no change, no rebuild, no restart.
 
 ### Features
 
@@ -386,7 +386,7 @@ The viewer is a **separate standalone project — [gitcapoom/splat-viewer](https
 
 ### Standalone build
 
-The standalone Vite build lives in the **splat-viewer repo**, not here (node-banana consumes the package via git dependency and serves it through Next.js at `/viewer` — no standalone build is needed for that path). To work on the viewer itself, clone `gitcapoom/splat-viewer` and run `npm install && npm run build` there.
+The Vite build lives in the **splat-viewer repo**, not here — node-banana serves the hosted build of it through the `/viewer` reverse-proxy (see "Splat Viewer" above). To work on the viewer itself, clone `gitcapoom/splat-viewer` and develop there; ship with the deploy script on OTOSERVE10.
 
 ## WorldLabs Integration
 

@@ -135,6 +135,9 @@ export function WorldLabsWorldNode({ id, data, selected }: NodeProps<WorldLabsWo
       name: nodeData.worldName || "Untitled World",
       worldId: nodeData.worldId,
     });
+    // Cache-buster: the proxied hosted build's index.html carries no
+    // Cache-Control — force a fresh copy so redeploys show up on next open.
+    params.set("_cb", String(Date.now()));
 
     const viewerUrl = `/viewer?${params.toString()}`;
     const w = window.open(viewerUrl, `worldlabs-viewer-${nodeData.worldId}`, "width=1280,height=720,alwaysOnTop=yes");
