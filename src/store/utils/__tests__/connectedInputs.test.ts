@@ -500,7 +500,8 @@ describe("getConnectedInputsPure", () => {
         inputSchema: [{ name: "image_url", type: "image" }],
       }),
     ];
-    const edges = [makeEdge("img", "gen", "image-0")];
+    // Convention: first schema input of a type maps to the bare handle ("image")
+    const edges = [makeEdge("img", "gen", "image")];
     const result = getConnectedInputsPure("gen", nodes, edges);
     expect(result.dynamicInputs).toEqual({ image_url: "data:image/png;base64,a" });
   });

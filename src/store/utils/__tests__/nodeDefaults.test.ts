@@ -304,7 +304,9 @@ describe("nodeDefaults utilities", () => {
       const data = createDefaultNodeData("llmGenerate");
 
       expect((data as any).provider).toBe("google");
-      expect((data as any).model).toBe("gemini-3-flash-preview");
+      // Model defaults to "" so LLMGenerateNode auto-fills with the live
+      // model list's first entry once /api/llm/models resolves.
+      expect((data as any).model).toBe("");
       expect((data as any).temperature).toBe(0.7);
       expect((data as any).maxTokens).toBe(8192);
     });
@@ -324,9 +326,9 @@ describe("nodeDefaults utilities", () => {
 
       // Should use node default for temperature
       expect((data as any).temperature).toBe(0.9);
-      // Should fall back to hardcoded for others
+      // Should fall back to hardcoded for others (model stays "" for auto-fill)
       expect((data as any).provider).toBe("google");
-      expect((data as any).model).toBe("gemini-3-flash-preview");
+      expect((data as any).model).toBe("");
       expect((data as any).maxTokens).toBe(8192);
     });
   });

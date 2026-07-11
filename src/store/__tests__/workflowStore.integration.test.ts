@@ -306,7 +306,8 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("imageInput-1", "generateVideo-1", "image", "image-0"),
+            // First schema input maps to the bare handle, extras are indexed
+            createTestEdge("imageInput-1", "generateVideo-1", "image", "image"),
             createTestEdge("imageInput-2", "generateVideo-1", "image", "image-1"),
           ],
         });
@@ -334,7 +335,8 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("prompt-1", "generateVideo-1", "text", "text-0"),
+            // First schema input maps to the bare handle, extras are indexed
+            createTestEdge("prompt-1", "generateVideo-1", "text", "text"),
             createTestEdge("prompt-2", "generateVideo-1", "text", "text-1"),
           ],
         });
@@ -443,7 +445,8 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("imageInput-1", "generateVideo-1", "image", "image-0"),
+            // First schema input maps to the bare handle, extras are indexed
+            createTestEdge("imageInput-1", "generateVideo-1", "image", "image"),
             createTestEdge("imageInput-2", "generateVideo-1", "image", "image-1"),
           ],
         });
@@ -840,9 +843,11 @@ describe("workflowStore integration tests", () => {
     beforeEach(() => {
       executionOrder = [];
 
-      // Mock fetch for API calls
+      // Mock fetch for API calls (executors probe isSSEResponse, which
+      // reads response.headers — JSON mocks need a content-type header)
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
         ok: true,
+        headers: new Headers({ "content-type": "application/json" }),
         json: () => Promise.resolve({ success: true, image: "data:image/png;base64,generated" }),
         text: () => Promise.resolve(""),
       }));
@@ -1246,9 +1251,11 @@ describe("workflowStore integration tests", () => {
 
   describe("Workflow execution data flow", () => {
     beforeEach(() => {
-      // Mock fetch for successful API responses
+      // Mock fetch for successful API responses (executors probe isSSEResponse,
+      // which reads response.headers — JSON mocks need a content-type header)
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
         ok: true,
+        headers: new Headers({ "content-type": "application/json" }),
         json: () => Promise.resolve({ success: true, image: "data:image/png;base64,generatedImage" }),
         text: () => Promise.resolve(""),
       }));
@@ -1450,7 +1457,8 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("imageInput-1", "generateVideo-1", "image", "image-0"),
+            // First schema input maps to the bare handle, extras are indexed
+            createTestEdge("imageInput-1", "generateVideo-1", "image", "image"),
             createTestEdge("imageInput-2", "generateVideo-1", "image", "image-1"),
           ],
         });
@@ -1945,7 +1953,7 @@ describe("workflowStore integration tests", () => {
         expect(result.dynamicInputs).toHaveProperty("image_url", testImage);
       });
 
-      it("should handle indexed handles (image-0, image-1) correctly", () => {
+      it("should handle bare and indexed handles (image, image-1) correctly", () => {
         const store = useWorkflowStore.getState();
         const image1 = "data:image/png;base64,first";
         const image2 = "data:image/png;base64,second";
@@ -1962,7 +1970,8 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("imageInput-1", "generateVideo-1", "image", "image-0"),
+            // First schema input maps to the bare handle, extras are indexed
+            createTestEdge("imageInput-1", "generateVideo-1", "image", "image"),
             createTestEdge("imageInput-2", "generateVideo-1", "image", "image-1"),
           ],
         });
@@ -1972,7 +1981,7 @@ describe("workflowStore integration tests", () => {
         expect(result.dynamicInputs).toHaveProperty("end_image", image2);
       });
 
-      it("should handle indexed text handles (text-0, text-1) correctly", () => {
+      it("should handle bare and indexed text handles (text, text-1) correctly", () => {
         const store = useWorkflowStore.getState();
         const prompt = "main prompt";
         const negPrompt = "negative prompt";
@@ -1989,7 +1998,8 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("prompt-1", "generateVideo-1", "text", "text-0"),
+            // First schema input maps to the bare handle, extras are indexed
+            createTestEdge("prompt-1", "generateVideo-1", "text", "text"),
             createTestEdge("prompt-2", "generateVideo-1", "text", "text-1"),
           ],
         });
@@ -1999,13 +2009,13 @@ describe("workflowStore integration tests", () => {
         expect(result.dynamicInputs).toHaveProperty("negative_prompt", negPrompt);
       });
 
-      it("should map both 'image' and 'image-0' to schema name when single image input", () => {
-        // Bug fix test: node components use 'image-0' for indexed handles, but legacy edges
-        // may use 'image'. Both should work when there's only one image input.
+      it("should map both 'image' and 'image-{schemaName}' to schema name when single image input", () => {
+        // Node components map the first schema input to the bare 'image' handle;
+        // legacy edges may use the 'image-{schemaName}' format. Both should work.
         const store = useWorkflowStore.getState();
         const testImage = "data:image/png;base64,singleImage";
 
-        // Test with indexed handle ID (image-0) - what new node components use
+        // Test with bare handle ID (image) - what node components use
         useWorkflowStore.setState({
           nodes: [
             createTestNode("imageInput-1", "imageInput", { image: testImage }),
@@ -2016,14 +2026,14 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("imageInput-1", "nanoBanana-1", "image", "image-0"),
+            createTestEdge("imageInput-1", "nanoBanana-1", "image", "image"),
           ],
         });
 
-        const resultIndexed = store.getConnectedInputs("nanoBanana-1");
-        expect(resultIndexed.dynamicInputs).toHaveProperty("image_input", testImage);
+        const resultBare = store.getConnectedInputs("nanoBanana-1");
+        expect(resultBare.dynamicInputs).toHaveProperty("image_input", testImage);
 
-        // Test with legacy handle ID (image) - what old edges may have
+        // Test with legacy handle ID (image-{schemaName}) - what old edges may have
         useWorkflowStore.setState({
           nodes: [
             createTestNode("imageInput-2", "imageInput", { image: testImage }),
@@ -2034,7 +2044,7 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("imageInput-2", "nanoBanana-2", "image", "image"),
+            createTestEdge("imageInput-2", "nanoBanana-2", "image", "image-image_input"),
           ],
         });
 
@@ -2042,12 +2052,12 @@ describe("workflowStore integration tests", () => {
         expect(resultLegacy.dynamicInputs).toHaveProperty("image_input", testImage);
       });
 
-      it("should map both 'text' and 'text-0' to schema name when single text input", () => {
-        // Same fix for text handles
+      it("should map both 'text' and 'text-{schemaName}' to schema name when single text input", () => {
+        // Same convention for text handles
         const store = useWorkflowStore.getState();
         const testPrompt = "test prompt text";
 
-        // Test with indexed handle ID (text-0)
+        // Test with bare handle ID (text) - what node components use
         useWorkflowStore.setState({
           nodes: [
             createTestNode("prompt-1", "prompt", { prompt: testPrompt }),
@@ -2058,14 +2068,14 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("prompt-1", "nanoBanana-1", "text", "text-0"),
+            createTestEdge("prompt-1", "nanoBanana-1", "text", "text"),
           ],
         });
 
-        const resultIndexed = store.getConnectedInputs("nanoBanana-1");
-        expect(resultIndexed.dynamicInputs).toHaveProperty("prompt", testPrompt);
+        const resultBare = store.getConnectedInputs("nanoBanana-1");
+        expect(resultBare.dynamicInputs).toHaveProperty("prompt", testPrompt);
 
-        // Test with legacy handle ID (text)
+        // Test with legacy handle ID (text-{schemaName})
         useWorkflowStore.setState({
           nodes: [
             createTestNode("prompt-2", "prompt", { prompt: testPrompt }),
@@ -2076,7 +2086,7 @@ describe("workflowStore integration tests", () => {
             }),
           ],
           edges: [
-            createTestEdge("prompt-2", "nanoBanana-2", "text", "text"),
+            createTestEdge("prompt-2", "nanoBanana-2", "text", "text-prompt"),
           ],
         });
 
@@ -2314,6 +2324,7 @@ describe("workflowStore integration tests", () => {
     beforeEach(() => {
       mockFetch = vi.fn().mockResolvedValue({
         ok: true,
+        headers: new Headers({ "content-type": "application/json" }),
         json: () => Promise.resolve({ success: true, image: "data:image/png;base64,generated" }),
         text: () => Promise.resolve(""),
       });
