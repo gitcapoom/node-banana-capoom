@@ -2307,13 +2307,96 @@ describe("workflowStore integration tests", () => {
 
         const store = useWorkflowStore.getState();
         await store.loadWorkflow({
+          version: 1,
           id: "test-workflow",
           name: "Test",
           nodes: [],
           edges: [],
+          edgeStyle: "angular",
         });
 
         expect(useWorkflowStore.getState().viewedCommentNodeIds.size).toBe(0);
+      });
+    });
+
+    describe("legacy indexed handle migration (image-0/text-0)", () => {
+      it("should rewrite image-0/text-0 edges targeting generator nodes to bare handles on load", async () => {
+        const store = useWorkflowStore.getState();
+        await store.loadWorkflow({
+          version: 1,
+          id: "legacy-workflow",
+          name: "Legacy",
+          edgeStyle: "angular",
+          nodes: [
+            createTestNode("imageInput-1", "imageInput", { image: "data:image/png;base64,a" }),
+            createTestNode("prompt-1", "prompt", { prompt: "p" }),
+            createTestNode("nanoBanana-1", "nanoBanana", {}),
+            createTestNode("generateVideo-1", "generateVideo", {}),
+            createTestNode("generate3d-1", "generate3d", {}),
+            createTestNode("upscaleGrid-1", "upscaleGrid", {}),
+          ],
+          edges: [
+            createTestEdge("imageInput-1", "nanoBanana-1", "image", "image-0"),
+            createTestEdge("prompt-1", "nanoBanana-1", "text", "text-0"),
+            createTestEdge("imageInput-1", "generateVideo-1", "image", "image-0"),
+            createTestEdge("prompt-1", "generateVideo-1", "text", "text-0"),
+            createTestEdge("imageInput-1", "generate3d-1", "image", "image-0"),
+            createTestEdge("prompt-1", "generate3d-1", "text", "text-0"),
+            createTestEdge("imageInput-1", "upscaleGrid-1", "image", "image-0"),
+          ],
+        });
+
+        const edges = useWorkflowStore.getState().edges;
+        const handlesFor = (target: string) =>
+          edges.filter((e) => e.target === target).map((e) => e.targetHandle).sort();
+        expect(handlesFor("nanoBanana-1")).toEqual(["image", "text"]);
+        expect(handlesFor("generateVideo-1")).toEqual(["image", "text"]);
+        expect(handlesFor("generate3d-1")).toEqual(["image", "text"]);
+        expect(handlesFor("upscaleGrid-1")).toEqual(["image"]);
+      });
+
+      it("should rewrite image-0 edges when importing a workflow", () => {
+        const store = useWorkflowStore.getState();
+        store.importWorkflow({
+          version: 1,
+          id: "imported-legacy",
+          name: "Imported",
+          edgeStyle: "angular",
+          nodes: [
+            createTestNode("imageInput-1", "imageInput", { image: "data:image/png;base64,a" }),
+            createTestNode("generateVideo-1", "generateVideo", {}),
+          ],
+          edges: [
+            createTestEdge("imageInput-1", "generateVideo-1", "image", "image-0"),
+          ],
+        });
+
+        const { nodes, edges } = useWorkflowStore.getState();
+        const videoNode = nodes.find((n) => n.type === "generateVideo");
+        expect(videoNode).toBeDefined();
+        const edge = edges.find((e) => e.target === videoNode!.id);
+        expect(edge?.targetHandle).toBe("image");
+      });
+
+      it("should not rewrite panoEditor's static image-0 handle", async () => {
+        const store = useWorkflowStore.getState();
+        await store.loadWorkflow({
+          version: 1,
+          id: "pano-workflow",
+          name: "Pano",
+          edgeStyle: "angular",
+          nodes: [
+            createTestNode("imageInput-1", "imageInput", { image: "data:image/png;base64,a" }),
+            createTestNode("panoEditor-1", "panoEditor", {}),
+          ],
+          edges: [
+            createTestEdge("imageInput-1", "panoEditor-1", "image", "image-0"),
+          ],
+        });
+
+        const edges = useWorkflowStore.getState().edges;
+        expect(edges).toHaveLength(1);
+        expect(edges[0].targetHandle).toBe("image-0");
       });
     });
   });

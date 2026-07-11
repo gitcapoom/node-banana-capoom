@@ -296,10 +296,10 @@ export function getConnectedInputsPure(
         handleToSchemaName[handleId] = input.name;
         // Legacy: "type-{schemaName}" format
         handleToSchemaName[`${handleType}-${input.name}`] = input.name;
-        // Legacy: "type-{index}" format (when index > 0, already covered above)
-        if (index > 0) {
-          handleToSchemaName[`${handleType}-${index}`] = input.name;
-        }
+        // Legacy: "type-{index}" indexed from 0 ("image-0" = first input).
+        // loadWorkflow migrates these, but edges can bypass it (importWorkflow,
+        // paste). For index > 0 this duplicates the current convention.
+        handleToSchemaName[`${handleType}-${index}`] = input.name;
       });
     };
 
