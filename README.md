@@ -4,6 +4,8 @@ A fork of [Shrimbly's Node Banana](https://github.com/shrimbly/node-banana) with
 
 > **Upstream:** This fork tracks `shrimbly/node-banana` as the `upstream` remote. All additions are layered on top of the upstream feature set.
 
+> **Architecture note (splat viewer):** The Gaussian Splat Viewer is a separate project ([`gitcapoom/splat-viewer`](https://github.com/gitcapoom/splat-viewer)), currently pulled in as a git dependency. It is being moved to a shared **hosted-build + reverse-proxy** model (Option A) served from OTOSERVE10 at `/_viewer/`; see `CLAUDE.md` and `HANDOFF.md`.
+
 ![Node Banana Screenshot](public/node-banana.png)
 
 ---

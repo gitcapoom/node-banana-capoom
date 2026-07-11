@@ -317,6 +317,8 @@ All routes in `src/app/api/`:
 
 ## Splat Viewer (dependency)
 
+> **Planned change — DECIDED 2026-07-11, not yet implemented (Option A).** node-banana will stop compiling the viewer in and instead **reverse-proxy** the one hosted build (`http://OTOSERVE10:8080/_viewer/`, served by the render-tracking-viewer Caddy) under its own `/viewer` origin — so `blob:`/`sessionStorage`/`postMessage` keep working. See the "Splat viewer distribution" section in `HANDOFF.md` for the migration steps. Until then, the git-dependency setup below is what's live.
+
 The viewer is a **separate standalone project — [gitcapoom/splat-viewer](https://github.com/gitcapoom/splat-viewer)** — that node-banana consumes as a **git dependency**. node-banana does NOT contain the viewer source; it only concerns itself with how it accesses the viewer.
 
 - `package.json` → `"splat-viewer": "github:gitcapoom/splat-viewer#main"`.
