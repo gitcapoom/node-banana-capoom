@@ -88,7 +88,11 @@ const mockUpdateNodeData = vi.fn();
 
 vi.mock("@/store/workflowStore", () => ({
   useWorkflowStore: (selector?: (state: unknown) => unknown) => {
-    const state = { updateNodeData: mockUpdateNodeData };
+    const state = {
+      updateNodeData: mockUpdateNodeData,
+      incrementModalCount: vi.fn(),
+      decrementModalCount: vi.fn(),
+    };
     if (selector) {
       return selector(state);
     }
