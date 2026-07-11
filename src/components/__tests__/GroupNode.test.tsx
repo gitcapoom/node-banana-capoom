@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { GroupNode } from "@/components/nodes/GroupNode";
+import { makeNodeProps } from "@/test/nodeProps";
 import { ReactFlowProvider } from "@xyflow/react";
 
 // Mock the workflow store
@@ -74,7 +75,7 @@ describe("GroupNode", () => {
     });
   });
 
-  const createNodeProps = (data: { groupId: string } = { groupId: "group-1" }) => ({
+  const createNodeProps = (data: { groupId: string } = { groupId: "group-1" }) => makeNodeProps({
     id: "group-node-1",
     type: "group" as const,
     data,

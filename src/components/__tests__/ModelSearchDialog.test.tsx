@@ -71,10 +71,13 @@ const defaultProviderSettings: ProviderSettings = {
   providers: {
     gemini: { id: "gemini", name: "Gemini", enabled: true, apiKey: null, apiKeyEnvVar: "GEMINI_API_KEY" },
     openai: { id: "openai", name: "OpenAI", enabled: false, apiKey: null },
+    anthropic: { id: "anthropic", name: "Anthropic", enabled: false, apiKey: null, apiKeyEnvVar: "ANTHROPIC_API_KEY" },
     replicate: { id: "replicate", name: "Replicate", enabled: true, apiKey: "test-replicate-key" },
     fal: { id: "fal", name: "fal.ai", enabled: true, apiKey: "test-fal-key" },
     kie: { id: "kie", name: "Kie.ai", enabled: false, apiKey: null },
     wavespeed: { id: "wavespeed", name: "WaveSpeed", enabled: false, apiKey: null },
+    worldlabs: { id: "worldlabs", name: "World Labs", enabled: false, apiKey: null, apiKeyEnvVar: "WORLDLABS_API_KEY" },
+    muapi: { id: "muapi", name: "muapi.ai", enabled: false, apiKey: null, apiKeyEnvVar: "MUAPI_API_KEY" },
   },
 };
 

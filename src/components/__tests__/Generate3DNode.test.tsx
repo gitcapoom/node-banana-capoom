@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Generate3DNode } from "@/components/nodes/Generate3DNode";
+import { makeNodeProps } from "@/test/nodeProps";
 import { ReactFlowProvider } from "@xyflow/react";
 import { Generate3DNodeData } from "@/types";
 
@@ -134,7 +135,7 @@ describe("Generate3DNode", () => {
     ...overrides,
   });
 
-  const createNodeProps = (data: Partial<Generate3DNodeData> = {}) => ({
+  const createNodeProps = (data: Partial<Generate3DNodeData> = {}) => makeNodeProps({
     id: "test-3d-node",
     type: "generate3d" as const,
     data: createNodeData(data),

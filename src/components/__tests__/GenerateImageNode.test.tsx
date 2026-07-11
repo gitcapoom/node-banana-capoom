@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { GenerateImageNode } from "@/components/nodes/GenerateImageNode";
+import { makeNodeProps } from "@/test/nodeProps";
 import { ReactFlowProvider } from "@xyflow/react";
 import { NanoBananaNodeData, ProviderSettings } from "@/types";
 
@@ -85,10 +86,13 @@ const defaultProviderSettings: ProviderSettings = {
   providers: {
     gemini: { id: "gemini", name: "Gemini", enabled: true, apiKey: null, apiKeyEnvVar: "GEMINI_API_KEY" },
     openai: { id: "openai", name: "OpenAI", enabled: false, apiKey: null },
+    anthropic: { id: "anthropic", name: "Anthropic", enabled: false, apiKey: null, apiKeyEnvVar: "ANTHROPIC_API_KEY" },
     replicate: { id: "replicate", name: "Replicate", enabled: false, apiKey: null },
     fal: { id: "fal", name: "fal.ai", enabled: true, apiKey: null },
     kie: { id: "kie", name: "Kie.ai", enabled: false, apiKey: null },
     wavespeed: { id: "wavespeed", name: "WaveSpeed", enabled: false, apiKey: null },
+    worldlabs: { id: "worldlabs", name: "World Labs", enabled: false, apiKey: null, apiKeyEnvVar: "WORLDLABS_API_KEY" },
+    muapi: { id: "muapi", name: "muapi.ai", enabled: false, apiKey: null, apiKeyEnvVar: "MUAPI_API_KEY" },
   },
 };
 
@@ -137,6 +141,7 @@ describe("GenerateImageNode", () => {
     resolution: "1K",
     model: "nano-banana-pro",
     useGoogleSearch: false,
+    useImageSearch: false,
     status: "idle",
     error: null,
     imageHistory: [],
@@ -144,7 +149,7 @@ describe("GenerateImageNode", () => {
     ...overrides,
   });
 
-  const createNodeProps = (data: Partial<NanoBananaNodeData> = {}) => ({
+  const createNodeProps = (data: Partial<NanoBananaNodeData> = {}) => makeNodeProps({
     id: "test-node-1",
     type: "nanoBanana" as const,
     data: createNodeData(data),

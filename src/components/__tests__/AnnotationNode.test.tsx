@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } 
 import { render, screen, fireEvent } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { AnnotationNode } from "@/components/nodes/AnnotationNode";
+import { makeNodeProps } from "@/test/nodeProps";
 import { ReactFlowProvider } from "@xyflow/react";
 import { AnnotationNodeData } from "@/types";
 
@@ -87,7 +88,7 @@ describe("AnnotationNode", () => {
     ...overrides,
   });
 
-  const createNodeProps = (data: Partial<AnnotationNodeData> = {}) => ({
+  const createNodeProps = (data: Partial<AnnotationNodeData> = {}) => makeNodeProps({
     id: "test-annotation-1",
     type: "annotation" as const,
     data: createNodeData(data),

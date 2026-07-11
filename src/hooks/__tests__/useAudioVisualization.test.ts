@@ -227,7 +227,7 @@ describe("useAudioVisualization", () => {
     const blob = createAudioBlob("audio-for-reset");
     const { result, rerender } = renderHook(
       ({ file }: { file: Blob | null }) => useAudioVisualization(file),
-      { initialProps: { file: blob } }
+      { initialProps: { file: blob as Blob | null } }
     );
 
     await waitFor(() => {

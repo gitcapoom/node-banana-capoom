@@ -49,6 +49,7 @@ describe("PromptNode", () => {
     positionAbsoluteY: 0,
     zIndex: 0,
     dragging: false,
+    draggable: true,
     deletable: true,
     selectable: true,
     parentId: undefined,

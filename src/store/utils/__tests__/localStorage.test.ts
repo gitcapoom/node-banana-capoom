@@ -81,8 +81,9 @@ describe("localStorage utilities", () => {
       const config = {
         workflowId: "wf_456",
         name: "New Workflow",
-        path: "/path/to/new",
-        lastSaved: Date.now(),
+        directoryPath: "/path/to/new",
+        generationsPath: null,
+        lastSavedAt: Date.now(),
       };
 
       saveSaveConfig(config);
@@ -95,8 +96,9 @@ describe("localStorage utilities", () => {
       const existingConfig = {
         workflowId: "wf_existing",
         name: "Existing",
-        path: "/existing",
-        lastSaved: Date.now(),
+        directoryPath: "/existing",
+        generationsPath: null,
+        lastSavedAt: Date.now(),
       };
       localStorageMock.setItem(
         STORAGE_KEY,
@@ -106,8 +108,9 @@ describe("localStorage utilities", () => {
       const newConfig = {
         workflowId: "wf_new",
         name: "New",
-        path: "/new",
-        lastSaved: Date.now(),
+        directoryPath: "/new",
+        generationsPath: null,
+        lastSavedAt: Date.now(),
       };
       saveSaveConfig(newConfig);
 
@@ -154,7 +157,7 @@ describe("localStorage utilities", () => {
 
   describe("saveWorkflowCostData", () => {
     it("stores cost data", () => {
-      const costData = { workflowId: "wf_789", totalCost: 2.5 };
+      const costData = { workflowId: "wf_789", incurredCost: 2.5, lastUpdated: Date.now() };
 
       saveWorkflowCostData(costData);
 
@@ -327,7 +330,7 @@ describe("localStorage utilities", () => {
     it("stores config to localStorage", () => {
       const config = {
         generateVideo: {
-          selectedModel: { provider: "replicate", modelId: "video-model", displayName: "Video Model" },
+          selectedModel: { provider: "replicate" as const, modelId: "video-model", displayName: "Video Model" },
         },
       };
 

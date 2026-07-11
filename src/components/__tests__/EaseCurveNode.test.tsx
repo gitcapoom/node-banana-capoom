@@ -80,6 +80,7 @@ vi.mock("@/components/nodes/BaseNode", () => {
 });
 
 import { EaseCurveNode } from "@/components/nodes/EaseCurveNode";
+import { makeNodeProps } from "@/test/nodeProps";
 
 /** Set up mock store state */
 function setMockStoreState(overrides: Record<string, unknown> = {}) {
@@ -113,7 +114,7 @@ const createNodeData = (
   ...overrides,
 });
 
-const createNodeProps = (data: Partial<EaseCurveNodeData> = {}) => ({
+const createNodeProps = (data: Partial<EaseCurveNodeData> = {}) => makeNodeProps({
   id: "test-ease-1",
   type: "easeCurve" as const,
   data: createNodeData(data),
