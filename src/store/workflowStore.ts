@@ -63,7 +63,8 @@ import {
   clearNodeImageRefs,
 } from "./utils/executionUtils";
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
-import { migrateEdgeHandles } from "./utils/pinMigration";
+import { migrateEdgeHandles, DYNAMIC_PIN_NODE_TYPES } from "./utils/pinMigration";
+import { parseDynPin, dynPinId } from "@/lib/dynamicPinId";
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { isDynPin } from "@/lib/dynamicPinId";
 import { ensureFullResForNodes } from "./execution/hydrateForRun";
@@ -720,6 +721,77 @@ function migrateLegacyIndexedHandles(nodes: WorkflowNode[], edges: WorkflowEdge[
     }
     return edge;
   });
+}
+
+/**
+ * Delete ghost edges on dynamic-pin nodes — leftovers from rewires that no
+ * longer anchor to a rendered handle (the React Flow #008 console spam) and,
+ * worse, kept feeding STALE data into input resolution:
+ *  - a schema-SCALAR field renders exactly one pin (slot 0), so of several
+ *    dyn-pin edges on it only the newest (highest slot) survives, renumbered
+ *    to slot 0;
+ *  - classic-handle edges ("image", "image-N", "image-<field>") mapping to a
+ *    field that a live dyn-pin edge already feeds are dropped outright.
+ * Only judges nodes whose inputSchema is persisted — no schema, no sweep.
+ */
+function sweepGhostEdges(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowEdge[] {
+  if (!getDynamicPinsEnabled()) return edges;
+  type SchemaInput = { name: string; type: string; isArray?: boolean; repeatable?: boolean };
+  const dynNodes = new Map<string, SchemaInput[]>();
+  for (const n of nodes) {
+    if (!DYNAMIC_PIN_NODE_TYPES.has(n.type as string)) continue;
+    const schema = (n.data as { inputSchema?: SchemaInput[] })?.inputSchema;
+    if (schema && schema.length > 0) dynNodes.set(n.id, schema);
+  }
+  if (dynNodes.size === 0) return edges;
+
+  const drop = new Set<string>();
+  const renumber = new Map<string, string>(); // edge id → new targetHandle
+
+  for (const [nodeId, schema] of dynNodes) {
+    const nodeEdges = edges.filter((e) => e.target === nodeId);
+    const scalarFields = new Set(schema.filter((i) => !i.isArray && !i.repeatable).map((i) => i.name));
+    const dynByField = new Map<string, WorkflowEdge[]>();
+    for (const e of nodeEdges) {
+      const d = parseDynPin(e.targetHandle);
+      if (d && d.field !== "primary" && !d.field.includes(".")) {
+        const list = dynByField.get(d.field) ?? [];
+        list.push(e);
+        dynByField.set(d.field, list);
+      }
+    }
+    // Scalar field with stacked slots: keep the newest (highest slot) → slot 0.
+    for (const [field, list] of dynByField) {
+      if (!scalarFields.has(field)) continue;
+      list.sort((a, b) => (parseDynPin(a.targetHandle)!.slot) - (parseDynPin(b.targetHandle)!.slot));
+      const keep = list[list.length - 1];
+      for (const e of list) if (e !== keep) drop.add(e.id);
+      const d = parseDynPin(keep.targetHandle)!;
+      if (d.slot !== 0) renumber.set(keep.id, dynPinId(d.type as "image" | "text" | "video" | "audio", field, 0));
+    }
+    // Classic-handle edges mapping to a dyn-fed field: ghosts, drop.
+    const classicToField = new Map<string, string>();
+    (["image", "text", "video", "audio"] as const).forEach((t) => {
+      const ins = schema.filter((i) => i.type === t && !i.repeatable);
+      ins.forEach((inp, idx) => {
+        classicToField.set(idx === 0 ? t : `${t}-${idx}`, inp.name);
+        classicToField.set(`${t}-${idx}`, inp.name);
+        classicToField.set(`${t}-${inp.name}`, inp.name);
+      });
+    });
+    for (const e of nodeEdges) {
+      if (parseDynPin(e.targetHandle)) continue;
+      if (e.targetHandle === "image-feedback" || e.targetHandle === "image-bg") continue;
+      const field = e.targetHandle ? classicToField.get(e.targetHandle) : undefined;
+      if (field && dynByField.has(field)) drop.add(e.id);
+    }
+  }
+
+  if (drop.size === 0 && renumber.size === 0) return edges;
+  console.info(`[edge-sweep] removed ${drop.size} ghost edge(s), renumbered ${renumber.size} to slot 0`);
+  return edges
+    .filter((e) => !drop.has(e.id))
+    .map((e) => (renumber.has(e.id) ? { ...e, targetHandle: renumber.get(e.id)! } : e));
 }
 
 const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
@@ -2389,11 +2461,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     const costData = workflow.id ? loadWorkflowCostData(workflow.id) : null;
 
     // Normalize edge handles to the active pin scheme so connections anchor
-    // regardless of which mode the file was saved in.
-    const finalEdges = migrateEdgeHandles(
+    // regardless of which mode the file was saved in — then sweep ghost
+    // edges (rewire leftovers that anchor to no rendered handle).
+    const finalEdges = sweepGhostEdges(
       hydratedWorkflow.nodes,
-      hydratedWorkflow.edges,
-      getDynamicPinsEnabled() ? "dynamic" : "classic"
+      migrateEdgeHandles(
+        hydratedWorkflow.nodes,
+        hydratedWorkflow.edges,
+        getDynamicPinsEnabled() ? "dynamic" : "classic"
+      )
     );
 
     set({
@@ -2619,7 +2695,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       }
       return edge;
     });
-    workflow.edges = migrateLegacyIndexedHandles(workflow.nodes, workflow.edges);
+    workflow.edges = sweepGhostEdges(
+      workflow.nodes,
+      migrateLegacyIndexedHandles(workflow.nodes, workflow.edges)
+    );
 
     // 5. Remap edge source/target IDs
     const newEdges: WorkflowEdge[] = workflow.edges

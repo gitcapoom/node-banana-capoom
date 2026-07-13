@@ -276,6 +276,21 @@ export function getConnectedInputsPure(
     return false;
   };
 
+  // A field the loaded schema POSITIVELY declares as scalar (non-array).
+  // Distinct from !isArrayPath: with no schema loaded we can't judge, and
+  // multi-slot aggregation must stay the default there.
+  const isKnownScalarPath = (fieldPath: string): boolean => {
+    if (!inputSchema || inputSchema.length === 0) return false;
+    const m = fieldPath.match(/^(.+)\.\d+\.(.+)$/);
+    if (m) {
+      const group = inputSchema.find((i) => i.name === m[1] && i.repeatable);
+      const child = group?.children?.find((c) => c.name === m[2]);
+      return !!child && !child.isArray;
+    }
+    const top = inputSchema.find((i) => i.name === fieldPath);
+    return !!top && !top.isArray;
+  };
+
   // Build mapping from normalized handle IDs to schema names if schema exists
   const handleToSchemaName: Record<string, string> = {};
   // Track which schema fields require arrays (isArray: true in schema)
@@ -590,7 +605,14 @@ export function getConnectedInputsPure(
           if (dyn.field !== "primary") {
             const fieldKey = remapFieldPath(dyn.field);
             const existing = dynamicInputs[fieldKey];
-            if (existing !== undefined) {
+            if (isKnownScalarPath(fieldKey)) {
+              // Schema says SCALAR: only slot 0 renders a pin, so multiple
+              // slots are rewire leftovers (ghost edges — React Flow #008).
+              // Edges are slot-sorted above → last write = highest slot = the
+              // newest wiring. Arraying them made providers unwrap [0], the
+              // stale ghost.
+              dynamicInputs[fieldKey] = value;
+            } else if (existing !== undefined) {
               // A second slot's value for this field — it must be an array.
               dynamicInputs[fieldKey] = Array.isArray(existing)
                 ? [...existing, value]
