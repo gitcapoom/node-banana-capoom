@@ -63,7 +63,7 @@ import {
   clearNodeImageRefs,
 } from "./utils/executionUtils";
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
-import { migrateEdgeHandles, DYNAMIC_PIN_NODE_TYPES } from "./utils/pinMigration";
+import { migrateEdgeHandles, remapDynEdgesToSchema, DYNAMIC_PIN_NODE_TYPES } from "./utils/pinMigration";
 import { parseDynPin, dynPinId } from "@/lib/dynamicPinId";
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { isDynPin } from "@/lib/dynamicPinId";
@@ -745,6 +745,12 @@ function sweepGhostEdges(nodes: WorkflowNode[], edges: WorkflowEdge[]): Workflow
   }
   if (dynNodes.size === 0) return edges;
 
+  // First: remap edges whose field vanished from the node's schema (workflow
+  // saved after a model switch) — same rules as the live model-switch hook.
+  for (const [nodeId, schema] of dynNodes) {
+    edges = remapDynEdgesToSchema(nodeId, schema, edges) ?? edges;
+  }
+
   const drop = new Set<string>();
   const renumber = new Map<string, string>(); // edge id → new targetHandle
 
@@ -939,6 +945,23 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     }
     if (node?.type === "conditionalSwitch" && ("rules" in data || "evaluationPaused" in data)) {
       get().recomputeDimmedNodes();
+    }
+    // Model switch: the node's inputSchema changed → remap its dyn-pin edges
+    // to the new schema's fields (or drop incompatible ones). Otherwise the
+    // old edges go invisible (their pins no longer render) while still
+    // feeding stale fields into the request body.
+    if (
+      "inputSchema" in data &&
+      node &&
+      DYNAMIC_PIN_NODE_TYPES.has(node.type as string) &&
+      getDynamicPinsEnabled()
+    ) {
+      const remapped = remapDynEdgesToSchema(
+        nodeId,
+        (data as { inputSchema?: Parameters<typeof remapDynEdgesToSchema>[1] }).inputSchema,
+        get().edges,
+      );
+      if (remapped) set({ edges: remapped });
     }
   },
 

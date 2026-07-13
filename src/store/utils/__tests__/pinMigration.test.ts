@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { migrateEdgeHandles } from "../pinMigration";
+import { migrateEdgeHandles, remapDynEdgesToSchema } from "../pinMigration";
 import type { WorkflowNode, WorkflowEdge } from "@/types";
 
 const node = (id: string, type: string, data: Record<string, unknown> = {}): WorkflowNode =>
@@ -106,5 +106,56 @@ describe("migrateEdgeHandles", () => {
     const back = migrateEdgeHandles(nodes, edges, "classic");
     expect(back[0].targetHandle).toBe("dynpin__image__elements.0.frontal_image_url__0");
     expect(back[1].targetHandle).toBe("image");
+  });
+});
+
+describe("remapDynEdgesToSchema", () => {
+  const schema = (inputs: Array<{ name: string; type: string; isArray?: boolean }>) => inputs;
+
+  it("moves edges from a vanished field to the new same-type field (array append)", () => {
+    // Model switched: old schema had image_urls[], new one has image_input[].
+    const edges = [
+      edge("e0", "gen", "dynpin__image__image_urls__0"),
+      edge("e1", "gen", "dynpin__image__image_urls__1"),
+    ];
+    const out = remapDynEdgesToSchema("gen", schema([
+      { name: "prompt", type: "text" },
+      { name: "image_input", type: "image", isArray: true },
+    ]), edges)!;
+    expect(handles(out)).toEqual([
+      "dynpin__image__image_input__0",
+      "dynpin__image__image_input__1",
+    ]);
+  });
+
+  it("scalar target keeps one remapped edge at slot 0, drops the rest", () => {
+    const edges = [
+      edge("e0", "gen", "dynpin__image__image_urls__0"),
+      edge("e1", "gen", "dynpin__image__image_urls__1"),
+    ];
+    const out = remapDynEdgesToSchema("gen", schema([
+      { name: "image_url", type: "image" },
+    ]), edges)!;
+    expect(handles(out)).toEqual(["dynpin__image__image_url__0"]);
+    expect(out[0].id).toBe("e0");
+  });
+
+  it("drops edges when the new schema has no input of that type; keeps matching fields untouched", () => {
+    const edges = [
+      edge("e0", "gen", "dynpin__video__video_url__0"),
+      edge("e1", "gen", "dynpin__image__image_url__0"),
+      edge("e2", "other", "dynpin__video__video_url__0"),
+    ];
+    const out = remapDynEdgesToSchema("gen", schema([
+      { name: "image_url", type: "image" },
+    ]), edges)!;
+    // video edge on gen dropped (no video input); image edge untouched; other node untouched
+    expect(out.map((e) => e.id)).toEqual(["e1", "e2"]);
+    expect(out[0].targetHandle).toBe("dynpin__image__image_url__0");
+  });
+
+  it("returns null when everything already matches the schema", () => {
+    const edges = [edge("e0", "gen", "dynpin__image__image_url__0")];
+    expect(remapDynEdgesToSchema("gen", schema([{ name: "image_url", type: "image" }]), edges)).toBeNull();
   });
 });
