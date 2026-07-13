@@ -277,14 +277,19 @@ export async function refreshUpstreamProcessors(
     }
   }
 
+  const refreshed: string[] = [];
   for (const id of order) {
     if (!isTarget(id)) continue;
     const node = byId.get(id);
     if (!node) continue;
     try {
       await executeNode(buildCtx(node), { useStoredFallback: true });
+      refreshed.push(`${node.type}:${id}`);
     } catch (err) {
-      console.warn(`[refreshUpstreamProcessors] ${node.type} ${id} failed:`, err);
+      console.warn(`[freshness] upstream ${node.type} ${id} failed:`, err);
     }
   }
+  // Deliberately loud: proves in the console/terminal that the pre-pass ran
+  // and which processors were recomputed before the requested node executed.
+  console.info(`[freshness] refreshed ${refreshed.length} upstream processor(s) for run of ${rootIds.join(",")}: ${refreshed.join(", ") || "(none)"}`);
 }
