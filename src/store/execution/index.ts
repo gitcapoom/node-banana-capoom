@@ -59,3 +59,5 @@ export { executeWorldLabsPano } from "./worldLabsPanoExecutor";
 export { executeWorldLabsWorld } from "./worldLabsWorldExecutor";
 
 export { executePanoEditor } from "./panoEditorExecutor";
+
+export { executeNode, refreshUpstreamProcessors, LOCAL_PROCESSOR_TYPES } from "./executeNode";

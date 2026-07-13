@@ -7,6 +7,7 @@
  */
 
 import type { NodeExecutionContext } from "./types";
+import type { WorkflowNode } from "@/types";
 import {
   executeAnnotation,
   executeArray,
@@ -187,5 +188,103 @@ export async function executeNode(
     case "panoShift":
       await executePanoShift(ctx);
       break;
+  }
+}
+
+/**
+ * Node types that are cheap, LOCAL, deterministic transforms of their inputs
+ * (canvas/GPU/text ops — no API calls, no cost). Safe to recompute on every
+ * downstream per-node Run, so generators always read CURRENT data instead of
+ * the stale output a previous run left behind (e.g. a reformat whose input
+ * changed since it last executed).
+ */
+export const LOCAL_PROCESSOR_TYPES: ReadonlySet<string> = new Set([
+  "annotation",
+  "imageCrop",
+  "mirror",
+  "reformat",
+  "cubemapEquirect",
+  "cubemapFaces",
+  "colorGrade",
+  "hsvCorrect",
+  "contrastAdjust",
+  "panoShift",
+  "maskPainter",
+  "roto",
+  "comp",
+  "promptConstructor",
+  "array",
+  "splitGrid",
+]);
+
+/**
+ * Re-execute every LOCAL processor upstream of `rootIds` (upstream-first) so a
+ * per-node / selection Run reads current data. API generators upstream are NOT
+ * re-run — their expensive cached outputs are kept. The roots themselves are
+ * never re-run here (the caller runs them). Failures are best-effort: the
+ * processor's executor records its own error state and the main run proceeds.
+ */
+export async function refreshUpstreamProcessors(
+  rootIds: string[],
+  nodes: WorkflowNode[],
+  edges: Array<{ source: string; target: string }>,
+  buildCtx: (node: WorkflowNode) => NodeExecutionContext,
+  isLocked?: (nodeId: string) => boolean,
+): Promise<void> {
+  // Transitive upstream closure of all roots.
+  const roots = new Set(rootIds);
+  const closure = new Set<string>();
+  const queue = [...rootIds];
+  while (queue.length > 0) {
+    const cur = queue.pop()!;
+    for (const e of edges) {
+      if (e.target === cur && !closure.has(e.source)) {
+        closure.add(e.source);
+        queue.push(e.source);
+      }
+    }
+  }
+
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const isTarget = (id: string): boolean => {
+    if (roots.has(id)) return false;
+    if (isLocked?.(id)) return false;
+    const t = byId.get(id)?.type;
+    return !!t && LOCAL_PROCESSOR_TYPES.has(t);
+  };
+  if (![...closure].some(isTarget)) return;
+
+  // Upstream-first order: Kahn over the whole closure (a processor can depend
+  // on another through intermediate non-processor nodes), then filtered.
+  const indeg = new Map<string, number>();
+  for (const id of closure) indeg.set(id, 0);
+  for (const e of edges) {
+    if (closure.has(e.source) && closure.has(e.target)) {
+      indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
+    }
+  }
+  const ready = [...closure].filter((id) => (indeg.get(id) ?? 0) === 0);
+  const order: string[] = [];
+  while (ready.length > 0) {
+    const id = ready.shift()!;
+    order.push(id);
+    for (const e of edges) {
+      if (e.source === id && closure.has(e.target)) {
+        const d = (indeg.get(e.target) ?? 0) - 1;
+        indeg.set(e.target, d);
+        if (d === 0) ready.push(e.target);
+      }
+    }
+  }
+
+  for (const id of order) {
+    if (!isTarget(id)) continue;
+    const node = byId.get(id);
+    if (!node) continue;
+    try {
+      await executeNode(buildCtx(node), { useStoredFallback: true });
+    } catch (err) {
+      console.warn(`[refreshUpstreamProcessors] ${node.type} ${id} failed:`, err);
+    }
   }
 }

@@ -67,6 +67,7 @@ import { migrateEdgeHandles } from "./utils/pinMigration";
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { isDynPin } from "@/lib/dynamicPinId";
 import { ensureFullResForNodes } from "./execution/hydrateForRun";
+import { refreshUpstreamProcessors } from "./execution/executeNode";
 import { evaluateRule } from "./utils/ruleEvaluation";
 import { computeDimmedNodes } from "./utils/dimmingUtils";
 import { getRunBlocker } from "./utils/runGating";
@@ -1759,6 +1760,26 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         logger.warn('node.execution', 'Full-res pre-pass failed (continuing)', { nodeId, error: String(err) });
       }
 
+      // Freshness pre-pass: re-run cheap LOCAL processors upstream (reformat,
+      // color grade, roto, comp, …) so this node reads CURRENT data — their
+      // outputImage is otherwise whatever the last run left behind, silently
+      // feeding stale pixels downstream. API generators keep cached outputs.
+      try {
+        const { groups } = get();
+        await refreshUpstreamProcessors(
+          [nodeId],
+          get().nodes,
+          get().edges,
+          (n) => get()._buildExecutionContext(n),
+          (id) => {
+            const n = get().nodes.find((x) => x.id === id);
+            return !!(n?.groupId && groups[n.groupId]?.locked);
+          },
+        );
+      } catch (err) {
+        logger.warn('node.execution', 'Upstream freshness pre-pass failed (continuing)', { nodeId, error: String(err) });
+      }
+
       const executionCtx = get()._buildExecutionContext(node);
 
       const regenOptions = { useStoredFallback: true };
@@ -2030,6 +2051,25 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         await ensureFullResForNodes(nodeIds, get().nodes, get().edges, get().updateNodeData, get().saveDirectoryPath);
       } catch (err) {
         logger.warn('node.execution', 'Full-res pre-pass failed (continuing)', { error: String(err) });
+      }
+
+      // Freshness pre-pass: re-run cheap LOCAL processors upstream of the
+      // selection (excluding the selection itself) so executors read CURRENT
+      // data instead of stale outputs from a previous run.
+      try {
+        const { groups } = get();
+        await refreshUpstreamProcessors(
+          nodeIds,
+          get().nodes,
+          get().edges,
+          (n) => get()._buildExecutionContext(n, abortController.signal),
+          (id) => {
+            const n = get().nodes.find((x) => x.id === id);
+            return !!(n?.groupId && groups[n.groupId]?.locked);
+          },
+        );
+      } catch (err) {
+        logger.warn('node.execution', 'Upstream freshness pre-pass failed (continuing)', { error: String(err) });
       }
 
       // Filter edges to only those within the selected set for topological sort
