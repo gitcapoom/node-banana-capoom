@@ -137,14 +137,17 @@ describe("schemaUtils", () => {
       expect(coerceParameterTypes(params, types)).toEqual({ steps: 20, guidance: 7.5 });
     });
 
-    it("should skip null and undefined values", () => {
-      const params = { steps: null, guidance: undefined, prompt: "hello" };
-      const types: ParameterTypeInfo = { steps: "integer", guidance: "number", prompt: "string" };
-      expect(coerceParameterTypes(params as Record<string, unknown>, types)).toEqual({
-        steps: null,
-        guidance: undefined,
-        prompt: "hello",
-      });
+    it("drops unset values (null / undefined / empty string) entirely", () => {
+      // An empty settings-panel field means "use the model's default" — the
+      // field must be ABSENT from the request body: providers (fal) run
+      // model-specific validation that 422s on explicit nulls.
+      const params = { steps: null, guidance: undefined, seed: "", prompt: "hello" };
+      const types: ParameterTypeInfo = { steps: "integer", guidance: "number", seed: "integer", prompt: "string" };
+      const result = coerceParameterTypes(params as Record<string, unknown>, types);
+      expect(result).toEqual({ prompt: "hello" });
+      expect("steps" in result).toBe(false);
+      expect("guidance" in result).toBe(false);
+      expect("seed" in result).toBe(false);
     });
 
     it("should skip params with no type info", () => {

@@ -87,6 +87,11 @@ export function getParameterTypesFromSchema(schema: Record<string, unknown> | un
 /**
  * Coerce parameter values to their expected types based on schema
  * This handles cases where values were incorrectly stored as strings (e.g., from UI enum selects)
+ *
+ * UNSET values (null / undefined / "") are DROPPED, not passed through: an
+ * empty settings-panel field means "use the model's default", and providers
+ * (fal in particular) run model-specific validation that rejects explicit
+ * nulls — the field must be absent from the request body entirely.
  */
 export function coerceParameterTypes(
   parameters: Record<string, unknown> | undefined,
@@ -97,7 +102,10 @@ export function coerceParameterTypes(
   const result = { ...parameters };
 
   for (const [key, value] of Object.entries(result)) {
-    if (value === undefined || value === null) continue;
+    if (value === undefined || value === null || value === "") {
+      delete result[key];
+      continue;
+    }
 
     const expectedType = typeInfo[key];
     if (!expectedType) continue;
