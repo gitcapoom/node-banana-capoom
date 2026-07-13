@@ -58,6 +58,28 @@ describe("getConnectedInputsPure — dynamic pins flag", () => {
     ]);
   });
 
+  it("ghost legacy edge never pollutes a field fed by a live dyn pin", () => {
+    // A rewire can leave an orphaned classic-handle edge in the store whose
+    // handle no longer renders (React Flow error #008). It maps to the same
+    // schema field as the live dyn-pin edge; if both contribute, the value
+    // becomes an array and providers unwrap [0] — the STALE ghost. The live
+    // pin must win outright, regardless of edge order.
+    const schema = { inputSchema: [{ name: "image_url", type: "image" }] };
+    const nodes = [
+      makeNode("old", "imageInput", { image: "data:image/png;base64,old" }),
+      makeNode("new", "imageInput", { image: "data:image/png;base64,new" }),
+      makeNode("gen", "nanoBanana", schema),
+    ];
+    // Ghost first (older), live dyn edge second — and the reverse order too.
+    for (const edges of [
+      [makeEdge("old", "gen", "image"), dynEdge("new", "gen", dynPinId("image", "image_url", 0))],
+      [dynEdge("new", "gen", dynPinId("image", "image_url", 0)), makeEdge("old", "gen", "image")],
+    ]) {
+      const result = getConnectedInputsPure("gen", nodes, edges);
+      expect(result.dynamicInputs.image_url).toBe("data:image/png;base64,new");
+    }
+  });
+
   it("assembles repeatable-group dyn pins into nested dynamicInputs paths", () => {
     const nodes = [
       makeNode("f0", "imageInput", { image: "frontal0" }),

@@ -372,6 +372,19 @@ export function getConnectedInputsPure(
     return fieldPath;
   };
 
+  // Fields already fed by an explicit dyn-pin edge. A LEGACY-handle edge
+  // (e.g. an orphaned bare "image" edge left behind by a rewire — invisible on
+  // the canvas because the handle no longer renders) must never ALSO feed the
+  // same field: arraying ghost + live values made providers unwrap [0], the
+  // stale ghost. Live pins categorically outrank legacy-handle mappings.
+  const dynFedFields = new Set<string>();
+  if (dynamicPinsOn) {
+    for (const e of incomingEdges) {
+      const d = parseDynPin(e.targetHandle);
+      if (d && d.field !== "primary") dynFedFields.add(remapFieldPath(d.field));
+    }
+  }
+
   incomingEdges
     .forEach((edge) => {
       const sourceNode = nodes.find((n) => n.id === edge.source);
@@ -578,7 +591,7 @@ export function getConnectedInputsPure(
             const fieldKey = remapFieldPath(dyn.field);
             const existing = dynamicInputs[fieldKey];
             if (existing !== undefined) {
-              // A second value for this field — it must be an array.
+              // A second slot's value for this field — it must be an array.
               dynamicInputs[fieldKey] = Array.isArray(existing)
                 ? [...existing, value]
                 : [existing, value];
@@ -599,8 +612,11 @@ export function getConnectedInputsPure(
         }
       }
 
-      // Map normalized handle ID to schema name for dynamicInputs
-      if (handleId && handleToSchemaName[handleId]) {
+      // Map normalized handle ID to schema name for dynamicInputs. Skipped
+      // when a live dyn-pin edge already feeds this field — legacy-handle
+      // edges (incl. invisible orphans left behind by rewires, whose handles
+      // no longer render) must never override or pollute live pins.
+      if (handleId && handleToSchemaName[handleId] && !dynFedFields.has(handleToSchemaName[handleId])) {
         const schemaName = handleToSchemaName[handleId];
         const existing = dynamicInputs[schemaName];
         if (existing !== undefined) {
