@@ -1046,19 +1046,46 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     get().pushUndoSnapshot();
     set((state) => {
       const baseData = buildConnectionEdgeData(connection, state.nodes, state.edges);
-      const newEdge = {
+      let newEdge = {
         ...connection,
         id: `edge-${connection.source}-${connection.target}-${connection.sourceHandle || "default"}-${connection.targetHandle || "default"}`,
         data: edgeDataOverrides ? { ...baseData, ...edgeDataOverrides } : baseData,
-      };
+      } as WorkflowEdge;
+      // Programmatic creators (connection drop menu, quickstart, …) still
+      // speak CLASSIC handles ("image"/"text"). On a dyn-pin node those
+      // handles don't render, so the edge would be born a ghost — invisible
+      // (React Flow #008) yet still resolving into the request body.
+      // Normalize to the active scheme; slot counters are seeded from the
+      // existing edges so converted edges never collide with occupied slots.
+      // Interactive connects already carry rendered handles → no-op.
+      const normalizedAll = migrateEdgeHandles(
+        state.nodes,
+        [...state.edges, newEdge],
+        getDynamicPinsEnabled() ? "dynamic" : "classic",
+      );
+      newEdge = normalizedAll[normalizedAll.length - 1];
+      let priorEdges = normalizedAll.slice(0, -1);
+      // A converted edge seeded PAST an occupied slot on a schema-SCALAR
+      // field would never render (scalars show one pin) — replacement is the
+      // intent, so retarget it to slot 0.
+      const dynNew = parseDynPin(newEdge.targetHandle);
+      if (dynNew && dynNew.slot > 0 && dynNew.field !== "primary" && !dynNew.field.includes(".")) {
+        const schema = (state.nodes.find((n) => n.id === newEdge.target)?.data as {
+          inputSchema?: Array<{ name: string; isArray?: boolean; repeatable?: boolean }>;
+        })?.inputSchema;
+        const f = schema?.find((i) => i.name === dynNew.field);
+        if (f && !f.isArray && !f.repeatable) {
+          newEdge = { ...newEdge, targetHandle: dynPinId(dynNew.type, dynNew.field, 0) };
+        }
+      }
       // Dynamic-pin slots hold exactly one edge: if this handle is already
       // occupied, drop the existing edge so the new one replaces it. The pin /
       // slot — and its name — stays the same (only the source changes).
-      const base = isDynPin(connection.targetHandle)
-        ? state.edges.filter(
-            (e) => !(e.target === connection.target && e.targetHandle === connection.targetHandle)
+      const base = isDynPin(newEdge.targetHandle)
+        ? priorEdges.filter(
+            (e) => !(e.target === newEdge.target && e.targetHandle === newEdge.targetHandle)
           )
-        : state.edges;
+        : priorEdges;
       // Cast needed: React Flow's Edge<T> types data as T | undefined, but addEdge expects data to be defined
       return {
         edges: addEdge(newEdge, base as never) as WorkflowEdge[],
@@ -1277,9 +1304,17 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       selected: false,
     }));
 
+    // Clipboard edges may carry the other pin scheme (copied before a flag
+    // toggle, or from a classic-era workflow) — normalize so nothing pastes
+    // in as a ghost edge.
+    const allNodesAfterPaste = [...updatedNodes, ...newNodes] as WorkflowNode[];
     set({
-      nodes: [...updatedNodes, ...newNodes] as WorkflowNode[],
-      edges: [...edges, ...internalEdges, ...inputEdges],
+      nodes: allNodesAfterPaste,
+      edges: migrateEdgeHandles(
+        allNodesAfterPaste,
+        [...edges, ...internalEdges, ...inputEdges],
+        getDynamicPinsEnabled() ? "dynamic" : "classic",
+      ),
       hasUnsavedChanges: true,
     });
 
