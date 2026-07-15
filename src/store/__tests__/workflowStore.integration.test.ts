@@ -2828,3 +2828,78 @@ describe("workflowStore integration tests", () => {
     });
   });
 });
+
+describe("onConnect handle normalization (dynamic pins)", () => {
+  beforeEach(async () => {
+    resetStore();
+    const { setDynamicPinsEnabled } = await import("@/lib/dynamicPins");
+    setDynamicPinsEnabled(true);
+  });
+  afterEach(async () => {
+    const { setDynamicPinsEnabled } = await import("@/lib/dynamicPins");
+    setDynamicPinsEnabled(false);
+  });
+
+  it("converts a programmatic classic 'image' connect into a dyn-pin edge (no birth ghosts)", () => {
+    const store = useWorkflowStore.getState();
+    act(() => {
+      useWorkflowStore.setState({
+        nodes: [
+          createTestNode("src", "annotation", {}),
+          createTestNode("gen", "nanoBanana", {
+            inputSchema: [
+              { name: "prompt", type: "text" },
+              { name: "image_urls", type: "image", isArray: true },
+            ],
+          }),
+        ],
+        edges: [],
+      });
+      // Programmatic creators (drop menu, quickstart) still speak classic ids.
+      store.onConnect({ source: "src", sourceHandle: "image", target: "gen", targetHandle: "image" });
+    });
+    const edges = useWorkflowStore.getState().edges;
+    expect(edges).toHaveLength(1);
+    expect(edges[0].targetHandle).toBe("dynpin__image__image_urls__0");
+  });
+
+  it("schema-less new node: classic connect lands on a rendered reference (primary) pin", () => {
+    const store = useWorkflowStore.getState();
+    act(() => {
+      useWorkflowStore.setState({
+        nodes: [
+          createTestNode("src", "annotation", {}),
+          createTestNode("gen", "nanoBanana", {}), // schema not fetched yet
+        ],
+        edges: [],
+      });
+      store.onConnect({ source: "src", sourceHandle: "image", target: "gen", targetHandle: "image" });
+    });
+    const edges = useWorkflowStore.getState().edges;
+    expect(edges).toHaveLength(1);
+    expect(edges[0].targetHandle).toBe("dynpin__image__primary__0");
+  });
+
+  it("classic connect onto an occupied schema-scalar field replaces the occupant at slot 0", () => {
+    const store = useWorkflowStore.getState();
+    act(() => {
+      useWorkflowStore.setState({
+        nodes: [
+          createTestNode("a", "imageInput", {}),
+          createTestNode("b", "annotation", {}),
+          createTestNode("gen", "nanoBanana", {
+            inputSchema: [{ name: "image_url", type: "image" }],
+          }),
+        ],
+        edges: [
+          { id: "old", source: "a", target: "gen", sourceHandle: "image", targetHandle: "dynpin__image__image_url__0" } as WorkflowEdge,
+        ],
+      });
+      store.onConnect({ source: "b", sourceHandle: "image", target: "gen", targetHandle: "image" });
+    });
+    const edges = useWorkflowStore.getState().edges;
+    expect(edges).toHaveLength(1);
+    expect(edges[0].source).toBe("b");
+    expect(edges[0].targetHandle).toBe("dynpin__image__image_url__0");
+  });
+});
