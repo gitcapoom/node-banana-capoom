@@ -295,12 +295,27 @@ export async function generateWithMuapi(
     }
 
     const mediaBuffer = await mediaResponse.arrayBuffer();
+    const mediaSizeMB = mediaBuffer.byteLength / 1024 / 1024;
+
+    // Large media: return URL only (data left empty for consumers), same as
+    // the kie Veo path. Inlining base64 into JSON runs into V8's string cap
+    // (~512MB) — a big Kling video crashed the client with "Invalid string
+    // length" when the executor re-stringified it for save-generation, which
+    // can download from the URL server-side anyway.
+    if (mediaSizeMB > 20) {
+      console.log(`[API:${requestId}] SUCCESS - Returning URL for large ${mediaType} (${mediaSizeMB.toFixed(1)}MB)`);
+      return {
+        success: true,
+        outputs: [{ type: mediaType, data: "", url: outputUrl }],
+      };
+    }
+
     const mediaBase64 = Buffer.from(mediaBuffer).toString("base64");
     const mediaContentType = mediaResponse.headers.get("content-type") ||
       (isVideoModel ? "video/mp4" : "audio/mpeg");
     const dataUrl = `data:${mediaContentType};base64,${mediaBase64}`;
 
-    console.log(`[API:${requestId}] SUCCESS - ${mediaType}: ${(mediaBuffer.byteLength / 1024 / 1024).toFixed(1)}MB`);
+    console.log(`[API:${requestId}] SUCCESS - ${mediaType}: ${mediaSizeMB.toFixed(1)}MB`);
     return {
       success: true,
       outputs: [{ type: mediaType, data: dataUrl, url: outputUrl }],

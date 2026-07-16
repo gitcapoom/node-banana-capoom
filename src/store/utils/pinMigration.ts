@@ -167,108 +167,164 @@ export function migrateEdgeHandles(
   });
 }
 
+
 /**
- * Remap a node's dyn-pin edges after its inputSchema changed (model switch).
- * An edge wired to a field the new schema doesn't have would otherwise go
- * INVISIBLE (its pin no longer renders — React Flow #008) while still feeding
- * the stale field into the request body. Rules:
- *  - edges whose field still exists (same name, same pin type) are untouched
- *    (slots are stable ids — @ImageA prompt tokens key off them);
- *  - edges on a vanished field move to the new schema's FIRST input of the
- *    same type: array fields append after the highest occupied slot, scalar
- *    fields take slot 0 (first remapped candidate wins; the rest drop, as do
- *    candidates whose target scalar already has a surviving edge);
- *  - no same-type input in the new schema → the edge is dropped (an invisible
- *    inert wire is worse than an honest disconnect);
- *  - nested repeatable-group paths ("elements.0.x") are only kept if the
- *    group still exists.
+ * Renderable-pin capabilities per dyn-pin node type when NO schema is present
+ * — mirrors each component's DynamicInputHandles fallback. Missing entry =
+ * bespoke pin rendering (router) → conformance skips the node.
+ */
+const FALLBACK_CAPS: Record<string, { image?: boolean; text?: boolean }> = {
+  nanoBanana: { image: true, text: true },
+  generateVideo: { image: true, text: true },
+  generate3d: { image: true, text: true },
+  upscaleGrid: { image: true, text: true },
+  llmGenerate: { image: true, text: true },
+  generateAudio: { text: true },
+  outputGallery: { image: true },
+};
+
+/**
+ * THE pin invariant, in one place: conform a node's dyn-pin edges to the set
+ * of pins the node actually renders (DynamicInputHandles). Any edge outside
+ * that set is remapped into it or dropped — never left invisible ("ghost"
+ * edges: React Flow #008 spam + stale data silently feeding the request).
+ *
+ * Renderable set:
+ *  - schema present: every schema field (scalar = slot 0 only, arrays = any
+ *    slot, repeatable groups = their children), PLUS the generic reference
+ *    (primary) image pins when the schema has no image-type input;
+ *  - no schema: the node type's fallback pins (primary image multi and/or
+ *    scalar "prompt").
+ *
+ * Conformance rules:
+ *  - surviving families keep their slots (stable ids — @ImageA tokens);
+ *  - scalar families collapse to ONE edge: the highest slot (= newest wiring)
+ *    wins and is renumbered to slot 0;
+ *  - unmappable image/text edges retarget to the first schema field of their
+ *    type, else to the fallback pin, else drop; video/audio without a schema
+ *    field drop (no generic sink);
+ *  - image-feedback / image-bg / non-dyn handles are untouched.
+ *
  * Returns the new edges array, or null when nothing needed to change.
  */
-export function remapDynEdgesToSchema(
-  nodeId: string,
-  schema: SchemaInput[] | undefined,
+export function conformEdgesToRenderablePins(
+  node: WorkflowNode,
   edges: WorkflowEdge[],
 ): WorkflowEdge[] | null {
-  if (!schema || schema.length === 0) return null;
+  const caps = FALLBACK_CAPS[node.type as string];
+  if (!caps) return null;
 
-  const byName = new Map(schema.filter((i) => !i.repeatable).map((i) => [i.name, i]));
-  const groups = new Set(schema.filter((i) => i.repeatable).map((i) => i.name));
+  const schema = (node.data as { inputSchema?: Array<SchemaInput & { children?: SchemaInput[] }> } | undefined)?.inputSchema;
+  const schemaMode = !!schema && schema.length > 0;
+  const byName = new Map<string, SchemaInput>();
+  const groups = new Set<string>();
   const firstOfType = new Map<string, SchemaInput>();
-  for (const i of schema) {
-    if (!i.repeatable && !firstOfType.has(i.type)) firstOfType.set(i.type, i);
+  let schemaHasImage = false;
+  if (schemaMode) {
+    for (const i of schema!) {
+      if (i.repeatable) {
+        groups.add(i.name);
+        if (i.children?.some((c) => c.type === "image")) schemaHasImage = true;
+        continue;
+      }
+      byName.set(i.name, i);
+      if (!firstOfType.has(i.type)) firstOfType.set(i.type, i);
+      if (i.type === "image") schemaHasImage = true;
+    }
   }
+  const primaryImageRenderable = !!caps.image && (!schemaMode || !schemaHasImage);
+  const fallbackPromptRenderable = !!caps.text && !schemaMode;
 
-  // Highest occupied slot per surviving field (for stable array appends).
-  const maxSlot = new Map<string, number>();
-  const candidates: Array<{ edge: WorkflowEdge; dyn: { type: string; field: string; slot: number } }> = [];
+  // Classify every dyn edge into a target family: { field, scalar } | drop.
+  type Fam = { field: string; scalar: boolean; type: DynPinType };
+  const famOf = (dyn: { type: DynPinType; field: string }): Fam | null => {
+    if (dyn.field === "primary") {
+      if (dyn.type === "image" && primaryImageRenderable) return { field: "primary", scalar: false, type: "image" };
+      if (dyn.type === "image" && schemaMode) {
+        const f = firstOfType.get("image");
+        if (f) return { field: f.name, scalar: !f.isArray, type: "image" };
+      }
+      return null;
+    }
+    const known = byName.get(dyn.field);
+    if (schemaMode && known && known.type === dyn.type) {
+      return { field: dyn.field, scalar: !known.isArray, type: dyn.type };
+    }
+    if (!schemaMode && dyn.field === "prompt" && dyn.type === "text" && fallbackPromptRenderable) {
+      return { field: "prompt", scalar: true, type: "text" };
+    }
+    // Unmappable name for the current mode — find a home by type.
+    if (schemaMode) {
+      const f = firstOfType.get(dyn.type);
+      if (f) return { field: f.name, scalar: !f.isArray, type: dyn.type };
+    }
+    if (dyn.type === "image" && primaryImageRenderable) return { field: "primary", scalar: false, type: "image" };
+    if (dyn.type === "text" && fallbackPromptRenderable) return { field: "prompt", scalar: true, type: "text" };
+    return null;
+  };
+
   const drop = new Set<string>();
+  const retarget = new Map<string, string>();
+  // Per family: incumbents (already on the family) and movers (retargeted in).
+  const families = new Map<string, { fam: Fam; incumbents: Array<{ e: WorkflowEdge; slot: number }>; movers: Array<{ e: WorkflowEdge; slot: number }> }>();
 
-  let primaryImageMaxSlot = -1;
-  const toPrimary: Array<{ edge: WorkflowEdge; dyn: { type: string; field: string; slot: number } }> = [];
   for (const e of edges) {
-    if (e.target !== nodeId) continue;
+    if (e.target !== node.id) continue;
     const dyn = parseDynPin(e.targetHandle);
     if (!dyn) continue;
-    if (dyn.field === "primary") {
-      if (dyn.type === "image") primaryImageMaxSlot = Math.max(primaryImageMaxSlot, dyn.slot);
-      continue; // generic reference pins always render — untouched
-    }
     if (dyn.field.includes(".")) {
       const group = dyn.field.split(".")[0];
       if (!groups.has(group)) drop.add(e.id);
       continue;
     }
-    const known = byName.get(dyn.field);
-    if (known && known.type === dyn.type) {
-      maxSlot.set(dyn.field, Math.max(maxSlot.get(dyn.field) ?? -1, dyn.slot));
-      continue; // field survives — edge untouched
-    }
-    const target = firstOfType.get(dyn.type);
-    if (!target) {
-      // IMAGE edges have a generic home: the reference (primary) pins, which
-      // generators render whenever the schema has no image input (kie models)
-      // and which feed the images[] path. Other types have no generic sink.
-      if (dyn.type === "image") toPrimary.push({ edge: e, dyn });
-      else drop.add(e.id);
+    const fam = famOf(dyn);
+    if (!fam) {
+      drop.add(e.id);
       continue;
     }
-    candidates.push({ edge: e, dyn });
+    const key = `${fam.type}|${fam.field}`;
+    const entry = families.get(key) ?? { fam, incumbents: [], movers: [] };
+    if (fam.field === dyn.field && fam.type === dyn.type) entry.incumbents.push({ e, slot: dyn.slot });
+    else entry.movers.push({ e, slot: dyn.slot });
+    families.set(key, entry);
   }
 
-  const retarget = new Map<string, string>(); // edge id → new targetHandle
-  const byTargetField = new Map<string, typeof candidates>();
-  for (const c of candidates) {
-    const field = firstOfType.get(c.dyn.type)!.name;
-    const list = byTargetField.get(field) ?? [];
-    list.push(c);
-    byTargetField.set(field, list);
-  }
-  for (const [field, list] of byTargetField) {
-    const input = byName.get(field)!;
-    list.sort((a, b) => a.dyn.slot - b.dyn.slot);
-    if (input.isArray) {
-      let slot = (maxSlot.get(field) ?? -1) + 1;
-      for (const c of list) {
-        retarget.set(c.edge.id, dynPinId(c.dyn.type as Parameters<typeof dynPinId>[0], field, slot++));
+  for (const { fam, incumbents, movers } of families.values()) {
+    incumbents.sort((a, b) => a.slot - b.slot);
+    movers.sort((a, b) => a.slot - b.slot);
+    if (fam.scalar) {
+      // One edge only: the newest incumbent (highest slot) wins, else the
+      // first mover. Winner sits at slot 0; everyone else drops.
+      const winner = incumbents.length > 0 ? incumbents[incumbents.length - 1] : movers[0];
+      for (const c of [...incumbents, ...movers]) {
+        if (c === winner) {
+          if (c.slot !== 0 || c.e.targetHandle !== dynPinId(fam.type, fam.field, 0)) {
+            retarget.set(c.e.id, dynPinId(fam.type, fam.field, 0));
+          }
+        } else {
+          drop.add(c.e.id);
+        }
       }
     } else {
-      const taken = maxSlot.has(field);
-      list.forEach((c, i) => {
-        if (!taken && i === 0) retarget.set(c.edge.id, dynPinId(c.dyn.type as Parameters<typeof dynPinId>[0], field, 0));
-        else drop.add(c.edge.id);
-      });
+      // Multi family: incumbents keep their (stable) slots — dedupe same-slot
+      // copies keeping the later edge; movers append after the highest slot.
+      const seen = new Map<number, WorkflowEdge>();
+      for (const c of incumbents) {
+        const prev = seen.get(c.slot);
+        if (prev) drop.add(prev.id); // later edge on the same slot wins
+        seen.set(c.slot, c.e);
+      }
+      let next = incumbents.length > 0 ? incumbents[incumbents.length - 1].slot + 1 : 0;
+      for (const c of movers) {
+        retarget.set(c.e.id, dynPinId(fam.type, fam.field, next++));
+      }
     }
-  }
-
-  // Image edges with no image field in the new schema → generic reference
-  // pins, appended after the highest occupied primary slot (stable ids).
-  toPrimary.sort((a, b) => a.dyn.slot - b.dyn.slot);
-  for (const c of toPrimary) {
-    retarget.set(c.edge.id, dynPinId("image", "primary", ++primaryImageMaxSlot));
   }
 
   if (drop.size === 0 && retarget.size === 0) return null;
-  console.info(`[schema-remap] ${nodeId}: remapped ${retarget.size} edge(s) to new schema fields, dropped ${drop.size} incompatible edge(s)`);
+  console.info(
+    `[pin-conform] ${node.type} ${node.id}: retargeted ${retarget.size}, dropped ${drop.size} edge(s) to match rendered pins`,
+  );
   return edges
     .filter((e) => !drop.has(e.id))
     .map((e) => (retarget.has(e.id) ? { ...e, targetHandle: retarget.get(e.id)! } : e));
