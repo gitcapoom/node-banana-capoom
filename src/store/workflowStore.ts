@@ -2024,8 +2024,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       });
       finalize();
 
-      saveLogSession();
-      await logger.endSession();
+      // Teardown must never throw: an exception here would escape the catch
+      // with the node still looking in-flight — dimming its (and downstream)
+      // Run buttons until a page reload.
+      try {
+        saveLogSession();
+        await logger.endSession();
+      } catch (teardownErr) {
+        console.error('[regenerateNode] log-session teardown failed:', teardownErr);
+      }
     }
   },
 
@@ -3115,6 +3122,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         return false;
       }
     } catch (error) {
+      // Deliberately loud: capacity errors ("Invalid array length" /
+      // "Invalid string length") mean some node field holds gigantic inline
+      // data — the stack pinpoints which serialization step blew up.
+      console.error("[auto-save] failed:", error instanceof Error ? error.stack || error.message : error);
       useToast
         .getState()
         .show(

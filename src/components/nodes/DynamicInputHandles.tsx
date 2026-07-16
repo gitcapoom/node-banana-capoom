@@ -204,6 +204,23 @@ export function DynamicInputHandles({
         addField(input.type as DynPinType, input.name, input.label || input.name, !!input.isArray, input.refConvention);
       }
     }
+    // A schema WITHOUT any image-type input (e.g. kie models, whose schemas
+    // declare only prompt — images travel via the generic images[] path) must
+    // still offer the generic reference pins: migration/normalization route
+    // otherwise-unmappable image edges to the "primary" field, and without
+    // this the pin never renders and those edges become invisible ghosts
+    // (React Flow #008). Only descriptors the caller's fallback declares are
+    // appended, so prompt-only generators (audio) don't grow image pins.
+    const schemaHasImage = inputSchema.some(
+      (i) =>
+        i.type === "image" ||
+        (i.repeatable && i.children?.some((c) => c.type === "image")),
+    );
+    if (!schemaHasImage) {
+      for (const d of fallback) {
+        if (d.type === "image") addField(d.type, d.field, d.label, d.multi);
+      }
+    }
   } else {
     for (const d of fallback) addField(d.type, d.field, d.label, d.multi);
   }

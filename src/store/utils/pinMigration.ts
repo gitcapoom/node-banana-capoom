@@ -203,10 +203,16 @@ export function remapDynEdgesToSchema(
   const candidates: Array<{ edge: WorkflowEdge; dyn: { type: string; field: string; slot: number } }> = [];
   const drop = new Set<string>();
 
+  let primaryImageMaxSlot = -1;
+  const toPrimary: Array<{ edge: WorkflowEdge; dyn: { type: string; field: string; slot: number } }> = [];
   for (const e of edges) {
     if (e.target !== nodeId) continue;
     const dyn = parseDynPin(e.targetHandle);
-    if (!dyn || dyn.field === "primary") continue;
+    if (!dyn) continue;
+    if (dyn.field === "primary") {
+      if (dyn.type === "image") primaryImageMaxSlot = Math.max(primaryImageMaxSlot, dyn.slot);
+      continue; // generic reference pins always render — untouched
+    }
     if (dyn.field.includes(".")) {
       const group = dyn.field.split(".")[0];
       if (!groups.has(group)) drop.add(e.id);
@@ -219,7 +225,11 @@ export function remapDynEdgesToSchema(
     }
     const target = firstOfType.get(dyn.type);
     if (!target) {
-      drop.add(e.id);
+      // IMAGE edges have a generic home: the reference (primary) pins, which
+      // generators render whenever the schema has no image input (kie models)
+      // and which feed the images[] path. Other types have no generic sink.
+      if (dyn.type === "image") toPrimary.push({ edge: e, dyn });
+      else drop.add(e.id);
       continue;
     }
     candidates.push({ edge: e, dyn });
@@ -248,6 +258,13 @@ export function remapDynEdgesToSchema(
         else drop.add(c.edge.id);
       });
     }
+  }
+
+  // Image edges with no image field in the new schema → generic reference
+  // pins, appended after the highest occupied primary slot (stable ids).
+  toPrimary.sort((a, b) => a.dyn.slot - b.dyn.slot);
+  for (const c of toPrimary) {
+    retarget.set(c.edge.id, dynPinId("image", "primary", ++primaryImageMaxSlot));
   }
 
   if (drop.size === 0 && retarget.size === 0) return null;
