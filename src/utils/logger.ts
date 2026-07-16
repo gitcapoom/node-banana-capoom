@@ -137,9 +137,10 @@ class Logger {
       this.currentSession.entries.push(entry);
     }
 
-    // Also log to console for development
+    // Also log to console for development — the SANITIZED context, so a
+    // giant raw value can't hang the console / dev-terminal relay.
     const consoleMethod = level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'log';
-    console[consoleMethod](`[${category}] ${message}`, context || '', error || '');
+    console[consoleMethod](`[${category}] ${message}`, entry.context || '', error || '');
   }
 
   /**
@@ -174,41 +175,48 @@ class Logger {
   }
 
   /**
-   * Sanitize context to protect privacy and reduce log size
+   * Sanitize context to protect privacy and BOUND log size. Every value is
+   * capped: any data: URL (any key) becomes metadata, other strings truncate,
+   * arrays and depth are limited. Log entries accumulate into the session and
+   * are JSON.stringify'd on endSession — one unbounded value (e.g. a video
+   * data URL in an executor's context) used to blow past V8's string limit
+   * ("Invalid string length") and crash the RUN that was ending its session.
    */
   private sanitizeContext(context: Record<string, any>): Record<string, any> {
-    const sanitized: Record<string, any> = {};
+    const MAX_STRING = 2000;
+    const MAX_ARRAY = 50;
+    const MAX_DEPTH = 4;
 
-    for (const [key, value] of Object.entries(context)) {
-      // Truncate prompts to 200 characters
-      if (key === 'prompt' && typeof value === 'string') {
-        sanitized[key] = value.length > 200 ? value.substring(0, 200) + '...[truncated]' : value;
-      }
-      // Convert image data URIs to metadata
-      else if (key === 'image' || key === 'images') {
-        if (typeof value === 'string' && value.startsWith('data:image')) {
-          sanitized[key] = this.extractImageMetadata(value);
-        } else if (Array.isArray(value)) {
-          sanitized[key] = value.map(img =>
-            typeof img === 'string' && img.startsWith('data:image')
-              ? this.extractImageMetadata(img)
-              : img
-          );
-        } else {
-          sanitized[key] = value;
+    const bound = (value: any, depth: number): any => {
+      if (typeof value === 'string') {
+        if (value.startsWith('data:')) {
+          return value.startsWith('data:image')
+            ? this.extractImageMetadata(value)
+            : { isDataURI: true, mime: value.slice(5, value.indexOf(';')), sizeKB: Math.round((value.length * 0.75) / 1024) };
         }
+        return value.length > MAX_STRING ? value.substring(0, MAX_STRING) + `…[+${value.length - MAX_STRING} chars]` : value;
       }
-      // Handle nested objects
-      else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        sanitized[key] = this.sanitizeContext(value);
+      if (Array.isArray(value)) {
+        if (depth >= MAX_DEPTH) return `[array(${value.length})]`;
+        const capped = value.slice(0, MAX_ARRAY).map((v) => bound(v, depth + 1));
+        if (value.length > MAX_ARRAY) capped.push(`…[+${value.length - MAX_ARRAY} more]`);
+        return capped;
       }
-      // Keep other values as-is
-      else {
-        sanitized[key] = value;
+      if (typeof value === 'object' && value !== null) {
+        if (depth >= MAX_DEPTH) return '[object]';
+        const out: Record<string, any> = {};
+        for (const [k, v] of Object.entries(value)) {
+          // Prompts stay extra short — privacy plus signal density.
+          out[k] = k === 'prompt' && typeof v === 'string' && v.length > 200
+            ? v.substring(0, 200) + '...[truncated]'
+            : bound(v, depth + 1);
+        }
+        return out;
       }
-    }
+      return value;
+    };
 
-    return sanitized;
+    return bound(context, 0) as Record<string, any>;
   }
 
   /**
