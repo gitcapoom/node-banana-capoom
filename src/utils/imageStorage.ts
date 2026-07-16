@@ -38,9 +38,20 @@ async function fetchWithTimeout(
 /**
  * Compute MD5 hash of image content for deduplication
  * Consistent with save-generation API (Phase 13 decision)
+ *
+ * Fed in CHUNKS: this runs client-side on crypto-browserify, whose Buffer
+ * polyfill converts a string via a plain byte array built with Array.push —
+ * a single update() with a giant data URL (e.g. a large inline video) threw
+ * "RangeError: Invalid array length" and killed auto-save. Chunking bounds
+ * the per-call allocation; the digest is identical.
  */
 function computeContentHash(data: string): string {
-  return crypto.createHash("md5").update(data).digest("hex");
+  const CHUNK = 8 * 1024 * 1024; // 8M chars per update
+  const hash = crypto.createHash("md5");
+  for (let i = 0; i < data.length; i += CHUNK) {
+    hash.update(data.slice(i, i + CHUNK));
+  }
+  return hash.digest("hex");
 }
 
 /**
