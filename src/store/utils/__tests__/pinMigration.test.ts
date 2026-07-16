@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { migrateEdgeHandles, remapDynEdgesToSchema } from "../pinMigration";
+import { migrateEdgeHandles, conformEdgesToRenderablePins } from "../pinMigration";
 import type { WorkflowNode, WorkflowEdge } from "@/types";
 
 const node = (id: string, type: string, data: Record<string, unknown> = {}): WorkflowNode =>
@@ -109,8 +109,9 @@ describe("migrateEdgeHandles", () => {
   });
 });
 
-describe("remapDynEdgesToSchema", () => {
-  const schema = (inputs: Array<{ name: string; type: string; isArray?: boolean }>) => inputs;
+describe("conformEdgesToRenderablePins", () => {
+  const gen = (type: string, inputs?: Array<{ name: string; type: string; isArray?: boolean }>) =>
+    node("gen", type, inputs ? { inputSchema: inputs } : {});
 
   it("moves edges from a vanished field to the new same-type field (array append)", () => {
     // Model switched: old schema had image_urls[], new one has image_input[].
@@ -118,7 +119,7 @@ describe("remapDynEdgesToSchema", () => {
       edge("e0", "gen", "dynpin__image__image_urls__0"),
       edge("e1", "gen", "dynpin__image__image_urls__1"),
     ];
-    const out = remapDynEdgesToSchema("gen", schema([
+    const out = conformEdgesToRenderablePins(gen("nanoBanana", [
       { name: "prompt", type: "text" },
       { name: "image_input", type: "image", isArray: true },
     ]), edges)!;
@@ -128,34 +129,43 @@ describe("remapDynEdgesToSchema", () => {
     ]);
   });
 
-  it("scalar target keeps one remapped edge at slot 0, drops the rest", () => {
-    const edges = [
-      edge("e0", "gen", "dynpin__image__image_urls__0"),
-      edge("e1", "gen", "dynpin__image__image_urls__1"),
-    ];
-    const out = remapDynEdgesToSchema("gen", schema([
+  it("primary edges on a schema WITH an image field move into that field (generateVideo case)", () => {
+    const edges = [edge("e0", "gen", "dynpin__image__primary__0")];
+    const out = conformEdgesToRenderablePins(gen("generateVideo", [
+      { name: "prompt", type: "text" },
       { name: "image_url", type: "image" },
     ]), edges)!;
     expect(handles(out)).toEqual(["dynpin__image__image_url__0"]);
-    expect(out[0].id).toBe("e0");
   });
 
-  it("drops edges when the new schema has no input of that type; keeps matching fields untouched", () => {
+  it("primary edges on a schema WITHOUT image fields stay (kie models render reference pins)", () => {
+    const edges = [edge("e0", "gen", "dynpin__image__primary__0")];
+    expect(conformEdgesToRenderablePins(gen("nanoBanana", [
+      { name: "prompt", type: "text" },
+    ]), edges)).toBeNull();
+  });
+
+  it("stacked scalar slots collapse to the newest at slot 0 (llmGenerate fallback prompt)", () => {
     const edges = [
+      edge("e0", "gen", "dynpin__text__prompt__0"),
+      edge("e1", "gen", "dynpin__text__prompt__1"),
+    ];
+    const out = conformEdgesToRenderablePins(gen("llmGenerate"), edges)!;
+    expect(out.map((e) => e.id)).toEqual(["e1"]);
+    expect(out[0].targetHandle).toBe("dynpin__text__prompt__0");
+  });
+
+  it("drops edges with no home; keeps conforming edges untouched (null)", () => {
+    const schema = [{ name: "image_url", type: "image" }];
+    // video edge on a schema without video inputs → dropped
+    const out = conformEdgesToRenderablePins(gen("generateVideo", schema), [
       edge("e0", "gen", "dynpin__video__video_url__0"),
       edge("e1", "gen", "dynpin__image__image_url__0"),
-      edge("e2", "other", "dynpin__video__video_url__0"),
-    ];
-    const out = remapDynEdgesToSchema("gen", schema([
-      { name: "image_url", type: "image" },
-    ]), edges)!;
-    // video edge on gen dropped (no video input); image edge untouched; other node untouched
-    expect(out.map((e) => e.id)).toEqual(["e1", "e2"]);
-    expect(out[0].targetHandle).toBe("dynpin__image__image_url__0");
-  });
-
-  it("returns null when everything already matches the schema", () => {
-    const edges = [edge("e0", "gen", "dynpin__image__image_url__0")];
-    expect(remapDynEdgesToSchema("gen", schema([{ name: "image_url", type: "image" }]), edges)).toBeNull();
+    ])!;
+    expect(out.map((e) => e.id)).toEqual(["e1"]);
+    // fully conforming set → null (no change)
+    expect(conformEdgesToRenderablePins(gen("generateVideo", schema), [
+      edge("e1", "gen", "dynpin__image__image_url__0"),
+    ])).toBeNull();
   });
 });
