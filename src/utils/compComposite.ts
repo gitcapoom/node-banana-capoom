@@ -9,7 +9,7 @@
  */
 
 import type { CompNodeData } from "@/types";
-import { COMP_OP_INDEX, defaultCompTransform } from "@/types/comp";
+import { COMP_OP_INDEX, defaultCompTransform, defaultCompFilter, type CompInputFilter } from "@/types/comp";
 import {
   renderComp,
   floatNodeToDataUrl,
@@ -47,6 +47,8 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
   // Merge against defaults so a legacy/partial transform can't reach the shader
   // with undefined fields (which would become NaN uniforms).
   const T = (t?: Partial<import("@/types/comp").CompTransform>) => ({ ...idt, ...(t ?? {}) });
+  const idf: CompInputFilter = { ...defaultCompFilter(), filter: "none" };
+  const Fm = (f?: Partial<CompInputFilter>) => ({ ...idf, ...(f ?? {}) });
   return {
     op: COMP_OP_INDEX[data.mergeOp] ?? 0,
     bgTransform: T(data.bgTransform),
@@ -65,6 +67,13 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
     outputResolution: data.outputResolution ?? "bg",
     bgOpacity: data.bgOpacity ?? 1,
     fgOpacity: data.fgOpacity ?? 1,
+    filters: {
+      bg: Fm(data.bgFilter),
+      bgAlpha: Fm(data.bgAlphaFilter),
+      fg: Fm(data.fgFilter),
+      fgAlpha: Fm(data.fgAlphaFilter),
+      matte: Fm(data.matteFilter),
+    },
   };
 }
 

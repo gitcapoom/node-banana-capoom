@@ -95,6 +95,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     op: nodeData.mergeOp, pm: nodeData.premultiplyFg, pmb: nodeData.premultiplyBg, sw: nodeData.swapBgFg, res: nodeData.outputResolution, bo: [nodeData.bgBlackOutside, nodeData.fgBlackOutside], bgo: nodeData.bgOpacity, fgo: nodeData.fgOpacity,
     bgT: nodeData.bgTransform, baT: nodeData.bgAlphaTransform, fgT: nodeData.fgTransform, faT: nodeData.fgAlphaTransform, mtT: nodeData.matteTransform,
     bar: nodeData.bgAlphaReformat, far: nodeData.fgAlphaReformat, mtr: nodeData.matteReformat,
+    bgF: nodeData.bgFilter, baF: nodeData.bgAlphaFilter, fgF: nodeData.fgFilter, faF: nodeData.fgAlphaFilter, mtF: nodeData.matteFilter,
     bgUrl: incoming.bg, baUrl: incoming.bgAlpha, fgUrl: incoming.fg, faUrl: incoming.fgAlpha, mtUrl: incoming.matte,
   });
 
