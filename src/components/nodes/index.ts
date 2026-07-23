@@ -42,5 +42,6 @@ export { CubemapFacesNode } from "./CubemapFacesNode";
 export { ColorGradeNode } from "./ColorGradeNode";
 export { HsvCorrectNode } from "./HsvCorrectNode";
 export { ContrastAdjustNode } from "./ContrastAdjustNode";
+export { BlurNode } from "./BlurNode";
 export { PanoShiftNode } from "./PanoShiftNode";
 export { GroupNode } from "./GroupNode";

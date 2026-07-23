@@ -13,13 +13,14 @@ import type {
 } from "./annotation";
 import type { MaskPainterNodeData } from "./maskPainter";
 import type { RotoNodeData } from "./roto";
-import type { CompNodeData } from "./comp";
+import type { CompNodeData, BlurFilterType } from "./comp";
 
 // Re-export types from annotation and mask painter for convenience
 export type { AnnotationNodeData, BaseNodeData };
 export type { MaskPainterNodeData };
 export type { RotoNodeData };
 export type { CompNodeData };
+export type { BlurFilterType };
 
 // Import from domain files to avoid circular dependencies
 import type { AspectRatio, Resolution, ModelType } from "./models";
@@ -72,6 +73,7 @@ export type NodeType =
   | "colorGrade"
   | "hsvCorrect"
   | "contrastAdjust"
+  | "blur"
   | "panoShift"
   | "sphereLightRender"
   | "upscaleGrid";
@@ -269,6 +271,31 @@ export interface ContrastAdjustNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+}
+
+/**
+ * Blur node — GPU blur/defocus with selectable filter (gaussian / box /
+ * motion / zoom / spin) and an optional grayscale matte input that gates
+ * where the blur lands (white = blurred). Chainable in the float pipeline.
+ */
+export interface BlurNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  matteImage: string | null;
+  matteImageRef?: string;
+  filter: BlurFilterType;
+  /** Amount: pixels for gaussian/box/motion; zoom/spin scale with it. */
+  radius: number;
+  /** Motion-blur direction, degrees CCW (0 = horizontal). */
+  angle: number;
+  /** Flip the matte (blur where it's black instead of white). */
+  invertMatte: boolean;
+  /** 0..1 blend between source (0) and blurred (1). */
+  mixAmount: number;
+  outputImage: string | null;
+  outputImageRef?: string;
+  outputImageThumb?: string;
+  error?: string | null;
 }
 
 /**
@@ -1089,6 +1116,7 @@ export type WorkflowNodeData =
   | ColorGradeNodeData
   | HsvCorrectNodeData
   | ContrastAdjustNodeData
+  | BlurNodeData
   | PanoShiftNodeData
   | SphereLightRenderNodeData
   | UpscaleGridNodeData;

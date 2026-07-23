@@ -66,6 +66,7 @@ export const THUMB_DISPLAY_FIELDS: Partial<Record<NodeType, ThumbDisplayField[]>
   colorGrade: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs" }],
   hsvCorrect: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs" }],
   contrastAdjust: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs" }],
+  blur: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs", format: "png" }],
   comp: [{ raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs", format: "png" }],
   maskPainter: [{ raw: "outputMask", ref: "outputMaskRef", thumb: "outputMaskThumb", folder: "inputs", format: "png" }],
   roto: [{ raw: "outputMask", ref: "outputMaskRef", thumb: "outputMaskThumb", folder: "inputs", format: "png" }],
@@ -121,6 +122,8 @@ export const RUN_FULLRES_FIELDS: Partial<Record<NodeType, RunImageField[]>> = {
     { raw: "outputImage", ref: "outputImageRef", folder: "inputs" },
   ],
   comp: [{ raw: "outputImage", ref: "outputImageRef", folder: "inputs" }],
+  // blur's input mirrors are re-derived from upstream by its executor (like comp).
+  blur: [{ raw: "outputImage", ref: "outputImageRef", folder: "inputs" }],
   upscaleGrid: [{ raw: "outputImage", ref: "outputImageRef", folder: "generations" }],
   maskPainter: [
     { raw: "sourceImage", ref: "sourceImageRef", folder: "inputs" },

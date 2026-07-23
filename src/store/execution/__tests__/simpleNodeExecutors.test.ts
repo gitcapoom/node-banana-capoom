@@ -7,7 +7,17 @@ import {
   executeOutputGallery,
   executeImageCompare,
   executeGlbViewer,
+  executeBlur,
 } from "../simpleNodeExecutors";
+
+// executeBlur's GPU commit + run-hydration are environment-bound — stub them.
+vi.mock("@/utils/colorChain", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/utils/colorChain")>();
+  return { ...actual, commitBlurNode: vi.fn().mockResolvedValue("data:image/png;base64,BLURRED") };
+});
+vi.mock("@/store/execution/hydrateForRun", () => ({
+  ensureFullResForNodes: vi.fn().mockResolvedValue(undefined),
+}));
 import type { NodeExecutionContext } from "../types";
 import type { WorkflowNode, WorkflowEdge } from "@/types";
 
@@ -580,5 +590,70 @@ describe("executeGlbViewer", () => {
     expect(ctx.updateNodeData).not.toHaveBeenCalled();
 
     fetchSpy.mockRestore();
+  });
+});
+
+describe("executeBlur", () => {
+  const IMG = "data:image/png;base64,SRC";
+  const MATTE = "data:image/png;base64,MATTE";
+
+  function blurSetup(edges: WorkflowEdge[], upstream: WorkflowNode[]) {
+    const node = makeNode("blur1", "blur", {
+      sourceImage: null, matteImage: null, filter: "gaussian", radius: 12,
+      angle: 0, invertMatte: false, mixAmount: 0.8, outputImage: null,
+    });
+    const ctx = makeCtx(node, {
+      getEdges: vi.fn().mockReturnValue(edges),
+      getNodes: vi.fn().mockReturnValue([node, ...upstream]),
+    });
+    return { node, ctx };
+  }
+
+  it("routes primary + matte handles, mirrors inputs, and commits with node params", async () => {
+    const { commitBlurNode } = await import("@/utils/colorChain");
+    vi.mocked(commitBlurNode).mockClear();
+    const src = makeNode("in1", "imageInput", { image: IMG });
+    const mt = makeNode("in2", "imageInput", { image: MATTE });
+    const { ctx } = blurSetup(
+      [
+        { id: "e1", source: "in1", target: "blur1", targetHandle: "image" } as WorkflowEdge,
+        { id: "e2", source: "in2", target: "blur1", targetHandle: "image-blur_matte" } as WorkflowEdge,
+      ],
+      [src, mt],
+    );
+
+    await executeBlur(ctx);
+
+    expect(ctx.updateNodeData).toHaveBeenCalledWith("blur1", {
+      sourceImage: IMG, sourceImageRef: undefined, matteImage: MATTE, matteImageRef: undefined,
+    });
+    expect(commitBlurNode).toHaveBeenCalledWith(
+      { url: IMG },
+      { url: MATTE },
+      { filter: "gaussian", radius: 12, angle: 0, invertMatte: false, mixAmount: 0.8 },
+      "blur1",
+      IMG,
+    );
+    expect(ctx.updateNodeData).toHaveBeenCalledWith("blur1", {
+      outputImage: "data:image/png;base64,BLURRED", outputImageRef: undefined, error: null,
+    });
+  });
+
+  it("clears a stale output when the source is disconnected", async () => {
+    const { commitBlurNode } = await import("@/utils/colorChain");
+    vi.mocked(commitBlurNode).mockClear();
+    const node = makeNode("blur1", "blur", {
+      sourceImage: IMG, matteImage: null, filter: "box", radius: 5,
+      angle: 0, invertMatte: false, mixAmount: 1, outputImage: "data:image/png;base64,OLD",
+    });
+    const ctx = makeCtx(node, {
+      getEdges: vi.fn().mockReturnValue([]),
+      getNodes: vi.fn().mockReturnValue([node]),
+    });
+
+    await executeBlur(ctx);
+
+    expect(ctx.updateNodeData).toHaveBeenCalledWith("blur1", { outputImage: null, outputImageRef: undefined });
+    expect(commitBlurNode).not.toHaveBeenCalled();
   });
 });
