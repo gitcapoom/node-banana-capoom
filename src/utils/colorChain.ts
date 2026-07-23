@@ -28,15 +28,15 @@
 
 import { DISPLAY_CLAMP_SHADER } from "./imageShaders";
 import { processImageWithShader, type UniformValue } from "./webglProcess";
-import type { CompTransform, CompReformat } from "@/types/comp";
+import type { CompTransform, CompReformat, CompInputFilter } from "@/types/comp";
 import { computePieces, computeFollowPieces, piecesToUniforms } from "./compTransform";
 
 export type ShaderInput = { url: string } | { floatNodeId: string };
 
 /** Node types that participate in the float color chain. `comp` joins so its
  *  inputs read upstream float textures and its output is published as a float
- *  texture (see renderComp below). */
-export const COLOR_NODE_TYPES = new Set<string>(["colorGrade", "hsvCorrect", "contrastAdjust", "comp"]);
+ *  texture (see renderComp below); `blur` likewise (see renderBlurNode). */
+export const COLOR_NODE_TYPES = new Set<string>(["colorGrade", "hsvCorrect", "contrastAdjust", "comp", "blur"]);
 
 // u_flipY: 1.0 for canvas-targeted passes (the browser presents the
 // default framebuffer top-left, and uploaded images are GL bottom-left,
@@ -91,6 +91,9 @@ function getCtx(): Ctx | null {
       floatRegistry.clear();
       urlTexCache = null;
       programCache.clear();
+      blurTexPool.clear();
+      compUrlCache.clear();
+      dummyTex = null;
     });
     ctx = { canvas, gl, quad, floatOK };
     return ctx;
@@ -116,11 +119,17 @@ export function hasFloat(nodeId: string): boolean {
   return floatRegistry.has(nodeId);
 }
 
-/** Free a node's float texture (call on unmount / delete). */
+/** Free a node's float texture + any pooled blur scratch (unmount / delete). */
 export function releaseColorNode(nodeId: string): void {
   const entry = floatRegistry.get(nodeId);
   if (entry && ctx) ctx.gl.deleteTexture(entry.tex);
   floatRegistry.delete(nodeId);
+  for (const [key, tex] of blurTexPool) {
+    if (key.startsWith(`${nodeId}:`)) {
+      if (ctx) ctx.gl.deleteTexture(tex.tex);
+      blurTexPool.delete(key);
+    }
+  }
 }
 
 // ─── shader / program ────────────────────────────────────────────
@@ -422,6 +431,15 @@ export interface CompRenderParams {
   outputResolution: "bg" | "fg"; // which input's size defines the output
   bgOpacity: number;       // 0..1, scales BG alpha before the merge
   fgOpacity: number;       // 0..1, scales FG alpha before the merge
+  /** Per-input blur/defocus filters, applied to each input's texture before
+   *  the merge shader samples it. Absent/identity ⇒ no pre-pass. */
+  filters?: {
+    bg: CompInputFilter;
+    bgAlpha: CompInputFilter;
+    fg: CompInputFilter;
+    fgAlpha: CompInputFilter;
+    matte: CompInputFilter;
+  };
 }
 
 /**
@@ -622,12 +640,23 @@ function compUniforms(
 /** Internal (no lock): render the comp into destNodeId's float texture. */
 async function renderCompUnlocked(c: Ctx, inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string): Promise<{ w: number; h: number } | null> {
   const { gl, quad } = c;
-  const bg = await resolveComp(gl, inputs.bg);
+  let bg = await resolveComp(gl, inputs.bg);
   if (!bg) return null;
-  const ba = await resolveComp(gl, inputs.bgAlpha);
-  const fg = await resolveComp(gl, inputs.fg);
-  const fa = await resolveComp(gl, inputs.fgAlpha);
-  const mt = await resolveComp(gl, inputs.matte);
+  let ba = await resolveComp(gl, inputs.bgAlpha);
+  let fg = await resolveComp(gl, inputs.fg);
+  let fa = await resolveComp(gl, inputs.fgAlpha);
+  let mt = await resolveComp(gl, inputs.matte);
+
+  // Per-input filter pre-passes (no-ops for identity params). Dims unchanged,
+  // so the transform math downstream is unaffected.
+  const F = params.filters;
+  if (F) {
+    bg = blurIntoUnlocked(c, bg, F.bg, `${destNodeId}:f_bg`);
+    if (ba) ba = blurIntoUnlocked(c, ba, F.bgAlpha, `${destNodeId}:f_ba`);
+    if (fg) fg = blurIntoUnlocked(c, fg, F.fg, `${destNodeId}:f_fg`);
+    if (fa) fa = blurIntoUnlocked(c, fa, F.fgAlpha, `${destNodeId}:f_fa`);
+    if (mt) mt = blurIntoUnlocked(c, mt, F.matte, `${destNodeId}:f_mt`);
+  }
   // Output resolution from BG (default) or FG.
   const sizeSrc = params.outputResolution === "fg" && fg ? fg : bg;
   const w = sizeSrc.w, h = sizeSrc.h;
@@ -723,4 +752,359 @@ export function renderCompToCanvas(inputs: CompRenderInputs, params: CompRenderP
     if (!res) return false;
     return blitFloatToCanvasUnlocked(c, destNodeId, destCanvas);
   });
+}
+
+// ─── Blur passes (Blur node + comp per-input filters) ─────────────────────
+//
+// All five filters run as texture→texture GPU passes so they compose with the
+// float chain (no 8-bit round-trip). Gaussian/box are separable two-pass;
+// motion/zoom/spin are single-pass 33-tap accumulations. Out-of-bounds samples
+// edge-hold via CLAMP_TO_EDGE.
+
+export type BlurPassParams = CompInputFilter;
+
+/** Blur-node params: pass params + matte handling + global mix. */
+export interface BlurNodeParams extends CompInputFilter {
+  invertMatte: boolean;
+  mixAmount: number; // 0..1
+}
+
+// Separable pass (gaussian / box). 33 taps max; u_half bounds the live taps,
+// u_stepUv is the per-tap uv step along the pass direction. Gaussian sigma is
+// fixed at half the tap extent (support ≈ ±2σ = ±radius).
+const SEP_BLUR_FRAG = `
+uniform vec2 u_stepUv;
+uniform float u_half;
+uniform float u_gauss;
+void main() {
+  float sigma = max(u_half * 0.5, 0.35);
+  vec4 acc = vec4(0.0);
+  float wsum = 0.0;
+  for (int i = -16; i <= 16; i++) {
+    float fi = float(i);
+    if (abs(fi) > u_half + 0.5) continue;
+    float w = (u_gauss > 0.5) ? exp(-0.5 * fi * fi / (sigma * sigma)) : 1.0;
+    acc += texture2D(u_tex, v_uv + u_stepUv * fi) * w;
+    wsum += w;
+  }
+  gl_FragColor = acc / max(wsum, 1e-6);
+}
+`;
+
+// Directional pass: motion (0) = line, zoom (1) = scale about center,
+// spin (2) = rotation about center. Aspect-correct (works in pixel space).
+const DIR_BLUR_FRAG = `
+uniform vec2 u_texSize;
+uniform float u_mode;
+uniform vec2 u_vec;
+uniform float u_amt;
+void main() {
+  vec2 ctr = u_texSize * 0.5;
+  vec2 p0 = v_uv * u_texSize;
+  vec4 acc = vec4(0.0);
+  for (int i = -16; i <= 16; i++) {
+    float t = float(i) / 16.0;
+    vec2 p;
+    if (u_mode < 0.5) {
+      p = p0 + u_vec * t;
+    } else if (u_mode < 1.5) {
+      p = ctr + (p0 - ctr) * (1.0 + u_amt * t);
+    } else {
+      float a = u_amt * t;
+      float cs = cos(a), sn = sin(a);
+      vec2 d = p0 - ctr;
+      p = ctr + vec2(cs * d.x - sn * d.y, sn * d.x + cs * d.y);
+    }
+    acc += texture2D(u_tex, p / u_texSize);
+  }
+  gl_FragColor = acc / 33.0;
+}
+`;
+
+// Final Blur-node pass: lerp source→blurred by matte luminance × mix. The
+// matte stretches to the source via v_uv, so any matte resolution works.
+const BLUR_MIX_FRAG = `
+uniform sampler2D u_blur;
+uniform sampler2D u_mt;
+uniform float u_mt_has, u_invert, u_mix;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+void main() {
+  vec4 src = texture2D(u_tex, v_uv);
+  vec4 blr = texture2D(u_blur, v_uv);
+  float m = 1.0;
+  if (u_mt_has > 0.5) m = dot(texture2D(u_mt, v_uv).rgb, LUMA);
+  if (u_invert > 0.5) m = 1.0 - m;
+  gl_FragColor = mix(src, blr, clamp(m * u_mix, 0.0, 1.0));
+}
+`;
+
+/** Pooled pass targets, keyed `${nodeId}:${slot}` (freed by releaseColorNode). */
+const blurTexPool = new Map<string, FloatTex>();
+
+function ensureBlurTex(c: Ctx, key: string, w: number, h: number): FloatTex {
+  const { gl } = c;
+  const prev = blurTexPool.get(key);
+  if (prev && prev.w === w && prev.h === h) return prev;
+  if (prev) gl.deleteTexture(prev.tex);
+  const tex = gl.createTexture()!;
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  // LINEAR — blur passes sample between texels (fractional steps).
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  if (c.floatOK) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  } else {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  }
+  const entry = { tex, w, h };
+  blurTexPool.set(key, entry);
+  return entry;
+}
+
+/** Draw a full-viewport pass with `prog` into `out` (FBO). Caller binds textures/uniforms after useProgram via the returned program. */
+function drawPassInto(c: Ctx, prog: WebGLProgram, out: FloatTex): boolean {
+  const { gl, quad } = c;
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, out.tex, 0);
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(fbo);
+    return false;
+  }
+  bindQuad(gl, prog, quad);
+  gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 0.0); // FBO: preserve orientation
+  gl.viewport(0, 0, out.w, out.h);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.deleteFramebuffer(fbo);
+  return true;
+}
+
+/** True when the filter would change nothing. */
+export function isBlurIdentity(f: CompInputFilter | undefined | null): boolean {
+  return !f || f.filter === "none" || !(f.radius > 0);
+}
+
+/**
+ * Blur `src` into pooled textures under `poolKey`. Returns `src` unchanged for
+ * identity params or on pass failure. NOT locked — internal use only.
+ */
+function blurIntoUnlocked(c: Ctx, src: FloatTex, f: CompInputFilter, poolKey: string): FloatTex {
+  if (isBlurIdentity(f)) return src;
+  const { gl } = c;
+  const { w, h } = src;
+
+  // Sample the source LINEAR for the pass, restoring its own filter after
+  // (registry float textures are NEAREST; comp URL uploads are LINEAR).
+  const withLinear = (tex: WebGLTexture, run: () => boolean): boolean => {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    const prevMin = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER) as number;
+    const prevMag = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER) as number;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    const ok = run();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, prevMin);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, prevMag);
+    return ok;
+  };
+
+  const bindSrc = (prog: WebGLProgram, tex: WebGLTexture) => {
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
+  };
+
+  if (f.filter === "gaussian" || f.filter === "box") {
+    const halfTaps = Math.min(16, Math.max(1, Math.ceil(f.radius)));
+    const stepPx = f.radius / halfTaps;
+    const prog = getProgram(gl, SEP_BLUR_FRAG);
+    const a = ensureBlurTex(c, `${poolKey}:a`, w, h);
+    const b = ensureBlurTex(c, `${poolKey}:b`, w, h);
+    const pass = (from: WebGLTexture, to: FloatTex, dirUv: [number, number]) => {
+      gl.useProgram(prog);
+      bindSrc(prog, from);
+      setUniforms(gl, prog, { u_stepUv: dirUv, u_half: halfTaps, u_gauss: f.filter === "gaussian" ? 1 : 0 });
+      return drawPassInto(c, prog, to);
+    };
+    const ok = withLinear(src.tex, () => pass(src.tex, a, [stepPx / w, 0]))
+      && pass(a.tex, b, [0, stepPx / h]);
+    return ok ? b : src;
+  }
+
+  // motion / zoom / spin — single directional pass.
+  const prog = getProgram(gl, DIR_BLUR_FRAG);
+  const b = ensureBlurTex(c, `${poolKey}:b`, w, h);
+  const mode = f.filter === "motion" ? 0 : f.filter === "zoom" ? 1 : 2;
+  const angleRad = (f.angle * Math.PI) / 180;
+  const uniforms: Record<string, UniformValue> = {
+    u_texSize: [w, h],
+    u_mode: mode,
+    // motion: total streak ≈ radius px (half-extent each way).
+    u_vec: [Math.cos(angleRad) * f.radius * 0.5, Math.sin(angleRad) * f.radius * 0.5],
+    // zoom: ±0.3% scale per radius unit; spin: ±0.006 rad per radius unit.
+    u_amt: f.filter === "zoom" ? f.radius * 0.003 : f.radius * 0.006,
+  };
+  const ok = withLinear(src.tex, () => {
+    gl.useProgram(prog);
+    bindSrc(prog, src.tex);
+    setUniforms(gl, prog, uniforms);
+    return drawPassInto(c, prog, b);
+  });
+  return ok ? b : src;
+}
+
+// ─── Blur node (chainable, matte-gated) ───────────────────────────────────
+
+/** Internal: render the blur node into its output texture. Returns the output
+ *  entry (registry float texture when supported, else a pooled 8-bit one). */
+async function renderBlurNodeUnlocked(
+  c: Ctx,
+  srcInput: CompResolvable | null,
+  matteInput: CompResolvable | null,
+  params: BlurNodeParams,
+  destNodeId: string,
+): Promise<FloatTex | null> {
+  const { gl } = c;
+  const src = await resolveComp(gl, srcInput);
+  if (!src) return null;
+  const mt = await resolveComp(gl, matteInput);
+  const { w, h } = src;
+
+  const blurred = blurIntoUnlocked(c, src, params, `${destNodeId}:blur`);
+
+  // Output: registry float texture when supported (joins the chain), else a
+  // pooled RGBA8 target (blit/PNG still work; chain falls back to 8-bit URLs).
+  let out: FloatTex;
+  if (c.floatOK) {
+    const prev = floatRegistry.get(destNodeId);
+    let outTex = prev?.tex;
+    if (!outTex || prev!.w !== w || prev!.h !== h) {
+      if (outTex) gl.deleteTexture(outTex);
+      outTex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, outTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    }
+    out = { tex: outTex, w, h };
+    floatRegistry.set(destNodeId, out);
+  } else {
+    out = ensureBlurTex(c, `${destNodeId}:out8`, w, h);
+  }
+
+  const prog = getProgram(gl, BLUR_MIX_FRAG);
+  gl.useProgram(prog);
+  const dummy = getDummyTex(gl);
+  const bind = (unit: number, tex: WebGLTexture, name: string) => {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gl.getUniformLocation(prog, name), unit);
+  };
+  bind(0, src.tex, "u_tex");
+  bind(1, blurred.tex, "u_blur");
+  bind(2, mt ? mt.tex : dummy, "u_mt");
+  setUniforms(gl, prog, {
+    u_mt_has: mt ? 1 : 0,
+    u_invert: params.invertMatte ? 1 : 0,
+    u_mix: Math.max(0, Math.min(1, params.mixAmount ?? 1)),
+  });
+  if (!drawPassInto(c, prog, out)) {
+    if (c.floatOK) floatRegistry.delete(destNodeId);
+    return null;
+  }
+  return out;
+}
+
+/** Blit any texture entry (float or 8-bit) display-clamped into a 2D canvas. */
+function blitEntryToCanvasUnlocked(c: Ctx, entry: FloatTex, destCanvas: HTMLCanvasElement): boolean {
+  const { gl, quad, canvas } = c;
+  const { tex, w, h } = entry;
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  const prog = getProgram(gl, DISPLAY_CLAMP_SHADER);
+  gl.useProgram(prog);
+  bindQuad(gl, prog, quad);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
+  gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 1.0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, w, h);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  if (destCanvas.width !== w) destCanvas.width = w;
+  if (destCanvas.height !== h) destCanvas.height = h;
+  const dctx = destCanvas.getContext("2d");
+  if (!dctx) return false;
+  dctx.clearRect(0, 0, w, h);
+  dctx.drawImage(canvas, 0, 0);
+  return true;
+}
+
+/** Render the blur node and blit the result to a visible canvas. */
+export function renderBlurNodeToCanvas(
+  srcInput: CompResolvable | null,
+  matteInput: CompResolvable | null,
+  params: BlurNodeParams,
+  destNodeId: string,
+  destCanvas: HTMLCanvasElement,
+): Promise<boolean> {
+  return withLock(async () => {
+    const c = getCtx();
+    if (!c) return false;
+    const out = await renderBlurNodeUnlocked(c, srcInput, matteInput, params, destNodeId);
+    if (!out) return false;
+    return blitEntryToCanvasUnlocked(c, out, destCanvas);
+  });
+}
+
+/**
+ * Commit path for the Blur node (executor + debounced UI commit): render (and
+ * publish the float texture when supported) and return the 8-bit PNG display
+ * URL. Never throws — returns `fallbackUrl` on any failure.
+ */
+export async function commitBlurNode(
+  srcInput: CompResolvable | null,
+  matteInput: CompResolvable | null,
+  params: BlurNodeParams,
+  destNodeId: string,
+  fallbackUrl: string,
+): Promise<string> {
+  try {
+    return await withLock(async () => {
+      const c = getCtx();
+      if (!c) return fallbackUrl;
+      const out = await renderBlurNodeUnlocked(c, srcInput, matteInput, params, destNodeId);
+      if (!out) return fallbackUrl;
+      const { gl, quad, canvas } = c;
+      const { tex, w, h } = out;
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      const prog = getProgram(gl, DISPLAY_CLAMP_SHADER);
+      gl.useProgram(prog);
+      bindQuad(gl, prog, quad);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
+      gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 1.0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, w, h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      return canvas.toDataURL("image/png");
+    });
+  } catch (err) {
+    console.error("commitBlurNode failed:", err);
+    return fallbackUrl;
+  }
 }

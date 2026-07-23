@@ -201,6 +201,9 @@ export function getSourceOutput(
   } else if (sourceNode.type === "contrastAdjust") {
     const cData = sourceNode.data as import("@/types").ContrastAdjustNodeData;
     return { type: "image", value: cData.outputImage || cData.sourceImage || null };
+  } else if (sourceNode.type === "blur") {
+    const bData = sourceNode.data as import("@/types").BlurNodeData;
+    return { type: "image", value: bData.outputImage || bData.sourceImage || null };
   } else if (sourceNode.type === "panoShift") {
     const psData = sourceNode.data as import("@/types").PanoShiftNodeData;
     return { type: "image", value: psData.outputImage || psData.sourceImage || null };

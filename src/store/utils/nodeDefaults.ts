@@ -102,6 +102,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   colorGrade: { width: 340, height: 460 },
   hsvCorrect: { width: 280, height: 380 },
   contrastAdjust: { width: 280, height: 380 },
+  blur: { width: 280, height: 420 },
   panoShift: { width: 320, height: 280 },
   sphereLightRender: { width: 300, height: 420 },
   upscaleGrid: { width: 300, height: 320 },
@@ -563,6 +564,17 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         clampWhites: false,
         outputImage: null,
       } as ContrastAdjustNodeData;
+    case "blur":
+      return {
+        sourceImage: null,
+        matteImage: null,
+        filter: "gaussian",
+        radius: 10,
+        angle: 0,
+        invertMatte: false,
+        mixAmount: 1,
+        outputImage: null,
+      } as import("@/types").BlurNodeData;
     case "panoShift":
       return {
         sourceImage: null,

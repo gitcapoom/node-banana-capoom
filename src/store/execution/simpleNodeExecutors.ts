@@ -570,6 +570,63 @@ export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
 }
 
 /**
+ * Blur executor — GPU blur/defocus (gaussian/box/motion/zoom/spin) with an
+ * optional matte gating where the blur lands. Routes the two input handles by
+ * targetHandle, mirrors them into node data, and commits via the float chain.
+ */
+export async function executeBlur(ctx: NodeExecutionContext): Promise<void> {
+  const { node, updateNodeData, getEdges, getNodes, saveDirectoryPath } = ctx;
+  try {
+    const data = node.data as import("@/types").BlurNodeData;
+    // Upstream inputs may be lazily null on open — a missing matte would
+    // silently blur the whole frame.
+    try {
+      await ensureFullResForNodes([node.id], getNodes(), getEdges(), updateNodeData, saveDirectoryPath);
+    } catch { /* best-effort */ }
+    const edges = getEdges();
+    const nodes = getNodes();
+    let src: string | null = null, srcId: string | null = null;
+    let mt: string | null = null, mtId: string | null = null;
+    for (const e of edges) {
+      if (e.target !== node.id) continue;
+      const s = nodes.find((n) => n.id === e.source);
+      if (!s) continue;
+      const out = getSourceOutput(s, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+      if (out.type !== "image" || !out.value) continue;
+      if (e.targetHandle === "image" || e.targetHandle == null) { src = out.value; srcId = s.id; }
+      else if (e.targetHandle === "image-blur_matte") { mt = out.value; mtId = s.id; }
+    }
+    updateNodeData(node.id, {
+      sourceImage: src, sourceImageRef: undefined, matteImage: mt, matteImageRef: undefined,
+    });
+    if (!src) {
+      if (data.outputImage !== null) updateNodeData(node.id, { outputImage: null, outputImageRef: undefined });
+      return;
+    }
+    const { commitBlurNode } = await import("@/utils/colorChain");
+    const { resolveInputRef } = await import("@/utils/compComposite");
+    const output = await commitBlurNode(
+      resolveInputRef(src, srcId),
+      resolveInputRef(mt, mtId),
+      {
+        filter: data.filter ?? "gaussian",
+        radius: data.radius ?? 10,
+        angle: data.angle ?? 0,
+        invertMatte: !!data.invertMatte,
+        mixAmount: data.mixAmount ?? 1,
+      },
+      node.id,
+      src,
+    );
+    updateNodeData(node.id, { outputImage: output, outputImageRef: undefined, error: null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Blur node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
  * Image Crop node: receives upstream image and applies the persisted crop region.
  * If no region is defined, passes the image through unchanged.
  * Crop region uses relative (0-1) coordinates so it adapts to any input resolution.

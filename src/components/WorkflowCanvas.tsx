@@ -69,6 +69,7 @@ import {
   ColorGradeNode,
   HsvCorrectNode,
   ContrastAdjustNode,
+  BlurNode,
   PanoShiftNode,
 } from "./nodes";
 
@@ -149,6 +150,7 @@ const nodeTypes: NodeTypes = {
   colorGrade: ColorGradeNode,
   hsvCorrect: HsvCorrectNode,
   contrastAdjust: ContrastAdjustNode,
+  blur: BlurNode,
   panoShift: PanoShiftNode,
 };
 
@@ -293,6 +295,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image"], outputs: ["image"] };
     case "contrastAdjust":
       return { inputs: ["image"], outputs: ["image"] };
+    case "blur":
+      return { inputs: ["image", "image-blur_matte"], outputs: ["image"] };
     case "panoShift":
       return { inputs: ["image"], outputs: ["image"] };
     default:
@@ -602,6 +606,7 @@ export function WorkflowCanvas() {
     colorGrade: 'Color Grade',
     hsvCorrect: 'HSV Color Correct',
     contrastAdjust: 'Contrast Adjust',
+    blur: 'Blur',
     panoShift: 'Pano Shift',
   };
 
@@ -1855,6 +1860,7 @@ export function WorkflowCanvas() {
             colorGrade: { width: 340, height: 460 },
             hsvCorrect: { width: 280, height: 380 },
             contrastAdjust: { width: 280, height: 380 },
+            blur: { width: 280, height: 420 },
             panoShift: { width: 320, height: 280 },
           };
           const dims = defaultDimensions[nodeType];
@@ -2590,6 +2596,8 @@ export function WorkflowCanvas() {
                 return "#38bdf8"; // sky-400 (roto shapes)
               case "comp":
                 return "#2dd4bf"; // teal-400 (composite / float)
+              case "blur":
+                return "#a78bfa"; // violet-400 (blur / defocus)
               case "videoInput":
                 return "#8b5cf6"; // violet-600 (video input)
               case "sphereLightRender":

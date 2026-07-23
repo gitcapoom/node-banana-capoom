@@ -49,6 +49,28 @@ export type CompMergeOp =
 export type CompReformat = "none" | "fill" | "fitH" | "fitV";
 
 /**
+ * Blur/defocus filter kinds, shared by the Blur node and the Comp's per-input
+ * filters (both run on the same GPU passes in colorChain.ts).
+ */
+export type BlurFilterType = "gaussian" | "box" | "motion" | "zoom" | "spin";
+
+/**
+ * Per-input filter applied to a comp input's texture BEFORE the merge shader
+ * samples it (float-preserving pre-pass). `radius` is the amount: pixels for
+ * gaussian/box/motion; zoom/spin scale proportionally. `angle` is the motion
+ * direction in degrees CCW (0 = horizontal).
+ */
+export interface CompInputFilter {
+  filter: BlurFilterType | "none";
+  radius: number;
+  angle: number;
+}
+
+export function defaultCompFilter(): CompInputFilter {
+  return { filter: "none", radius: 10, angle: 0 };
+}
+
+/**
  * Per-input affine transform (FG, FG_Alpha, Matte — never BG).
  * `enabled` is the master checkbox that reveals the on-screen controls; for
  * FG_Alpha, `enabled=false` ALSO means "follow FG" (inherit FG's transform).
@@ -97,6 +119,14 @@ export interface CompNodeData extends BaseNodeData {
   bgAlphaReformat: CompReformat;   // matches BG
   fgAlphaReformat: CompReformat;   // matches FG
   matteReformat: CompReformat;     // matches BG
+
+  // Per-input filters (blur/defocus pre-pass). Optional so legacy saves load
+  // untouched — absent ⇒ "none".
+  bgFilter?: CompInputFilter;
+  bgAlphaFilter?: CompInputFilter;
+  fgFilter?: CompInputFilter;
+  fgAlphaFilter?: CompInputFilter;
+  matteFilter?: CompInputFilter;
 
   /** Multiply the FG's / BG's RGB by its (effective) alpha before compositing. */
   premultiplyFg: boolean;
@@ -165,6 +195,11 @@ export function defaultCompData(): CompNodeData {
     bgAlphaReformat: "none",
     fgAlphaReformat: "none",
     matteReformat: "none",
+    bgFilter: defaultCompFilter(),
+    bgAlphaFilter: defaultCompFilter(),
+    fgFilter: defaultCompFilter(),
+    fgAlphaFilter: defaultCompFilter(),
+    matteFilter: defaultCompFilter(),
     premultiplyFg: false,
     premultiplyBg: false,
     bgOpacity: 1,
