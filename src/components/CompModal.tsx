@@ -9,7 +9,7 @@ import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { renderCompToCanvas, floatNodeToDataUrl, renderComp } from "@/utils/colorChain";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPieces } from "@/utils/compTransform";
-import { COMP_OP_LABELS, defaultCompTransform } from "@/types/comp";
+import { COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, type CompInputFilter, type BlurFilterType } from "@/types/comp";
 import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/types";
 
 type Pt = { x: number; y: number };
@@ -26,6 +26,14 @@ const REFORMATS: Array<{ v: CompReformat; label: string }> = [
   { v: "fill", label: "Fill" },
   { v: "fitH", label: "Fit Horizontal" },
   { v: "fitV", label: "Fit Vertical" },
+];
+const FILTERS: Array<{ v: CompInputFilter["filter"]; label: string }> = [
+  { v: "none", label: "None" },
+  { v: "gaussian", label: "Gaussian" },
+  { v: "box", label: "Box" },
+  { v: "motion", label: "Motion" },
+  { v: "zoom", label: "Zoom" },
+  { v: "spin", label: "Spin" },
 ];
 
 function loadSize(src: string): Promise<{ w: number; h: number } | null> {
@@ -132,7 +140,7 @@ export function CompModal() {
 
   // Live preview into the offscreen canvas, rAF-coalesced.
   const previewSig = data
-    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
+    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bgF: data.bgFilter, baF: data.bgAlphaFilter, fgF: data.fgFilter, faF: data.fgAlphaFilter, mtF: data.matteFilter, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
     : "";
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
@@ -159,7 +167,13 @@ export function CompModal() {
   }, []);
 
   const TKEY = { bg: "bgTransform", bgAlpha: "bgAlphaTransform", fg: "fgTransform", fgAlpha: "fgAlphaTransform", matte: "matteTransform" } as const;
+  const FKEY = { bg: "bgFilter", bgAlpha: "bgAlphaFilter", fg: "fgFilter", fgAlpha: "fgAlphaFilter", matte: "matteFilter" } as const;
   const activeKey = TKEY[activeInput];
+  const activeFilterKey = FKEY[activeInput];
+  const activeFilter: CompInputFilter = {
+    ...defaultCompFilter(),
+    ...((data?.[activeFilterKey] as Partial<CompInputFilter> | undefined) ?? {}),
+  };
   // Merge against defaults so legacy/partial transforms always have every field.
   const activeTransform: CompTransform | undefined = data
     ? { ...defaultCompTransform(), ...((data[activeKey] as Partial<CompTransform> | undefined) ?? {}) }
@@ -181,6 +195,15 @@ export function CompModal() {
       updateNodeData(sourceNodeId, { [activeKey]: next } as Partial<CompNodeData>);
     },
     [sourceNodeId, data, activeKey, updateNodeData],
+  );
+
+  const patchFilter = useCallback(
+    (patch: Partial<CompInputFilter>) => {
+      if (!sourceNodeId || !data) return;
+      const cur = { ...defaultCompFilter(), ...((data[activeFilterKey] as Partial<CompInputFilter> | undefined) ?? {}) };
+      updateNodeData(sourceNodeId, { [activeFilterKey]: { ...cur, ...patch } } as Partial<CompNodeData>);
+    },
+    [sourceNodeId, data, activeFilterKey, updateNodeData],
   );
 
   // Latest nudge closure (arrow keys move the active transform by whole pixels).
@@ -539,6 +562,44 @@ export function CompModal() {
                 </select>
               </div>
             )}
+            {/* Per-input filter: blur/defocus this input before the merge */}
+            <div className="flex flex-col gap-1.5 mt-1 pt-2 border-t border-neutral-800">
+              <div className="flex items-center gap-1.5" title="Blur/defocus this input before the merge (float-preserving GPU pre-pass)">
+                <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Filter</label>
+                <select
+                  value={activeFilter.filter}
+                  onChange={(e) => patchFilter({ filter: e.target.value as BlurFilterType | "none" })}
+                  className="nodrag flex-1 min-w-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700"
+                >
+                  {FILTERS.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
+                </select>
+              </div>
+              {activeFilter.filter !== "none" && (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Amount</label>
+                    <input
+                      type="range" min={0} max={100} step={1} value={activeFilter.radius}
+                      onChange={(e) => patchFilter({ radius: parseFloat(e.target.value) })}
+                      className="nodrag flex-1 accent-teal-500"
+                    />
+                    <span className="text-[10px] text-neutral-400 w-9 text-right tabular-nums">{Math.round(activeFilter.radius)}px</span>
+                  </div>
+                  {activeFilter.filter === "motion" && (
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Angle</label>
+                      <input
+                        type="range" min={0} max={360} step={1} value={activeFilter.angle}
+                        onChange={(e) => patchFilter({ angle: parseFloat(e.target.value) })}
+                        className="nodrag flex-1 accent-teal-500"
+                      />
+                      <span className="text-[10px] text-neutral-400 w-9 text-right tabular-nums">{Math.round(activeFilter.angle)}°</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
             <div className="text-[10px] text-neutral-600 leading-snug mt-1">
               Drag the box to move · corner = scale both · edge dots = scale X/Y · amber = rotate · center dot = pivot (double-click = auto). (0,0) = bottom-left.
               {activeInput === "bgAlpha" ? " Reformat matches BG." : activeInput === "fgAlpha" ? " Reformat matches FG." : activeInput === "matte" ? " Reformat matches BG; matte limits the merge." : ""}
