@@ -6,6 +6,52 @@ import { validateWorkflowPath } from "@/utils/pathValidation";
 
 export const maxDuration = 300; // 5 minute timeout for large workflow files
 
+/**
+ * Crash-safe write: write to a temp sibling, fsync so the DATA reaches disk,
+ * rotate the previous good copy to .bak, then rename over the target.
+ *
+ * The old in-place `writeFile` zeroed AI_Gen.json when the machine crashed
+ * mid-save: NTFS committed the new file size (metadata) but the page cache
+ * holding the content never flushed, so the sole copy read back as NUL bytes.
+ * With this path a crash can only ever lose the in-flight save — the target
+ * always holds the previous complete JSON, and .bak the one before it.
+ */
+async function writeWorkflowAtomic(filePath: string, json: string): Promise<void> {
+  const tmpPath = `${filePath}.tmp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const handle = await fs.open(tmpPath, "w");
+  try {
+    await handle.writeFile(json, "utf-8");
+    await handle.sync(); // force data to disk BEFORE the rename makes it live
+  } finally {
+    await handle.close();
+  }
+
+  // Keep the previous save as .bak — but never displace a good backup with a
+  // corrupt target (a zeroed/truncated file doesn't start with '{').
+  try {
+    const head = Buffer.alloc(1);
+    const th = await fs.open(filePath, "r");
+    try {
+      await th.read(head, 0, 1, 0);
+    } finally {
+      await th.close();
+    }
+    if (head[0] === 0x7b /* '{' */) {
+      await fs.copyFile(filePath, `${filePath}.bak`);
+    }
+  } catch {
+    // No existing target — first save.
+  }
+
+  try {
+    await fs.rename(tmpPath, filePath);
+  } catch {
+    // Some filesystems refuse rename-over-existing — replace explicitly.
+    await fs.unlink(filePath).catch(() => {});
+    await fs.rename(tmpPath, filePath);
+  }
+}
+
 // POST: Save workflow to file
 export async function POST(request: NextRequest) {
   let directoryPath: string | undefined;
@@ -113,9 +159,9 @@ export async function POST(request: NextRequest) {
     const safeName = filename.replace(/[^a-zA-Z0-9-_]/g, "_");
     const filePath = path.join(directoryPath, `${safeName}.json`);
 
-    // Write workflow JSON
+    // Write workflow JSON (crash-safe: tmp + fsync + .bak rotation + rename)
     const json = JSON.stringify(workflow, null, 2);
-    await fs.writeFile(filePath, json, "utf-8");
+    await writeWorkflowAtomic(filePath, json);
 
     logger.info('file.save', 'Workflow saved successfully', {
       filePath,
@@ -243,9 +289,27 @@ export async function PUT(request: NextRequest) {
     // traversal is still caught.
     const nativePath = path.normalize(filePath);
 
-    // Read and parse the workflow file
-    const content = await fs.readFile(nativePath, 'utf-8');
-    const workflow = JSON.parse(content);
+    // Read and parse the workflow file. If it's unreadable (e.g. zeroed by a
+    // crash mid-save), fall back to the rolling .bak the save path maintains.
+    let workflow: { version?: unknown; nodes?: unknown; edges?: unknown };
+    let restoredFromBackup = false;
+    try {
+      const content = await fs.readFile(nativePath, 'utf-8');
+      workflow = JSON.parse(content);
+    } catch (parseErr) {
+      const bakPath = `${nativePath}.bak`;
+      try {
+        workflow = JSON.parse(await fs.readFile(bakPath, 'utf-8'));
+        restoredFromBackup = true;
+        logger.warn('file.load', 'Main workflow file unreadable — loaded .bak fallback', {
+          filePath,
+          bakPath,
+          error: parseErr instanceof Error ? parseErr.message : 'parse failed',
+        });
+      } catch {
+        throw parseErr; // no usable backup — surface the original error
+      }
+    }
 
     // Basic validation that it's a workflow file
     if (!workflow.version || !workflow.nodes || !workflow.edges) {
@@ -258,8 +322,9 @@ export async function PUT(request: NextRequest) {
     logger.info('file.load', 'Workflow opened by path successfully', {
       filePath,
       dirPath,
-      nodeCount: workflow.nodes?.length,
-      edgeCount: workflow.edges?.length,
+      nodeCount: (workflow.nodes as unknown[])?.length,
+      edgeCount: (workflow.edges as unknown[])?.length,
+      restoredFromBackup,
     });
 
     return NextResponse.json({
@@ -267,6 +332,10 @@ export async function PUT(request: NextRequest) {
       workflow,
       directoryPath: path.dirname(nativePath),
       fileName: path.basename(nativePath, '.json'),
+      restoredFromBackup,
+      ...(restoredFromBackup
+        ? { warning: "Main workflow file was corrupt — loaded the last-good .bak (previous save). Re-save to repair the main file." }
+        : {}),
     });
   } catch (error) {
     logger.error('file.error', 'Failed to open workflow by path', {

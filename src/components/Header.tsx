@@ -7,6 +7,7 @@ import { ProjectSetupModal } from "./ProjectSetupModal";
 import { CostIndicator } from "./CostIndicator";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
 import { FileOpenDialog } from "./FileOpenDialog";
+import { useToast } from "./Toast";
 import { useDynamicPinsEnabled, setDynamicPinsEnabled } from "@/lib/dynamicPins";
 
 function CommentsNavigationIcon() {
@@ -166,6 +167,16 @@ export function Header() {
       if (!result.success) {
         alert(`Failed to open: ${result.error}`);
         return;
+      }
+
+      // Server fell back to the rolling .bak (main file corrupt) — warn.
+      if (result.restoredFromBackup) {
+        useToast.getState().show(
+          "Workflow file was corrupt — loaded the last-good backup",
+          "warning",
+          true,
+          result.warning || filePath
+        );
       }
 
       const workflow = result.workflow as WorkflowFile;
