@@ -1,4 +1,5 @@
 import { useWorkflowStore, WorkflowFile, generateWorkflowId } from "@/store/workflowStore";
+import { useToast } from "@/components/Toast";
 
 /**
  * Open a project/workflow from an absolute file path.
@@ -23,6 +24,17 @@ export async function openWorkflowByPath(
 
     if (!result.success) {
       return { ok: false, error: result.error || "Failed to open workflow" };
+    }
+
+    // The server falls back to the rolling .bak when the main file is corrupt
+    // (e.g. zeroed by a crash mid-save) — tell the user they're one save behind.
+    if (result.restoredFromBackup) {
+      useToast.getState().show(
+        "Workflow file was corrupt — loaded the last-good backup",
+        "warning",
+        true,
+        result.warning || filePath
+      );
     }
 
     const workflow = result.workflow as WorkflowFile;
