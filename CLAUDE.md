@@ -46,6 +46,12 @@ Node Banana is a node-based visual workflow editor for AI image generation. User
 | Image generation API route | `src/app/api/generate/route.ts` |
 | LLM text generation API route | `src/app/api/llm/route.ts` |
 | Cost calculations | `src/utils/costCalculator.ts` |
+| Float color chain (GPU, grade/blur/comp) | `src/utils/colorChain.ts` |
+| Comp orchestration (executor + previews) | `src/utils/compComposite.ts` |
+| Dynamic-pin edge conformance / migration | `src/store/utils/pinMigration.ts` |
+| Lazy full-res image field maps | `src/utils/imageFieldMap.ts` |
+| Crash-safe workflow save/load route | `src/app/api/workflow/route.ts` |
+| Splat-viewer local installer | `scripts/install-splat-viewer.mjs` |
 | Grid splitting utility | `src/utils/gridSplitter.ts` |
 | Equirectangular projection math | `src/utils/equirectProjection.ts` |
 | Cinema camera presets | `src/utils/cinemaCameraPresets.ts` |
@@ -131,11 +137,39 @@ LLM models:
 | `panoCrop` | Perspective snapshot from pano | auto-created | image, text (metadata) |
 | `panoEditor` | Composite edit back onto pano | image ×2, text | image |
 
-### Mask & Utility Nodes
+### Mask, Roto & Compositing Nodes
 
 | Type | Purpose | Inputs | Outputs |
 |------|---------|--------|---------|
 | `maskPainter` | Paint inpainting masks (Konva) | image | image (mask) |
+| `roto` | Bezier/polygon roto shapes → matte (Konva modal) | image | image (matte) |
+| `comp` | Nuke Merge clone: 22 ops, per-input transforms + blur/defocus filters, float pipeline (CompModal editor) | image ×5 (`image-comp_bg`, `image-comp_bg_alpha`, `image-comp_fg`, `image-comp_fg_alpha`, `image-comp_matte`) | image |
+| `blur` | GPU blur: gaussian/box/motion/zoom/spin + matte gate + mix, float chain | image, `image-blur_matte` | image |
+
+### Color & Image Processing Nodes
+
+All are cheap local processors (see `LOCAL_PROCESSOR_TYPES`) with the
+`sourceImage`/`outputImage` pattern. `colorGrade`/`hsvCorrect`/`contrastAdjust`/`blur`/`comp`
+form the **float color chain** (`COLOR_NODE_TYPES` in `src/utils/colorChain.ts`):
+16-bit float GPU textures pass between them unclamped; 8-bit PNGs only for
+display/persistence/non-color consumers.
+
+| Type | Purpose |
+|------|---------|
+| `colorGrade` | Blackpoint/whitepoint/lift/gain/multiply/offset/gamma |
+| `hsvCorrect` | Hue shift / saturation / value |
+| `contrastAdjust` | S-curve contrast with roll-off + pivot |
+| `imageCrop` | Persistent relative crop region |
+| `mirror` | Horizontal / vertical flip |
+| `reformat` | Resize with fill/fit modes |
+| `cubemapEquirect` | Cubemap cross ↔ equirectangular |
+| `cubemapFaces` | Cubemap ↔ six face images (multi-handle) |
+| `panoShift` | Horizontal shift with seam wrap |
+| `sphereLightRender` | Locally-rendered lit sphere (no inputs) |
+| `upscaleGrid` | Grid-split upscaling via generator models |
+| `image2GS` | Image → Gaussian Splat (3d output) |
+| `videoInput` / `videoCompare` | Video file input / A-B video compare |
+| `router` / `switch` / `conditionalSwitch` | Routing / toggling / rule-based routing |
 
 ## Node Connection System
 
@@ -330,9 +364,13 @@ Why the reverse-proxy (not a plain link/iframe to the OTOSERVE10 URL): the proxi
 - Nodes open it by URL: `window.open('/viewer?url=…&worldId=…')` (`SpzViewerNode`, `WorldLabsWorldNode`; `Image2GSNode` feeds blob: URLs into `SpzViewerNode` over the `3d` handle). `/viewer/pano` and `/viewer/[worldId]` are node-banana's own app routes, untouched by the proxy.
 - Viewer URL params: `url`, `name`, `worldId`, `lens`, `sensor`, `gsDir`, `projectDir`.
 
+### Local build option (external users / no hosted origin)
+- `npm run viewer:install` (`scripts/install-splat-viewer.mjs`) clones + builds the viewer into **`public/_viewer/` (gitignored)**. `next.config.ts` detects `public/_viewer/index.html` at startup and switches the `/viewer` + `/assets/*` rewrites to internal paths — no external origin needed. Re-run to update.
+- **Precedence:** a local `public/_viewer/` build SHADOWS the hosted OTOSERVE10 origin. On this workstation there should normally be NO `public/_viewer/` folder — if `/viewer` ever looks stale here, check for and delete a forgotten local build first.
+
 ### Updating the viewer
 - **All viewer changes happen in the gitcapoom/splat-viewer repo**, never in node-banana.
-- To ship a viewer update: redeploy the hosted build on OTOSERVE10 (`C:\caddy\deploy-splat-viewer.ps1` — pulls main, builds, copies into `D:/Projects/AD/_viewer/`). Every consumer picks it up on next open; node-banana needs no change, no rebuild, no restart.
+- To ship a viewer update: redeploy the hosted build on OTOSERVE10 (`C:\caddy\deploy-splat-viewer.ps1` — pulls main, builds, copies into `D:/Projects/AD/_viewer/`). Every consumer picks it up on next open; node-banana needs no change, no rebuild, no restart. (Users on the local-build path instead re-run `npm run viewer:install`.)
 
 ### Features
 
