@@ -60,3 +60,5 @@ generations/
 .agents/
 
 .superset/
+# local splat-viewer build (npm run viewer:install) — a dependency, never embedded
+/public/_viewer/
