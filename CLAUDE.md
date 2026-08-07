@@ -109,7 +109,7 @@ LLM models:
 | `generateVideo` | AI video generation | image, text | video |
 | `generate3d` | AI 3D model generation | image, text | 3d |
 | `generateAudio` | AI audio/TTS generation | text | audio |
-| `llmGenerate` | AI text generation | text, image | text |
+| `llmGenerate` | AI text generation | text, image, video (Gemini only) | text |
 | `splitGrid` | Split image into grid cells | image | reference |
 | `audioInput` | Load/upload audio files | audio | audio |
 | `output` | Display final result | image | none |

@@ -111,6 +111,48 @@ function googleImagePart(img: string): { inlineData: { mimeType: string; data: s
 type GooglePart = { inlineData: { mimeType: string; data: string } } | { text: string };
 type GoogleContent = { role: "user" | "model"; parts: GooglePart[] };
 
+// ─── Video input (Gemini only) ────────────────────────────────────
+// Gemini accepts video as inlineData parts (≤ ~20MB inline). Anthropic and
+// OpenAI chat completions have no video input — the route rejects those
+// combinations with a clear error instead of a cryptic provider 400.
+
+const GOOGLE_VIDEO_INLINE_LIMIT = 20 * 1024 * 1024;
+
+/**
+ * Convert a video input (data: URL, or an http(s) URL fetched server-side)
+ * into Gemini's inlineData part. Throws a user-readable error for oversized
+ * or unreadable videos.
+ */
+async function googleVideoPart(vid: string): Promise<GooglePart> {
+  let mimeType = "video/mp4";
+  let base64Data: string;
+
+  if (vid.startsWith("data:")) {
+    const matches = vid.match(/^data:(.+?);base64,(.+)$/);
+    if (!matches) throw new Error("Unrecognized video data URL");
+    mimeType = matches[1];
+    base64Data = matches[2];
+  } else {
+    // http(s) URL — providers won't fetch arbitrary URLs; inline it ourselves.
+    const resp = await fetch(vid);
+    if (!resp.ok) throw new Error(`Could not fetch video input (${resp.status})`);
+    const buf = Buffer.from(await resp.arrayBuffer());
+    mimeType = resp.headers.get("content-type")?.split(";")[0] || "video/mp4";
+    base64Data = buf.toString("base64");
+  }
+
+  const rawSize = Math.ceil(base64Data.length * 3 / 4);
+  if (rawSize > GOOGLE_VIDEO_INLINE_LIMIT) {
+    throw new Error(
+      `Video input is ${(rawSize / 1024 / 1024).toFixed(0)}MB — Gemini accepts up to ` +
+      `${(GOOGLE_VIDEO_INLINE_LIMIT / 1024 / 1024).toFixed(0)}MB inline. Trim or downscale the video first ` +
+      `(Video Trim / a shorter clip).`
+    );
+  }
+  if (!mimeType.startsWith("video/")) mimeType = "video/mp4";
+  return { inlineData: { mimeType, data: base64Data } };
+}
+
 // ─── Reasoning / thinking ─────────────────────────────────────────
 // Cross-provider dial-up for "think more before answering". Each
 // provider exposes a different native parameter — we map a single
@@ -142,9 +184,9 @@ function supportsReasoning(provider: string, model: string): boolean {
   return false;
 }
 
-/** Anthropic `thinking.budget_tokens`. Higher = deeper reasoning, costs
- *  more output tokens. Note: the budget is *subtracted* from max_tokens,
- *  so users dialing this up may need to bump Max Tokens too. */
+/** Anthropic `thinking.budget_tokens` — ONLY for pre-adaptive Claude models
+ *  (3.7 Sonnet, Opus/Sonnet 4.0–4.5, Haiku 4.5). Higher = deeper reasoning,
+ *  costs more output tokens; the budget shares max_tokens with the reply. */
 function anthropicThinkingBudget(level: ReasoningLevel): number {
   switch (level) {
     case "low": return 2048;
@@ -152,6 +194,24 @@ function anthropicThinkingBudget(level: ReasoningLevel): number {
     case "high": return 16384;
     default: return 0;
   }
+}
+
+/**
+ * Claude models where `thinking: {type: "enabled", budget_tokens}` is
+ * REMOVED (the API returns 400) and adaptive thinking + `output_config.effort`
+ * replaces it: Opus 4.6+, Sonnet 4.6+, every 5+-tier model (opus-5, sonnet-5),
+ * and Fable/Mythos. Opus 4.6 / Sonnet 4.6 technically still accept the old
+ * shape as a deprecated escape hatch, but adaptive is the recommended mode
+ * there too, so they route through it as well.
+ */
+function anthropicUsesAdaptiveThinking(model: string): boolean {
+  const m = model.toLowerCase();
+  if (/^claude-(fable|mythos)/.test(m)) return true;
+  if (/^claude-opus-4-[6-9]/.test(m)) return true;
+  if (/^claude-sonnet-4-[6-9]/.test(m)) return true;
+  // Bare major version ≥ 5 for any tier: claude-opus-5, claude-sonnet-5, …
+  if (/^claude-(opus|sonnet|haiku)-([5-9]|\d{2,})(-|$)/.test(m)) return true;
+  return false;
 }
 
 /** OpenAI's `reasoning_effort`. "minimal" is opt-out-style on GPT-5;
@@ -205,12 +265,18 @@ async function generateWithGoogle(
   });
 
   // Translate turns into Gemini's `contents` array. Assistant role is
-  // `model` in Gemini parlance. Each turn's images become inlineData parts
-  // followed by a text part. Async because oversized images go through
-  // sharp-based compression before encoding.
+  // `model` in Gemini parlance. Each turn's videos + images become inlineData
+  // parts followed by a text part. Async because oversized images go through
+  // sharp-based compression before encoding (videos are inlined as-is, with
+  // a hard size cap).
   const contents: GoogleContent[] = [];
   for (const m of messages) {
     const parts: GooglePart[] = [];
+    if (m.videos && m.videos.length > 0) {
+      for (const vid of m.videos) {
+        parts.push(await googleVideoPart(vid));
+      }
+    }
     if (m.images && m.images.length > 0) {
       for (const img of m.images) {
         const sized = await enforceImageSize(img, PROVIDER_IMAGE_LIMITS.google, "google");
@@ -387,14 +453,16 @@ type AnthropicContentBlock =
 type AnthropicMessage = { role: "user" | "assistant"; content: string | AnthropicContentBlock[] };
 
 /**
- * Anthropic's "thinking-era" Opus models (Opus 4.5 onward and any Opus 5+)
- * reject explicit `temperature` — the API returns 400 with
- * "`temperature` is deprecated for this model." Everything earlier
- * (Sonnet/Haiku across all generations, Opus 4 / 4.1) still accepts it.
+ * Claude models that reject an explicit `temperature` (400: "`temperature`
+ * is deprecated for this model"): Opus 4.5 onward, every 5+-tier model
+ * (opus-5, sonnet-5), and Fable/Mythos. Earlier Sonnet/Haiku generations and
+ * Opus 4 / 4.1 still accept it.
  */
 function anthropicAcceptsTemperature(model: string): boolean {
-  if (/^claude-opus-4-[5-9]/.test(model)) return false;
-  if (/^claude-opus-(\d{2,}|[5-9])/.test(model)) return false;
+  const m = model.toLowerCase();
+  if (/^claude-opus-4-[5-9]/.test(m)) return false;
+  if (/^claude-(fable|mythos)/.test(m)) return false;
+  if (/^claude-(opus|sonnet|haiku)-([5-9]|\d{2,})(-|$)/.test(m)) return false;
   return true;
 }
 
@@ -460,18 +528,21 @@ async function generateWithAnthropic(
     }
   }
 
-  // Reasoning: extended thinking. Anthropic requires temperature to be
-  // omitted (or =1) whenever thinking is enabled, AND the thinking
-  // budget is *deducted from* max_tokens — so we need to ensure the
-  // budget fits with headroom for the actual reply.
+  // Reasoning: two API generations.
+  //  - Adaptive-era models (Opus/Sonnet 4.6+, all 5+ tiers, Fable/Mythos):
+  //    `thinking: {type: "adaptive"}` + `output_config.effort`. The old
+  //    `budget_tokens` shape returns 400 on these models.
+  //  - Older thinking models (3.7 Sonnet, 4.0–4.5, Haiku 4.5): the classic
+  //    `thinking: {type: "enabled", budget_tokens}`.
+  // Either way temperature must be omitted while thinking is on, and thinking
+  // shares max_tokens with the visible reply — keep headroom for both.
   const useReasoning = reasoning !== "off" && supportsReasoning("anthropic", modelId);
-  const thinkBudget = useReasoning ? anthropicThinkingBudget(reasoning) : 0;
-  // Reserve at least 1024 tokens for the visible reply on top of thinking;
-  // bump max_tokens automatically if the user's slider would leave no room.
-  const effectiveMaxTokens = thinkBudget > 0
-    ? Math.max(maxTokens, thinkBudget + 1024)
+  const adaptive = anthropicUsesAdaptiveThinking(modelId);
+  const thinkBudget = useReasoning && !adaptive ? anthropicThinkingBudget(reasoning) : 0;
+  const effectiveMaxTokens = useReasoning
+    ? Math.max(maxTokens, anthropicThinkingBudget(reasoning) + 1024)
     : maxTokens;
-  const tempForRequest = thinkBudget > 0
+  const tempForRequest = useReasoning
     ? null
     : (anthropicAcceptsTemperature(modelId) ? temperature : null);
 
@@ -489,6 +560,9 @@ async function generateWithAnthropic(
       ...(tempForRequest !== null ? { temperature: tempForRequest } : {}),
       max_tokens: effectiveMaxTokens,
       ...(system ? { system } : {}),
+      ...(useReasoning && adaptive
+        ? { thinking: { type: "adaptive" }, output_config: { effort: reasoning } }
+        : {}),
       ...(thinkBudget > 0 ? { thinking: { type: "enabled", budget_tokens: thinkBudget } } : {}),
     }),
   });
@@ -539,6 +613,7 @@ export async function POST(request: NextRequest) {
     const {
       prompt,
       images,
+      videos,
       messages,
       system,
       provider,
@@ -550,12 +625,17 @@ export async function POST(request: NextRequest) {
 
     // Normalise to a single internal shape (`messages[]`). New multi-turn
     // callers populate `messages` directly; legacy one-shot callers pass
-    // `prompt`/`images` and we wrap them into a single user turn.
+    // `prompt`/`images`/`videos` and we wrap them into a single user turn.
     let normMessages: ConversationTurn[];
     if (Array.isArray(messages) && messages.length > 0) {
       normMessages = messages;
     } else if (prompt) {
-      normMessages = [{ role: "user", text: prompt, ...(images && images.length > 0 ? { images } : {}) }];
+      normMessages = [{
+        role: "user",
+        text: prompt,
+        ...(images && images.length > 0 ? { images } : {}),
+        ...(videos && videos.length > 0 ? { videos } : {}),
+      }];
     } else {
       logger.warn('api.llm', 'LLM request validation failed: no prompt or messages', { requestId });
       return NextResponse.json<LLMGenerateResponse>(
@@ -576,6 +656,32 @@ export async function POST(request: NextRequest) {
       const valid = m.images.filter(isLikelyImageUrl);
       return valid.length === m.images.length ? m : { ...m, images: valid };
     });
+
+    // Same defense for the video handle: keep only things that could be a
+    // video (data:video/, http(s)). blob: URLs can't be read server-side —
+    // the executor converts them to data URLs before sending.
+    const isLikelyVideoUrl = (s: unknown): s is string => {
+      if (typeof s !== "string" || s.length === 0) return false;
+      return s.startsWith("data:video/") || s.startsWith("http://") || s.startsWith("https://");
+    };
+    normMessages = normMessages.map((m) => {
+      if (!m.videos || m.videos.length === 0) return m;
+      const valid = m.videos.filter(isLikelyVideoUrl);
+      return valid.length === m.videos.length ? m : { ...m, videos: valid };
+    });
+
+    // Video input is a Gemini-only capability — fail loudly (and helpfully)
+    // for the other providers instead of forwarding to a cryptic 400.
+    const hasVideos = normMessages.some((m) => m.videos && m.videos.length > 0);
+    if (hasVideos && provider !== "google") {
+      return NextResponse.json<LLMGenerateResponse>(
+        {
+          success: false,
+          error: "Video input is only supported by Google Gemini models. Switch the LLM node's provider/model to a Gemini model, or disconnect the video input.",
+        },
+        { status: 400 }
+      );
+    }
 
     const totalImages = normMessages.reduce((n, m) => n + (m.images?.length ?? 0), 0);
     logger.info('api.llm', 'LLM generation request received', {

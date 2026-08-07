@@ -44,6 +44,9 @@ export interface ConversationTurn {
   role: "user" | "assistant";
   text: string;
   images?: string[];
+  /** Video data/http URLs. Only Google Gemini models accept video input;
+   *  the route rejects videos on other providers with a clear error. */
+  videos?: string[];
   /** ms epoch — used for sort stability in the UI, optional everywhere else. */
   timestamp?: number;
 }
@@ -59,6 +62,8 @@ export interface ConversationTurn {
 export interface LLMGenerateRequest {
   prompt?: string;
   images?: string[];
+  /** Video inputs (Gemini models only). */
+  videos?: string[];
   messages?: ConversationTurn[];
   system?: string;
   provider: LLMProvider;
@@ -66,7 +71,8 @@ export interface LLMGenerateRequest {
   temperature?: number;
   maxTokens?: number;
   /** Provider-agnostic reasoning / thinking effort. The route translates
-   *  this into each provider's native param: Anthropic `thinking.budget_tokens`,
+   *  this into each provider's native param: Anthropic adaptive thinking +
+   *  `output_config.effort` (older Claude models: `thinking.budget_tokens`),
    *  OpenAI `reasoning_effort`, Google `thinkingConfig.thinkingBudget`. */
   reasoning?: "off" | "low" | "medium" | "high";
 }

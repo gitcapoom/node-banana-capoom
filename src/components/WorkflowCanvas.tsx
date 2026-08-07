@@ -219,7 +219,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       // prompt) and `images` (references passthrough: the ordered list the LLM
       // saw) outputs are only rendered in loopback mode, but listing them here
       // lets batch-connect validation accept edges to/from them.
-      return { inputs: ["text", "image", "image-feedback"], outputs: ["text", "prompt", "images"] };
+      return { inputs: ["text", "image", "image-feedback", "video"], outputs: ["text", "prompt", "images"] };
     case "splitGrid":
       return { inputs: ["image"], outputs: ["reference"] };
     case "output":

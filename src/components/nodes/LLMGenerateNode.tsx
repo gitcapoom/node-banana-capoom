@@ -460,6 +460,18 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
           />
         </>
       )}
+      {/* Video input — Gemini models only (the route rejects other providers
+          with a clear error). Rendered in BOTH pin modes (like image-feedback)
+          so a video edge can never point at an unrendered handle. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="video"
+        style={{ top: "85%" }}
+        data-handletype="video"
+        className="!bg-violet-500 !border-violet-700"
+        title="Video input — analyzed by Gemini models (not supported by OpenAI/Claude)"
+      />
       {/* Feedback image input (loopback only) — the previous generation = Image 1 */}
       {loopbackMode && (
         <Handle
