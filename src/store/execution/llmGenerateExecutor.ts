@@ -127,6 +127,30 @@ export async function executeLlmGenerate(
   // Keep the passthrough list clean too (it's forwarded to the generator).
   if (passthroughList) passthroughList = passthroughList.filter(isLikelyImageUrl);
 
+  // Video inputs (Gemini models only — the route rejects other providers with
+  // a clear error). blob: URLs only exist in this browser session, so convert
+  // them to data URLs before they cross to the server.
+  let videos: string[] = [];
+  for (const vid of inputs.videos) {
+    if (typeof vid !== "string" || vid.length === 0) continue;
+    if (vid.startsWith("blob:")) {
+      try {
+        const blob = await fetch(vid).then((r) => r.blob());
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Failed to read video blob"));
+          reader.readAsDataURL(blob);
+        });
+        videos.push(dataUrl);
+      } catch (err) {
+        console.warn(`[llmGenerateExecutor] Could not read video blob URL:`, err);
+      }
+    } else if (vid.startsWith("data:video/") || vid.startsWith("http://") || vid.startsWith("https://")) {
+      videos.push(vid);
+    }
+  }
+
   if (!text) {
     updateNodeData(node.id, {
       status: "error",
@@ -150,6 +174,7 @@ export async function executeLlmGenerate(
     role: "user",
     text,
     ...(images.length > 0 ? { images } : {}),
+    ...(videos.length > 0 ? { videos } : {}),
     timestamp: Date.now(),
   };
 
@@ -172,7 +197,7 @@ export async function executeLlmGenerate(
   // appended to the system prompt (see effectiveSystem below), so no pinning
   // is needed here.
   const historyToSend = loopbackMode
-    ? slicedPrior.map(({ images: _img, ...rest }) => rest)
+    ? slicedPrior.map(({ images: _img, videos: _vid, ...rest }) => rest)
     : slicedPrior;
 
   const outboundMessages: ConversationTurn[] = useConversation

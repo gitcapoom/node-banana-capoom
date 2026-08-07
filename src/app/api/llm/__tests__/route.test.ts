@@ -685,6 +685,115 @@ describe("/api/llm route", () => {
       );
     });
 
+    it("should use adaptive thinking + effort on current Claude models (no budget_tokens)", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            content: [
+              { type: "thinking", thinking: "" },
+              { type: "text", text: "Thought about it" },
+            ],
+          }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Hard question",
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        temperature: 0.7,
+        maxTokens: 1024,
+        reasoning: "high",
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.text).toBe("Thought about it");
+      // Adaptive shape: thinking {type: adaptive} + output_config.effort,
+      // temperature omitted, max_tokens bumped for thinking headroom.
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.anthropic.com/v1/messages",
+        expect.objectContaining({
+          body: JSON.stringify({
+            model: "claude-opus-4-6",
+            messages: [{ role: "user", content: "Hard question" }],
+            max_tokens: 17408,
+            thinking: { type: "adaptive" },
+            output_config: { effort: "high" },
+          }),
+        })
+      );
+    });
+
+    it("should keep budget_tokens thinking on pre-adaptive Claude models", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({ content: [{ type: "text", text: "ok" }] }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Question",
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+        temperature: 0.7,
+        maxTokens: 1024,
+        reasoning: "medium",
+      });
+
+      await POST(request);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.anthropic.com/v1/messages",
+        expect.objectContaining({
+          body: JSON.stringify({
+            model: "claude-sonnet-4-5-20250929",
+            messages: [{ role: "user", content: "Question" }],
+            max_tokens: 9216,
+            thinking: { type: "enabled", budget_tokens: 8192 },
+          }),
+        })
+      );
+    });
+
+    it("should omit temperature for 5-tier Claude models even with reasoning off", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({ content: [{ type: "text", text: "ok" }] }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Question",
+        provider: "anthropic",
+        model: "claude-sonnet-5",
+        temperature: 0.7,
+        maxTokens: 1024,
+        reasoning: "off",
+      });
+
+      await POST(request);
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "https://api.anthropic.com/v1/messages",
+        expect.objectContaining({
+          body: JSON.stringify({
+            model: "claude-sonnet-5",
+            messages: [{ role: "user", content: "Question" }],
+            max_tokens: 1024,
+          }),
+        })
+      );
+    });
+
     it("should reject missing Anthropic API key", async () => {
       delete process.env.ANTHROPIC_API_KEY;
 
@@ -855,6 +964,73 @@ describe("/api/llm route", () => {
           }),
         })
       );
+    });
+  });
+
+  describe("Video input", () => {
+    beforeEach(() => {
+      global.fetch = mockFetch;
+    });
+
+    it("should send video as a Gemini inlineData part before the text", async () => {
+      process.env.GEMINI_API_KEY = "test-gemini-key";
+      mockGenerateContent.mockResolvedValueOnce({ text: "A clip of a cat" });
+
+      const request = createMockPostRequest({
+        prompt: "Describe this video",
+        videos: ["data:video/mp4;base64,AAAAFGZ0eXA="],
+        provider: "google",
+        model: "gemini-2.5-flash",
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.text).toBe("A clip of a cat");
+      const callArg = mockGenerateContent.mock.calls[0][0];
+      expect(callArg.contents[0].parts[0]).toEqual({
+        inlineData: { mimeType: "video/mp4", data: "AAAAFGZ0eXA=" },
+      });
+      expect(callArg.contents[0].parts[callArg.contents[0].parts.length - 1]).toEqual({
+        text: "Describe this video",
+      });
+    });
+
+    it("should reject video input for non-Gemini providers with a clear error", async () => {
+      process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+
+      const request = createMockPostRequest({
+        prompt: "Describe this video",
+        videos: ["data:video/mp4;base64,AAAAFGZ0eXA="],
+        provider: "anthropic",
+        model: "claude-sonnet-4.5",
+      });
+
+      const response = await POST(request);
+      const data = await response.json();
+
+      expect(response.status).toBe(400);
+      expect(data.success).toBe(false);
+      expect(data.error).toContain("Google Gemini");
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("should strip non-video values wired to the video handle", async () => {
+      process.env.GEMINI_API_KEY = "test-gemini-key";
+      mockGenerateContent.mockResolvedValueOnce({ text: "ok" });
+
+      const request = createMockPostRequest({
+        prompt: "Hello",
+        videos: ["not a video at all", "blob:http://localhost/x"],
+        provider: "google",
+        model: "gemini-2.5-flash",
+      });
+
+      const response = await POST(request);
+      expect(response.status).toBe(200);
+      const callArg = mockGenerateContent.mock.calls[0][0];
+      expect(callArg.contents[0].parts).toEqual([{ text: "Hello" }]);
     });
   });
 });

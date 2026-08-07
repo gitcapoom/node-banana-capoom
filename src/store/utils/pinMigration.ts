@@ -132,6 +132,10 @@ export function migrateEdgeHandles(
     // field and gets rewritten to a plain reference pin on the classic→dynamic
     // pass that runs at load, so the feedback connection is lost after restart.
     if (handle === "image-feedback" || handle === "image-bg") return e;
+    // llmGenerate's static `video` handle (Gemini video input) is rendered in
+    // BOTH pin modes and has no dyn-pin equivalent — migrating it would send
+    // the edge to a video dyn-pin that conformance then drops (no schema).
+    if (handle === "video" && node.type === "llmGenerate") return e;
 
     // Router: image-first bundle. Only image edges convert; in classic mode they
     // collapse back to the single multi-edge "image" handle (no image-N).

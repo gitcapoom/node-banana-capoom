@@ -203,7 +203,7 @@ npm run start
 | Generate 3D | in: image+text (+dynamic), out: 3d | 3D model generation |
 | Image to Splat | in: image, out: 3d | Single image → Gaussian Splat |
 | Generate Audio | in: text, out: audio | Audio/music generation |
-| LLM Generate | in: text+image, out: text | Text generation (Gemini, OpenAI) |
+| LLM Generate | in: text+image+video, out: text | Text generation (Gemini, OpenAI, Claude); video input analyzed by Gemini models only |
 | Generate Panorama | in: image+text, out: image+text | WorldLabs Marble equirectangular pano |
 | Generate World | in: image, out: 3d+image | WorldLabs Marble 3D Gaussian Splat world |
 | Sphere Light Render | out: image | Locally-rendered lit sphere (lighting reference) |
