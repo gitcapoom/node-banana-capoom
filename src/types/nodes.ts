@@ -105,6 +105,9 @@ export interface ImageInputNodeData extends BaseNodeData {
   outputImage?: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
 }
 
 /**
@@ -146,6 +149,9 @@ export interface ImageCropNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
 }
 
 /**
@@ -161,6 +167,9 @@ export interface MirrorNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
 }
 
 export interface ReformatNodeData extends BaseNodeData {
@@ -175,6 +184,9 @@ export interface ReformatNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
 }
 
 /**
@@ -196,6 +208,9 @@ export interface CubemapEquirectNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
 }
 
 /**
@@ -232,6 +247,9 @@ export interface ColorGradeNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
 }
 
 /**
@@ -252,6 +270,9 @@ export interface HsvCorrectNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
 }
 
 /**
@@ -273,6 +294,9 @@ export interface ContrastAdjustNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
 }
 
 /**
@@ -297,6 +321,9 @@ export interface BlurNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
   error?: string | null;
 }
 
@@ -336,6 +363,9 @@ export interface PanoShiftNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
+   *  is current WITHOUT needing a file ref — see previewSrc. */
+  outputImageThumbKey?: string | null;
 }
 
 /**
@@ -553,6 +583,10 @@ export interface GenerateVideoNodeData extends BaseNodeData {
   outputVideoRef?: string; // External video reference for storage optimization
   thumbnailImage?: string | null; // First frame thumbnail for canvas display
   thumbnailImageRef?: string; // External ref to thumbnail saved in generations/
+  /** cheapUrlKey of the video this thumbnail was captured from. Without it the
+   *  capture re-runs on every hydration — decoding the whole video and seeking
+   *  four times for a thumbnail that already exists. */
+  thumbnailImageKey?: string | null;
   selectedModel?: SelectedModel; // Required for video generation (no legacy fallback)
   parameters?: Record<string, unknown>; // Model-specific parameters
   inputSchema?: ModelInputDef[]; // Model's input schema for dynamic handles

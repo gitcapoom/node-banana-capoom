@@ -9,6 +9,7 @@ import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { cropImageToDataUrl } from "@/utils/cropImage";
 import type { ImageCropNodeData } from "@/types";
 import { previewSrc } from "@/utils/nodePreview";
+import { cheapUrlKey } from "@/utils/renderSignature";
 
 type ImageCropNodeType = Node<ImageCropNodeData, "imageCrop">;
 
@@ -108,8 +109,14 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     });
   }, [id, updateNodeData]);
 
+  // The output thumb is trustworthy the moment its key matches the output it
+  // was made from — the ref is cleared on every crop by design, so without this
+  // the node painted the full-res crop (up to ~10MP) into a ~90px box from the
+  // first edit until the next save.
+  const outThumbCurrent =
+    !!nodeData.outputImage && nodeData.outputImageThumbKey === cheapUrlKey(nodeData.outputImage);
   const displayImage =
-    previewSrc(nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageRef) ||
+    previewSrc(nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageRef, outThumbCurrent) ||
     previewSrc(nodeData.sourceImage, nodeData.sourceImageThumb, nodeData.sourceImageRef);
 
   return (
@@ -117,7 +124,10 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
       id={id}
       selected={selected}
       contentClassName="flex-1 min-h-0 overflow-clip"
-      aspectFitMedia={nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImageThumb}
+      // Thumb first: this only needs an ASPECT RATIO (and feeds the resolution
+      // badge, which reads the persisted *Dims anyway), so referencing the
+      // full-res image here just kept it alive on the render path.
+      aspectFitMedia={displayImage}
     >
       <Handle
         type="target"

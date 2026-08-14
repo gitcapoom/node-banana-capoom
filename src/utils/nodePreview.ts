@@ -24,12 +24,28 @@
  * next saves and gets a thumb again.
  */
 
-/** Inline-preview source for one image field, given its thumb and file ref. */
+/**
+ * Inline-preview source for one image field, given its thumb and file ref.
+ *
+ * `thumbIsCurrent` is the second way to prove the thumb matches the pixels, for
+ * the case the ref cannot cover: a locally computed output (crop, mirror,
+ * reformat, a GPU commit) clears its ref BY DESIGN — those are fresh pixels
+ * with no file behind them — and then generates a thumb from that very output.
+ * Keying the thumb to the output it came from (`<field>ThumbKey`, the same
+ * trick OutputNode already uses) proves currency directly, so the node stops
+ * painting a 10-24MP image into a ~90px box for every edit until the next save.
+ */
 export function previewSrc(
   full: string | null | undefined,
   thumb: string | null | undefined,
   ref: string | null | undefined,
+  thumbIsCurrent: boolean = false,
 ): string | null {
-  if (thumb && ref) return thumb;
-  return full ?? thumb ?? null;
+  if (thumb && (ref || thumbIsCurrent)) return thumb; // provably current
+  // No node preview paints a full-res image. A thumb whose currency we cannot
+  // prove may lag the pixels by the moment it takes to regenerate, and that is
+  // the better trade every time: the alternative is decoding 10-24MP into a
+  // ~90px box and re-decoding it on every viewport remount.
+  if (thumb) return thumb;
+  return full ?? null;
 }

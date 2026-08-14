@@ -89,7 +89,9 @@ describe("executeAnnotation", () => {
 
     await executeAnnotation(ctx);
 
-    expect(ctx.updateNodeData).toHaveBeenCalledWith("ann", { outputImage: "data:image/png;base64,abc", outputImageRef: undefined });
+    // outputImageThumbKey is cleared alongside the new output so nothing can
+    // claim the previous thumb matches these pixels (see commitProcessorOutput).
+    expect(ctx.updateNodeData).toHaveBeenCalledWith("ann", { outputImage: "data:image/png;base64,abc", outputImageRef: undefined, outputImageThumbKey: null });
   });
 
   it("should not overwrite existing annotated outputImage", async () => {
@@ -131,7 +133,7 @@ describe("executeAnnotation", () => {
     await executeAnnotation(ctx);
 
     expect(ctx.updateNodeData).toHaveBeenCalledWith("ann", { sourceImage: "new-image", sourceImageRef: undefined });
-    expect(ctx.updateNodeData).toHaveBeenCalledWith("ann", { outputImage: "new-image", outputImageRef: undefined });
+    expect(ctx.updateNodeData).toHaveBeenCalledWith("ann", { outputImage: "new-image", outputImageRef: undefined, outputImageThumbKey: null });
   });
 
   it("should do nothing when no images connected", async () => {
@@ -635,7 +637,7 @@ describe("executeBlur", () => {
       IMG,
     );
     expect(ctx.updateNodeData).toHaveBeenCalledWith("blur1", {
-      outputImage: "data:image/png;base64,BLURRED", outputImageRef: undefined, error: null,
+      outputImage: "data:image/png;base64,BLURRED", outputImageRef: undefined, outputImageThumbKey: null, error: null,
     });
   });
 
@@ -653,7 +655,7 @@ describe("executeBlur", () => {
 
     await executeBlur(ctx);
 
-    expect(ctx.updateNodeData).toHaveBeenCalledWith("blur1", { outputImage: null, outputImageRef: undefined });
+    expect(ctx.updateNodeData).toHaveBeenCalledWith("blur1", { outputImage: null, outputImageRef: undefined, outputImageThumbKey: null });
     expect(commitBlurNode).not.toHaveBeenCalled();
   });
 });

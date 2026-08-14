@@ -1,4 +1,5 @@
 import { createImageThumbnailWithMeta, thumbMaxDim } from "@/utils/createImageThumbnail";
+import { cheapUrlKey } from "@/utils/renderSignature";
 import type { WorkflowNodeData } from "@/types";
 
 /**
@@ -24,6 +25,9 @@ export async function commitProcessorOutput(
   updateNodeData(nodeId, {
     outputImage,
     outputImageRef: undefined,
+    // Drop the previous output's thumb key immediately. Until the new thumb
+    // lands below, nothing may claim the old thumb matches these pixels.
+    outputImageThumbKey: null,
     ...extra,
   } as Partial<WorkflowNodeData>);
 
@@ -38,6 +42,9 @@ export async function commitProcessorOutput(
       const t = await createImageThumbnailWithMeta(outputImage, thumbMaxDim(), 0.72, "jpeg");
       updateNodeData(nodeId, {
         outputImageThumb: t.thumb,
+        // Keyed to the output it was made from, so the preview can trust it
+        // even though the ref is (correctly) cleared above.
+        outputImageThumbKey: cheapUrlKey(outputImage),
         outputImageDims: { width: t.width, height: t.height },
       } as Partial<WorkflowNodeData>);
     } catch {
