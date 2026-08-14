@@ -10,6 +10,7 @@ import { MediaOverlay } from "../MediaOverlay";
 import { deriveAutoTitle } from "@/utils/nodeTitleFromFilename";
 import { mirrorImage } from "@/utils/mirrorImage";
 import { useFullResField } from "@/hooks/useFullResField";
+import { previewSrc } from "@/utils/nodePreview";
 
 type ImageInputNodeType = Node<ImageInputNodeData, "imageInput">;
 
@@ -148,10 +149,13 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
 
   const flipActive = !!(nodeData.flipHorizontal || nodeData.flipVertical);
   // Full-res (null on open until loaded) and thumb display values, picking the
-  // mirrored copy when a flip is active. Display = full-res ?? thumb.
+  // mirrored copy when a flip is active. The inline preview shows the thumb
+  // whenever its file ref proves it current — these are the heaviest images on
+  // the canvas (8192x8192 is normal) and they render into a ~56px box.
   const displayFull = flipActive && nodeData.outputImage ? nodeData.outputImage : nodeData.image;
   const displayThumb = flipActive && nodeData.outputImageThumb ? nodeData.outputImageThumb : nodeData.imageThumb;
-  const displayImage = displayFull ?? displayThumb;
+  const displayRef = flipActive && nodeData.outputImage ? nodeData.outputImageRef : nodeData.imageRef;
+  const displayImage = previewSrc(displayFull, displayThumb, displayRef);
   const hasImage = !!(nodeData.image || nodeData.imageThumb);
 
   // No-op handlers for overlay (single image, no carousel)
@@ -174,7 +178,7 @@ export function ImageInputNode({ id, data, selected }: NodeProps<ImageInputNodeT
       id={id}
       selected={selected}
       contentClassName="flex-1 min-h-0 overflow-clip"
-      aspectFitMedia={nodeData.image ?? nodeData.imageThumb}
+      aspectFitMedia={displayImage}
       fullBleed
     >
       {/* Reference input handle for visual links from Split Grid node */}

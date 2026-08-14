@@ -7,6 +7,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { mirrorImage } from "@/utils/mirrorImage";
 import type { MirrorNodeData } from "@/types";
+import { previewSrc } from "@/utils/nodePreview";
 
 type MirrorNodeType = Node<MirrorNodeData, "mirror">;
 
@@ -79,7 +80,8 @@ export function MirrorNode({ id, data, selected }: NodeProps<MirrorNodeType>) {
   }, [id, nodeData.flipVertical, updateNodeData]);
 
   const displayImage =
-    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
+    previewSrc(nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageRef) ||
+    previewSrc(nodeData.sourceImage, nodeData.sourceImageThumb, nodeData.sourceImageRef);
   const activeLabel =
     nodeData.flipHorizontal && nodeData.flipVertical
       ? "Horizontal + Vertical"
