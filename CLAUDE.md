@@ -145,6 +145,7 @@ LLM models:
 | `roto` | Bezier/polygon roto shapes → matte (Konva modal) | image | image (matte) |
 | `comp` | Nuke Merge clone: 22 ops, per-input transforms + blur/defocus filters, float pipeline (CompModal editor) | image ×5 (`image-comp_bg`, `image-comp_bg_alpha`, `image-comp_fg`, `image-comp_fg_alpha`, `image-comp_matte`) | image |
 | `blur` | GPU blur: gaussian/box/motion/zoom/spin + matte gate + mix, float chain | image, `image-blur_matte` | image |
+| `viewer` | Live tap on the graph (Nuke-style Viewer): resolves its upstream reactively, so it reflects edits without a run. Offered as a source in every full-screen view | image | none |
 
 ### Color & Image Processing Nodes
 

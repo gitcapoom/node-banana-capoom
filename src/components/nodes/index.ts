@@ -43,5 +43,6 @@ export { ColorGradeNode } from "./ColorGradeNode";
 export { HsvCorrectNode } from "./HsvCorrectNode";
 export { ContrastAdjustNode } from "./ContrastAdjustNode";
 export { BlurNode } from "./BlurNode";
+export { ViewerNode } from "./ViewerNode";
 export { PanoShiftNode } from "./PanoShiftNode";
 export { GroupNode } from "./GroupNode";

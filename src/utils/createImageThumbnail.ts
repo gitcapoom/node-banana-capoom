@@ -11,13 +11,13 @@
  */
 
 /**
- * Max thumbnail edge, in px. Node previews render at ~200-300 CSS px, so this
- * is display-accurate at 1x and still readable at 2x DPR. Every thumb-writing
- * path shares it — raising it inflates the workflow JSON quadratically (a 384px
- * thumb carries 2.6x the pixels of a 236px one) and slows canvas paint in large
- * setups, where dozens of thumbs decode at once.
+ * Max thumbnail edge, in px — one fixed size for every thumb-writing path, on
+ * purpose. Node previews render at ~200-300 CSS px, so this is display-accurate
+ * without the cost of the old 384px thumbs, which carried 2.3x the pixels: that
+ * weight lands in the workflow JSON and in every canvas paint, and in large
+ * setups dozens of them decode at once.
  */
-export const THUMB_MAX_DIM = 236;
+export const THUMB_MAX_DIM = 256;
 
 export interface ThumbnailWithMeta {
   thumb: string;

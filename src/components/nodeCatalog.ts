@@ -63,6 +63,7 @@ export const ALL_NODES_CATEGORIES: NodeCatalogCategory[] = [
       { type: "hsvCorrect", label: "HSV Color Correct" },
       { type: "contrastAdjust", label: "Contrast Adjust" },
       { type: "blur", label: "Blur" },
+      { type: "viewer", label: "Viewer" },
       { type: "splitGrid", label: "Split Grid" },
       { type: "videoStitch", label: "Video Stitch" },
       { type: "videoTrim", label: "Video Trim" },

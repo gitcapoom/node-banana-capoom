@@ -32,6 +32,7 @@ import {
   executeHsvCorrect,
   executeContrastAdjust,
   executeBlur,
+  executeViewer,
   executePanoShift,
 } from "./simpleNodeExecutors";
 import { executeNanoBanana } from "./nanoBananaExecutor";
@@ -189,6 +190,9 @@ export async function executeNode(
     case "blur":
       await executeBlur(ctx);
       break;
+    case "viewer":
+      await executeViewer(ctx);
+      break;
     case "panoShift":
       await executePanoShift(ctx);
       break;
@@ -213,6 +217,7 @@ export const LOCAL_PROCESSOR_TYPES: ReadonlySet<string> = new Set([
   "hsvCorrect",
   "contrastAdjust",
   "blur",
+  "viewer",
   "panoShift",
   "maskPainter",
   "roto",
