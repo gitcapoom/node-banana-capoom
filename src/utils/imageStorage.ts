@@ -935,12 +935,13 @@ async function hydrateNodeImages(
 
     case "nanoBanana": {
       const d = data as import("@/types").NanoBananaNodeData;
-      let outputImage = d.outputImage;
+      // outputImage stays lazy, like every other displayed image field. The
+      // save above writes outputImageThumb + outputImageRef beside it, so the
+      // node has something to paint; full-res arrives on demand
+      // (useFullResField on double-click) or before a run
+      // (ensureFullResForNodes, via RUN_FULLRES_FIELDS.nanoBanana).
+      const outputImage = d.outputImage;
       const inputImages = [...(d.inputImages || [])];
-
-      if (d.outputImageRef && !d.outputImage) {
-        outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "generations");
-      }
 
       // inputImages is deliberately NOT hydrated here. No component renders it;
       // the executors read it only as a fallback when nothing is connected, so

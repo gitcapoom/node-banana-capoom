@@ -22,6 +22,7 @@ import { InlineParameterPanel } from "./InlineParameterPanel";
 import { browseRegistry } from "@/utils/browseRegistry";
 import { MediaOverlay } from "../MediaOverlay";
 import { previewSrc } from "@/utils/nodePreview";
+import { useFullResField } from "@/hooks/useFullResField";
 
 /** Reorder items so they read column-first in a row-based CSS grid.
  *  e.g. [1,2,3,4,5,6,7,8] with 2 cols → [1,5,2,6,3,7,4,8] */
@@ -461,9 +462,32 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
 
   // Clear the "missing" placeholder once a real image becomes the output
   // (a present generation loaded, a fresh generation, or hydration on open).
+  // A thumb counts: outputImage is now lazy, so on open the ONLY evidence a
+  // generation exists is its thumb + ref, and gating on full-res alone would
+  // show "Generation image missing" for every node in a freshly opened file.
   useEffect(() => {
-    if (nodeData.outputImage) setCarouselMissing(false);
-  }, [nodeData.outputImage]);
+    if (nodeData.outputImage || nodeData.outputImageThumb) setCarouselMissing(false);
+  }, [nodeData.outputImage, nodeData.outputImageThumb]);
+
+  /** What the node body paints: the thumb until full-res is actually needed. */
+  const displayImage = previewSrc(
+    nodeData.outputImage as string | null | undefined,
+    nodeData.outputImageThumb as string | null | undefined,
+    nodeData.outputImageRef as string | null | undefined,
+  );
+
+  // Full-res on demand — the overlay is the one place that wants real pixels.
+  const { ensure: ensureFullRes } = useFullResField();
+  const handleOpenOverlay = useCallback(async () => {
+    await ensureFullRes({
+      id,
+      field: "outputImage",
+      ref: nodeData.outputImageRef as string | undefined,
+      current: nodeData.outputImage as string | null | undefined,
+      folder: "generations",
+    });
+    setShowOverlay(true);
+  }, [ensureFullRes, id, nodeData.outputImageRef, nodeData.outputImage]);
 
   // Handle model selection from browse dialog
   const handleBrowseModelSelect = useCallback((model: ProviderModel) => {
@@ -587,7 +611,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       hasError={nodeData.status === "error"}
       fullBleed
       settingsExpanded={inlineParametersEnabled && isParamsExpanded}
-      aspectFitMedia={previewSrc(nodeData.outputImage as string | null | undefined, nodeData.outputImageThumb as string | null | undefined, nodeData.outputImageRef as string | null | undefined)}
+      aspectFitMedia={displayImage}
       settingsPanel={inlineParametersEnabled ? (
         <InlineParameterPanel
           expanded={isParamsExpanded}
@@ -952,14 +976,14 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
         <SplitGenerationButton id={id} count={nodeData.imageHistory?.length ?? 0} />
         {/* Preview area */}
-        {nodeData.outputImage || carouselMissing ? (
+        {displayImage || carouselMissing ? (
           <>
-            {nodeData.outputImage ? (
+            {displayImage ? (
               <img
-                src={previewSrc(nodeData.outputImage as string | null | undefined, nodeData.outputImageThumb as string | null | undefined, nodeData.outputImageRef as string | null | undefined) ?? undefined}
+                src={displayImage}
                 alt="Generated"
                 className="w-full h-full object-contain cursor-pointer"
-                onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}
+                onDoubleClick={(e) => { e.stopPropagation(); void handleOpenOverlay(); }}
               />
             ) : (
               /* Selected generation's file is missing on disk — placeholder keeps the carousel browsable */

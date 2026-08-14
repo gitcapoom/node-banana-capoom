@@ -34,6 +34,12 @@ export interface RunImageField {
 }
 
 export const THUMB_DISPLAY_FIELDS: Partial<Record<NodeType, ThumbDisplayField[]>> = {
+  // A generated frame is a displayed field like any other. It was the last one
+  // still hydrated eagerly at full res on open — 8 nodes x a 24MP frame in this
+  // project, resident for the whole session.
+  nanoBanana: [
+    { raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "generations" },
+  ],
   imageInput: [
     { raw: "image", ref: "imageRef", thumb: "imageThumb", folder: "inputs" },
     { raw: "outputImage", ref: "outputImageRef", thumb: "outputImageThumb", folder: "inputs" },
@@ -82,6 +88,11 @@ export const THUMB_DISPLAY_FIELDS: Partial<Record<NodeType, ThumbDisplayField[]>
  * (whose outputs are loaded here), so its own mirrors needn't be loaded.
  */
 export const RUN_FULLRES_FIELDS: Partial<Record<NodeType, RunImageField[]>> = {
+  // Required, not optional: downstream nodes read a generator's outputImage
+  // through getSourceOutput, so with hydration now lazy this is what puts the
+  // real pixels back before a run (and before an editor opens, via
+  // loadNodeFullResInputs).
+  nanoBanana: [{ raw: "outputImage", ref: "outputImageRef", folder: "generations" }],
   imageInput: [
     { raw: "image", ref: "imageRef", folder: "inputs" },
     { raw: "outputImage", ref: "outputImageRef", folder: "inputs" },
