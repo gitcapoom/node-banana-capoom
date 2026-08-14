@@ -425,8 +425,8 @@ export function CompModal() {
       </div>
 
       <div className="flex-1 flex min-h-0">
-        <div ref={containerRef} className="flex-1 overflow-hidden bg-neutral-900">
-          <DockedViewer className="bottom-4 left-4" />
+        <div ref={containerRef} className="relative flex-1 overflow-hidden bg-neutral-900">
+          <DockedViewer />
           {data.bgImage && offscreen ? (
             <Stage ref={stageRef} width={stageSize.width} height={stageSize.height} scaleX={scale} scaleY={scale} x={position.x} y={position.y} onWheel={handleWheel} onMouseDown={onStageDown} onMouseMove={onStageMove} onMouseUp={endTranslate} onMouseLeave={endTranslate}>
               <Layer listening={false}>

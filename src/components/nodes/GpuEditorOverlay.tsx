@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { ZoomPanView } from "@/components/ZoomPanView";
+import { DockedViewer } from "@/components/ViewerFeed";
 
 /**
  * Shared full-screen viewer for the GPU-native image-processing nodes
@@ -73,6 +74,9 @@ export function GpuEditorOverlay({ title, canvasRef, onClose, children }: GpuEdi
           </svg>
         </button>
       </div>
+
+      {/* Live Viewer feed, dockable to any corner. */}
+      <DockedViewer />
 
       {/* Floating controls panel — bottom-right. */}
       <div
