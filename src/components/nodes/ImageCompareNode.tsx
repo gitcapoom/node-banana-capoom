@@ -68,7 +68,7 @@ export function ImageCompareNode({
       // should paint, instead of the upstream's full-res output.
       let aThumb: string | null = null;
       let bThumb: string | null = null;
-      const ambiguous: string[] = [];
+      const ambiguous: Array<string | null> = [];
       const ambiguousThumbs: Array<string | null> = [];
 
       for (const edge of edges) {
@@ -80,16 +80,23 @@ export function ImageCompareNode({
           edge.sourceHandle,
           edge.data as Record<string, unknown> | undefined
         );
-        if (out.type !== "image" || !out.value) continue;
+        if (out.type !== "image") continue;
         const th = sourceThumb(sourceNode.data as Record<string, unknown>);
+        // A CONNECTED pin counts even when the upstream's full-res value is
+        // lazily null — which is now the normal state on open. Bailing on
+        // `!out.value` made the node report "Connect 2 images to compare" for
+        // connections that plainly existed, and threw away the upstream thumb
+        // that was sitting right there.
+        if (!out.value && !th) continue;
+        const v = out.value ?? null;
 
         if (edge.targetHandle === "image-1") {
-          b = out.value; bThumb = th;
+          b = v; bThumb = th;
         } else if (edge.targetHandle === "image") {
-          if (!a) { a = out.value; aThumb = th; }
-          else { ambiguous.push(out.value); ambiguousThumbs.push(th); }
+          if (!a && !aThumb) { a = v; aThumb = th; }
+          else { ambiguous.push(v); ambiguousThumbs.push(th); }
         } else {
-          ambiguous.push(out.value); ambiguousThumbs.push(th);
+          ambiguous.push(v); ambiguousThumbs.push(th);
         }
       }
 
@@ -168,7 +175,11 @@ export function ImageCompareNode({
           Dropping `nodrag nopan nowheel` here is deliberate too: with nothing
           interactive left, the node should drag and the canvas should pan and
           zoom from anywhere on it, like every other node. */}
-      {imageA && imageB ? (
+      {/* Gate on what we can actually PAINT, not on full-res. With lazy
+          loading the upstream's full value is null on open while its thumb is
+          right there, and gating on the former showed "Connect 2 images" for
+          connections that plainly existed. */}
+      {previewA && previewB ? (
         <div
           className="group flex-1 relative cursor-pointer"
           onDoubleClick={(e) => {
@@ -211,14 +222,14 @@ export function ImageCompareNode({
       ) : (
         <div className="w-full flex-1 min-h-[200px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center gap-2">
           <span className="text-neutral-500 text-[10px] text-center px-4">
-            {!imageA && !imageB
+            {!previewA && !previewB
               ? "Connect 2 images to compare"
               : "Connect another image to compare"}
           </span>
-          {imageA && !imageB && (
+          {previewA && !previewB && (
             <div className="text-[9px] text-neutral-600">Image A connected</div>
           )}
-          {!imageA && imageB && (
+          {!previewA && previewB && (
             <div className="text-[9px] text-neutral-600">Image B connected</div>
           )}
         </div>
