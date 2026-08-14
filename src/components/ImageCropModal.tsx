@@ -70,15 +70,19 @@ export function ImageCropModal() {
     };
   }, []);
 
-  // zoomStageAtPointer drives the Konva stage directly (cursor-anchored); the
-  // stage is React-controlled here, so read the result back into state.
+  // Cursor-anchored zoom. The stage is React-controlled, so the view the helper
+  // computes goes into state rather than onto the stage.
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const stage = stageRef.current;
     if (!stage) return;
-    zoomStageAtPointer(stage, e.evt.deltaY, { min: 0.05, max: 20 });
-    setScale(stage.scaleX());
-    setPosition({ x: stage.x(), y: stage.y() });
+    // zoomStageAtPointer RETURNS the new view — it does not mutate the stage.
+    // Reading the stage back after calling it gave the unchanged values, so the
+    // zoom silently did nothing.
+    const next = zoomStageAtPointer(stage, e.evt.deltaY, { min: 0.05, max: 20 });
+    if (!next) return;
+    setScale(next.scale);
+    setPosition(next.position);
   }, []);
 
   // Load image + compute fit
