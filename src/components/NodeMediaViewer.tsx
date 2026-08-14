@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { createPortal } from "react-dom";
+import { useEffect } from "react";
 import { MediaOverlay } from "./MediaOverlay";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useNodeMediaViewer } from "@/store/nodeMediaViewerStore";
@@ -19,26 +18,7 @@ const noop = () => {};
 export function NodeMediaViewer() {
   const target = useNodeMediaViewer((s) => s.target);
   const close = useNodeMediaViewer((s) => s.close);
-  const origin = useNodeMediaViewer((s) => s.origin);
-  const showSource = useNodeMediaViewer((s) => s.showSource);
   const { ensure, loading } = useFullResField();
-
-  // Every Viewer node on the canvas is offered as an alternative feed, so a
-  // full-screen view opened from ANY node can be switched to the live tap at
-  // the end of the chain — and stays live while an editor is worked on.
-  //
-  // Derived with useMemo from the (reference-stable) nodes array rather than
-  // built inside the selector: a selector that maps to fresh objects returns a
-  // new array identity on every store read, which useShallow cannot settle —
-  // React then re-subscribes forever ("getSnapshot should be cached").
-  const nodes = useWorkflowStore((s) => s.nodes);
-  const viewerNodes = useMemo(
-    () =>
-      nodes
-        .filter((n) => n.type === "viewer")
-        .map((n) => ({ id: n.id, title: (n.data as { customTitle?: string })?.customTitle || "Viewer" })),
-    [nodes],
-  );
 
   const content = useWorkflowStore((s) => {
     if (!target) return null;
@@ -84,10 +64,7 @@ export function NodeMediaViewer() {
 
   if (!target || !content) return null;
 
-  const showSwitcher = viewerNodes.length > 0;
-
   return (
-    <>
       <MediaOverlay
         content={content}
         mediaType={target.mediaType}
@@ -98,38 +75,5 @@ export function NodeMediaViewer() {
         onNext={noop}
         onClose={close}
       />
-      {/* Source switcher, portalled ABOVE the overlay (which is z-200). */}
-      {showSwitcher &&
-        createPortal(
-          <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[210] flex items-center gap-1 bg-black/70 backdrop-blur rounded-full px-2 py-1 text-[11px]">
-            <span className="text-white/40 pr-1">Source</span>
-            <button
-              onClick={() => origin && showSource(origin)}
-              className={`px-2 py-0.5 rounded-full transition-colors ${
-                origin && target.nodeId === origin.nodeId && target.field === origin.field
-                  ? "bg-white/90 text-neutral-900"
-                  : "text-white/70 hover:text-white"
-              }`}
-            >
-              This node
-            </button>
-            {viewerNodes.map((v) => (
-              <button
-                key={v.id}
-                onClick={() =>
-                  showSource({ nodeId: v.id, field: "image", mediaType: "image", folder: "inputs" })
-                }
-                className={`px-2 py-0.5 rounded-full transition-colors ${
-                  target.nodeId === v.id ? "bg-cyan-400 text-neutral-900" : "text-white/70 hover:text-white"
-                }`}
-                title="Live tap — updates as upstream nodes change"
-              >
-                {v.title}
-              </button>
-            ))}
-          </div>,
-          document.body,
-        )}
-    </>
   );
 }

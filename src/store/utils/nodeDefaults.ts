@@ -104,6 +104,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   contrastAdjust: { width: 280, height: 380 },
   blur: { width: 280, height: 420 },
   viewer: { width: 360, height: 300 },
+  dot: { width: 14, height: 14 },
   panoShift: { width: 320, height: 280 },
   sphereLightRender: { width: 300, height: 420 },
   upscaleGrid: { width: 300, height: 320 },
@@ -565,6 +566,8 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         clampWhites: false,
         outputImage: null,
       } as ContrastAdjustNodeData;
+    case "dot":
+      return {} as import("@/types").DotNodeData;
     case "viewer":
       return {
         image: null,

@@ -8,6 +8,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { rasterizeRoto } from "@/utils/rasterizeRoto";
 import type { RotoShape, RotoPoint, RotoFeatherFalloff } from "@/types";
 import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
+import { DockedViewer } from "@/components/ViewerFeed";
 
 type Pt = { x: number; y: number };
 const uid = () => `${Date.now().toString(36)}-${Math.floor(performance.now() % 1e6).toString(36)}`;
@@ -636,6 +637,7 @@ export function RotoModal() {
       {/* Canvas + layer panel */}
       <div className="flex-1 flex min-h-0">
         <div ref={containerRef} className="flex-1 overflow-hidden bg-neutral-900">
+          <DockedViewer className="bottom-4 right-4" />
           <Stage
             ref={stageRef}
             width={containerRef.current?.clientWidth || 800}

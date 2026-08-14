@@ -92,6 +92,8 @@ vi.mock("@/store/workflowStore", () => ({
       updateNodeData: mockUpdateNodeData,
       incrementModalCount: vi.fn(),
       decrementModalCount: vi.fn(),
+      // The docked Viewer pane reads the node list to find Viewer nodes.
+      nodes: [] as Array<{ id: string; type: string; data: Record<string, unknown> }>,
     };
     if (selector) {
       return selector(state);
