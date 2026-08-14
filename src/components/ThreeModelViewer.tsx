@@ -25,7 +25,7 @@ function Model({ url, onError, modelLoadedRef }: { url: string; onError?: () => 
   const groupRef = useRef<THREE.Group>(null);
   const sceneRef = useRef<THREE.Group | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { camera } = useThree();
+  const { camera, invalidate } = useThree();
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +65,8 @@ function Model({ url, onError, modelLoadedRef }: { url: string; onError?: () => 
           const dist = 3.5;
           camera.position.set(dist, dist * 0.6, dist);
           camera.lookAt(0, 0, 0);
+          // On-demand frameloop: nothing repaints unless we ask.
+          invalidate();
         },
         undefined,
         (error) => {
@@ -96,7 +98,7 @@ function Model({ url, onError, modelLoadedRef }: { url: string; onError?: () => 
         sceneRef.current = null;
       }
     };
-  }, [url, camera, onError]);
+  }, [url, camera, onError, invalidate]);
 
   if (!loaded || !sceneRef.current) return null;
 
@@ -142,7 +144,7 @@ function CaptureHelper({
   /** When set, crops the captured frame to this aspect ratio (width/height) */
   targetAspectRatio?: number;
 }) {
-  const { gl, scene, camera } = useThree();
+  const { gl, scene, camera, invalidate } = useThree();
   const bgImageRef = useRef<HTMLImageElement | null>(null);
 
   // Preload background image for compositing into frame grabs
@@ -153,13 +155,16 @@ function CaptureHelper({
     }
     const img = new window.Image();
     img.crossOrigin = "anonymous";
-    img.onload = () => { bgImageRef.current = img; };
+    img.onload = () => { bgImageRef.current = img; invalidate(); };
     img.onerror = () => { bgImageRef.current = null; };
     img.src = backgroundImageUrl;
     return () => { bgImageRef.current = null; };
-  }, [backgroundImageUrl]);
+  }, [backgroundImageUrl, invalidate]);
 
-  useFrame(() => {
+  // Publish the capture closure once per dependency change. This used to run in
+  // useFrame — rebuilding the closure 60x/second forever, and forcing the whole
+  // canvas onto an always-on render loop just to keep a function reference warm.
+  useEffect(() => {
     captureRef.current = () => {
       try {
         if (envGroupRef.current) {
@@ -237,7 +242,7 @@ function CaptureHelper({
         return null;
       }
     };
-  });
+  }, [captureRef, envGroupRef, gl, scene, camera, targetAspectRatio]);
 
   return null;
 }
@@ -317,14 +322,15 @@ function LoadingIndicator() {
  * Reactively updates camera.fov when cinema settings change.
  */
 function CameraFOVUpdater({ fov }: { fov: number }) {
-  const { camera } = useThree();
+  const { camera, invalidate } = useThree();
 
   useEffect(() => {
     if (camera instanceof THREE.PerspectiveCamera) {
       camera.fov = fov;
       camera.updateProjectionMatrix();
+      invalidate(); // on-demand frameloop — repaint with the new framing
     }
-  }, [camera, fov]);
+  }, [camera, fov, invalidate]);
 
   return null;
 }
@@ -447,6 +453,22 @@ export function ThreeModelViewer({
     }
   }, [hasCinemaSettings, containerSize, selectedAspect]);
 
+  /**
+   * Continuous rendering is the exception, not the default.
+   *
+   * react-three-fiber's default `frameloop="always"` drives a 60fps rAF render
+   * on every mounted Canvas for as long as it lives — burning GPU on a model
+   * that is sitting perfectly still, once per viewer. On demand, frames are
+   * drawn only when something asks for one (`invalidate()`), which the model
+   * loader, the resize observer and OrbitControls all do.
+   *
+   * Three cases still need every frame: auto-rotation (the camera moves each
+   * tick), auto-capture (it counts frames before grabbing), and an in-progress
+   * user drag (OrbitControls damping settles over several frames).
+   */
+  const needsContinuousFrames =
+    (autoRotate && !isInteracting) || !!onAutoCapture || isInteracting;
+
   // Stable onCreated handler — only set clear color when no background image
   const handleCreated = useCallback(({ gl }: { gl: THREE.WebGLRenderer }) => {
     if (!backgroundImage) {
@@ -477,6 +499,7 @@ export function ThreeModelViewer({
     >
       <Canvas
         resize={{ offsetSize: true }}
+        frameloop={needsContinuousFrames ? "always" : "demand"}
         gl={{ preserveDrawingBuffer: true, antialias: true, alpha: !!backgroundImage }}
         camera={{ position: [3.5, 2.1, 3.5], fov: vFov, near: 0.01, far: 100 }}
         onCreated={handleCreated}

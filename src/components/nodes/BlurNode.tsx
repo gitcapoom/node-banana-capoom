@@ -8,9 +8,13 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { releaseColorNode, renderBlurNodeToCanvas, commitBlurNode, type BlurNodeParams } from "@/utils/colorChain";
 import { resolveInputRef } from "@/utils/compComposite";
+import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
 import type { BlurNodeData, BlurFilterType } from "@/types";
 
 type BlurNodeType = Node<BlurNodeData, "blur">;
+
+/** Last committed blur per node — survives viewport-culling remounts. */
+const committedBlurs = new RenderSignatureCache();
 
 const FILTERS: Array<{ v: BlurFilterType; label: string }> = [
   { v: "gaussian", label: "Gaussian" },
@@ -76,8 +80,10 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
   }, [incoming.src, incoming.matte, nodeData.sourceImage, nodeData.matteImage, id, updateNodeData]);
 
   const params = paramsOf(nodeData);
+  // Cheap keys for the image URLs — see renderSignature.ts.
   const sig = JSON.stringify({
-    src: incoming.src, srcId: incoming.srcId, mt: incoming.matte, mtId: incoming.matteId, p: params,
+    src: cheapUrlKey(incoming.src), srcId: incoming.srcId,
+    mt: cheapUrlKey(incoming.matte), mtId: incoming.matteId, p: params,
   });
   const latest = useRef({ incoming, params });
   latest.current = { incoming, params };
@@ -106,15 +112,21 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
     const { incoming: inc } = latest.current;
     if (!inc.src) {
       if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null, outputImageRef: undefined });
+      committedBlurs.forget(id);
       return;
     }
     if (!allInputsResolved) return;
+    // Unchanged since the last commit (typically a viewport-culling remount):
+    // the live-preview effect above already repainted the canvas, and a commit
+    // would re-encode the identical PNG and cascade a store update downstream.
+    if (committedBlurs.matches(id, sig) && nodeData.outputImage) return;
     const t = setTimeout(async () => {
       const { incoming: cur, params: p } = latest.current;
       if (!cur.src) return;
       const out = await commitBlurNode(
         resolveInputRef(cur.src, cur.srcId), resolveInputRef(cur.matte, cur.matteId), p, id, cur.src,
       );
+      committedBlurs.set(id, sig);
       updateNodeData(id, { outputImage: out, outputImageRef: undefined });
     }, 300);
     return () => clearTimeout(t);

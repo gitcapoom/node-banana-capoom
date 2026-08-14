@@ -10,9 +10,18 @@
  * image/ref intact rather than poisoning the field with a bad thumb.
  */
 
+/**
+ * Max thumbnail edge, in px. Node previews render at ~200-300 CSS px, so this
+ * is display-accurate at 1x and still readable at 2x DPR. Every thumb-writing
+ * path shares it — raising it inflates the workflow JSON quadratically (a 384px
+ * thumb carries 2.6x the pixels of a 236px one) and slows canvas paint in large
+ * setups, where dozens of thumbs decode at once.
+ */
+export const THUMB_MAX_DIM = 236;
+
 export async function createImageThumbnail(
   srcDataUrl: string,
-  maxDim = 384,
+  maxDim = THUMB_MAX_DIM,
   quality = 0.72,
   format: "jpeg" | "png" = "jpeg",
 ): Promise<string> {

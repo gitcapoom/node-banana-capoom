@@ -9,9 +9,13 @@ import { useCompStore } from "@/store/compStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { releaseColorNode, renderCompToCanvas, floatNodeToDataUrl } from "@/utils/colorChain";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
+import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
 import type { CompNodeData } from "@/types";
 
 type CompNodeType = Node<CompNodeData, "comp">;
+
+/** Last committed composite per node — survives viewport-culling remounts. */
+const committedComps = new RenderSignatureCache();
 
 const CHECKER_STYLE: CSSProperties = {
   backgroundColor: "#454545",
@@ -89,19 +93,26 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     if (Object.keys(patch).length) updateNodeData(id, patch);
   }, [incoming, nodeData.bgImage, nodeData.bgAlphaImage, nodeData.fgImage, nodeData.fgAlphaImage, nodeData.matteImage, id, updateNodeData]);
 
-  // Live preview + commit whenever inputs/params change.
+  // Live preview + commit whenever inputs/params change. The input URLs are
+  // full-res data URLs (tens of MB each), so they go in by CHEAP KEY — a raw
+  // JSON.stringify of five of them would copy every image on every render.
   const sig = JSON.stringify({
     bgSrc: incoming.bgSrc, baSrc: incoming.baSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc,
     op: nodeData.mergeOp, pm: nodeData.premultiplyFg, pmb: nodeData.premultiplyBg, sw: nodeData.swapBgFg, res: nodeData.outputResolution, bo: [nodeData.bgBlackOutside, nodeData.fgBlackOutside], bgo: nodeData.bgOpacity, fgo: nodeData.fgOpacity,
     bgT: nodeData.bgTransform, baT: nodeData.bgAlphaTransform, fgT: nodeData.fgTransform, faT: nodeData.fgAlphaTransform, mtT: nodeData.matteTransform,
     bar: nodeData.bgAlphaReformat, far: nodeData.fgAlphaReformat, mtr: nodeData.matteReformat,
     bgF: nodeData.bgFilter, baF: nodeData.bgAlphaFilter, fgF: nodeData.fgFilter, faF: nodeData.fgAlphaFilter, mtF: nodeData.matteFilter,
-    bgUrl: incoming.bg, baUrl: incoming.bgAlpha, fgUrl: incoming.fg, faUrl: incoming.fgAlpha, mtUrl: incoming.matte,
+    bgUrl: cheapUrlKey(incoming.bg), baUrl: cheapUrlKey(incoming.bgAlpha), fgUrl: cheapUrlKey(incoming.fg),
+    faUrl: cheapUrlKey(incoming.fgAlpha), mtUrl: cheapUrlKey(incoming.matte),
   });
 
   useEffect(() => {
     if (modalOpenForThis) return; // editor owns rendering while open
     let cancelled = false;
+    // Scrolled back into view with nothing changed: the canvas still has to be
+    // repainted (it was torn down with the node), but the PNG encode and the
+    // store write would reproduce byte-identical output — skip both.
+    const republishOnly = committedComps.matches(id, sig) && !!nodeData.outputImage;
     const urls = { bg: incoming.bg, bgAlpha: incoming.bgAlpha, fg: incoming.fg, fgAlpha: incoming.fgAlpha, matte: incoming.matte };
     const srcs = { bgSrc: incoming.bgSrc, baSrc: incoming.baSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc };
     const run = async () => {
@@ -119,8 +130,12 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       const ok = canvas ? await renderCompToCanvas(buildCompInputs(urls, srcs), buildCompParams(nodeData), id, canvas) : false;
       if (cancelled) return;
       if (ok) {
+        // Canvas repainted and the float texture is republished — that's all a
+        // re-entry needs.
+        if (republishOnly) return;
         const url = await floatNodeToDataUrl(id);
         if (!cancelled && url && url !== nodeData.outputImage) {
+          committedComps.set(id, sig);
           updateNodeData(id, { outputImage: url, outputImageRef: undefined });
         }
       } else {
@@ -131,7 +146,9 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
           img.onload = () => { if (cancelled || !canvasRef.current) return; canvasRef.current.width = outW; canvasRef.current.height = outH; canvasRef.current.getContext("2d")?.drawImage(img, 0, 0); };
           img.src = dataUrl;
         }
+        if (republishOnly) return;
         if (dataUrl !== nodeData.outputImage) {
+          committedComps.set(id, sig);
           updateNodeData(id, { outputImage: dataUrl, outputImageRef: undefined, outputWidth: outW, outputHeight: outH });
         }
       }

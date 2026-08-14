@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { loadMediaById } from "@/utils/mediaStorage";
-import { createImageThumbnail } from "@/utils/createImageThumbnail";
+import { createImageThumbnail, THUMB_MAX_DIM } from "@/utils/createImageThumbnail";
 import { THUMB_DISPLAY_FIELDS } from "@/utils/imageFieldMap";
 import type { WorkflowNode, NodeType } from "@/types";
 
@@ -43,7 +43,7 @@ export function useThumbBackfill(nodes: WorkflowNode[]) {
           try {
             const full = await loadMediaById(ref, saveDirectoryPath, f.folder);
             if (!full) return;
-            const t = await createImageThumbnail(full, 384, 0.72, f.format ?? "jpeg");
+            const t = await createImageThumbnail(full, THUMB_MAX_DIM, 0.72, f.format ?? "jpeg");
             // Store ONLY the thumb — do not retain the full-res in node data.
             updateNodeData(node.id, { [f.thumb]: t });
           } catch {
