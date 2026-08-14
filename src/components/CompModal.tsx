@@ -12,6 +12,7 @@ import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPi
 import { COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, type CompInputFilter, type BlurFilterType } from "@/types/comp";
 import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/types";
 import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
+import { cheapUrlKey } from "@/utils/renderSignature";
 import { DockedViewer } from "@/components/ViewerFeed";
 
 type Pt = { x: number; y: number };
@@ -142,9 +143,22 @@ export function CompModal() {
   }, [isModalOpen, outW, outH]);
 
   // Live preview into the offscreen canvas, rAF-coalesced.
-  const previewSig = data
-    ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bgF: data.bgFilter, baF: data.bgAlphaFilter, fgF: data.fgFilter, faF: data.fgAlphaFilter, mtF: data.matteFilter, bg: data.bgImage, baU: data.bgAlphaImage, fgU: data.fgImage, faU: data.fgAlphaImage, mtU: data.matteImage })
-    : "";
+  //
+  // The five image fields go in by CHEAP KEY, never raw. They are base64 data
+  // URLs — a 34-55MB PNG on disk is a 45-73MB JS string here — and this
+  // expression sits in the RENDER BODY, so stringifying them raw copied and
+  // escape-scanned 100-300MB on every render, twice per pointer-move while
+  // dragging a handle. That, not the GPU, was what made this editor crawl.
+  // CompNode already learned this (see renderSignature.ts and CompNode's own
+  // sig); the modal never did. useMemo keeps it off renders that changed
+  // nothing at all.
+  const previewSig = useMemo(
+    () =>
+      data
+        ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bgF: data.bgFilter, baF: data.bgAlphaFilter, fgF: data.fgFilter, faF: data.fgAlphaFilter, mtF: data.matteFilter, bg: cheapUrlKey(data.bgImage), baU: cheapUrlKey(data.bgAlphaImage), fgU: cheapUrlKey(data.fgImage), faU: cheapUrlKey(data.fgAlphaImage), mtU: cheapUrlKey(data.matteImage) })
+        : "",
+    [data],
+  );
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
     let cancelled = false;
