@@ -7,7 +7,7 @@ import Konva from "konva";
 import { useCompStore, type CompActiveInput } from "@/store/compStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { renderCompPreviewToCanvas, floatNodeToDataUrl, renderComp } from "@/utils/colorChain";
+import { renderCompPreviewToCanvas, floatNodeToDataUrl, renderComp, type CompRoi } from "@/utils/colorChain";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPieces } from "@/utils/compTransform";
 import { COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, type CompInputFilter, type BlurFilterType } from "@/types/comp";
@@ -179,24 +179,51 @@ export function CompModal() {
     return () => clearTimeout(t);
   }, [scale]);
 
+  // Visible region of the output, in output px, debounced with the same cadence
+  // as the zoom. Zoomed OUT this covers the whole frame and clamps to it, so
+  // nothing changes; zoomed IN it shrinks, which is what keeps the cost of
+  // going closer flat instead of growing with the magnification. The margin
+  // means a small pan doesn't immediately expose an unrendered edge.
+  const [viewRoi, setViewRoi] = useState<CompRoi | null>(null);
+  useEffect(() => {
+    if (!outW || !outH) return;
+    const t = setTimeout(() => {
+      const vw = stageSize.width / scale;
+      const vh = stageSize.height / scale;
+      const mx = vw * 0.15, my = vh * 0.15;
+      setViewRoi({
+        x: Math.max(0, Math.floor(-position.x / scale - mx)),
+        y: Math.max(0, Math.floor(-position.y / scale - my)),
+        w: Math.ceil(vw + mx * 2),
+        h: Math.ceil(vh + my * 2),
+      });
+    }, 140);
+    return () => clearTimeout(t);
+  }, [scale, position.x, position.y, stageSize.width, stageSize.height, outW, outH]);
+
+  /** The ROI the last preview actually rendered — the image is laid out here. */
+  const [renderedRoi, setRenderedRoi] = useState<CompRoi | null>(null);
+
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
     let cancelled = false;
     const urls = { bg: data.bgImage, bgAlpha: data.bgAlphaImage, fg: data.fgImage, fgAlpha: data.fgAlphaImage, matte: data.matteImage };
     const run = async () => {
       if (!urls.bg) return;
-      // PROXY preview: composite at the editor's zoom level, not at source
-      // resolution. At fit-to-window on a 6554x3686 comp that is ~12x less
-      // pixel work, and it tracks zoom so detail comes back as you go in
-      // (unlike a fixed cap, which just went soft). The Konva Image is still
-      // laid out at outW x outH, so nothing moves.
+      // PROXY preview: composite only the VISIBLE REGION, at the editor's zoom
+      // level, rather than the whole frame at source resolution. Cost is then
+      // bounded by the viewport — roughly the same whether you are at fit, 1:1
+      // or 8:1 — instead of scaling with either the source size or the zoom.
       //
-      // This deliberately does NOT publish the float texture — see the commit
+      // This deliberately does NOT publish the float texture: see the commit
       // effect below.
-      const ok = await renderCompPreviewToCanvas(
+      const roiOut = await renderCompPreviewToCanvas(
         buildCompInputs(urls, srcs), buildCompParams(data), sourceNodeId, offscreen, renderScale,
+        viewRoi ?? undefined,
       );
-      if (!cancelled && !ok) {
+      if (!cancelled && roiOut) setRenderedRoi(roiOut);
+      if (!cancelled && !roiOut) {
+        setRenderedRoi(null); // Canvas2D fallback paints the whole frame
         const { dataUrl, outW: w, outH: h } = await compositeCompForExecutor(urls, srcs, data, sourceNodeId);
         if (cancelled || !dataUrl || !w) return;
         await new Promise<void>((res) => { const img = new Image(); img.onload = () => { offscreen.width = w; offscreen.height = h; offscreen.getContext("2d")?.drawImage(img, 0, 0); res(); }; img.onerror = () => res(); img.src = dataUrl; });
@@ -205,7 +232,7 @@ export function CompModal() {
     };
     const raf = requestAnimationFrame(run);
     return () => { cancelled = true; cancelAnimationFrame(raf); };
-  }, [previewSig, isModalOpen, srcs, sourceNodeId, offscreen, renderScale]);
+  }, [previewSig, isModalOpen, srcs, sourceNodeId, offscreen, renderScale, viewRoi]);
 
   // COMMIT, on settle. CompNode's own render is suspended for the node being
   // edited (the modal owns the canvas), so without this nothing downstream —
@@ -491,7 +518,17 @@ export function CompModal() {
                 {data.checkerboard && checkerTile
                   ? <Rect x={0} y={0} width={outW} height={outH} fillPatternImage={checkerTile as unknown as HTMLImageElement} fillPatternRepeat="repeat" />
                   : <Rect x={0} y={0} width={outW} height={outH} fill="#000" />}
-                <KonvaImage ref={imageNodeRef} image={offscreen} width={outW} height={outH} />
+                {/* Laid out at the ROI the preview actually rendered, so the
+                    sub-rect lands in the right place on the full-size frame.
+                    Falls back to the whole frame (Canvas2D fallback path). */}
+                <KonvaImage
+                  ref={imageNodeRef}
+                  image={offscreen}
+                  x={renderedRoi?.x ?? 0}
+                  y={renderedRoi?.y ?? 0}
+                  width={renderedRoi?.w ?? outW}
+                  height={renderedRoi?.h ?? outH}
+                />
               </Layer>
               <Layer>
                 {showHandles && pieces && (

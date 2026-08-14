@@ -483,6 +483,10 @@ export function renderColorNodeToCanvas(
 // ─── Comp (Nuke Merge clone) — multi-input float compositor ───────────────
 
 export type CompResolvable = { url: string } | { floatNodeId: string };
+
+/** A sub-rectangle of the comp output, in output px, TOP-LEFT origin (the same
+ *  space the editor lays its Konva image out in). */
+export interface CompRoi { x: number; y: number; w: number; h: number }
 export interface CompRenderInputs {
   bg: CompResolvable | null;
   bgAlpha: CompResolvable | null;
@@ -530,6 +534,12 @@ export interface CompRenderParams {
  */
 const COMP_FRAG = `
 uniform vec2 u_outSize;
+// Sub-rectangle of the output this pass actually renders, in output px,
+// bottom-left origin. Commit passes the whole frame (origin 0, size u_outSize)
+// and is therefore bit-identical to having no ROI at all; the editor's preview
+// passes only what is on screen, so zooming IN costs no more than zooming out.
+uniform vec2 u_roiOrigin;
+uniform vec2 u_roiSize;
 uniform sampler2D u_bg;
 uniform sampler2D u_ba;
 uniform sampler2D u_fg;
@@ -557,7 +567,7 @@ float sft(float b, float s){
   return (s < 0.5) ? b - (1.0 - 2.0*s)*b*(1.0 - b) : b + (2.0*s - 1.0)*(d - b);
 }
 void main() {
-  vec2 O = vec2(v_uv.x * u_outSize.x, (1.0 - v_uv.y) * u_outSize.y);
+  vec2 O = u_roiOrigin + vec2(v_uv.x * u_roiSize.x, (1.0 - v_uv.y) * u_roiSize.y);
 
   // BG (transformed; default identity = passthrough). Black-outside controls
   // whether outside the BG footprint is transparent (bo=1) or edge-held (bo=0).
@@ -683,6 +693,10 @@ function compUniforms(
 ): Record<string, UniformValue> {
   const u: Record<string, UniformValue> = {
     u_outSize: [outW, outH],
+    // Whole frame by default — renderCompUnlocked overrides these for a
+    // preview that only needs the visible sub-rect.
+    u_roiOrigin: [0, 0],
+    u_roiSize: [outW, outH],
     u_op: params.op,
     u_premultFg: params.premultFg ? 1 : 0,
     u_premultBg: params.premultBg ? 1 : 0,
@@ -732,8 +746,8 @@ async function renderCompUnlocked(
   inputs: CompRenderInputs,
   params: CompRenderParams,
   destNodeId: string,
-  preview?: { scale: number },
-): Promise<{ w: number; h: number; entry: FloatTex } | null> {
+  preview?: { scale: number; roi?: CompRoi },
+): Promise<{ w: number; h: number; entry: FloatTex; roi: CompRoi } | null> {
   const { gl, quad } = c;
   let bg = await resolveComp(gl, inputs.bg);
   if (!bg) return null;
@@ -756,9 +770,23 @@ async function renderCompUnlocked(
   const sizeSrc = params.outputResolution === "fg" && fg ? fg : bg;
   const w = sizeSrc.w, h = sizeSrc.h;
 
-  // Framebuffer size: full-res on commit, viewport-scaled on preview.
-  const dw = preview ? Math.max(1, Math.round(w * preview.scale)) : w;
-  const dh = preview ? Math.max(1, Math.round(h * preview.scale)) : h;
+  // Region actually rendered, in output px. Commit always renders the whole
+  // frame; a preview renders only the visible sub-rect, clamped to the frame.
+  const roiTL = preview?.roi
+    ? {
+        x: Math.max(0, Math.min(w, preview.roi.x)),
+        y: Math.max(0, Math.min(h, preview.roi.y)),
+        w: Math.max(1, Math.min(w, preview.roi.w)),
+        h: Math.max(1, Math.min(h, preview.roi.h)),
+      }
+    : { x: 0, y: 0, w, h };
+  // Don't let a ROI run off the right/bottom edge.
+  roiTL.w = Math.max(1, Math.min(roiTL.w, w - roiTL.x));
+  roiTL.h = Math.max(1, Math.min(roiTL.h, h - roiTL.y));
+
+  // Framebuffer size: full-res on commit, ROI x zoom on preview.
+  const dw = preview ? Math.max(1, Math.round(roiTL.w * preview.scale)) : w;
+  const dh = preview ? Math.max(1, Math.round(roiTL.h * preview.scale)) : h;
 
   let target: FloatTex;
   if (preview) {
@@ -799,8 +827,14 @@ async function renderCompUnlocked(
   };
   bind(0, bg, "u_bg"); bind(1, fg, "u_fg"); bind(2, fa, "u_fa"); bind(3, mt, "u_mt"); bind(4, ba, "u_ba");
   // u_outSize is the SOURCE size in both modes — it defines the coordinate
-  // space the transforms are solved in, not the framebuffer.
-  setUniforms(gl, prog, compUniforms(params, w, h, bg, ba, fg, fa, mt));
+  // space the transforms are solved in, not the framebuffer. The ROI selects
+  // which part of that space this pass covers (y flipped to the shader's
+  // bottom-left origin).
+  setUniforms(gl, prog, {
+    ...compUniforms(params, w, h, bg, ba, fg, fa, mt),
+    u_roiOrigin: [roiTL.x, h - (roiTL.y + roiTL.h)],
+    u_roiSize: [roiTL.w, roiTL.h],
+  });
   gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 0.0); // FBO: preserve orientation
   gl.viewport(0, 0, dw, dh);
   gl.clearColor(0, 0, 0, 0);
@@ -808,7 +842,7 @@ async function renderCompUnlocked(
   gl.drawArrays(gl.TRIANGLES, 0, 6);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
-  return { w, h, entry: target };
+  return { w, h, entry: target, roi: roiTL };
 }
 
 /**
@@ -904,18 +938,22 @@ export function renderCompPreviewToCanvas(
   destNodeId: string,
   destCanvas: HTMLCanvasElement,
   scale: number,
-): Promise<boolean> {
+  roi?: CompRoi,
+): Promise<CompRoi | null> {
   const gen = (previewGeneration.get(destNodeId) ?? 0) + 1;
   previewGeneration.set(destNodeId, gen);
   return withLock(async () => {
-    if (previewGeneration.get(destNodeId) !== gen) return false; // superseded while queued
+    if (previewGeneration.get(destNodeId) !== gen) return null; // superseded while queued
     const c = getCtx();
-    if (!c || !c.floatOK) return false;
+    if (!c || !c.floatOK) return null;
     const res = await renderCompUnlocked(c, inputs, params, destNodeId, {
       scale: Math.max(0.02, Math.min(1, scale)),
+      roi,
     });
-    if (!res) return false;
-    return blitEntryToCanvasUnlocked(c, res.entry, destCanvas);
+    if (!res) return null;
+    // The caller must lay the result out at the ROI it actually got back —
+    // clamping may have shrunk the requested rect at the frame edges.
+    return blitEntryToCanvasUnlocked(c, res.entry, destCanvas) ? res.roi : null;
   });
 }
 
