@@ -144,101 +144,56 @@ export function ImageCompareNode({
         B
       </div>
 
-      {/* Mode and opacity live in the fullscreen overlay (double-click), not on
-          the thumbnail — at node scale the preview is the useful part. */}
-      {/* Comparison view or placeholder */}
+      {/* The node body is a STATIC two-up preview, not a comparison tool.
+          It used to mount a live ReactCompareSlider (pointer handlers, a
+          ResizeObserver, and both images always rendered) plus the blend and
+          difference layers — a full interactive comparer per node, running on
+          the canvas whether or not anyone was looking at it. Comparing is a
+          thing you do deliberately, so it now happens in the fullscreen
+          overlay on double-click and nowhere else.
+
+          Dropping `nodrag nopan nowheel` here is deliberate too: with nothing
+          interactive left, the node should drag and the canvas should pan and
+          zoom from anywhere on it, like every other node. */}
       {imageA && imageB ? (
         <div
-          className="flex-1 relative nodrag nopan nowheel"
+          className="group flex-1 relative cursor-pointer"
           onDoubleClick={(e) => {
             e.stopPropagation();
             void loadNodeFullResInputs(id); // pull full-res from refs for the fullscreen view
             setShowOverlay(true);
           }}
-          title="Double-click to view fullscreen"
+          title="Double-click to compare"
         >
-          {compareMode === "slide" && (
-            <>
-              <ReactCompareSlider
-                itemOne={
-                  <ReactCompareSliderImage
-                    src={previewA ?? undefined}
-                    alt="Image A"
-                    style={{ objectFit: "contain" }}
-                  />
-                }
-                itemTwo={
-                  <ReactCompareSliderImage
-                    src={previewB ?? undefined}
-                    alt="Image B"
-                    style={{ objectFit: "contain" }}
-                  />
-                }
-                portrait={false}
-                style={{ width: "100%", height: "100%" }}
+          <div className="absolute inset-0 flex gap-px">
+            <div className="relative flex-1 min-w-0 bg-black/40">
+              <img
+                src={previewA ?? undefined}
+                alt="Image A"
+                className="w-full h-full object-contain"
+                draggable={false}
               />
-              {/* Corner labels */}
-              <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
+              <div className="absolute top-1.5 left-1.5 bg-black/50 text-white text-[10px] font-medium px-1.5 py-0.5 rounded pointer-events-none">
                 A
               </div>
-              <div className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
+            </div>
+            <div className="relative flex-1 min-w-0 bg-black/40">
+              <img
+                src={previewB ?? undefined}
+                alt="Image B"
+                className="w-full h-full object-contain"
+                draggable={false}
+              />
+              <div className="absolute top-1.5 right-1.5 bg-black/50 text-white text-[10px] font-medium px-1.5 py-0.5 rounded pointer-events-none">
                 B
               </div>
-            </>
-          )}
-
-          {compareMode === "blend" && (
-            <div className="relative w-full h-full" style={{ minHeight: 200 }}>
-              <img
-                src={previewA ?? undefined}
-                alt="Image A"
-                className="w-full h-full object-contain"
-                draggable={false}
-              />
-              <img
-                src={previewB ?? undefined}
-                alt="Image B"
-                className="absolute inset-0 w-full h-full object-contain"
-                style={{ opacity: blendOpacity }}
-                draggable={false}
-              />
-              {/* Corner labels */}
-              <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
-                A
-              </div>
-              <div className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
-                B ({Math.round(blendOpacity * 100)}%)
-              </div>
             </div>
-          )}
-
-          {compareMode === "difference" && (
-            <div className="relative w-full h-full" style={{ minHeight: 200 }}>
-              <img
-                src={previewA ?? undefined}
-                alt="Image A"
-                className="w-full h-full object-contain"
-                draggable={false}
-              />
-              <img
-                src={previewB ?? undefined}
-                alt="Image B"
-                className="absolute inset-0 w-full h-full object-contain"
-                style={{
-                  opacity: blendOpacity,
-                  mixBlendMode: "difference",
-                }}
-                draggable={false}
-              />
-              {/* Corner labels */}
-              <div className="absolute top-2 left-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
-                A
-              </div>
-              <div className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-medium px-2 py-1 rounded pointer-events-none">
-                Diff ({Math.round(blendOpacity * 100)}%)
-              </div>
-            </div>
-          )}
+          </div>
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center pointer-events-none">
+            <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 bg-black/60 px-2 py-1 rounded">
+              Double-click to compare
+            </span>
+          </div>
         </div>
       ) : (
         <div className="w-full flex-1 min-h-[200px] border border-dashed border-neutral-600 rounded flex flex-col items-center justify-center gap-2">
