@@ -67,7 +67,11 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
       />
 
       {displayImage ? (
-        <div className="relative group flex-1 flex flex-col min-h-0">
+        <div
+          className="relative group flex-1 flex flex-col min-h-0 cursor-pointer"
+          onDoubleClick={handleEdit}
+          title="Double-click to open the mask editor"
+        >
           <img
             src={displayImage}
             alt="Mask"

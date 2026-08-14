@@ -154,7 +154,7 @@ export function CubemapEquirectNode({ id, data, selected }: NodeProps<CubemapEqu
       {/* Preview area */}
       {displayImage ? (
         <div className="relative w-full flex-1 min-h-0">
-          <img
+          <img data-node-media="outputImage"
             src={displayImage}
             alt="Conversion result"
             className="w-full h-full object-contain"

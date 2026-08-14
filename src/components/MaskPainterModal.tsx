@@ -6,6 +6,7 @@ import { useMaskPainterStore } from "@/store/maskPainterStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { MaskElement, MaskStroke, MaskRect, MaskCircle, MaskPainterNodeData } from "@/types";
 import Konva from "konva";
+import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
 
 /**
  * Full-screen mask painting modal.
@@ -54,6 +55,26 @@ export function MaskPainterModal() {
   const [currentElement, setCurrentElement] = useState<MaskElement | null>(null);
   const [drawStart, setDrawStart] = useState({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  // Space-held panning — every drag here paints, so pan needs a modifier
+  // (same convention as the roto editor).
+  const [spaceHeld, setSpaceHeld] = useState(false);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const down = (e: KeyboardEvent) => {
+      if (e.key === " ") { setSpaceHeld(true); e.preventDefault(); }
+    };
+    const up = (e: KeyboardEvent) => { if (e.key === " ") setSpaceHeld(false); };
+    const blur = () => setSpaceHeld(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, [isModalOpen]);
 
   // Determine if the current tool is a freehand tool (brush/eraser) or a shape tool
   const isFreehandTool = currentTool === "brush" || currentTool === "eraser";
@@ -139,6 +160,7 @@ export function MaskPainterModal() {
     (e: Konva.KonvaEventObject<MouseEvent>) => {
       // Right-click or middle-click: allow panning
       if (e.evt.button !== 0) return;
+      if (spaceHeld) return; // space + drag pans the view instead of painting
 
       const pos = getRelativePointerPosition();
       setIsDrawing(true);
@@ -181,7 +203,7 @@ export function MaskPainterModal() {
         setCurrentElement(circle);
       }
     },
-    [currentTool, brushSize, isFreehandTool, getRelativePointerPosition]
+    [currentTool, brushSize, isFreehandTool, getRelativePointerPosition, spaceHeld]
   );
 
   const handleMouseMove = useCallback(() => {
@@ -239,12 +261,14 @@ export function MaskPainterModal() {
   const handleWheel = useCallback(
     (e: Konva.KonvaEventObject<WheelEvent>) => {
       e.evt.preventDefault();
-      const scaleBy = 1.1;
-      const oldScale = scale;
-      const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy;
-      setScale(Math.min(Math.max(newScale, 0.1), 5));
+      const stage = stageRef.current;
+      if (!stage) return;
+      const next = zoomStageAtPointer(stage, e.evt.deltaY, { min: 0.1, max: 5 });
+      if (!next) return;
+      setScale(next.scale);
+      setPosition(next.position);
     },
-    [scale]
+    []
   );
 
   /**
@@ -497,7 +521,7 @@ export function MaskPainterModal() {
           scaleY={scale}
           x={position.x}
           y={position.y}
-          draggable={false}
+          draggable={spaceHeld}
           onDragEnd={(e) => {
             if (e.target === stageRef.current)
               setPosition({ x: e.target.x(), y: e.target.y() });
@@ -507,7 +531,7 @@ export function MaskPainterModal() {
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
           onWheel={handleWheel}
-          style={{ cursor: "crosshair" }}
+          style={{ cursor: spaceHeld ? "grab" : "crosshair" }}
         >
           {/* Layer 1: Source image background */}
           <Layer>

@@ -93,7 +93,11 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" />
 
       {displayImage ? (
-        <div className="relative group flex-1 flex flex-col min-h-0">
+        <div
+          className="relative group flex-1 flex flex-col min-h-0 cursor-pointer"
+          onDoubleClick={handleEdit}
+          title="Double-click to open the roto editor"
+        >
           <img src={displayImage} alt="Roto matte" className="w-full flex-1 min-h-0 object-contain rounded" />
           <button
             onClick={(e) => { e.stopPropagation(); handleRemove(); }}

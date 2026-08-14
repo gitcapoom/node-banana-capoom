@@ -3,8 +3,10 @@
 import { ReactNode, useCallback, useRef, useLayoutEffect } from "react";
 import { Node, NodeResizer, OnResize, useReactFlow } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useNodeMediaViewer } from "@/store/nodeMediaViewerStore";
 import { isPanningRef } from "@/components/WorkflowCanvas";
 import { getMediaDimensions, calculateAspectFitSize } from "@/utils/nodeDimensions";
+import type { MediaType } from "@/components/MediaOverlay";
 
 const DEFAULT_NODE_DIMENSION = 300;
 
@@ -229,9 +231,31 @@ export function BaseNode({
     [id, setNodes]
   );
 
-  const handleResizeHandleDblClick = useCallback(
+  const openMediaViewer = useNodeMediaViewer((s) => s.open);
+
+  const handleNodeDblClick = useCallback(
     async (e: React.MouseEvent) => {
       const target = e.target as HTMLElement;
+
+      // A node's preview opts into the shared full-screen viewer by marking its
+      // media element `data-node-media="<field>"`. Nodes that own a richer
+      // editor (annotation, crop, comp, the GPU editors) handle their own
+      // double-click instead and simply don't carry the marker.
+      const media = target.closest<HTMLElement>("[data-node-media]");
+      if (media && !e.defaultPrevented) {
+        const field = media.dataset.nodeMedia;
+        if (field) {
+          e.stopPropagation();
+          openMediaViewer({
+            nodeId: id,
+            field,
+            mediaType: (media.dataset.nodeMediaType as MediaType) || "image",
+            folder: media.dataset.nodeMediaFolder === "generations" ? "generations" : "inputs",
+          });
+          return;
+        }
+      }
+
       if (!target.closest(".react-flow__resize-control")) return;
       if (!aspectFitMedia) return;
 
@@ -263,7 +287,7 @@ export function BaseNode({
         })
       );
     },
-    [aspectFitMedia, id, fullBleed, getNodes, setNodes]
+    [aspectFitMedia, id, fullBleed, getNodes, setNodes, openMediaViewer]
   );
 
   const hasExpandedSettings = settingsExpanded && settingsPanel;
@@ -273,7 +297,7 @@ export function BaseNode({
       className={hasExpandedSettings
         ? `relative flex flex-col w-full h-full overflow-visible bg-neutral-800 rounded-lg ${selected ? "ring-2 ring-blue-500/40 shadow-lg shadow-blue-500/25" : ""}`
         : "contents"}
-      onDoubleClick={handleResizeHandleDblClick}
+      onDoubleClick={handleNodeDblClick}
     >
       <NodeResizer
         isVisible={selected}

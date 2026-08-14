@@ -326,6 +326,7 @@ export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesN
       {previewImage ? (
         <div className="relative w-full flex-1 min-h-0">
           <img
+            data-node-media={nodeData.mode === "split" ? "sourceImage" : "outputCross"}
             src={previewImage}
             alt={nodeData.mode === "split" ? "Source cross" : "Combined cross"}
             className="w-full h-full object-contain"

@@ -11,6 +11,7 @@ import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/ut
 import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPieces } from "@/utils/compTransform";
 import { COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, type CompInputFilter, type BlurFilterType } from "@/types/comp";
 import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/types";
+import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
 
 type Pt = { x: number; y: number };
 type NumKey = "hPos" | "vPos" | "rotation" | "scaleX" | "scaleY";
@@ -162,8 +163,12 @@ export function CompModal() {
 
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
-    const by = 1.1;
-    setScale((s) => Math.min(Math.max(e.evt.deltaY > 0 ? s / by : s * by, 0.05), 8));
+    const stage = stageRef.current;
+    if (!stage) return;
+    const next = zoomStageAtPointer(stage, e.evt.deltaY, { min: 0.05, max: 8 });
+    if (!next) return;
+    setScale(next.scale);
+    setPosition(next.position);
   }, []);
 
   const TKEY = { bg: "bgTransform", bgAlpha: "bgAlphaTransform", fg: "fgTransform", fgAlpha: "fgAlphaTransform", matte: "matteTransform" } as const;

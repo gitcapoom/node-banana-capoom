@@ -99,7 +99,7 @@ export function ReformatNode({ id, data, selected }: NodeProps<ReformatNodeType>
 
       {displayImage ? (
         <div className="relative w-full flex-1 min-h-0">
-          <img src={displayImage} alt="Reformatted" className="w-full h-full object-contain" />
+          <img data-node-media="outputImage" src={displayImage} alt="Reformatted" className="w-full h-full object-contain" />
           <div className="absolute bottom-1 left-1 right-1 text-center">
             <span className="text-[9px] text-white/60 bg-black/40 px-1.5 py-0.5 rounded">
               {Math.max(1, Math.round(nodeData.width || 0))}×{Math.max(1, Math.round(nodeData.height || 0))}

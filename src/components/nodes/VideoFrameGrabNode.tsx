@@ -83,7 +83,7 @@ export function VideoFrameGrabNode({ id, data, selected }: NodeProps<VideoFrameG
         <div className="flex-1 min-h-0 relative">
           {nodeData.outputImage ? (
             <>
-              <img
+              <img data-node-media="outputImage"
                 src={nodeData.outputImage}
                 className="absolute inset-0 w-full h-full object-contain rounded"
                 alt="Extracted frame"

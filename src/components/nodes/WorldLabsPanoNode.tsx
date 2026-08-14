@@ -259,6 +259,7 @@ export function WorldLabsPanoNode({ id, data, selected }: NodeProps<WorldLabsPan
           {isComplete && previewUrl && (
             <div className="w-full">
               <img
+                data-node-media="panoUrl"
                 src={previewUrl}
                 alt={nodeData.worldName}
                 className="w-full h-auto object-cover"

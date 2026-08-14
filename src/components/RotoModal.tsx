@@ -7,6 +7,7 @@ import { useRotoStore } from "@/store/rotoStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { rasterizeRoto } from "@/utils/rasterizeRoto";
 import type { RotoShape, RotoPoint, RotoFeatherFalloff } from "@/types";
+import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
 
 type Pt = { x: number; y: number };
 const uid = () => `${Date.now().toString(36)}-${Math.floor(performance.now() % 1e6).toString(36)}`;
@@ -219,16 +220,11 @@ export function RotoModal() {
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const stage = stageRef.current;
-    const pointer = stage?.getPointerPosition();
-    if (!stage || !pointer) return;
-    const oldScale = stage.scaleX();
-    const by = 1.1;
-    const newScale = Math.min(Math.max(e.evt.deltaY > 0 ? oldScale / by : oldScale * by, 0.1), 8);
-    // Keep the image point under the cursor pinned while zooming.
-    const mx = (pointer.x - stage.x()) / oldScale;
-    const my = (pointer.y - stage.y()) / oldScale;
-    setScale(newScale);
-    setPosition({ x: pointer.x - mx * newScale, y: pointer.y - my * newScale });
+    if (!stage) return;
+    const next = zoomStageAtPointer(stage, e.evt.deltaY, { min: 0.1, max: 8 });
+    if (!next) return;
+    setScale(next.scale);
+    setPosition(next.position);
   }, []);
 
   const selShape = work.find((s) => s.id === selectedShapeId) || null;

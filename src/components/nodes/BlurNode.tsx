@@ -160,7 +160,11 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
       </div>
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" />
 
-      <div className="relative w-full aspect-square bg-neutral-900/60 rounded overflow-hidden">
+      <div
+        data-node-media="outputImage"
+        className="relative w-full aspect-square bg-neutral-900/60 rounded overflow-hidden cursor-pointer"
+        title="Double-click to view full screen"
+      >
         {hasSrc && allInputsResolved ? (
           <canvas ref={canvasRef} className="w-full h-full object-contain" />
         ) : thumb ? (

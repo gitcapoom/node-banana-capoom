@@ -9,6 +9,7 @@ import { AnnotationModal } from "@/components/AnnotationModal";
 import { MaskPainterModal } from "@/components/MaskPainterModal";
 import { RotoModal } from "@/components/RotoModal";
 import { CompModal } from "@/components/CompModal";
+import { NodeMediaViewer } from "@/components/NodeMediaViewer";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { openWorkflowByPath } from "@/utils/openWorkflowByPath";
 import { useToast } from "@/components/Toast";
@@ -63,6 +64,7 @@ export default function Home() {
         <MaskPainterModal />
         <RotoModal />
         <CompModal />
+        <NodeMediaViewer />
       </div>
     </ReactFlowProvider>
   );
