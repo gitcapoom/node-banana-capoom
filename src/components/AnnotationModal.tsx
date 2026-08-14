@@ -14,6 +14,7 @@ import {
   ToolType,
 } from "@/types";
 import Konva from "konva";
+import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
 
 const COLORS = [
   "#ef4444",
@@ -68,6 +69,9 @@ export function AnnotationModal() {
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  // Space-held panning, so the view can be moved with any tool active
+  // (matches the roto / mask editors).
+  const [spaceHeld, setSpaceHeld] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawStart, setDrawStart] = useState({ x: 0, y: 0 });
   const [currentShape, setCurrentShape] = useState<AnnotationShape | null>(null);
@@ -76,6 +80,23 @@ export function AnnotationModal() {
   const [pendingTextPosition, setPendingTextPosition] = useState<{ x: number; y: number } | null>(null);
   const textInputCreatedAt = useRef<number>(0);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+    const down = (e: KeyboardEvent) => {
+      if (e.key === " ") { setSpaceHeld(true); e.preventDefault(); }
+    };
+    const up = (e: KeyboardEvent) => { if (e.key === " ") setSpaceHeld(false); };
+    const blur = () => setSpaceHeld(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, [isModalOpen]);
 
   useEffect(() => {
     if (sourceImage) {
@@ -155,6 +176,7 @@ export function AnnotationModal() {
 
   const handleMouseDown = useCallback(
     (e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (spaceHeld) return; // space + drag pans the view instead of drawing
       if (currentTool === "select") {
         const clickedOnEmpty = e.target === e.target.getStage() || e.target.getClassName() === "Image";
         if (clickedOnEmpty) {
@@ -270,11 +292,13 @@ export function AnnotationModal() {
 
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
-    const scaleBy = 1.1;
-    const oldScale = scale;
-    const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy;
-    setScale(Math.min(Math.max(newScale, 0.1), 5));
-  }, [scale]);
+    const stage = stageRef.current;
+    if (!stage) return;
+    const next = zoomStageAtPointer(stage, e.evt.deltaY, { min: 0.1, max: 5 });
+    if (!next) return;
+    setScale(next.scale);
+    setPosition(next.position);
+  }, []);
 
   const flattenImage = useCallback((): string => {
     const stage = stageRef.current;
@@ -467,7 +491,7 @@ export function AnnotationModal() {
           scaleY={scale}
           x={position.x}
           y={position.y}
-          draggable={currentTool === "select"}
+          draggable={currentTool === "select" || spaceHeld}
           onDragEnd={(e) => { if (e.target === stageRef.current) setPosition({ x: e.target.x(), y: e.target.y() }); }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}

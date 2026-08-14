@@ -97,7 +97,7 @@ export function SphereLightRenderNode({ id, data, selected }: NodeProps<SphereLi
 
       <div className="relative w-full flex-1 min-h-0 rounded-md overflow-hidden bg-neutral-900/40 flex items-center justify-center">
         {outputImage ? (
-          <img src={outputImage} alt="Sphere light render" className="w-full h-full object-contain" draggable={false} />
+          <img data-node-media="outputImage" src={outputImage} alt="Sphere light render" className="w-full h-full object-contain" draggable={false} />
         ) : (
           <span className="text-[10px] text-neutral-500">Rendering…</span>
         )}

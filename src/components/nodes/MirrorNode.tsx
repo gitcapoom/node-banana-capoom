@@ -147,7 +147,7 @@ export function MirrorNode({ id, data, selected }: NodeProps<MirrorNodeType>) {
 
       {displayImage ? (
         <div className="relative w-full flex-1 min-h-0">
-          <img
+          <img data-node-media="outputImage"
             src={displayImage}
             alt="Mirrored"
             className="w-full h-full object-contain"

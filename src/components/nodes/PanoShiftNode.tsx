@@ -164,7 +164,7 @@ export function PanoShiftNode({ id, data, selected }: NodeProps<PanoShiftNodeTyp
       {/* Preview */}
       {displayImage ? (
         <div className="relative w-full flex-1 min-h-0">
-          <img
+          <img data-node-media="outputImage"
             src={displayImage}
             alt="Shifted"
             className="w-full h-full object-contain"

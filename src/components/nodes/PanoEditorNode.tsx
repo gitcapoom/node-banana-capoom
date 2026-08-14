@@ -115,7 +115,7 @@ export function PanoEditorNode({ id, data, selected }: NodeProps<PanoEditorNodeT
         {/* Output preview */}
         {nodeData.outputImage && (
           <div className="bg-neutral-900 rounded-lg overflow-hidden">
-            <img
+            <img data-node-media="outputImage"
               src={nodeData.outputImage}
               alt="Composited panorama"
               className="w-full h-auto object-cover"

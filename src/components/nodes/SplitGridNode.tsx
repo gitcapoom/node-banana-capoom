@@ -66,7 +66,7 @@ export function SplitGridNode({ id, data, selected }: NodeProps<SplitGridNodeTyp
         {/* Full-bleed preview area */}
         {nodeData.sourceImage ? (
           <div className="relative w-full h-full">
-            <img
+            <img data-node-media="sourceImage"
               src={nodeData.sourceImage}
               alt="Source grid"
               className="w-full h-full object-contain rounded-lg"

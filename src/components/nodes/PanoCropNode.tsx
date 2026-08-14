@@ -63,7 +63,7 @@ export function PanoCropNode({ id, data, selected }: NodeProps<PanoCropNodeType>
         {/* Image preview */}
         {nodeData.image ? (
           <div className="bg-neutral-900 rounded-lg overflow-hidden">
-            <img
+            <img data-node-media="image"
               src={nodeData.image}
               alt={nodeData.filename || "Pano crop"}
               className="w-full h-auto object-cover"
