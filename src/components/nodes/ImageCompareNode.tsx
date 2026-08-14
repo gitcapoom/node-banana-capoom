@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useCallback, useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { createPortal } from "react-dom";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import {
@@ -29,8 +30,6 @@ export function ImageCompareNode({
 }: NodeProps<ImageCompareNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
-  const edges = useWorkflowStore((state) => state.edges);
-  const nodes = useWorkflowStore((state) => state.nodes);
   const loadNodeFullResInputs = useWorkflowStore((state) => state.loadNodeFullResInputs);
 
   const compareMode = nodeData.compareMode || "slide";
@@ -55,41 +54,48 @@ export function ImageCompareNode({
   // cubemapEquirect, generators, router passthrough, …) works automatically.
   // Falls back to dropping legacy/ambiguous edges into B if no explicit
   // "image-1" handle is connected.
-  const [imageA, imageB] = useMemo<[string | null, string | null]>(() => {
-    let a: string | null = null;
-    let b: string | null = null;
-    const ambiguous: string[] = [];
+  // Resolved INSIDE the selector with a shallow compare, so this node
+  // re-renders only when A or B actually changes. Selecting `nodes` and
+  // `edges` wholesale (as this did) meant a re-render on every store write
+  // anywhere in the graph — 60-120 times a second during any node drag.
+  const resolved = useWorkflowStore(
+    useShallow((state) => {
+      const edges = state.edges;
+      const nodes = state.nodes;
+      let a: string | null = null;
+      let b: string | null = null;
+      const ambiguous: string[] = [];
 
-    for (const edge of edges) {
-      if (edge.target !== id) continue;
-      const sourceNode = nodes.find((n) => n.id === edge.source);
-      if (!sourceNode) continue;
-      const out = getSourceOutput(
-        sourceNode,
-        edge.sourceHandle,
-        edge.data as Record<string, unknown> | undefined
-      );
-      if (out.type !== "image" || !out.value) continue;
+      for (const edge of edges) {
+        if (edge.target !== id) continue;
+        const sourceNode = nodes.find((n) => n.id === edge.source);
+        if (!sourceNode) continue;
+        const out = getSourceOutput(
+          sourceNode,
+          edge.sourceHandle,
+          edge.data as Record<string, unknown> | undefined
+        );
+        if (out.type !== "image" || !out.value) continue;
 
-      if (edge.targetHandle === "image-1") {
-        b = out.value;
-      } else if (edge.targetHandle === "image") {
-        if (!a) a = out.value;
-        else ambiguous.push(out.value);
-      } else {
-        ambiguous.push(out.value);
+        if (edge.targetHandle === "image-1") {
+          b = out.value;
+        } else if (edge.targetHandle === "image") {
+          if (!a) a = out.value;
+          else ambiguous.push(out.value);
+        } else {
+          ambiguous.push(out.value);
+        }
       }
-    }
 
-    if (!b && ambiguous.length > 0) b = ambiguous[0];
+      if (!b && ambiguous.length > 0) b = ambiguous[0];
+      return { a, b };
+    }),
+  );
 
-    // Fall back to the externalized inline thumb when the live edge value and
-    // the (lazy, null-on-open) full-res mirror are both unavailable.
-    return [
-      a || nodeData.imageA || nodeData.imageAThumb || null,
-      b || nodeData.imageB || nodeData.imageBThumb || null,
-    ];
-  }, [edges, nodes, id, nodeData.imageA, nodeData.imageB, nodeData.imageAThumb, nodeData.imageBThumb]);
+  // Fall back to the externalized inline thumb when the live edge value and
+  // the (lazy, null-on-open) full-res mirror are both unavailable.
+  const imageA = resolved.a || nodeData.imageA || nodeData.imageAThumb || null;
+  const imageB = resolved.b || nodeData.imageB || nodeData.imageBThumb || null;
 
   // In-node previews are ~70px wide, so they show the externalized thumb when
   // its ref proves it current. The full-screen overlay below keeps imageA/imageB

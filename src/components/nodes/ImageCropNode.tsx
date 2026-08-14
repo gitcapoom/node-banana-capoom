@@ -9,9 +9,22 @@ import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { cropImageToDataUrl } from "@/utils/cropImage";
 import type { ImageCropNodeData } from "@/types";
 import { previewSrc } from "@/utils/nodePreview";
-import { cheapUrlKey } from "@/utils/renderSignature";
+import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
+import { commitProcessorOutput } from "@/store/execution/commitProcessorOutput";
 
 type ImageCropNodeType = Node<ImageCropNodeData, "imageCrop">;
+
+/**
+ * Last applied (source + region) per node id.
+ *
+ * MODULE level, not a useRef, and that is the whole point. React Flow unmounts
+ * nodes scrolled out of view; a per-instance ref died with the unmount, so the
+ * guard was always empty on the way back and every pan that recrossed a crop
+ * node re-ran a full-res decode + PNG encode — measured at ~1.5-3s per node,
+ * and this graph has nine of them. CompNode's guard has been module-level for
+ * exactly this reason.
+ */
+const committedCrops = new RenderSignatureCache();
 
 export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeType>) {
   const nodeData = data;
@@ -27,9 +40,9 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     return ins.images[0] || null;
   });
 
-  // Track the last applied (sourceImage + region) so we don't re-crop redundantly.
-  // Also doubles as a "is this settled promise still relevant" check.
-  const lastFingerprintRef = useRef<string>("");
+  // Guards the in-flight promise against a newer one landing first. The
+  // cross-remount dedup lives in `committedCrops` above.
+  const inFlightRef = useRef<string>("");
 
   // 1) Mirror upstream image into sourceImage.
   useEffect(() => {
@@ -47,30 +60,52 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
 
     if (!src) {
       if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null });
-      lastFingerprintRef.current = "";
+      inFlightRef.current = "";
+      committedCrops.forget(id);
       return;
     }
 
-    // No region → passthrough
+    // `cheapUrlKey`, not `src.length`. Two different images of equal byte
+    // length collided on the old fingerprint and the node kept showing the
+    // previous crop — a correctness bug, not just a perf one.
+    const srcKey = cheapUrlKey(src);
+
+    // No region → passthrough. Carry the source's thumb across as the output's
+    // thumb (it IS a thumb of these exact pixels), so the preview has something
+    // small to paint instead of the full-res source.
     if (!region) {
-      if (nodeData.outputImage !== src) updateNodeData(id, { outputImage: src });
-      lastFingerprintRef.current = `passthrough:${src.length}`;
+      const sig = `passthrough:${srcKey}`;
+      if (committedCrops.matches(id, sig) && nodeData.outputImage === src) return;
+      committedCrops.set(id, sig);
+      if (nodeData.outputImage !== src) {
+        updateNodeData(id, {
+          outputImage: src,
+          outputImageRef: undefined,
+          outputImageThumb: nodeData.sourceImageThumb,
+          outputImageThumbKey: nodeData.sourceImageThumb ? srcKey : null,
+        });
+      }
       return;
     }
 
-    const fingerprint = `${src.length}|${region.x}|${region.y}|${region.width}|${region.height}`;
-    if (lastFingerprintRef.current === fingerprint) return;
-    lastFingerprintRef.current = fingerprint;
+    const fingerprint = `${srcKey}|${region.x}|${region.y}|${region.width}|${region.height}`;
+    // Already produced this exact crop — a remount is not a reason to redo a
+    // full-res decode and PNG encode.
+    if (committedCrops.matches(id, fingerprint) && nodeData.outputImage) return;
+    inFlightRef.current = fingerprint;
 
     cropImageToDataUrl(src, region)
       .then((cropped) => {
-        if (lastFingerprintRef.current !== fingerprint) return;
-        // Clear the stale ref so the new crop is (re)saved + re-thumbed on save.
-        updateNodeData(id, { outputImage: cropped, outputImageRef: undefined });
+        if (inFlightRef.current !== fingerprint) return;
+        committedCrops.set(id, fingerprint);
+        // commitProcessorOutput writes the display thumb beside the output.
+        // Writing the output raw is what left this node with nothing but a
+        // full-res image to paint into a ~90px box.
+        void commitProcessorOutput(updateNodeData, id, cropped);
       })
       .catch((err) => {
         console.error("ImageCropNode: crop failed", err);
-        if (lastFingerprintRef.current !== fingerprint) return;
+        if (inFlightRef.current !== fingerprint) return;
         updateNodeData(id, { outputImage: src });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps

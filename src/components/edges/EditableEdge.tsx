@@ -7,6 +7,7 @@ import {
   getSmoothStepPath,
   getBezierPath,
   useReactFlow,
+  useNodesData,
 } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { NanoBananaNodeData, WorkflowEdgeData } from "@/types";
@@ -52,24 +53,28 @@ export function EditableEdge({
   const edgeStyle = useWorkflowStore((state) => state.edgeStyle);
   const [isDragging, setIsDragging] = useState(false);
 
-  // Narrow selector: returns boolean, only re-renders when selection relevance changes
-  const isConnectedToSelection = useWorkflowStore((state) => {
-    const selectedNodes = state.nodes.filter((n) => n.selected);
-    if (selectedNodes.length === 0) return false;
-    return selectedNodes.some((n) => n.id === source || n.id === target);
-  });
+  // Returns a boolean, but it used to ALLOCATE an array to get there: zustand
+  // re-runs every subscriber's selector on every store write, so `.filter()`
+  // here meant one throwaway array and a full 70-node walk per edge per write —
+  // with ~50 edges on screen that is thousands of visits per frame during a
+  // drag. `.some()` allocates nothing and exits on the first hit.
+  const isConnectedToSelection = useWorkflowStore((state) =>
+    state.nodes.some((n) => n.selected && (n.id === source || n.id === target)),
+  );
 
   const edgeData = data as EdgeData | undefined;
   const offsetX = edgeData?.offsetX ?? 0;
   const offsetY = edgeData?.offsetY ?? 0;
   const hasPause = edgeData?.hasPause ?? false;
 
-  // Narrow selector: only re-renders when target loading status changes
-  const isTargetLoading = useWorkflowStore((state) => {
-    const targetNode = state.nodes.find((n) => n.id === target);
-    if (targetNode?.type !== "nanoBanana") return false;
-    return (targetNode.data as NanoBananaNodeData).status === "loading";
-  });
+  // useNodesData is React Flow's INDEXED id->node lookup with a shallow
+  // compare; the previous `state.nodes.find()` inside a zustand selector was
+  // an O(nodes) scan per edge on every store write — the same O(nodes^2)
+  // pattern BaseNode already calls out for making panning crawl.
+  const targetNodeData = useNodesData(target);
+  const isTargetLoading =
+    targetNodeData?.type === "nanoBanana" &&
+    (targetNodeData.data as NanoBananaNodeData).status === "loading";
 
   // Determine edge color based on handle type (orange if paused)
   const edgeColor = useMemo(() => {

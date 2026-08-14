@@ -649,6 +649,38 @@ let autoSaveIntervalId: ReturnType<typeof setInterval> | null = null;
  */
 const AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000;
 
+/**
+ * Node-data keys written by machinery rather than by the user. A write touching
+ * only these never pushes an undo snapshot.
+ *
+ * Beyond outputs and status, this covers the three families that made image
+ * work feel heavy: MIRRORED INPUTS (a node copying its upstream's value into
+ * its own data on mount), DISPLAY DERIVATIVES (thumbs, thumb keys, dimension
+ * readouts), and REFS (where a value now lives on disk). None of them is an
+ * edit; all of them fire in bursts as a graph hydrates or a cascade runs.
+ */
+const SKIP_UNDO_KEYS = new Set([
+  // status / lifecycle
+  "status", "error", "isProcessing", "viewerOpen", "viewerWindowOpen",
+  // outputs
+  "outputImage", "outputImageRef", "outputVideo", "outputVideoRef",
+  "output3dUrl", "outputAudio", "outputText", "outputMask", "outputMaskRef",
+  "outputWidth", "outputHeight",
+  // history
+  "imageHistory", "videoHistory", "model3dHistory", "audioHistory",
+  "selectedHistoryIndex", "selectedVideoHistoryIndex",
+  // display derivatives
+  "outputImageThumb", "outputImageThumbKey", "outputImageDims",
+  "outputMaskThumb", "outputMaskDims", "imageThumb", "imageThumbKey", "imageDims",
+  "thumbnailImage", "thumbnailImageRef", "thumbnailImageKey",
+  "sourceImageThumb", "sourceImageDims",
+  // mirrored inputs (a node copying upstream into its own data)
+  "sourceImage", "sourceImageRef", "matteImage", "matteImageRef",
+  "bgImage", "bgImageRef", "bgAlphaImage", "bgAlphaImageRef",
+  "fgImage", "fgImageRef", "fgAlphaImage", "fgAlphaImageRef",
+  "imageA", "imageARef", "imageAThumb", "imageB", "imageBRef", "imageBThumb",
+]);
+
 // RAF debounce for hover updates — coalesces rapid mouseenter/mouseleave events
 // into a single store update per animation frame
 let hoverRafId: number | null = null;
@@ -881,11 +913,31 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => {
-    // Only snapshot for user-initiated data changes, not generation outputs/status
-    const skipUndoKeys = new Set(["status", "error", "outputImage", "outputImageRef", "outputVideo", "outputVideoRef", "output3dUrl", "outputAudio", "imageHistory", "videoHistory", "model3dHistory", "audioHistory", "selectedHistoryIndex", "thumbnailImage", "viewerOpen", "viewerWindowOpen", "isProcessing"]);
-    const isUserChange = Object.keys(data).some(k => !skipUndoKeys.has(k));
-    if (isUserChange) get().pushUndoSnapshot();
     const node = get().nodes.find((n) => n.id === nodeId);
+
+    // NO-OP GUARD. Zustand re-runs every subscriber's selector on every set(),
+    // and this store's writers are full of effects that re-assert a value they
+    // already hold: input mirrors on mount, schema caches, thumbnail effects,
+    // processors republishing an unchanged output. Each of those used to
+    // rebuild the whole nodes array and fan out to every node component, edge
+    // and selector in the graph. If nothing actually changes, do nothing.
+    if (node) {
+      const cur = node.data as Record<string, unknown>;
+      let changed = false;
+      for (const k of Object.keys(data)) {
+        if (!Object.is(cur[k], (data as Record<string, unknown>)[k])) { changed = true; break; }
+      }
+      if (!changed) return;
+    }
+
+    // Only snapshot for user-initiated data changes. Everything a MACHINE
+    // writes belongs here: a mirrored input, a thumbnail, a dimension readout
+    // or a republished output is not an edit the user can meaningfully undo,
+    // and treating it as one made every image cascade walk all 70 nodes,
+    // JSON round-trip a snapshot, clear the redo stack, and perform a SECOND
+    // store write — twice a second throughout any drag.
+    const isUserChange = Object.keys(data).some(k => !SKIP_UNDO_KEYS.has(k));
+    if (isUserChange) get().pushUndoSnapshot();
     set((state) => ({
       nodes: state.nodes.map((node) =>
         node.id === nodeId
