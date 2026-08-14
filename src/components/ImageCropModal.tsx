@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Stage, Layer, Image as KonvaImage, Rect, Transformer, Group } from "react-konva";
+import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
+import { commitProcessorOutput } from "@/store/execution/commitProcessorOutput";
 import Konva from "konva";
 import { useImageCropStore, type CropRegion } from "@/store/imageCropStore";
 import { useWorkflowStore } from "@/store/workflowStore";
@@ -48,6 +50,36 @@ export function ImageCropModal() {
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
   const [scale, setScale] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  // Wheel-zoom and space-drag pan, the same as the mask / annotation / comp
+  // editors. Without them this modal could only ever show the fit-to-window
+  // view, which is no use for placing a crop edge on a large frame.
+  const [spaceHeld, setSpaceHeld] = useState(false);
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code === "Space" && !e.repeat) { e.preventDefault(); setSpaceHeld(true); }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") setSpaceHeld(false);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, []);
+
+  // zoomStageAtPointer drives the Konva stage directly (cursor-anchored); the
+  // stage is React-controlled here, so read the result back into state.
+  const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
+    e.evt.preventDefault();
+    const stage = stageRef.current;
+    if (!stage) return;
+    zoomStageAtPointer(stage, e.evt.deltaY, { min: 0.05, max: 20 });
+    setScale(stage.scaleX());
+    setPosition({ x: stage.x(), y: stage.y() });
+  }, []);
 
   // Load image + compute fit
   useEffect(() => {
@@ -200,12 +232,15 @@ export function ImageCropModal() {
       }
     }
 
-    updateNodeData(sourceNodeId, {
+    // Close first: the thumbnail encode below is a full-res decode, and making
+    // the user watch the modal sit there for it is exactly the kind of stall
+    // this whole pass is about. Region and lock go in the same update as the
+    // output so downstream consumers never see a half-applied crop.
+    closeModal();
+    void commitProcessorOutput(updateNodeData, sourceNodeId, outputImage, {
       cropRegion,
       aspectLock,
-      outputImage,
     });
-    closeModal();
   }, [sourceNodeId, sourceImage, cropRegion, aspectLock, updateNodeData, closeModal]);
 
   // Convert relative region to Konva pixel box (on the stage, not scaled)
@@ -360,6 +395,10 @@ export function ImageCropModal() {
             scaleY={scale}
             x={position.x}
             y={position.y}
+            onWheel={handleWheel}
+            draggable={spaceHeld}
+            onDragEnd={(e) => setPosition({ x: e.target.x(), y: e.target.y() })}
+            style={{ cursor: spaceHeld ? "grab" : "default" }}
           >
             <Layer>
               <KonvaImage image={image} width={stageSize.width} height={stageSize.height} />

@@ -36,6 +36,7 @@ import { shiftImageX } from "@/utils/panoShift";
 import { renderSphereLight } from "@/utils/renderSphereLight";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { ensureFullResForNodes } from "@/store/execution/hydrateForRun";
+import { commitProcessorOutput } from "@/store/execution/commitProcessorOutput";
 
 /**
  * Annotation node: receives upstream image as source, passes through if no annotations.
@@ -51,7 +52,7 @@ export async function executeAnnotation(ctx: NodeExecutionContext): Promise<void
       // Pass through the image if no annotations exist, or if the previous
       // output was itself a pass-through of the old source image
       if (!nodeData.outputImage || nodeData.outputImage === nodeData.sourceImage) {
-        updateNodeData(node.id, { outputImage: image, outputImageRef: undefined });
+        await commitProcessorOutput(updateNodeData, node.id, image);
       }
     }
   } catch (err) {
@@ -555,7 +556,7 @@ export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
       matteImage: mt, matteImageRef: undefined,
     });
     if (!bg) {
-      if (data.outputImage !== null) updateNodeData(node.id, { outputImage: null, outputImageRef: undefined });
+      if (data.outputImage !== null) await commitProcessorOutput(updateNodeData, node.id, null);
       return;
     }
     const { compositeCompForExecutor } = await import("@/utils/compComposite");
@@ -606,7 +607,7 @@ export async function executeBlur(ctx: NodeExecutionContext): Promise<void> {
       sourceImage: src, sourceImageRef: undefined, matteImage: mt, matteImageRef: undefined,
     });
     if (!src) {
-      if (data.outputImage !== null) updateNodeData(node.id, { outputImage: null, outputImageRef: undefined });
+      if (data.outputImage !== null) await commitProcessorOutput(updateNodeData, node.id, null);
       return;
     }
     const { commitBlurNode } = await import("@/utils/colorChain");
@@ -624,7 +625,7 @@ export async function executeBlur(ctx: NodeExecutionContext): Promise<void> {
       node.id,
       src,
     );
-    updateNodeData(node.id, { outputImage: output, outputImageRef: undefined, error: null });
+    await commitProcessorOutput(updateNodeData, node.id, output, { error: null });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Blur node ${node.id} failed:`, message);
@@ -681,17 +682,17 @@ export async function executeImageCrop(ctx: NodeExecutionContext): Promise<void>
 
     // No crop region → passthrough
     if (!nodeData.cropRegion) {
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, incoming);
       return;
     }
 
     // Apply the crop
     try {
       const cropped = await cropImageToDataUrl(incoming, nodeData.cropRegion);
-      updateNodeData(node.id, { outputImage: cropped, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, cropped);
     } catch (err) {
       console.error(`[Workflow] Image Crop failed:`, err);
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, incoming);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -726,16 +727,16 @@ export async function executeMirror(ctx: NodeExecutionContext): Promise<void> {
     const h = !!nodeData.flipHorizontal;
     const v = !!nodeData.flipVertical;
     if (!h && !v) {
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, incoming);
       return;
     }
 
     try {
       const flipped = await mirrorImage(incoming, h, v);
-      updateNodeData(node.id, { outputImage: flipped, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, flipped);
     } catch (err) {
       console.error(`[Workflow] Mirror failed:`, err);
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, incoming);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -755,7 +756,7 @@ export async function executeSphereLightRender(ctx: NodeExecutionContext): Promi
       updateNodeData(node.id, { status: "error", error: "Sphere render unavailable (no canvas)" });
       return;
     }
-    updateNodeData(node.id, { outputImage: url, outputImageRef: undefined, status: "complete", error: null });
+    await commitProcessorOutput(updateNodeData, node.id, url, { status: "complete", error: null });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] SphereLightRender node ${node.id} failed:`, message);
@@ -779,7 +780,7 @@ export async function executeReformat(ctx: NodeExecutionContext): Promise<void> 
     }
     const { reformatImage } = await import("@/utils/reformatImage");
     const out = await reformatImage(incoming, nodeData.width || 1, nodeData.height || 1, nodeData.mode ?? "fill", nodeData.filter ?? "cubic");
-    updateNodeData(node.id, { outputImage: out, outputImageRef: undefined });
+    await commitProcessorOutput(updateNodeData, node.id, out);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Reformat node ${node.id} failed:`, message);
@@ -812,10 +813,10 @@ export async function executeCubemapEquirect(ctx: NodeExecutionContext): Promise
 
     try {
       const output = await applyCubemapEquirect(incoming, nodeData.mode, nodeData.outputSize);
-      updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, output);
     } catch (err) {
       console.error(`[Workflow] Cubemap/Equirect conversion failed:`, err);
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, incoming);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -965,7 +966,7 @@ export async function executeColorGrade(ctx: NodeExecutionContext): Promise<void
       u_clampLow:   nodeData.clampBlacks ? 1 : 0,
       u_clampHigh:  nodeData.clampWhites ? 1 : 0,
     }, node.id, isIdentityGrade(p), incoming);
-    updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
+    await commitProcessorOutput(updateNodeData, node.id, output);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Color Grade node ${node.id} failed:`, message);
@@ -1023,7 +1024,7 @@ export async function executeHsvCorrect(ctx: NodeExecutionContext): Promise<void
       u_clampLow: nodeData.clampBlacks ? 1 : 0,
       u_clampHigh: nodeData.clampWhites ? 1 : 0,
     }, node.id, isIdentity, incoming);
-    updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
+    await commitProcessorOutput(updateNodeData, node.id, output);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] HSV Correct node ${node.id} failed:`, message);
@@ -1061,7 +1062,7 @@ export async function executeContrastAdjust(ctx: NodeExecutionContext): Promise<
       u_clampLow: nodeData.clampBlacks ? 1 : 0,
       u_clampHigh: nodeData.clampWhites ? 1 : 0,
     }, node.id, isIdentity, incoming);
-    updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
+    await commitProcessorOutput(updateNodeData, node.id, output);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[Workflow] Contrast Adjust node ${node.id} failed:`, message);
@@ -1092,10 +1093,10 @@ export async function executePanoShift(ctx: NodeExecutionContext): Promise<void>
 
     try {
       const output = await shiftImageX(incoming, nodeData.shiftX || 0);
-      updateNodeData(node.id, { outputImage: output, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, output);
     } catch (err) {
       console.error(`[Workflow] Pano Shift failed:`, err);
-      updateNodeData(node.id, { outputImage: incoming, outputImageRef: undefined });
+      await commitProcessorOutput(updateNodeData, node.id, incoming);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
