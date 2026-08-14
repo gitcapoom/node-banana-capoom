@@ -161,6 +161,22 @@ export function CompModal() {
     return () => { cancelled = true; cancelAnimationFrame(raf); };
   }, [previewSig, isModalOpen, srcs, sourceNodeId, offscreen]);
 
+  // Publish the composite WHILE the editor is open. CompNode's own render is
+  // suspended for the node being edited (the modal owns the canvas), so without
+  // this nothing downstream — including a Viewer — would move until Done. The
+  // preview pass above already published this node's float texture, so the only
+  // added cost is the PNG encode, debounced to once per settle.
+  useEffect(() => {
+    if (!isModalOpen || !sourceNodeId || !data?.bgImage) return;
+    const t = setTimeout(async () => {
+      const url = await floatNodeToDataUrl(sourceNodeId);
+      if (url) updateNodeData(sourceNodeId, { outputImage: url, outputImageRef: undefined });
+    }, 350);
+    return () => clearTimeout(t);
+    // previewSig covers every input + parameter the composite depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewSig, isModalOpen, sourceNodeId]);
+
   const handleWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const stage = stageRef.current;

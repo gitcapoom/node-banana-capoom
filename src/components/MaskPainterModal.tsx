@@ -364,6 +364,22 @@ export function MaskPainterModal() {
     return canvas.toDataURL("image/png");
   }, [image, strokes, sourceNodeId, nodes]);
 
+  // Publish the mask WHILE painting so downstream nodes and any Viewer follow
+  // along without waiting for Done. `strokes` is not written here — it is the
+  // store state this modal already renders from.
+  useEffect(() => {
+    if (!isModalOpen || !sourceNodeId || !image) return;
+    const t = setTimeout(() => {
+      try {
+        const outputMask = flattenMask();
+        if (outputMask) updateNodeData(sourceNodeId, { outputMask, outputMaskRef: undefined });
+      } catch (e) {
+        console.error("MaskPainterModal: live mask commit failed", e);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [isModalOpen, sourceNodeId, image, strokes, currentElement, flattenMask, updateNodeData]);
+
   const handleDone = useCallback(() => {
     if (!sourceNodeId) return;
     const outputMask = flattenMask();

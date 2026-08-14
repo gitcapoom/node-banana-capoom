@@ -18,8 +18,17 @@ export interface NodeMediaTarget {
 }
 
 interface NodeMediaViewerState {
+  /** What is currently on screen. */
   target: NodeMediaTarget | null;
+  /**
+   * The node the user actually double-clicked. Kept separate from `target` so
+   * that after switching the feed to a Viewer node, "This node" can go back to
+   * where the session started.
+   */
+  origin: NodeMediaTarget | null;
   open: (target: NodeMediaTarget) => void;
+  /** Switch the displayed feed without forgetting the origin. */
+  showSource: (target: NodeMediaTarget) => void;
   close: () => void;
 }
 
@@ -32,6 +41,8 @@ interface NodeMediaViewerState {
  */
 export const useNodeMediaViewer = create<NodeMediaViewerState>((set) => ({
   target: null,
-  open: (target) => set({ target }),
-  close: () => set({ target: null }),
+  origin: null,
+  open: (target) => set({ target, origin: target }),
+  showSource: (target) => set({ target }),
+  close: () => set({ target: null, origin: null }),
 }));

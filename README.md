@@ -20,6 +20,7 @@ A fork of [Shrimbly's Node Banana](https://github.com/shrimbly/node-banana) with
 | **Roto** | Process | Bezier/polygon shape roto editor producing mattes (full-screen Konva editor, invert toggle) |
 | **Composite** | Process | Floating-point clone of Nuke's Merge node: 22 merge ops, per-input affine transforms, external BG/FG alpha pins, matte pin, premultiply/swap/opacity controls, per-input blur/defocus filters |
 | **Blur** | Process | GPU blur with five filters (Gaussian, Box, Motion, Zoom, Spin), an optional matte input gating where the blur lands, invert + mix controls |
+| **Viewer** | Process | Live tap on the graph — reflects upstream edits in realtime without a run (edit a roto matte and the composite lands here), and is selectable as a source from any node's full-screen view |
 | **Color Grade** | Process | Nuke-style grade (blackpoint/whitepoint/lift/gain/multiply/offset/gamma) on the float GPU chain |
 | **HSV Color Correct** | Process | Hue shift / saturation / value on the float GPU chain |
 | **Contrast Adjust** | Process | S-curve contrast with roll-off and pivot on the float GPU chain |

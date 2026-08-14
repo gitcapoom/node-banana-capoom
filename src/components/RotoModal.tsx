@@ -227,6 +227,30 @@ export function RotoModal() {
     setPosition(next.position);
   }, []);
 
+  // Publish the matte WHILE editing, so anything downstream — a composite, a
+  // Viewer node, an open full-screen view — reflects the edit without waiting
+  // for Done. Debounced: rasterizing a full-res matte on every handle drag
+  // would stall the editor. `shapes` is deliberately NOT written here; it is
+  // the input this modal derives `work` from, and writing it back would feed
+  // straight into that effect and re-trigger this one.
+  useEffect(() => {
+    if (!isModalOpen || !sourceNodeId || !image) return;
+    const t = setTimeout(() => {
+      try {
+        const outputMask = rasterizeRoto(work, image.width, image.height, { invert });
+        updateNodeData(sourceNodeId, {
+          outputMask,
+          outputMaskRef: undefined,
+          imageWidth: image.width,
+          imageHeight: image.height,
+        });
+      } catch (e) {
+        console.error("RotoModal: live matte commit failed", e);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [isModalOpen, sourceNodeId, image, work, invert, updateNodeData]);
+
   const selShape = work.find((s) => s.id === selectedShapeId) || null;
 
   const editPoint = useCallback((shapeId: string, pointId: string, fn: (p: RotoPoint) => RotoPoint) => {

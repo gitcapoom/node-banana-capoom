@@ -74,6 +74,7 @@ export type NodeType =
   | "hsvCorrect"
   | "contrastAdjust"
   | "blur"
+  | "viewer"
   | "panoShift"
   | "sphereLightRender"
   | "upscaleGrid";
@@ -296,6 +297,23 @@ export interface BlurNodeData extends BaseNodeData {
   outputImageRef?: string;
   outputImageThumb?: string;
   error?: string | null;
+}
+
+/**
+ * Viewer node — a live tap on the graph, in the spirit of Nuke's Viewer.
+ *
+ * Unlike Output (which mirrors its input when the workflow RUNS), the Viewer
+ * resolves its upstream reactively in the component, so it reflects edits as
+ * they happen: retouch a roto matte feeding a composite and the Viewer — and
+ * its full-screen view — follow along without a run.
+ */
+export interface ViewerNodeData extends BaseNodeData {
+  image: string | null;
+  imageRef?: string;
+  imageThumb?: string;
+  imageDims?: { width: number; height: number };
+  /** Show transparent pixels as a checkerboard instead of solid black. */
+  checkerboard?: boolean;
 }
 
 /**
@@ -1117,6 +1135,7 @@ export type WorkflowNodeData =
   | HsvCorrectNodeData
   | ContrastAdjustNodeData
   | BlurNodeData
+  | ViewerNodeData
   | PanoShiftNodeData
   | SphereLightRenderNodeData
   | UpscaleGridNodeData;

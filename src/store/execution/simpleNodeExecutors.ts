@@ -627,6 +627,28 @@ export async function executeBlur(ctx: NodeExecutionContext): Promise<void> {
 }
 
 /**
+ * Viewer node: mirror the connected image so a workflow RUN leaves the same
+ * state the live in-node selector produces. The node is normally kept current
+ * by its own reactive subscription; this covers headless/offscreen runs, where
+ * the component may never have mounted.
+ */
+export async function executeViewer(ctx: NodeExecutionContext): Promise<void> {
+  const { node, getConnectedInputs, updateNodeData } = ctx;
+  try {
+    const { images } = getConnectedInputs(node.id);
+    const incoming = images[0] || null;
+    const data = node.data as import("@/types").ViewerNodeData;
+    if (incoming !== data.image) {
+      updateNodeData(node.id, { image: incoming, imageRef: undefined });
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Viewer node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
  * Image Crop node: receives upstream image and applies the persisted crop region.
  * If no region is defined, passes the image through unchanged.
  * Crop region uses relative (0-1) coordinates so it adapts to any input resolution.
