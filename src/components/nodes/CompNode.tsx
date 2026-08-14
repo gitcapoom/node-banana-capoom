@@ -17,6 +17,10 @@ type CompNodeType = Node<CompNodeData, "comp">;
 
 /** Last committed composite per node — survives viewport-culling remounts. */
 const committedComps = new RenderSignatureCache();
+/** Nodes whose persisted output has been adopted as already-committed this
+ *  page session, so a fresh load never re-flattens a float texture it already
+ *  has an answer for. Module-level: it must outlive viewport-culling remounts. */
+const adoptedComps = new Set<string>();
 
 const CHECKER_STYLE: CSSProperties = {
   backgroundColor: "#454545",
@@ -112,7 +116,23 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     // Scrolled back into view with nothing changed: republish the float texture
     // for downstream chaining, but skip the PNG encode and the store write —
     // they would reproduce byte-identical output.
-    const republishOnly = committedComps.matches(id, sig) && !!nodeData.outputImage;
+    // First sight of this node in this page session: it already carries an
+    // output from the save, produced from these same inputs (a load restores
+    // both sides together), so adopt the current signature instead of
+    // recomputing it. Without this the guard below could never fire on a fresh
+    // load — `outputImage` is lazily null until something hydrates it — and
+    // every comp that mounted, or re-mounted as viewport culling moved over it,
+    // took the full path and flattened its float texture to a full-res PNG.
+    // Measured on the real graph: 6554x3686 encodes at 1.0-1.8s each, three of
+    // them for one node drag, 11.3s of blocked main thread.
+    if (!adoptedComps.has(id) && (nodeData.outputImage || nodeData.outputImageThumb)) {
+      adoptedComps.add(id);
+      committedComps.set(id, sig);
+    }
+    // A thumb is equally good evidence of a prior commit, and it is what
+    // survives a save — requiring the full-res copy is what made this miss.
+    const republishOnly =
+      committedComps.matches(id, sig) && !!(nodeData.outputImage || nodeData.outputImageThumb);
     const urls = { bg: incoming.bg, bgAlpha: incoming.bgAlpha, fg: incoming.fg, fgAlpha: incoming.fgAlpha, matte: incoming.matte };
     const srcs = { bgSrc: incoming.bgSrc, baSrc: incoming.baSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc };
     const run = async () => {
@@ -146,9 +166,15 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
           });
         }
       } else {
+        // Check BEFORE compositing, not after. compositeCompForExecutor does the
+        // whole composite and flattens it to a full-res PNG itself, so testing
+        // the guard on its result meant every remount paid for an image it was
+        // about to throw away — 6554x3686 encodes at ~0.8-1.0s each. This is the
+        // non-float fallback path, so it ran whenever EXT_color_buffer_float was
+        // unavailable, which is exactly when the machine can least afford it.
+        if (republishOnly) return;
         const { dataUrl, outW, outH } = await compositeCompForExecutor(urls, srcs, nodeData, id);
         if (cancelled || !dataUrl) return;
-        if (republishOnly) return;
         if (dataUrl !== nodeData.outputImage) {
           committedComps.set(id, sig);
           updateNodeData(id, {
