@@ -12,9 +12,15 @@ import {
   hasFloat,
   releaseColorNode,
   renderColorNodeToCanvas,
+  renderColorNodeToFloat,
   commitColorNode,
   type ShaderInput,
 } from "@/utils/colorChain";
+
+import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
+
+/** Last committed render per color node — see RenderSignatureCache. */
+const committedSignatures = new RenderSignatureCache();
 
 /**
  * Live GPU preview into a visible <canvas>.
@@ -183,15 +189,44 @@ export function useColorNode(args: UseColorNodeArgs): void {
   // ── Debounced commit (float texture + display URL) ──
   useEffect(() => {
     if (!sourceImage) {
-      updateNodeData(id, { outputImage: null });
+      // Only write when there's something to clear — an unconditional write
+      // re-renders the whole node tree every time an unconnected node mounts.
+      const cur = useWorkflowStore.getState().nodes.find((n) => n.id === id);
+      if ((cur?.data as { outputImage?: string | null } | undefined)?.outputImage != null) {
+        updateNodeData(id, { outputImage: null });
+      }
+      committedSignatures.forget(id);
       return;
     }
+
+    const signature = `${cheapUrlKey(sourceImage)}|${upstreamColorNodeId ?? "-"}|${uniformsKey}|${isIdentity ? 1 : 0}|${shaderSource.length}`;
+
+    // Already committed exactly this render (typically: the node just scrolled
+    // back into view). Re-publish the float texture so downstream color nodes
+    // keep chaining in float, but skip the PNG encode and the store write —
+    // the stored `outputImage` is already this exact result.
+    if (committedSignatures.matches(id, signature)) {
+      const stored = useWorkflowStore.getState().nodes.find((n) => n.id === id);
+      const hasOutput = !!(stored?.data as { outputImage?: string | null } | undefined)?.outputImage;
+      if (hasOutput) {
+        if (!isIdentity && floatSupported() && !hasFloat(id)) {
+          const input = resolveInput();
+          if (input) {
+            void renderColorNodeToFloat(input, shaderSource, effUniformsRef.current, id)
+              .catch((e) => console.error("useColorNode float refresh:", e));
+          }
+        }
+        return;
+      }
+    }
+
     const handle = setTimeout(async () => {
       const input = resolveInput();
       if (!input || !sourceImage) return;
       const displayUrl = await commitColorNode(
         input, shaderSource, effUniformsRef.current, id, isIdentity, sourceImage,
       );
+      committedSignatures.set(id, signature);
       updateNodeData(id, { outputImage: displayUrl, outputImageRef: undefined });
     }, commitDelay);
     return () => clearTimeout(handle);
@@ -199,6 +234,8 @@ export function useColorNode(args: UseColorNodeArgs): void {
   }, [id, sourceImage, upstreamColorNodeId, shaderSource, uniformsKey, isIdentity, commitDelay]);
 
   // ── Release the float texture on unmount ──
+  // The commit signature deliberately OUTLIVES the unmount: it is what lets a
+  // node scroll back into view without re-encoding an identical PNG.
   useEffect(() => {
     return () => releaseColorNode(id);
   }, [id]);
