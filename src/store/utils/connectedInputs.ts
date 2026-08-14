@@ -411,6 +411,20 @@ export function getConnectedInputsPure(
       // Skip dimmed source nodes — their data should not flow downstream
       if (dimmedNodeIds && dimmedNodeIds.has(sourceNode.id)) return;
 
+      // A Dot is a pure reroute: resolve straight through to whatever feeds it.
+      // Deliberately NOT mirrored into the dot's own data — copying the image
+      // would put a second full-res duplicate in the store (and the workflow
+      // file) for every reroute point on the canvas.
+      if (sourceNode.type === "dot") {
+        const dotInputs = getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);
+        images.push(...dotInputs.images);
+        videos.push(...dotInputs.videos);
+        audio.push(...dotInputs.audio);
+        if (dotInputs.text !== null && text === null) text = dotInputs.text;
+        if (dotInputs.model3d && !model3d) model3d = dotInputs.model3d;
+        return;
+      }
+
       // Router passthrough — traverse upstream to find actual data source
       if (sourceNode.type === "router") {
         const routerInputs = getConnectedInputsPure(sourceNode.id, nodes, edges, _visited, dimmedNodeIds);

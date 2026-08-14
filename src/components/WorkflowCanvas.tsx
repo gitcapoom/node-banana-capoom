@@ -71,19 +71,21 @@ import {
   ContrastAdjustNode,
   BlurNode,
   ViewerNode,
+  DotNode,
   PanoShiftNode,
 } from "./nodes";
 
 // Lazy-load GLBViewerNode to avoid bundling three.js for users who don't use 3D nodes
 const GLBViewerNode = dynamic(() => import("./nodes/GLBViewerNode").then(mod => ({ default: mod.GLBViewerNode })), { ssr: false });
 import { EditableEdge, ReferenceEdge, SharedEdgeGradients } from "./edges";
+import { DOT_SIZE } from "./nodes/DotNode";
 import { MenuAction } from "./ConnectionDropMenu";
 import { NodeSearchPalette } from "./NodeSearchPalette";
 import { MultiSelectToolbar } from "./MultiSelectToolbar";
 import { EdgeToolbar } from "./EdgeToolbar";
 import { GlobalImageHistory } from "./GlobalImageHistory";
 import { GroupBackgroundsPortal, GroupControlsOverlay } from "./GroupsOverlay";
-import { NodeType, NanoBananaNodeData, HandleType } from "@/types";
+import { NodeType, NanoBananaNodeData, HandleType, WorkflowEdge } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 import { FloatingNodeHeader } from "./nodes/FloatingNodeHeader";
 import { ControlPanel } from "./nodes/ControlPanel";
@@ -153,6 +155,7 @@ const nodeTypes: NodeTypes = {
   contrastAdjust: ContrastAdjustNode,
   blur: BlurNode,
   viewer: ViewerNode,
+  dot: DotNode,
   panoShift: PanoShiftNode,
 };
 
@@ -301,6 +304,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image", "image-blur_matte"], outputs: ["image"] };
     case "viewer":
       return { inputs: ["image"], outputs: [] };
+    case "dot":
+      return { inputs: ["image"], outputs: ["image"] };
     case "panoShift":
       return { inputs: ["image"], outputs: ["image"] };
     default:
@@ -612,6 +617,7 @@ export function WorkflowCanvas() {
     contrastAdjust: 'Contrast Adjust',
     blur: 'Blur',
     viewer: 'Viewer',
+    dot: 'Dot',
     panoShift: 'Pano Shift',
   };
 
@@ -670,6 +676,36 @@ export function WorkflowCanvas() {
 
 
   // Check if a node was dropped into a group and add it to that group
+  /**
+   * Ctrl/Cmd + click an edge → drop a Dot at that point and route the edge
+   * through it. Purely organisational: long edges can be bent around the graph
+   * instead of cutting across it. The Dot resolves straight through, so nothing
+   * downstream changes.
+   */
+  const handleEdgeClick = useCallback(
+    (event: React.MouseEvent, edge: WorkflowEdge) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const pos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      // Centre the dot on the cursor rather than hanging it off the corner.
+      const dotId = addNode("dot", { x: pos.x - DOT_SIZE / 2, y: pos.y - DOT_SIZE / 2 });
+
+      const store = useWorkflowStore.getState();
+      store.onEdgesChange([{ id: edge.id, type: "remove" }]);
+      store.addEdgeWithType(
+        { source: edge.source, sourceHandle: edge.sourceHandle ?? null, target: dotId, targetHandle: "image" },
+        (edge.type as string) || "editable",
+      );
+      store.addEdgeWithType(
+        { source: dotId, sourceHandle: "image", target: edge.target, targetHandle: edge.targetHandle ?? null },
+        (edge.type as string) || "editable",
+      );
+    },
+    [addNode, screenToFlowPosition],
+  );
+
   const handleNodeDragStop = useCallback(
     (_event: React.MouseEvent, node: Node) => {
       // Skip if it's a group node
@@ -1867,6 +1903,7 @@ export function WorkflowCanvas() {
             contrastAdjust: { width: 280, height: 380 },
             blur: { width: 280, height: 420 },
             viewer: { width: 360, height: 300 },
+            dot: { width: 14, height: 14 },
             panoShift: { width: 320, height: 280 },
           };
           const dims = defaultDimensions[nodeType];
@@ -2467,6 +2504,7 @@ export function WorkflowCanvas() {
         onMoveStart={() => { isPanningRef.current = true; setHoveredNodeId(null); }}
         onMoveEnd={() => { isPanningRef.current = false; }}
         onNodeDragStop={handleNodeDragStop}
+        onEdgeClick={handleEdgeClick}
         onSelectionChange={handleSelectionChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
@@ -2606,6 +2644,8 @@ export function WorkflowCanvas() {
                 return "#a78bfa"; // violet-400 (blur / defocus)
               case "viewer":
                 return "#22d3ee"; // cyan-400 (live viewer tap)
+              case "dot":
+                return "#a3a3a3"; // neutral-400 (reroute point)
               case "videoInput":
                 return "#8b5cf6"; // violet-600 (video input)
               case "sphereLightRender":

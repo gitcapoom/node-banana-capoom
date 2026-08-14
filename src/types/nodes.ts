@@ -75,6 +75,7 @@ export type NodeType =
   | "contrastAdjust"
   | "blur"
   | "viewer"
+  | "dot"
   | "panoShift"
   | "sphereLightRender"
   | "upscaleGrid";
@@ -315,6 +316,12 @@ export interface ViewerNodeData extends BaseNodeData {
   /** Show transparent pixels as a checkerboard instead of solid black. */
   checkerboard?: boolean;
 }
+
+/**
+ * Dot node — a visual reroute point. Carries its input straight through; it
+ * exists only so edges can be routed around the graph instead of across it.
+ */
+export type DotNodeData = BaseNodeData;
 
 /**
  * Pano Shift node — horizontal pixel shift with seam wrap-around.
@@ -1136,6 +1143,7 @@ export type WorkflowNodeData =
   | ContrastAdjustNodeData
   | BlurNodeData
   | ViewerNodeData
+  | DotNodeData
   | PanoShiftNodeData
   | SphereLightRenderNodeData
   | UpscaleGridNodeData;

@@ -12,6 +12,7 @@ import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPi
 import { COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, type CompInputFilter, type BlurFilterType } from "@/types/comp";
 import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/types";
 import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
+import { DockedViewer } from "@/components/ViewerFeed";
 
 type Pt = { x: number; y: number };
 type NumKey = "hPos" | "vPos" | "rotation" | "scaleX" | "scaleY";
@@ -425,6 +426,7 @@ export function CompModal() {
 
       <div className="flex-1 flex min-h-0">
         <div ref={containerRef} className="flex-1 overflow-hidden bg-neutral-900">
+          <DockedViewer className="bottom-4 left-4" />
           {data.bgImage && offscreen ? (
             <Stage ref={stageRef} width={stageSize.width} height={stageSize.height} scaleX={scale} scaleY={scale} x={position.x} y={position.y} onWheel={handleWheel} onMouseDown={onStageDown} onMouseMove={onStageMove} onMouseUp={endTranslate} onMouseLeave={endTranslate}>
               <Layer listening={false}>

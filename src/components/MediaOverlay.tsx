@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ThreeModelViewer } from "@/components/ThreeModelViewer";
 import { ZoomPanView } from "@/components/ZoomPanView";
+import { useViewerNodes, ViewerSourceSwitcher } from "@/components/ViewerFeed";
 import {
   SENSOR_PRESETS,
   LENS_FOCAL_LENGTHS,
@@ -167,15 +168,34 @@ export function MediaOverlay({
     return getCameraSummary(sensor, focalLength, aspect);
   }, [cameraSettings, effectiveAspectIndex]);
 
+  // Any Viewer node can take over this surface. Living in MediaOverlay means
+  // EVERY full-screen view gets it — the nodes that render their own overlay
+  // (image input, generators, viewers) as well as the shared one.
+  const viewers = useViewerNodes();
+  const [viewerSourceId, setViewerSourceId] = useState<string | null>(null);
+  const activeViewer = viewerSourceId ? viewers.find((v) => v.id === viewerSourceId) ?? null : null;
+  // Showing a Viewer's feed means showing an image, whatever this surface was
+  // opened on.
+  const shownContent = activeViewer ? activeViewer.image : content;
+  const shownType: MediaType = activeViewer ? "image" : mediaType;
+
   const hasPrevNext = totalCount > 1;
-  const showFrameGrab = (mediaType === "video" || mediaType === "3d") && onFrameGrab;
-  const show3dControls = mediaType === "3d" && cameraSettings && onCameraSettingsChange;
+  const showFrameGrab = (shownType === "video" || shownType === "3d") && onFrameGrab;
+  const show3dControls = shownType === "3d" && cameraSettings && onCameraSettingsChange;
 
   const overlay = (
     <div
       className="fixed inset-0 bg-black/85 z-[200] flex items-center justify-center"
       onClick={handleBackdropClick}
     >
+      {/* Source switcher — available from every full-screen view */}
+      <ViewerSourceSwitcher
+        viewers={viewers}
+        selectedId={viewerSourceId}
+        onSelect={setViewerSourceId}
+        className="absolute top-4 left-1/2 -translate-x-1/2 z-20"
+      />
+
       {/* Top-right controls */}
       <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
         {/* Frame grab button (video and 3D) */}
@@ -226,16 +246,16 @@ export function MediaOverlay({
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
             </svg>
           </div>
-        ) : content ? (
+        ) : shownContent ? (
           <>
-            {mediaType === "image" && (
+            {shownType === "image" && (
               <ZoomPanView
                 className="w-[90vw] h-[80vh] rounded-lg"
                 panMode="free"
               >
                 <div className="w-full h-full flex items-center justify-center">
                   <img
-                    src={content}
+                    src={shownContent}
                     alt="Full view"
                     className="max-w-full max-h-full object-contain"
                     draggable={false}
@@ -243,7 +263,7 @@ export function MediaOverlay({
                 </div>
               </ZoomPanView>
             )}
-            {mediaType === "video" && videoBlobUrl && (
+            {shownType === "video" && videoBlobUrl && (
               <ZoomPanView
                 className="w-[90vw] h-[80vh] rounded-lg"
                 panMode="alt-modifier"
@@ -259,15 +279,15 @@ export function MediaOverlay({
                 </div>
               </ZoomPanView>
             )}
-            {mediaType === "audio" && (
+            {shownType === "audio" && (
               <div className="bg-neutral-800 rounded-lg p-8 min-w-[400px]">
-                <audio src={content} controls autoPlay className="w-full" />
+                <audio src={shownContent} controls autoPlay className="w-full" />
               </div>
             )}
-            {mediaType === "3d" && (
+            {shownType === "3d" && (
               <div className="w-[80vw] h-[70vh] rounded-lg overflow-hidden">
                 <ThreeModelViewer
-                  modelUrl={content}
+                  modelUrl={shownContent}
                   autoRotate
                   captureRef={threeCaptureRef}
                   interactive

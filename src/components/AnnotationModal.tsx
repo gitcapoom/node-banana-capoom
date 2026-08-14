@@ -15,6 +15,7 @@ import {
 } from "@/types";
 import Konva from "konva";
 import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
+import { DockedViewer } from "@/components/ViewerFeed";
 
 const COLORS = [
   "#ef4444",
@@ -483,6 +484,7 @@ export function AnnotationModal() {
 
       {/* Canvas Container */}
       <div ref={containerRef} className="flex-1 overflow-hidden bg-neutral-900">
+          <DockedViewer className="bottom-4 right-4" />
         <Stage
           ref={stageRef}
           width={containerRef.current?.clientWidth || 800}
