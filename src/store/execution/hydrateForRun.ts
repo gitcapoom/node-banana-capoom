@@ -20,6 +20,24 @@ interface MinimalEdge {
   target: string;
 }
 
+/**
+ * ARRAY-valued image fields, which RUN_FULLRES_FIELDS cannot express.
+ *
+ * `inputImages` is a generator's stored copy of what was fed to it, used by the
+ * executors ONLY as a fallback when nothing is connected (generateVideoExecutor
+ * :48, generate3dExecutor:48, image2gsExecutor:56, connectedInputs:585). No
+ * component renders it, so hydrating it at open bought nothing and cost
+ * hundreds of MB of resident base64 for the whole session — it is now loaded
+ * here, right before a run, like every other full-res field.
+ */
+const RUN_FULLRES_ARRAY_FIELDS: Partial<
+  Record<NodeType, Array<{ raw: string; refs: string; folder: "inputs" | "generations" }>>
+> = {
+  nanoBanana: [{ raw: "inputImages", refs: "inputImageRefs", folder: "inputs" }],
+  llmGenerate: [{ raw: "inputImages", refs: "inputImageRefs", folder: "inputs" }],
+  generateVideo: [{ raw: "inputImages", refs: "inputImageRefs", folder: "inputs" }],
+};
+
 /** All nodes that feed (directly or transitively) any of `rootIds`, plus the roots. */
 function collectWithUpstream(rootIds: string[], edges: MinimalEdge[]): Set<string> {
   const need = new Set<string>(rootIds);
@@ -52,9 +70,31 @@ export async function ensureFullResForNodes(
   for (const id of need) {
     const node = byId.get(id);
     if (!node) continue;
+    const data = node.data as Record<string, unknown>;
+
+    for (const af of RUN_FULLRES_ARRAY_FIELDS[node.type as NodeType] ?? []) {
+      const refs = data[af.refs] as Array<string | null | undefined> | undefined;
+      if (!Array.isArray(refs) || refs.length === 0) continue;
+      const cur = (data[af.raw] as Array<string | null | undefined> | undefined) ?? [];
+      // Nothing to do if every ref already has a loaded value beside it.
+      if (refs.every((r, i) => !r || cur[i])) continue;
+      tasks.push(
+        (async () => {
+          const next = [...cur];
+          await Promise.all(
+            refs.map(async (r, i) => {
+              if (!r || next[i]) return;
+              const url = await loadMediaById(r, saveDirectoryPath, af.folder);
+              if (url) next[i] = url;
+            }),
+          );
+          updateNodeData(id, { [af.raw]: next } as Partial<WorkflowNodeData>);
+        })(),
+      );
+    }
+
     const fields = RUN_FULLRES_FIELDS[node.type as NodeType];
     if (!fields) continue;
-    const data = node.data as Record<string, unknown>;
     for (const f of fields) {
       const raw = data[f.raw] as string | null | undefined;
       const ref = data[f.ref] as string | undefined;

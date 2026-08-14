@@ -942,16 +942,11 @@ async function hydrateNodeImages(
         outputImage = await loadImageById(d.outputImageRef, workflowPath, loadedImages, "generations");
       }
 
-      // Hydrate input images from refs
-      if (d.inputImageRefs && d.inputImageRefs.length > 0) {
-        for (let i = 0; i < d.inputImageRefs.length; i++) {
-          const ref = d.inputImageRefs[i];
-          if (ref) {
-            inputImages[i] = await loadImageById(ref, workflowPath, loadedImages, "inputs");
-          }
-        }
-      }
-
+      // inputImages is deliberately NOT hydrated here. No component renders it;
+      // the executors read it only as a fallback when nothing is connected, so
+      // loading it at open bought nothing and kept a full-res base64 copy of
+      // every generator input resident for the whole session. The refs stay,
+      // and ensureFullResForNodes loads them before a run.
       newData = {
         ...d,
         inputImages,
@@ -962,38 +957,18 @@ async function hydrateNodeImages(
 
     case "llmGenerate": {
       const d = data as import("@/types").LLMGenerateNodeData;
-      const inputImages = [...(d.inputImages || [])];
-
-      // Hydrate input images from refs
-      if (d.inputImageRefs && d.inputImageRefs.length > 0) {
-        for (let i = 0; i < d.inputImageRefs.length; i++) {
-          const ref = d.inputImageRefs[i];
-          if (ref) {
-            inputImages[i] = await loadImageById(ref, workflowPath, loadedImages, "inputs");
-          }
-        }
-      }
-
+      // Lazy, as above — loaded by ensureFullResForNodes before a run.
       newData = {
         ...d,
-        inputImages,
+        inputImages: [...(d.inputImages || [])],
       };
       break;
     }
 
     case "generateVideo": {
       const d = data as import("@/types").GenerateVideoNodeData;
+      // Lazy, as above — loaded by ensureFullResForNodes before a run.
       const inputImages = [...(d.inputImages || [])];
-
-      // Hydrate input images from refs
-      if (d.inputImageRefs && d.inputImageRefs.length > 0) {
-        for (let i = 0; i < d.inputImageRefs.length; i++) {
-          const ref = d.inputImageRefs[i];
-          if (ref) {
-            inputImages[i] = await loadImageById(ref, workflowPath, loadedImages, "inputs");
-          }
-        }
-      }
 
       // Hydrate thumbnail from ref (don't load full video — loaded on-demand in overlay)
       let thumbnailImage = d.thumbnailImage;
