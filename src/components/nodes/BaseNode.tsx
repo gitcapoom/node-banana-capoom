@@ -7,6 +7,7 @@ import { useNodeMediaViewer } from "@/store/nodeMediaViewerStore";
 import { isPanningRef } from "@/components/WorkflowCanvas";
 import { getMediaDimensions, calculateAspectFitSize } from "@/utils/nodeDimensions";
 import { MediaResolutionBadge } from "./MediaResolutionBadge";
+import { useThumbnailPending } from "@/lib/thumbnailSize";
 import type { MediaType } from "@/components/MediaOverlay";
 
 const DEFAULT_NODE_DIMENSION = 300;
@@ -85,6 +86,7 @@ export function BaseNode({
   // a `nodes.find()` inside one makes each write cost O(nodes²). With a graph
   // full of GPU nodes — which write on each commit — that alone made panning
   // crawl. `useNodesData` is an indexed lookup with a shallow compare.
+  const thumbRendering = useThumbnailPending(id);
   const nodeData = useNodesData(id);
   const { storedDims, mediaIsThumb } = useMemo(() => {
     const data = nodeData?.data as Record<string, unknown> | undefined;
@@ -363,7 +365,12 @@ export function BaseNode({
         <div ref={contentRef} className={contentClassName ?? (fullBleed ? "flex-1 min-h-0 relative" : "px-3 pb-4 flex-1 min-h-0 overflow-hidden flex flex-col")}>{children}</div>
         {/* Resolution readout — every node that shows media gets one, since
             aspectFitMedia is already the node's displayed image/video. */}
-        <MediaResolutionBadge media={aspectFitMedia} storedDims={storedDims} mediaIsThumb={mediaIsThumb} />
+        <MediaResolutionBadge
+          media={aspectFitMedia}
+          storedDims={storedDims}
+          mediaIsThumb={mediaIsThumb}
+          rendering={thumbRendering}
+        />
       </div>
       {settingsPanel && (
         <div ref={settingsPanelRef}>

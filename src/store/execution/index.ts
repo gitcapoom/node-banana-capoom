@@ -60,4 +60,4 @@ export { executeWorldLabsWorld } from "./worldLabsWorldExecutor";
 
 export { executePanoEditor } from "./panoEditorExecutor";
 
-export { executeNode, refreshUpstreamProcessors, LOCAL_PROCESSOR_TYPES } from "./executeNode";
+export { executeNode, refreshUpstreamProcessors, refreshDownstreamProcessors, LOCAL_PROCESSOR_TYPES } from "./executeNode";

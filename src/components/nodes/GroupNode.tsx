@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { NodeProps, NodeResizer, Node as FlowNode } from "@xyflow/react";
 import { useWorkflowStore, GROUP_COLORS } from "@/store/workflowStore";
+import { useShallow } from "zustand/react/shallow";
 import { NodeGroup, GroupColor } from "@/types";
 
 // Header height constant
@@ -24,7 +25,14 @@ const COLOR_OPTIONS: { color: GroupColor; label: string }[] = [
 ];
 
 export function GroupNode({ id, data, selected }: NodeProps<GroupNodeType>) {
-  const { groups, updateGroup, deleteGroup, moveGroupNodes } = useWorkflowStore();
+  const { groups, updateGroup, deleteGroup, moveGroupNodes } = useWorkflowStore(
+    useShallow((s) => ({
+      groups: s.groups,
+      updateGroup: s.updateGroup,
+      deleteGroup: s.deleteGroup,
+      moveGroupNodes: s.moveGroupNodes,
+    })),
+  );
   const groupId = data.groupId;
   const group = groups[groupId];
 

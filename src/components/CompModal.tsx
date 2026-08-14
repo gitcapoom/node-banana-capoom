@@ -50,6 +50,7 @@ function loadSize(src: string): Promise<{ w: number; h: number } | null> {
 export function CompModal() {
   const { isModalOpen, sourceNodeId, activeInput, closeModal, setActiveInput } = useCompStore();
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
+  const propagateFromNode = useWorkflowStore((s) => s.propagateFromNode);
   const node = useWorkflowStore((s) => s.nodes.find((n) => n.id === sourceNodeId));
   const edges = useWorkflowStore((s) => s.edges);
   const nodes = useWorkflowStore((s) => s.nodes);
@@ -171,7 +172,10 @@ export function CompModal() {
     if (!isModalOpen || !sourceNodeId || !data?.bgImage) return;
     const t = setTimeout(async () => {
       const url = await floatNodeToDataUrl(sourceNodeId);
-      if (url) updateNodeData(sourceNodeId, { outputImage: url, outputImageRef: undefined });
+      if (url) {
+        updateNodeData(sourceNodeId, { outputImage: url, outputImageRef: undefined });
+        void propagateFromNode(sourceNodeId);
+      }
     }, 350);
     return () => clearTimeout(t);
     // previewSig covers every input + parameter the composite depends on.

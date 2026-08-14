@@ -4,6 +4,7 @@ import { useCallback, useState, useRef, useEffect } from "react";
 import { useViewport, ViewportPortal } from "@xyflow/react";
 import { useWorkflowStore, GROUP_COLORS } from "@/store/workflowStore";
 import { GroupColor } from "@/types";
+import { useShallow } from "zustand/react/shallow";
 
 const COLOR_OPTIONS: { color: GroupColor; label: string }[] = [
   { color: "neutral", label: "Gray" },
@@ -30,7 +31,7 @@ interface GroupBackgroundProps {
 
 // Renders just the group background - displayed below nodes (z-index 1)
 function GroupBackground({ groupId }: GroupBackgroundProps) {
-  const { groups } = useWorkflowStore();
+  const groups = useWorkflowStore((s) => s.groups);
   const group = groups[groupId];
 
   if (!group) return null;
@@ -60,7 +61,15 @@ interface GroupControlsProps {
 
 // Renders the group header and resize handles - displayed above nodes (z-index 5)
 function GroupControls({ groupId, zoom }: GroupControlsProps) {
-  const { groups, updateGroup, deleteGroup, moveGroupNodes, toggleGroupLock } = useWorkflowStore();
+  const { groups, updateGroup, deleteGroup, moveGroupNodes, toggleGroupLock } = useWorkflowStore(
+    useShallow((s) => ({
+      groups: s.groups,
+      updateGroup: s.updateGroup,
+      deleteGroup: s.deleteGroup,
+      moveGroupNodes: s.moveGroupNodes,
+      toggleGroupLock: s.toggleGroupLock,
+    })),
+  );
   const group = groups[groupId];
 
   const [isEditing, setIsEditing] = useState(false);
@@ -473,7 +482,7 @@ function GroupControls({ groupId, zoom }: GroupControlsProps) {
 // Renders group backgrounds inside ReactFlow's viewport using ViewportPortal
 // This participates in React Flow's stacking context so z-index works properly
 export function GroupBackgroundsPortal() {
-  const { groups } = useWorkflowStore();
+  const groups = useWorkflowStore((s) => s.groups);
   const groupIds = Object.keys(groups);
 
   if (groupIds.length === 0) return null;
@@ -491,7 +500,7 @@ export function GroupBackgroundsPortal() {
 
 // Renders group controls (headers, resize handles) using ViewportPortal above nodes
 export function GroupControlsOverlay() {
-  const { groups } = useWorkflowStore();
+  const groups = useWorkflowStore((s) => s.groups);
   const { zoom } = useViewport();
 
   const groupIds = Object.keys(groups);

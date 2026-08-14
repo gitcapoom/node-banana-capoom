@@ -34,6 +34,7 @@ export function MaskPainterModal() {
   } = useMaskPainterStore();
 
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const propagateFromNode = useWorkflowStore((state) => state.propagateFromNode);
   const nodes = useWorkflowStore((state) => state.nodes);
   const incrementModalCount = useWorkflowStore((state) => state.incrementModalCount);
   const decrementModalCount = useWorkflowStore((state) => state.decrementModalCount);
@@ -373,13 +374,16 @@ export function MaskPainterModal() {
     const t = setTimeout(() => {
       try {
         const outputMask = flattenMask();
-        if (outputMask) updateNodeData(sourceNodeId, { outputMask, outputMaskRef: undefined });
+        if (outputMask) {
+          updateNodeData(sourceNodeId, { outputMask, outputMaskRef: undefined });
+          void propagateFromNode(sourceNodeId);
+        }
       } catch (e) {
         console.error("MaskPainterModal: live mask commit failed", e);
       }
     }, 300);
     return () => clearTimeout(t);
-  }, [isModalOpen, sourceNodeId, image, strokes, currentElement, flattenMask, updateNodeData]);
+  }, [isModalOpen, sourceNodeId, image, strokes, currentElement, flattenMask, updateNodeData, propagateFromNode]);
 
   const handleDone = useCallback(() => {
     if (!sourceNodeId) return;

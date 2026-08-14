@@ -103,6 +103,7 @@ import { ImageCropModal } from "./ImageCropModal";
 import { browseRegistry } from "@/utils/browseRegistry";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { useThumbBackfill } from "@/hooks/useThumbBackfill";
+import { useThumbRegeneration } from "@/hooks/useThumbRegeneration";
 import { SplitGridSettingsModal } from "./SplitGridSettingsModal";
 import { createPortal } from "react-dom";
 import { useAnnotationStore } from "@/store/annotationStore";
@@ -411,6 +412,7 @@ export function WorkflowCanvas() {
     })));
   // One-time migration: backfill inline thumbnails for workflows saved before
   // they existed (loads each full-res once, stores only the thumb).
+  useThumbRegeneration();
   useThumbBackfill(nodes);
   const onNodesChange = useWorkflowStore((state) => state.onNodesChange);
   const onEdgesChange = useWorkflowStore((state) => state.onEdgesChange);

@@ -44,6 +44,37 @@ function readInitial(): ThumbnailSize {
 let current: ThumbnailSize = readInitial();
 const listeners = new Set<() => void>();
 
+/**
+ * Bumped each time the size changes. Node previews watch it so they can show
+ * "rendering" while their thumbnail is still the old size — changing the
+ * setting doesn't rewrite existing thumbs on the spot, and a preview silently
+ * showing stale pixels reads as the setting having done nothing.
+ */
+let generation = 0;
+const pendingNodes = new Set<string>();
+
+export function getThumbnailGeneration(): number {
+  return generation;
+}
+
+/** True while `nodeId` has not yet re-rendered its thumb at the current size. */
+export function isThumbnailPending(nodeId: string): boolean {
+  return pendingNodes.has(nodeId);
+}
+
+/** Called by a node once it has written a thumb at the current size. */
+export function markThumbnailRendered(nodeId: string): void {
+  if (!pendingNodes.delete(nodeId)) return;
+  listeners.forEach((l) => l());
+}
+
+/** Called on a size change with every node that displays a thumbnail. */
+export function markAllThumbnailsPending(nodeIds: string[]): void {
+  pendingNodes.clear();
+  nodeIds.forEach((id) => pendingNodes.add(id));
+  listeners.forEach((l) => l());
+}
+
 /** Non-React getter — used by the save path and the GPU commit paths. */
 export function getThumbnailMaxDim(): ThumbnailSize {
   return current;
@@ -52,6 +83,7 @@ export function getThumbnailMaxDim(): ThumbnailSize {
 export function setThumbnailMaxDim(value: ThumbnailSize): void {
   if (value === current || !isValid(value)) return;
   current = value;
+  generation++;
   try {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(STORAGE_KEY, String(value));
@@ -60,6 +92,10 @@ export function setThumbnailMaxDim(value: ThumbnailSize): void {
     /* localStorage unavailable — keep the in-memory value */
   }
   listeners.forEach((l) => l());
+}
+
+export function subscribeThumbnailSize(cb: () => void): () => void {
+  return subscribe(cb);
 }
 
 function subscribe(cb: () => void): () => void {
@@ -72,4 +108,13 @@ function subscribe(cb: () => void): () => void {
 /** React hook — components re-render when the size changes. */
 export function useThumbnailMaxDim(): ThumbnailSize {
   return useSyncExternalStore(subscribe, getThumbnailMaxDim, () => DEFAULT_THUMBNAIL_SIZE);
+}
+
+/** React hook — true while this node's thumbnail is still at the old size. */
+export function useThumbnailPending(nodeId: string): boolean {
+  return useSyncExternalStore(
+    subscribe,
+    () => isThumbnailPending(nodeId),
+    () => false,
+  );
 }
