@@ -144,44 +144,8 @@ export function ImageCompareNode({
         B
       </div>
 
-      {/* Mode selector */}
-      <div className="flex gap-1 mb-2 nodrag">
-        {MODE_OPTIONS.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => setMode(opt.value)}
-            className={`flex-1 text-[10px] font-medium py-1 px-2 rounded transition-colors ${
-              compareMode === opt.value
-                ? "bg-blue-600 text-white"
-                : "bg-neutral-700 text-neutral-400 hover:bg-neutral-600 hover:text-neutral-300"
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Opacity slider for blend/difference modes */}
-      {compareMode !== "slide" && imageA && imageB && (
-        <div className="flex items-center gap-2 mb-2 nodrag px-1">
-          <span className="text-[9px] text-neutral-400 whitespace-nowrap">
-            Opacity
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.01}
-            value={blendOpacity}
-            onChange={(e) => setOpacity(parseFloat(e.target.value))}
-            className="flex-1 h-1 accent-blue-500 cursor-pointer"
-          />
-          <span className="text-[9px] text-neutral-400 w-[28px] text-right tabular-nums">
-            {Math.round(blendOpacity * 100)}%
-          </span>
-        </div>
-      )}
-
+      {/* Mode and opacity live in the fullscreen overlay (double-click), not on
+          the thumbnail — at node scale the preview is the useful part. */}
       {/* Comparison view or placeholder */}
       {imageA && imageB ? (
         <div

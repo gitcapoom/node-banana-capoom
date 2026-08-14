@@ -540,49 +540,9 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
       <Handle type="target" position={Position.Left} id="image" data-handletype="image" />
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" />
 
-      <div className="nodrag nowheel max-h-[260px] overflow-y-auto rounded bg-neutral-900/30 mb-1">
-        {SLIDERS.map((s) => {
-          const value = params[s.key];
-          const expanded = forceSplit[s.key] || !isMaster(value);
-          return (
-            <GradeRow
-              key={s.key}
-              def={s}
-              value={value}
-              expanded={expanded}
-              onChange={(next) => setParamValue(s.key, next)}
-              onToggleExpanded={() => toggleExpanded(s.key)}
-            />
-          );
-        })}
-      </div>
-
-      <div className="flex items-center justify-between mb-1 px-1 nodrag">
-        <button
-          onClick={resetAll}
-          disabled={identity}
-          className={`text-[10px] py-0.5 px-2 rounded transition-colors ${
-            identity
-              ? "bg-neutral-800 text-neutral-600"
-              : "bg-neutral-700 text-neutral-200 hover:bg-neutral-600"
-          }`}
-          title="Reset all to identity"
-        >
-          Reset all
-        </button>
-        {identity && (
-          <span className="text-[9px] text-neutral-600 italic">passthrough</span>
-        )}
-      </div>
-
-      <div className="px-1 nodrag">
-        <ClampToggles
-          clampBlacks={nodeData.clampBlacks ?? false}
-          clampWhites={nodeData.clampWhites ?? false}
-          onChange={setClamp}
-        />
-      </div>
-
+      {/* Sliders, Reset and the clamp toggles live in the full-screen editor
+          (double-click) — the overlay already renders the same controls, so the
+          node itself stays just the picture. */}
       {liveActive || preview ? (
         <div
           className="relative w-full flex-1 min-h-0 cursor-pointer"
