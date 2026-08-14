@@ -16,7 +16,64 @@ export const maxDuration = 300; // 5 minute timeout for large workflow files
  * With this path a crash can only ever lose the in-flight save — the target
  * always holds the previous complete JSON, and .bak the one before it.
  */
-async function writeWorkflowAtomic(filePath: string, json: string): Promise<void> {
+/**
+ * Above this size a file certainly carries a graph, so we never parse it. An
+ * empty workflow serialises to ~130 bytes; anything smaller than this is cheap
+ * enough to read and count properly.
+ */
+const CHEAP_PARSE_MAX_BYTES = 4096;
+
+/**
+ * Does the file already on disk contain any nodes?
+ *   true  — yes, it carries a graph
+ *   false — it parses but has zero nodes
+ *   null  — unknown (missing, unreadable, unparseable)
+ *
+ * Deliberately size-bounded: with external image storage off, a workflow JSON
+ * can be hundreds of MB, and parsing that on every save to answer a yes/no
+ * question would be worse than the problem it guards. Large ⇒ certainly not
+ * the ~130-byte empty file we care about.
+ */
+async function existingCarriesGraph(filePath: string): Promise<boolean | null> {
+  try {
+    const { size } = await fs.stat(filePath);
+    if (typeof size !== "number") return null;
+    if (size > CHEAP_PARSE_MAX_BYTES) return true;
+    const parsed = JSON.parse(await fs.readFile(filePath, "utf-8"));
+    return Array.isArray(parsed?.nodes) && parsed.nodes.length > 0;
+  } catch {
+    return null; // no target yet, or unreadable — callers treat as "don't know"
+  }
+}
+
+/** Thrown when a save would destroy a graph; surfaced to the client as 409. */
+class DestructiveSaveError extends Error {
+  constructor(public readonly targetPath: string) {
+    super("Refusing to overwrite a non-empty workflow with an empty one");
+    this.name = "DestructiveSaveError";
+  }
+}
+
+async function writeWorkflowAtomic(
+  filePath: string,
+  json: string,
+  opts: { incomingNodeCount: number; allowEmpty: boolean },
+): Promise<void> {
+  // ── Guard 1: never let an empty graph silently replace a real one ──
+  //
+  // This is not hypothetical. A blank canvas that still pointed at a loaded
+  // project autosaved `{"nodes":[],"edges":[]}` over a 3.5MB workflow, and 90s
+  // later the next autosave copied that empty file over the .bak too — both
+  // copies gone. The old code could not stop it: its only backup guard asked
+  // whether the file began with '{', and an empty-but-VALID workflow does.
+  //
+  // An explicit user save passes allowEmpty, so genuinely deleting every node
+  // and saving still works. Autosave never does.
+  const carriesGraph = await existingCarriesGraph(filePath);
+  if (opts.incomingNodeCount === 0 && !opts.allowEmpty && carriesGraph === true) {
+    throw new DestructiveSaveError(filePath);
+  }
+
   const tmpPath = `${filePath}.tmp-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const handle = await fs.open(tmpPath, "w");
   try {
@@ -26,8 +83,11 @@ async function writeWorkflowAtomic(filePath: string, json: string): Promise<void
     await handle.close();
   }
 
-  // Keep the previous save as .bak — but never displace a good backup with a
-  // corrupt target (a zeroed/truncated file doesn't start with '{').
+  // ── Guard 2: .bak only ever holds the last GOOD save ──
+  //
+  // Rotate only when the current target is both parseable-looking (starts with
+  // '{') AND actually carries a graph. Previously an empty target was copied
+  // over the backup, which is what turned one bad save into total loss.
   try {
     const head = Buffer.alloc(1);
     const th = await fs.open(filePath, "r");
@@ -36,7 +96,10 @@ async function writeWorkflowAtomic(filePath: string, json: string): Promise<void
     } finally {
       await th.close();
     }
-    if (head[0] === 0x7b /* '{' */) {
+    // `!== false` — an unreadable/unknown target still rotates, exactly as
+    // before. Only a target we positively KNOW is empty is held back, so a
+    // small-but-real workflow keeps getting backed up.
+    if (head[0] === 0x7b /* '{' */ && carriesGraph !== false) {
       await fs.copyFile(filePath, `${filePath}.bak`);
     }
   } catch {
@@ -159,9 +222,14 @@ export async function POST(request: NextRequest) {
     const safeName = filename.replace(/[^a-zA-Z0-9-_]/g, "_");
     const filePath = path.join(directoryPath, `${safeName}.json`);
 
-    // Write workflow JSON (crash-safe: tmp + fsync + .bak rotation + rename)
+    // Write workflow JSON (crash-safe: tmp + fsync + .bak rotation + rename).
+    // `allowEmpty` is set only by an explicit user-initiated save, so autosave
+    // can never blank a project — see writeWorkflowAtomic for the incident.
     const json = JSON.stringify(workflow, null, 2);
-    await writeWorkflowAtomic(filePath, json);
+    await writeWorkflowAtomic(filePath, json, {
+      incomingNodeCount: Array.isArray(workflow?.nodes) ? workflow.nodes.length : 0,
+      allowEmpty: body.allowEmpty === true,
+    });
 
     logger.info('file.save', 'Workflow saved successfully', {
       filePath,
@@ -173,6 +241,22 @@ export async function POST(request: NextRequest) {
       filePath,
     });
   } catch (error) {
+    if (error instanceof DestructiveSaveError) {
+      logger.warn('file.save', 'Refused an empty save over an existing workflow', {
+        directoryPath,
+        filename,
+        targetPath: error.targetPath,
+      });
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Refused to save an empty workflow over an existing one. If you really meant to clear it, save explicitly.",
+          code: "empty_save_refused",
+        },
+        { status: 409 },
+      );
+    }
     logger.error('file.error', 'Failed to save workflow', {
       directoryPath,
       filename,

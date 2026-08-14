@@ -246,7 +246,7 @@ export function Header() {
     setShowProjectModal(false);
     // Small delay to let state update
     setTimeout(() => {
-      saveToFile().catch((error) => {
+      saveToFile({ allowEmpty: true }).catch((error) => {
         console.error("Failed to save project:", error);
         alert("Failed to save project. Please try again.");
       });
@@ -348,7 +348,7 @@ export function Header() {
                 {/* File operations group */}
                 <div className="flex items-center gap-0.5 ml-2 pl-2 border-l border-neutral-700/50">
                   <button
-                    onClick={() => canSave ? saveToFile() : handleOpenSettings()}
+                    onClick={() => canSave ? saveToFile({ allowEmpty: true }) : handleOpenSettings()}
                     disabled={isSaving}
                     className="relative p-1.5 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded transition-colors disabled:opacity-50"
                     title={isSaving ? "Saving..." : canSave ? "Save project" : "Configure save location"}

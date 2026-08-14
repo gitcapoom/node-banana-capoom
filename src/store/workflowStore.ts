@@ -539,7 +539,9 @@ interface WorkflowStore {
   setAutoSaveEnabled: (enabled: boolean) => void;
   setUseExternalImageStorage: (enabled: boolean) => void;
   markAsUnsaved: () => void;
-  saveToFile: () => Promise<boolean>;
+  /** `allowEmpty` marks a save the USER asked for: only those may write an
+   *  empty graph over an existing workflow (the server refuses otherwise). */
+  saveToFile: (opts?: { allowEmpty?: boolean }) => Promise<boolean>;
   saveAsFile: (name: string) => Promise<boolean>;
   initializeAutoSave: () => void;
   cleanupAutoSave: () => void;
@@ -636,6 +638,16 @@ interface WorkflowStore {
 let nodeIdCounter = 0;
 let groupIdCounter = 0;
 let autoSaveIntervalId: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * How often autosave fires. Was 90s, which on this project's graphs meant a
+ * full externalize-and-write pass (walking every node, hashing and writing any
+ * new images) three times a minute — enough to be felt while working, and a
+ * narrow window in which a bad state could be persisted twice and take the
+ * rolling .bak with it. Five minutes keeps the safety net without the churn;
+ * Ctrl+S is still there for anything you don't want to lose.
+ */
+const AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000;
 
 // RAF debounce for hover updates — coalesces rapid mouseenter/mouseleave events
 // into a single store update per animation frame
@@ -2885,7 +2897,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     set({ hasUnsavedChanges: true });
   },
 
-  saveToFile: async () => {
+  saveToFile: async (opts?: { allowEmpty?: boolean }) => {
     let {
       nodes,
       edges,
@@ -2981,6 +2993,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           directoryPath: saveDirectoryPath,
           filename: workflowName,
           workflow,
+          allowEmpty: opts?.allowEmpty === true,
         }),
       });
 
@@ -3069,6 +3082,16 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         });
 
         return true;
+      } else if (result.code === "empty_save_refused") {
+        // The server declined to blank an existing workflow. That is the guard
+        // doing its job, not a failure — say so plainly and leave the file
+        // alone. hasUnsavedChanges stays true, so the real graph still gets
+        // written the moment there is one.
+        console.warn("[save] server refused an empty save over an existing workflow");
+        useToast
+          .getState()
+          .show("Skipped saving an empty workflow over the existing file.", "info");
+        return false;
       } else {
         useToast.getState().show(`Auto-save failed: ${result.error}`, "error");
         return false;
@@ -3109,7 +3132,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       hasUnsavedChanges: true,
     });
 
-    const success = await get().saveToFile();
+    const success = await get().saveToFile({ allowEmpty: true });
     if (!success) {
       // Rollback to previous identity on failure
       set({ workflowId: prevId, workflowName: prevName, hasUnsavedChanges: prevUnsaved });
@@ -3122,6 +3145,15 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
     autoSaveIntervalId = setInterval(async () => {
       const state = get();
+      // NEVER autosave an empty canvas. A blank graph that still pointed at a
+      // loaded project is exactly how a real workflow got overwritten with
+      // `{"nodes":[],"edges":[]}`, and 90s later the .bak went the same way.
+      // Deleting every node on purpose is still saveable — by hand, which is
+      // the only context where "yes, really, save nothing" is a statement of
+      // intent rather than an accident of timing. The server refuses this too
+      // (POST /api/workflow), so both app instances are covered; this just
+      // stops the pointless request.
+      if (state.nodes.length === 0) return;
       if (
         state.autoSaveEnabled &&
         state.hasUnsavedChanges &&
@@ -3132,7 +3164,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       ) {
         await state.saveToFile();
       }
-    }, 90 * 1000); // 90 seconds
+    }, AUTO_SAVE_INTERVAL_MS);
   },
 
   cleanupAutoSave: () => {
