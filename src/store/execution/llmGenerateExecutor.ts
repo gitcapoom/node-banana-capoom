@@ -9,6 +9,7 @@ import type { LLMGenerateNodeData, ConversationTurn } from "@/types";
 import { buildLlmHeaders } from "@/store/utils/buildApiHeaders";
 import { LOOPBACK_SKILL, LOOPBACK_SKILL_NAME } from "./loopbackSkill";
 import type { NodeExecutionContext } from "./types";
+import { loadMediaById } from "@/utils/mediaStorage";
 
 export interface LlmGenerateOptions {
   /** When true, falls back to stored inputImages/inputPrompt if no connections provide them. */
@@ -47,6 +48,7 @@ export async function executeLlmGenerate(
     updateNodeData,
     signal,
     providerSettings,
+    saveDirectoryPath,
   } = ctx;
 
   const { useStoredFallback = false } = options;
@@ -196,9 +198,28 @@ export async function executeLlmGenerate(
   // The original request + initial prompt survive truncation via THE SPEC
   // appended to the system prompt (see effectiveSystem below), so no pinning
   // is needed here.
-  const historyToSend = loopbackMode
-    ? slicedPrior.map(({ images: _img, videos: _vid, ...rest }) => rest)
-    : slicedPrior;
+  // Transcript images live on disk as refs after a save (see imageStorage), so
+  // hydrate the turns actually being sent — otherwise a reloaded conversation
+  // would quietly go text-only. Only the sliced window is loaded, never the
+  // whole history.
+  let historyToSend: ConversationTurn[] = slicedPrior;
+  if (!loopbackMode && saveDirectoryPath) {
+    historyToSend = await Promise.all(
+      slicedPrior.map(async (turn) => {
+        if (turn.images?.length || !turn.imageRefs?.length) return turn;
+        const loaded = await Promise.all(
+          turn.imageRefs.map((ref) =>
+            ref ? loadMediaById(ref, saveDirectoryPath, "inputs").catch(() => null) : null,
+          ),
+        );
+        const images = loaded.filter((u): u is string => !!u);
+        return images.length ? { ...turn, images } : turn;
+      }),
+    );
+  }
+  if (loopbackMode) {
+    historyToSend = slicedPrior.map(({ images: _img, videos: _vid, ...rest }) => rest);
+  }
 
   const outboundMessages: ConversationTurn[] = useConversation
     ? [...historyToSend, newUserTurn]

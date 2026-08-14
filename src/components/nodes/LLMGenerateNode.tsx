@@ -792,6 +792,9 @@ interface ConversationRowProps {
 }
 
 function ConversationRow({ turn, onRemove }: ConversationRowProps) {
+  // After a save the transcript keeps refs + thumbs instead of inline full-res
+  // images (see imageStorage), so prefer whichever is present.
+  const turnPreviews = (turn.images?.length ? turn.images : turn.imageThumbs ?? []).filter(Boolean);
   const isUser = turn.role === "user";
   return (
     <div className="group/row flex items-start gap-1 px-1 py-0.5 rounded hover:bg-neutral-800/40 transition-colors">
@@ -804,9 +807,9 @@ function ConversationRow({ turn, onRemove }: ConversationRowProps) {
         {isUser ? "U" : "A"}
       </span>
       <div className="flex-1 min-w-0">
-        {turn.images && turn.images.length > 0 && (
+        {turnPreviews.length > 0 && (
           <div className="flex gap-1 mb-0.5">
-            {turn.images.slice(0, 3).map((img, i) => (
+            {turnPreviews.slice(0, 3).map((img, i) => (
               <img
                 key={i}
                 src={img}
@@ -814,9 +817,9 @@ function ConversationRow({ turn, onRemove }: ConversationRowProps) {
                 className="w-8 h-8 object-cover rounded border border-neutral-700"
               />
             ))}
-            {turn.images.length > 3 && (
+            {turnPreviews.length > 3 && (
               <span className="text-[9px] text-neutral-500 self-end">
-                +{turn.images.length - 3}
+                +{turnPreviews.length - 3}
               </span>
             )}
           </div>
