@@ -781,8 +781,17 @@ async function renderCompUnlocked(c: Ctx, inputs: CompRenderInputs, params: Comp
   return { w, h };
 }
 
-/** Display-clamp a float texture to a visible 2D canvas (no lock). */
-function blitFloatToCanvasUnlocked(c: Ctx, nodeId: string, destCanvas: HTMLCanvasElement): boolean {
+/**
+ * Display-clamp a float texture to a visible 2D canvas (no lock).
+ *
+ * `maxDim` caps the DESTINATION only. The comp editor showed a 6554x3686
+ * result in a ~1150px viewport, and this blit sized the destination to the
+ * full 24MP — a 96MB backing store, a 24MP clearRect + drawImage per frame
+ * (~390MB of pixel traffic), which Konva then filter-downscaled 5.7x again on
+ * every redraw. The GL draw stays 1:1 because the float textures are NEAREST
+ * and point-sampling them small aliases into noise; only the copy shrinks.
+ */
+function blitFloatToCanvasUnlocked(c: Ctx, nodeId: string, destCanvas: HTMLCanvasElement, maxDim?: number): boolean {
   const { gl, quad, canvas } = c;
   const entry = floatRegistry.get(nodeId);
   if (!entry) return false;
@@ -801,12 +810,16 @@ function blitFloatToCanvasUnlocked(c: Ctx, nodeId: string, destCanvas: HTMLCanva
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
-  if (destCanvas.width !== w) destCanvas.width = w;
-  if (destCanvas.height !== h) destCanvas.height = h;
+  const s = maxDim && maxDim > 0 ? Math.min(1, maxDim / Math.max(w, h)) : 1;
+  const dw = Math.max(1, Math.round(w * s));
+  const dh = Math.max(1, Math.round(h * s));
+  if (destCanvas.width !== dw) destCanvas.width = dw;
+  if (destCanvas.height !== dh) destCanvas.height = dh;
   const dctx = destCanvas.getContext("2d");
   if (!dctx) return false;
-  dctx.clearRect(0, 0, w, h);
-  dctx.drawImage(canvas, 0, 0);
+  if (s < 1) { dctx.imageSmoothingEnabled = true; dctx.imageSmoothingQuality = "high"; }
+  dctx.clearRect(0, 0, dw, dh);
+  dctx.drawImage(canvas, 0, 0, dw, dh);
   return true;
 }
 
@@ -820,14 +833,15 @@ export function renderComp(inputs: CompRenderInputs, params: CompRenderParams, d
   });
 }
 
-/** Render the comp and blit the display-clamped result to a visible canvas. */
-export function renderCompToCanvas(inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string, destCanvas: HTMLCanvasElement): Promise<boolean> {
+/** Render the comp and blit the display-clamped result to a visible canvas.
+ *  `maxDim` caps the DESTINATION canvas — see blitFloatToCanvasUnlocked. */
+export function renderCompToCanvas(inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string, destCanvas: HTMLCanvasElement, maxDim?: number): Promise<boolean> {
   return withLock(async () => {
     const c = getCtx();
     if (!c || !c.floatOK) return false;
     const res = await renderCompUnlocked(c, inputs, params, destNodeId);
     if (!res) return false;
-    return blitFloatToCanvasUnlocked(c, destNodeId, destCanvas);
+    return blitFloatToCanvasUnlocked(c, destNodeId, destCanvas, maxDim);
   });
 }
 

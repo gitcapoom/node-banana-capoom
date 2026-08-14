@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Stage, Layer, Image as KonvaImage, Line, Circle, Rect } from "react-konva";
 import Konva from "konva";
 import { useCompStore, type CompActiveInput } from "@/store/compStore";
@@ -14,6 +15,11 @@ import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/t
 import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
 import { cheapUrlKey } from "@/utils/renderSignature";
 import { DockedViewer } from "@/components/ViewerFeed";
+
+/** Longest edge of the live preview canvas, in px. Generous enough to be ~1:1
+ *  at fit-to-window on a large display, ~6x cheaper than compositing at a
+ *  24MP source resolution nobody can see. */
+const PREVIEW_MAX_DIM = 2560;
 
 type Pt = { x: number; y: number };
 type NumKey = "hPos" | "vPos" | "rotation" | "scaleX" | "scaleY";
@@ -53,8 +59,6 @@ export function CompModal() {
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const propagateFromNode = useWorkflowStore((s) => s.propagateFromNode);
   const node = useWorkflowStore((s) => s.nodes.find((n) => n.id === sourceNodeId));
-  const edges = useWorkflowStore((s) => s.edges);
-  const nodes = useWorkflowStore((s) => s.nodes);
   const incrementModalCount = useWorkflowStore((s) => s.incrementModalCount);
   const decrementModalCount = useWorkflowStore((s) => s.decrementModalCount);
 
@@ -95,23 +99,33 @@ export function CompModal() {
   const outW = resSrc?.w ?? 0;
   const outH = resSrc?.h ?? 0;
 
-  const srcs = useMemo(() => {
-    const r = { bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null };
-    if (!sourceNodeId) return r;
-    for (const e of edges) {
-      if (e.target !== sourceNodeId) continue;
-      const src = nodes.find((n) => n.id === e.source);
-      if (!src) continue;
-      const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
-      if (out.type !== "image" || !out.value) continue;
-      if (e.targetHandle === "image-comp_bg") r.bgSrc = src.id;
-      else if (e.targetHandle === "image-comp_bg_alpha") r.baSrc = src.id;
-      else if (e.targetHandle === "image-comp_fg") r.fgSrc = src.id;
-      else if (e.targetHandle === "image-comp_fg_alpha") r.faSrc = src.id;
-      else if (e.targetHandle === "image-comp_matte") r.mtSrc = src.id;
-    }
-    return r;
-  }, [edges, nodes, sourceNodeId]);
+  // Five source ids, shallow-compared.
+  //
+  // This was a useMemo over [edges, nodes], and both arrays get a new identity
+  // on EVERY store write — so `srcs` was a fresh object every time, and it is a
+  // dependency of the preview effect below. A full 24MP composite therefore
+  // re-fired for every unrelated write anywhere in the graph, including the
+  // modal's own 350ms publish and every node propagateFromNode touched. With a
+  // shallow compare the object is stable until a connection genuinely changes.
+  const srcs = useWorkflowStore(
+    useShallow((state) => {
+      const r = { bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null };
+      if (!sourceNodeId) return r;
+      for (const e of state.edges) {
+        if (e.target !== sourceNodeId) continue;
+        const src = state.nodes.find((n) => n.id === e.source);
+        if (!src) continue;
+        const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+        if (out.type !== "image" || !out.value) continue;
+        if (e.targetHandle === "image-comp_bg") r.bgSrc = src.id;
+        else if (e.targetHandle === "image-comp_bg_alpha") r.baSrc = src.id;
+        else if (e.targetHandle === "image-comp_fg") r.fgSrc = src.id;
+        else if (e.targetHandle === "image-comp_fg_alpha") r.faSrc = src.id;
+        else if (e.targetHandle === "image-comp_matte") r.mtSrc = src.id;
+      }
+      return r;
+    }),
+  );
 
   // Decode input sizes (for handle geometry + stage fit).
   useEffect(() => {
@@ -165,7 +179,15 @@ export function CompModal() {
     const urls = { bg: data.bgImage, bgAlpha: data.bgAlphaImage, fg: data.fgImage, fgAlpha: data.fgAlphaImage, matte: data.matteImage };
     const run = async () => {
       if (!urls.bg) return;
-      const ok = await renderCompToCanvas(buildCompInputs(urls, srcs), buildCompParams(data), sourceNodeId, offscreen);
+      // Cap the preview canvas to roughly the viewport. The Konva Image is
+      // still laid out at outW x outH, so nothing moves — only the source
+      // resolution drops, turning a 24MP clearRect + drawImage (and Konva's
+      // 5.7x filter-downscale of a 96MB canvas on every redraw) into a few
+      // megapixels. Zooming past ~1.15x fit softens the preview; the committed
+      // output is unaffected and stays full-res.
+      const ok = await renderCompToCanvas(
+        buildCompInputs(urls, srcs), buildCompParams(data), sourceNodeId, offscreen, PREVIEW_MAX_DIM,
+      );
       if (!cancelled && !ok) {
         const { dataUrl, outW: w, outH: h } = await compositeCompForExecutor(urls, srcs, data, sourceNodeId);
         if (cancelled || !dataUrl || !w) return;
