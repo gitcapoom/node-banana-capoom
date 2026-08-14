@@ -305,9 +305,15 @@ export async function executeOutputGallery(ctx: NodeExecutionContext): Promise<v
 export async function executeImageCompare(ctx: NodeExecutionContext): Promise<void> {
   const { node, getConnectedInputs, updateNodeData } = ctx;
   const { images } = getConnectedInputs(node.id);
+  // Clear the refs alongside the mirrors, as every other executor does: a ref
+  // is the promise that the saved file — and the display thumb beside it —
+  // still match these pixels, and the preview relies on that to know when a
+  // thumb is safe to show.
   updateNodeData(node.id, {
     imageA: images[0] || null,
     imageB: images[1] || null,
+    imageARef: undefined,
+    imageBRef: undefined,
   });
 }
 

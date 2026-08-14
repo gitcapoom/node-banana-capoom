@@ -13,6 +13,8 @@ import { FileSaveDialog } from "../FileSaveDialog";
 import { ZoomPanView } from "../ZoomPanView";
 import { extractUpstreamWorkflow } from "@/utils/upstreamExtractor";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
+import { createImageThumbnail } from "@/utils/createImageThumbnail";
+import { cheapUrlKey } from "@/utils/renderSignature";
 
 type OutputNodeType = Node<OutputNodeData, "output">;
 
@@ -132,6 +134,34 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     if (nodeData.model3d) return nodeData.model3d;
     return nodeData.image;
   }, [nodeData.audio, nodeData.video, nodeData.model3d, nodeData.image]);
+
+  // The inline preview is ~60px wide but `image` is whatever upstream produced
+  // — 6554x3686 is normal here. An Output node deliberately persists nothing,
+  // so there is no saved thumb to fall back on the way other nodes have; make
+  // one in memory once the node is quiet, keyed to the image it came from so it
+  // can never outlive its source. Full-res still feeds the lightbox, the
+  // download and the save sidecar.
+  const previewThumb =
+    nodeData.imageThumb && nodeData.image && nodeData.imageThumbKey === cheapUrlKey(nodeData.image)
+      ? nodeData.imageThumb
+      : null;
+
+  useEffect(() => {
+    const full = nodeData.image;
+    if (!full || previewThumb) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const thumb = await createImageThumbnail(full, undefined, 0.72, "jpeg");
+        if (!cancelled && thumb) updateNodeData(id, { imageThumb: thumb, imageThumbKey: cheapUrlKey(full) });
+      } catch {
+        /* preview stays on full-res */
+      }
+    }, 700);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [id, nodeData.image, previewThumb, updateNodeData]);
+
+  const inlineSrc = previewThumb ?? contentSrc;
 
   // Auto-trigger execution when a new connection is made
   useEffect(() => {
@@ -441,7 +471,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
                 onClick={() => setShowLightbox(true)}
               >
                 <img
-                  src={contentSrc}
+                  src={inlineSrc ?? undefined}
                   alt="Output"
                   className="w-full h-full object-contain"
                 />
