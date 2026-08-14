@@ -40,6 +40,19 @@ export function ImageCropModal() {
   } = useImageCropStore();
 
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const incrementModalCount = useWorkflowStore((state) => state.incrementModalCount);
+  const decrementModalCount = useWorkflowStore((state) => state.decrementModalCount);
+
+  // Register with the workflow modal count while open, like every other Konva
+  // editor does. This one never did — so with the crop editor open the canvas
+  // underneath stayed fully live: Space activated React Flow's pan at the same
+  // time as the crop pan, and Delete/Backspace still deleted the selected
+  // NODES behind the modal.
+  useEffect(() => {
+    if (!isModalOpen) return;
+    incrementModalCount();
+    return () => decrementModalCount();
+  }, [isModalOpen, incrementModalCount, decrementModalCount]);
 
   const stageRef = useRef<Konva.Stage>(null);
   const rectRef = useRef<Konva.Rect>(null);
@@ -56,19 +69,29 @@ export function ImageCropModal() {
   const [spaceHeld, setSpaceHeld] = useState(false);
 
   useEffect(() => {
+    // Only while open: with `[]` deps this listener lived for the whole
+    // canvas's lifetime and swallowed Space app-wide even with the crop editor
+    // closed. The other editors guard on isModalOpen for the same reason.
+    if (!isModalOpen) return;
     const down = (e: KeyboardEvent) => {
       if (e.code === "Space" && !e.repeat) { e.preventDefault(); setSpaceHeld(true); }
     };
     const up = (e: KeyboardEvent) => {
       if (e.code === "Space") setSpaceHeld(false);
     };
+    // Alt-tabbing while holding Space would otherwise strand spaceHeld=true,
+    // leaving the crop box permanently undraggable.
+    const clear = () => setSpaceHeld(false);
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
+    window.addEventListener("blur", clear);
     return () => {
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", clear);
+      setSpaceHeld(false);
     };
-  }, []);
+  }, [isModalOpen]);
 
   // Cursor-anchored zoom. The stage is React-controlled, so the view the helper
   // computes goes into state rather than onto the stage.
@@ -401,7 +424,13 @@ export function ImageCropModal() {
             y={position.y}
             onWheel={handleWheel}
             draggable={spaceHeld}
-            onDragEnd={(e) => setPosition({ x: e.target.x(), y: e.target.y() })}
+            // Konva bubbles dragend from children, and the crop Rect is
+            // draggable — so without this guard, moving the crop box wrote the
+            // RECT's coordinates into the STAGE position and the view jumped
+            // away. Same guard the mask / annotation editors already carry.
+            onDragEnd={(e) => {
+              if (e.target === stageRef.current) setPosition({ x: e.target.x(), y: e.target.y() });
+            }}
             style={{ cursor: spaceHeld ? "grab" : "default" }}
           >
             <Layer>
@@ -432,7 +461,11 @@ export function ImageCropModal() {
                   stroke="transparent"
                   strokeWidth={0}
                   fill="transparent"
-                  draggable
+                  // While panning, the crop box must get out of the way: it
+                  // covers the crop area, so pointer-down would start the
+                  // RECT's drag and the stage would never move.
+                  draggable={!spaceHeld}
+                  listening={!spaceHeld}
                   onDragEnd={handleRectDragEnd}
                   onTransform={handleRectTransform}
                   onTransformEnd={handleRectTransform}
@@ -442,6 +475,7 @@ export function ImageCropModal() {
               {/* Transformer for resize handles */}
               <Transformer
                 ref={transformerRef}
+                listening={!spaceHeld}
                 rotateEnabled={false}
                 keepRatio={aspectLock !== "free"}
                 enabledAnchors={[
