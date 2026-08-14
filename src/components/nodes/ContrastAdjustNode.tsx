@@ -6,6 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { useColorNode } from "@/hooks/useGpuPreview";
+import { useUpstreamImage } from "@/hooks/useUpstreamImage";
 import { CONTRAST_SHADER } from "@/utils/imageShaders";
 import type { UniformValue } from "@/utils/webglProcess";
 import { GpuEditorOverlay } from "./GpuEditorOverlay";
@@ -44,20 +45,12 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
   const nodeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const incomingImage = useWorkflowStore((state): string | null => {
-    const edge = state.edges.find((e) => e.target === id && e.targetHandle === "image");
-    if (!edge) return null;
-    const src = state.nodes.find((n) => n.id === edge.source);
-    if (!src) return null;
-    const out = getSourceOutput(src, edge.sourceHandle);
-    return out.type === "image" ? out.value : null;
-  });
-  const upstreamColorNodeId = useWorkflowStore((state): string | null => {
-    const edge = state.edges.find((e) => e.target === id && e.targetHandle === "image");
-    if (!edge) return null;
-    const src = state.nodes.find((n) => n.id === edge.source);
-    return src && COLOR_NODE_TYPES.has(src.type as string) ? src.id : null;
-  });
+  // Indexed upstream lookup — a zustand selector scanning edges+nodes here runs
+  // on every store write for every node (see useUpstreamImage).
+  const upstream = useUpstreamImage("image");
+  const incomingImage = upstream.image;
+  const upstreamColorNodeId =
+    upstream.sourceId && COLOR_NODE_TYPES.has(upstream.sourceType ?? "") ? upstream.sourceId : null;
 
   useEffect(() => {
     if (incomingImage !== nodeData.sourceImage) {

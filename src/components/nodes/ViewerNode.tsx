@@ -4,7 +4,7 @@ import { useCallback, useEffect, type CSSProperties } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
-import { getSourceOutput } from "@/store/utils/connectedInputs";
+import { useUpstreamImage } from "@/hooks/useUpstreamImage";
 import type { ViewerNodeData } from "@/types";
 
 type ViewerNodeType = Node<ViewerNodeData, "viewer">;
@@ -32,14 +32,9 @@ export function ViewerNode({ id, data, selected }: NodeProps<ViewerNodeType>) {
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
 
   // Resolve the upstream image reactively — this is what makes the node live.
-  const incoming = useWorkflowStore((state): string | null => {
-    const edge = state.edges.find((e) => e.target === id && (e.targetHandle === "image" || e.targetHandle == null));
-    if (!edge) return null;
-    const src = state.nodes.find((n) => n.id === edge.source);
-    if (!src) return null;
-    const out = getSourceOutput(src, edge.sourceHandle, edge.data as Record<string, unknown> | undefined);
-    return out.type === "image" ? out.value : null;
-  });
+  // Read through React Flow's indexes; a store selector scanning edges+nodes
+  // would re-run for every node on every write (see useUpstreamImage).
+  const incoming = useUpstreamImage("image").image;
 
   // Mirror into node data so the shared full-screen viewer (which reads a node
   // field, not a URL) shows this — and keeps showing it live while open.

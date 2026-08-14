@@ -1,7 +1,7 @@
 "use client";
 
-import { ReactNode, useCallback, useRef, useLayoutEffect } from "react";
-import { Node, NodeResizer, OnResize, useReactFlow } from "@xyflow/react";
+import { ReactNode, useCallback, useMemo, useRef, useLayoutEffect } from "react";
+import { Node, NodeResizer, OnResize, useReactFlow, useNodesData } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useNodeMediaViewer } from "@/store/nodeMediaViewerStore";
 import { isPanningRef } from "@/components/WorkflowCanvas";
@@ -78,34 +78,35 @@ export function BaseNode({
   const isCurrentlyExecuting = currentNodeIds.includes(id);
   const { getNodes, setNodes } = useReactFlow();
 
-  // Source dimensions persisted next to the thumbnail at save time, under
-  // `<field>Dims`. `aspectFitMedia` is the node's displayed media but carries no
-  // field name, so we look at the two conventional display fields — that covers
-  // every node without threading a prop through all of them.
-  const storedDims = useWorkflowStore((state) => {
-    const data = state.nodes.find((n) => n.id === id)?.data as Record<string, unknown> | undefined;
-    if (!data) return null;
-    return (data.outputImageDims ??
-      data.outputMaskDims ??
-      data.imageDims ??
-      data.sourceImageDims ??
-      null) as { width: number; height: number } | null;
-  });
-
-  // Is the media we're displaying one of this node's thumbnails? Nodes render
-  // `fullRes ?? thumb`, so this is an identity check rather than a guess — and
-  // it keeps the resolution badge from reporting a thumbnail's size as fact.
-  const mediaIsThumb = useWorkflowStore((state) => {
-    if (!aspectFitMedia) return false;
-    const data = state.nodes.find((n) => n.id === id)?.data as Record<string, unknown> | undefined;
-    if (!data) return false;
-    return (
-      aspectFitMedia === data.outputImageThumb ||
-      aspectFitMedia === data.imageThumb ||
-      aspectFitMedia === data.sourceImageThumb ||
-      aspectFitMedia === data.outputMaskThumb
-    );
-  });
+  // Resolution-badge inputs, read through React Flow's own id→node index.
+  //
+  // This is deliberately NOT a useWorkflowStore selector: BaseNode wraps EVERY
+  // node, zustand re-runs every subscriber's selector on every store write, and
+  // a `nodes.find()` inside one makes each write cost O(nodes²). With a graph
+  // full of GPU nodes — which write on each commit — that alone made panning
+  // crawl. `useNodesData` is an indexed lookup with a shallow compare.
+  const nodeData = useNodesData(id);
+  const { storedDims, mediaIsThumb } = useMemo(() => {
+    const data = nodeData?.data as Record<string, unknown> | undefined;
+    if (!data) return { storedDims: null, mediaIsThumb: false };
+    return {
+      // Source dimensions persisted next to the thumbnail at save time, under
+      // `<field>Dims`; `aspectFitMedia` carries no field name, so we check the
+      // conventional display fields.
+      storedDims: (data.outputImageDims ??
+        data.outputMaskDims ??
+        data.imageDims ??
+        data.sourceImageDims ??
+        null) as { width: number; height: number } | null,
+      // Nodes render `fullRes ?? thumb`, so this is an identity check rather
+      // than a guess — it keeps the badge from reporting a thumbnail's own size.
+      mediaIsThumb: !!aspectFitMedia &&
+        (aspectFitMedia === data.outputImageThumb ||
+          aspectFitMedia === data.imageThumb ||
+          aspectFitMedia === data.sourceImageThumb ||
+          aspectFitMedia === data.outputMaskThumb),
+    };
+  }, [nodeData, aspectFitMedia]);
 
   const settingsPanelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);

@@ -47,6 +47,12 @@ export interface ConversationTurn {
   /** Video data/http URLs. Only Google Gemini models accept video input;
    *  the route rejects videos on other providers with a clear error. */
   videos?: string[];
+  /** File refs for the turn's images, written at save time. The full-res
+   *  images live on disk from then on — a transcript that kept them inline
+   *  grew the workflow without bound. */
+  imageRefs?: string[];
+  /** Small previews for the transcript UI, matching `imageRefs` by index. */
+  imageThumbs?: string[];
   /** ms epoch — used for sort stability in the UI, optional everywhere else. */
   timestamp?: number;
 }

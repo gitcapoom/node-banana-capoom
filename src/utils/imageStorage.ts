@@ -1,6 +1,6 @@
 import { WorkflowNode, WorkflowNodeData } from "@/types";
 import { WorkflowFile } from "@/store/workflowStore";
-import { createImageThumbnailWithMeta, thumbMaxDim } from "./createImageThumbnail";
+import { createImageThumbnail, createImageThumbnailWithMeta, thumbMaxDim } from "./createImageThumbnail";
 import crypto from "crypto";
 
 /**
@@ -309,6 +309,27 @@ async function externalizeNodeImages(
       break;
     }
 
+    case "viewer": {
+      // A Viewer is a DISPLAY tap: whatever it shows already exists on the node
+      // upstream, and re-resolves from there the moment the graph loads. Saving
+      // its own full-res copy duplicated tens of MB per viewer into the workflow
+      // (one measured at 74MB). Keep a thumbnail for the pre-resolve preview and
+      // drop the full-res — there is nothing to lose and no ref to write.
+      const d = data as Record<string, unknown>;
+      const raw = d.image as string | null | undefined;
+      newData = d;
+      if (isBase64DataUrl(raw)) {
+        const next: Record<string, unknown> = { ...d, image: null, imageRef: undefined };
+        try {
+          const t = await createImageThumbnailWithMeta(raw!, thumbMaxDim(), 0.72, "png");
+          next.imageThumb = t.thumb;
+          next.imageDims = { width: t.width, height: t.height };
+        } catch { /* keep whatever thumb is already there */ }
+        newData = next;
+      }
+      break;
+    }
+
     case "llmGenerate": {
       const d = data as import("@/types").LLMGenerateNodeData;
       let inputImageRefs = d.inputImageRefs ? [...d.inputImageRefs] : [];
@@ -330,8 +351,38 @@ async function externalizeNodeImages(
         }
       }
 
+      // Conversation transcript. Every turn kept its images inline at FULL
+      // resolution, so a long chat grew without bound — 398MB in one measured
+      // workflow, dwarfing everything else in the file and sitting in memory for
+      // the whole session. Each image becomes a ref (full-res on disk, loadable)
+      // plus a thumbnail for the transcript UI, which is all the node renders.
+      let conversation = d.conversation;
+      if (Array.isArray(conversation) && conversation.length > 0) {
+        conversation = await Promise.all(
+          conversation.map(async (turn) => {
+            if (!Array.isArray(turn.images) || turn.images.length === 0) return turn;
+            const refs = turn.imageRefs ? [...turn.imageRefs] : [];
+            const thumbs = turn.imageThumbs ? [...turn.imageThumbs] : [];
+            for (let i = 0; i < turn.images.length; i++) {
+              const img = turn.images[i];
+              if (!isBase64DataUrl(img)) continue;
+              if (!refs[i]) {
+                refs[i] = await saveImageAndGetId(img, workflowPath, savedImageIds, "inputs");
+              }
+              if (!thumbs[i]) {
+                try {
+                  thumbs[i] = await createImageThumbnail(img, thumbMaxDim(), 0.72, "jpeg");
+                } catch { /* transcript falls back to no preview */ }
+              }
+            }
+            return { ...turn, images: [], imageRefs: refs, imageThumbs: thumbs };
+          }),
+        );
+      }
+
       newData = {
         ...d,
+        conversation,
         inputImages: inputImages.length > 0 && inputImages.every(i => i === "") ? [] : inputImages,
         inputImageRefs: inputImageRefs.length > 0 ? inputImageRefs : undefined,
       };
