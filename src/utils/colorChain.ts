@@ -325,6 +325,83 @@ export function floatNodeToDataUrl(nodeId: string): Promise<string | null> {
   });
 }
 
+/** Scratch 2D canvas for downscaled readbacks (one per module, reused). */
+let thumbCanvas: HTMLCanvasElement | null = null;
+
+/**
+ * Flatten a node's float texture straight to a THUMBNAIL-resolution data URL.
+ *
+ * The display path — a node body preview a few dozen px wide — was being fed by
+ * `floatNodeToDataUrl`, which encodes the texture at its native size. On this
+ * project's comps that is 6554x3686, and a 24MP PNG encode costs ~1.0s of
+ * blocked main thread EACH; the old thumbnail path then decoded that PNG again
+ * and re-encoded it small, for another ~300ms. Nine of those is most of the
+ * time it took to open a workflow.
+ *
+ * The GPU draw is not the expensive part — `toDataURL` is. So this renders the
+ * display-clamp pass exactly as before, then downscales off the GL canvas into
+ * a small 2D canvas and encodes THAT. Same drawImage downscale the old
+ * `createImageThumbnailWithMeta` did, so the result is pixel-comparable; it
+ * just skips the full-res encode and the decode that followed it.
+ *
+ * Returns the thumb plus the SOURCE dimensions (free here, and the only place
+ * they're cheaply available — see createImageThumbnail for why that matters).
+ * Null when the node has no float texture.
+ */
+export function floatNodeToThumbDataUrl(
+  nodeId: string,
+  maxDim: number,
+  format: "png" | "jpeg" = "png",
+  quality = 0.72,
+): Promise<{ thumb: string; width: number; height: number } | null> {
+  return withLock(async () => {
+    const c = getCtx();
+    if (!c) return null;
+    const { gl, quad, canvas } = c;
+    const entry = floatRegistry.get(nodeId);
+    if (!entry) return null;
+    const { tex, w, h } = entry;
+
+    // Full-res display-clamp draw into the GL canvas — GPU work, ~free.
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    const prog = getProgram(gl, DISPLAY_CLAMP_SHADER);
+    gl.useProgram(prog);
+    bindQuad(gl, prog, quad);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
+    gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 1.0); // canvas → flip for upright display
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // Downscale, then encode the SMALL canvas.
+    const scale = Math.min(1, maxDim / Math.max(w, h));
+    const tw = Math.max(1, Math.round(w * scale));
+    const th = Math.max(1, Math.round(h * scale));
+    if (!thumbCanvas) thumbCanvas = document.createElement("canvas");
+    const tc = thumbCanvas;
+    if (tc.width !== tw) tc.width = tw;
+    if (tc.height !== th) tc.height = th;
+    const tctx = tc.getContext("2d");
+    if (!tctx) return null;
+    tctx.imageSmoothingEnabled = true;
+    tctx.imageSmoothingQuality = "high";
+    tctx.clearRect(0, 0, tw, th);
+    tctx.drawImage(canvas, 0, 0, tw, th);
+    return {
+      // PNG by default: comp output carries alpha, and JPEG would flatten it to
+      // black (same reason createImageThumbnail defaults comps to png).
+      thumb: format === "png" ? tc.toDataURL("image/png") : tc.toDataURL("image/jpeg", quality),
+      width: w,
+      height: h,
+    };
+  });
+}
+
 /**
  * Commit path shared by the live hook AND the workflow executors:
  * produce this node's float texture (for the chain) and return the 8-bit

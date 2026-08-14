@@ -15,11 +15,12 @@ import {
   renderColorNodeToCanvas,
   renderColorNodeToFloat,
   commitColorNode,
+  floatNodeToThumbDataUrl,
   type ShaderInput,
 } from "@/utils/colorChain";
 
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
-import { createImageThumbnailWithMeta } from "@/utils/createImageThumbnail";
+import { createImageThumbnailWithMeta, thumbMaxDim } from "@/utils/createImageThumbnail";
 
 /** How long the live canvas keeps rendering after the last change. */
 const LIVE_LINGER_MS = 1500;
@@ -281,8 +282,14 @@ export function useColorNode(args: UseColorNodeArgs): { liveActive: boolean } {
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const meta = await createImageThumbnailWithMeta(full);
-        if (cancelled) return;
+        // Straight off the float texture when this node still owns one —
+        // decoding the full-res PNG we just encoded, only to re-encode it at
+        // thumbnail size, was pure waste. Same JPEG output as before; the
+        // fallback keeps identical behaviour when there is no float texture.
+        const meta = hasFloat(id)
+          ? await floatNodeToThumbDataUrl(id, thumbMaxDim(), "jpeg")
+          : await createImageThumbnailWithMeta(full);
+        if (cancelled || !meta) return;
         updateNodeData(id, {
           outputImageThumb: meta.thumb,
           outputImageDims: { width: meta.width, height: meta.height },

@@ -7,8 +7,8 @@ import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useCompStore } from "@/store/compStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { releaseColorNode, renderComp, floatNodeToDataUrl } from "@/utils/colorChain";
-import { createImageThumbnailWithMeta } from "@/utils/createImageThumbnail";
+import { releaseColorNode, renderComp, floatNodeToDataUrl, floatNodeToThumbDataUrl, hasFloat } from "@/utils/colorChain";
+import { createImageThumbnailWithMeta, thumbMaxDim } from "@/utils/createImageThumbnail";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
 import type { CompNodeData } from "@/types";
@@ -201,8 +201,15 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const meta = await createImageThumbnailWithMeta(full, undefined, 0.8, "png");
-        if (!cancelled) updateNodeData(id, { outputImageThumb: meta.thumb });
+        // Read the thumb straight off the float texture when we still have it.
+        // The old path decoded the full-res PNG we had just encoded and
+        // re-encoded it small — ~300ms per node on a 24MP comp, for a preview
+        // a few dozen px wide. Falls back to the PNG when the texture is gone
+        // (float unsupported, context lost, or a non-float fallback commit).
+        const meta = hasFloat(id)
+          ? await floatNodeToThumbDataUrl(id, thumbMaxDim(), "png")
+          : await createImageThumbnailWithMeta(full, undefined, 0.8, "png");
+        if (!cancelled && meta) updateNodeData(id, { outputImageThumb: meta.thumb });
       } catch { /* preview falls back to the full-res image */ }
     }, 900);
     return () => { cancelled = true; clearTimeout(t); };

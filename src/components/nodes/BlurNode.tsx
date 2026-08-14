@@ -6,8 +6,8 @@ import { useShallow } from "zustand/react/shallow";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { releaseColorNode, renderBlurNodeToCanvas, commitBlurNode, type BlurNodeParams } from "@/utils/colorChain";
-import { createImageThumbnailWithMeta } from "@/utils/createImageThumbnail";
+import { releaseColorNode, renderBlurNodeToCanvas, commitBlurNode, floatNodeToThumbDataUrl, hasFloat, type BlurNodeParams } from "@/utils/colorChain";
+import { createImageThumbnailWithMeta, thumbMaxDim } from "@/utils/createImageThumbnail";
 import { resolveInputRef } from "@/utils/compComposite";
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
 import type { BlurNodeData, BlurFilterType } from "@/types";
@@ -159,8 +159,14 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const meta = await createImageThumbnailWithMeta(full, undefined, 0.8, "png");
-        if (cancelled) return;
+        // Off the float texture when there is one — decoding the full-res PNG
+        // we just encoded only to shrink it was the expensive half. When float
+        // is unsupported the blur output lives in a pooled RGBA8 texture that
+        // isn't in the registry, so hasFloat() correctly routes to the PNG.
+        const meta = hasFloat(id)
+          ? await floatNodeToThumbDataUrl(id, thumbMaxDim(), "png")
+          : await createImageThumbnailWithMeta(full, undefined, 0.8, "png");
+        if (cancelled || !meta) return;
         updateNodeData(id, {
           outputImageThumb: meta.thumb,
           outputImageDims: { width: meta.width, height: meta.height },
