@@ -136,7 +136,6 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         if (republishOnly) return;
         const url = await floatNodeToDataUrl(id);
         if (!cancelled && url && url !== nodeData.outputImage) {
-          const meta = await createImageThumbnailWithMeta(url, undefined, 0.8, "png").catch(() => null);
           committedComps.set(id, sig);
           updateNodeData(id, {
             outputImage: url,
@@ -144,7 +143,6 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
             outputWidth: res.w,
             outputHeight: res.h,
             outputImageDims: { width: res.w, height: res.h },
-            ...(meta ? { outputImageThumb: meta.thumb } : {}),
           });
         }
       } else {
@@ -152,7 +150,6 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         if (cancelled || !dataUrl) return;
         if (republishOnly) return;
         if (dataUrl !== nodeData.outputImage) {
-          const meta = await createImageThumbnailWithMeta(dataUrl, undefined, 0.8, "png").catch(() => null);
           committedComps.set(id, sig);
           updateNodeData(id, {
             outputImage: dataUrl,
@@ -160,7 +157,6 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
             outputWidth: outW,
             outputHeight: outH,
             outputImageDims: { width: outW, height: outH },
-            ...(meta ? { outputImageThumb: meta.thumb } : {}),
           });
         }
       }
@@ -169,6 +165,22 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig, modalOpenForThis]);
+
+  // Display thumbnail once the node has been quiet. Kept off the render path
+  // because the Comp modal drives that path continuously while editing, and a
+  // full-res PNG re-encode per settle stacked up behind every change.
+  useEffect(() => {
+    const full = nodeData.outputImage;
+    if (!full || modalOpenForThis) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const meta = await createImageThumbnailWithMeta(full, undefined, 0.8, "png");
+        if (!cancelled) updateNodeData(id, { outputImageThumb: meta.thumb });
+      } catch { /* preview falls back to the full-res image */ }
+    }, 900);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [id, nodeData.outputImage, modalOpenForThis, updateNodeData]);
 
   // Free the float texture when the node is removed.
   useEffect(() => () => releaseColorNode(id), [id]);

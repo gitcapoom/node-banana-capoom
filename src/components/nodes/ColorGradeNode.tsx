@@ -497,7 +497,7 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
 
   // Float-chain pipeline: live canvas preview + debounced commit (float
   // texture for the next color node, 8-bit display URL for the thumbnail).
-  useColorNode({
+  const { liveActive } = useColorNode({
     id,
     sourceImage: nodeData.sourceImage,
     upstreamColorNodeId,
@@ -583,13 +583,18 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
         />
       </div>
 
-      {preview ? (
+      {liveActive || preview ? (
         <div
           className="relative w-full flex-1 min-h-0 cursor-pointer"
           onDoubleClick={handleOpenEditor}
           title="Double-click for full-screen editor"
         >
-          <img src={preview} alt="Color grade" className="w-full h-full object-contain" />
+          {/* Live GPU canvas while adjusting; committed image otherwise. */}
+          {liveActive ? (
+            <canvas ref={nodeCanvasRef} className="w-full h-full object-contain" />
+          ) : (
+            <img src={preview!} alt="Color grade" className="w-full h-full object-contain" />
+          )}
         </div>
       ) : (
         <div className="w-full flex-1 min-h-0 bg-neutral-900/40 flex flex-col items-center justify-center">
