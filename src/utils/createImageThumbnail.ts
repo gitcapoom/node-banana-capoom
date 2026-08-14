@@ -71,6 +71,38 @@ export async function createImageThumbnailWithMeta(
   });
 }
 
+/**
+ * Repair a stored "thumbnail" that isn't actually thumbnail-sized.
+ *
+ * Video posters generated before mediaCapture.ts grew a size cap were written
+ * at source resolution — a 4K clip produced a 7680x4312 PNG. Real examples
+ * still on disk in a live project: 55.6MB, 16.7MB and 7MB files, each loaded
+ * into the store and the DOM on every open to fill a ~90px preview. New
+ * captures are capped, but nothing ever went back and fixed the old ones.
+ *
+ * Returns a downscaled copy, or null when the thumb is already within budget
+ * (or cannot be decoded) — so callers can treat null as "nothing to do".
+ */
+export async function downscaleIfOversized(
+  dataUrl: string,
+  maxDim = thumbMaxDim(),
+): Promise<string | null> {
+  try {
+    const meta = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+      const img = new Image();
+      if (!dataUrl.startsWith("data:") && !dataUrl.startsWith("blob:")) img.crossOrigin = "anonymous";
+      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => reject(new Error("decode failed"));
+      img.src = dataUrl;
+    });
+    // A little slack so we don't rewrite thumbs that are merely a few px over.
+    if (Math.max(meta.w, meta.h) <= maxDim * 1.5) return null;
+    return await createImageThumbnail(dataUrl, maxDim, 0.72, "png");
+  } catch {
+    return null;
+  }
+}
+
 /** Thumbnail only — see createImageThumbnailWithMeta when the source size matters. */
 export async function createImageThumbnail(
   srcDataUrl: string,

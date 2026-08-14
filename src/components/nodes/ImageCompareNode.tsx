@@ -13,7 +13,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { ImageCompareNodeData } from "@/types";
 import { ZoomPanView } from "../ZoomPanView";
-import { previewSrc } from "@/utils/nodePreview";
+import { previewSrc, sourceThumb } from "@/utils/nodePreview";
 
 type ImageCompareNodeType = Node<ImageCompareNodeData, "imageCompare">;
 
@@ -64,7 +64,12 @@ export function ImageCompareNode({
       const nodes = state.nodes;
       let a: string | null = null;
       let b: string | null = null;
+      // The upstream's OWN thumb of these exact pixels — what the node body
+      // should paint, instead of the upstream's full-res output.
+      let aThumb: string | null = null;
+      let bThumb: string | null = null;
       const ambiguous: string[] = [];
+      const ambiguousThumbs: Array<string | null> = [];
 
       for (const edge of edges) {
         if (edge.target !== id) continue;
@@ -76,19 +81,20 @@ export function ImageCompareNode({
           edge.data as Record<string, unknown> | undefined
         );
         if (out.type !== "image" || !out.value) continue;
+        const th = sourceThumb(sourceNode.data as Record<string, unknown>);
 
         if (edge.targetHandle === "image-1") {
-          b = out.value;
+          b = out.value; bThumb = th;
         } else if (edge.targetHandle === "image") {
-          if (!a) a = out.value;
-          else ambiguous.push(out.value);
+          if (!a) { a = out.value; aThumb = th; }
+          else { ambiguous.push(out.value); ambiguousThumbs.push(th); }
         } else {
-          ambiguous.push(out.value);
+          ambiguous.push(out.value); ambiguousThumbs.push(th);
         }
       }
 
-      if (!b && ambiguous.length > 0) b = ambiguous[0];
-      return { a, b };
+      if (!b && ambiguous.length > 0) { b = ambiguous[0]; bThumb = ambiguousThumbs[0] ?? null; }
+      return { a, b, aThumb, bThumb };
     }),
   );
 
@@ -97,11 +103,12 @@ export function ImageCompareNode({
   const imageA = resolved.a || nodeData.imageA || nodeData.imageAThumb || null;
   const imageB = resolved.b || nodeData.imageB || nodeData.imageBThumb || null;
 
-  // In-node previews are ~70px wide, so they show the externalized thumb when
-  // its ref proves it current. The full-screen overlay below keeps imageA/imageB
-  // — that is where real resolution actually matters.
-  const previewA = previewSrc(imageA, nodeData.imageAThumb, nodeData.imageARef);
-  const previewB = previewSrc(imageB, nodeData.imageBThumb, nodeData.imageBRef);
+  // Node previews are a couple of hundred px: prefer the UPSTREAM's thumb, then
+  // this node's own persisted thumb, and only fall back to full-res when
+  // neither exists. The full-screen overlay below keeps imageA/imageB — that is
+  // where real resolution actually matters.
+  const previewA = resolved.aThumb ?? previewSrc(imageA, nodeData.imageAThumb, nodeData.imageARef);
+  const previewB = resolved.bThumb ?? previewSrc(imageB, nodeData.imageBThumb, nodeData.imageBRef);
 
   // Full-screen overlay
   const [showOverlay, setShowOverlay] = useState(false);

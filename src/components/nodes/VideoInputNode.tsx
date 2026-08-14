@@ -9,6 +9,7 @@ import { VideoInputNodeData } from "@/types";
 import { MediaOverlay } from "../MediaOverlay";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 import { captureVideoThumbnail } from "@/utils/mediaCapture";
+import { downscaleIfOversized } from "@/utils/createImageThumbnail";
 import { saveMediaImmediately, loadMediaById } from "@/utils/mediaStorage";
 import { deriveAutoTitle } from "@/utils/nodeTitleFromFilename";
 
@@ -101,6 +102,20 @@ export function VideoInputNode({ id, data, selected }: NodeProps<VideoInputNodeT
     },
     [id, updateNodeData, saveDirectoryPath, nodeData]
   );
+
+  // Repair a thumbnail stored before mediaCapture.ts capped its size — see
+  // GenerateVideoNode for the same fix and the sizes involved.
+  useEffect(() => {
+    const t = nodeData.thumbnailImage;
+    if (!t) return;
+    let cancelled = false;
+    void downscaleIfOversized(t).then((small) => {
+      if (!cancelled && small) {
+        updateNodeData(id, { thumbnailImage: small, thumbnailImageRef: undefined });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [id, nodeData.thumbnailImage, updateNodeData]);
 
   // Generate thumbnail if videoFile exists but thumbnailImage is missing (e.g. loaded from save)
   useEffect(() => {

@@ -25,6 +25,27 @@
  */
 
 /**
+ * The display thumbnail a SOURCE node already has for its output.
+ *
+ * For nodes that mirror an upstream value (Image Compare, and anything else
+ * that shows what is plugged into it), the value resolved from the edge is the
+ * upstream's FULL-RES output, and the mirroring node's own `*Thumb` only exists
+ * once the workflow has saved that mirror. So on a live connection there is no
+ * local thumb and the preview painted the upstream's full-res image — measured
+ * at two 6554x3686 images, 130MB of base64, in a single 187x342 node.
+ *
+ * The upstream already made a thumb of exactly those pixels. Use it.
+ */
+export function sourceThumb(sourceData: Record<string, unknown> | undefined | null): string | null {
+  if (!sourceData) return null;
+  for (const k of ["outputImageThumb", "imageThumb", "outputMaskThumb", "thumbnailImage", "sourceImageThumb"]) {
+    const v = sourceData[k];
+    if (typeof v === "string" && v) return v;
+  }
+  return null;
+}
+
+/**
  * Inline-preview source for one image field, given its thumb and file ref.
  *
  * `thumbIsCurrent` is the second way to prove the thumb matches the pixels, for

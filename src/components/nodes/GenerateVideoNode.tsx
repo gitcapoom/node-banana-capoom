@@ -20,6 +20,7 @@ import { ProviderBadge } from "./ProviderBadge";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { captureVideoThumbnail } from "@/utils/mediaCapture";
 import { cheapUrlKey } from "@/utils/renderSignature";
+import { downscaleIfOversized } from "@/utils/createImageThumbnail";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { browseRegistry } from "@/utils/browseRegistry";
 import { MediaOverlay } from "../MediaOverlay";
@@ -486,6 +487,21 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeData.outputVideo]);
+
+  // Repair a thumbnail stored before mediaCapture.ts capped its size. Some are
+  // tens of MB at source resolution; they load into the store and the DOM on
+  // every open to fill a ~90px preview. Downscale once, in place.
+  useEffect(() => {
+    const t = nodeData.thumbnailImage;
+    if (!t) return;
+    let cancelled = false;
+    void downscaleIfOversized(t).then((small) => {
+      if (!cancelled && small) {
+        updateNodeData(id, { thumbnailImage: small, thumbnailImageRef: undefined });
+      }
+    });
+    return () => { cancelled = true; };
+  }, [id, nodeData.thumbnailImage, updateNodeData]);
 
   // Whether video output exists (either in-memory or externalized to disk)
   const hasVideoOutput = !!(nodeData.outputVideo || nodeData.outputVideoRef);
