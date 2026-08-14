@@ -7,7 +7,7 @@ import Konva from "konva";
 import { useCompStore, type CompActiveInput } from "@/store/compStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { renderCompToCanvas, floatNodeToDataUrl, renderComp } from "@/utils/colorChain";
+import { renderCompPreviewToCanvas, floatNodeToDataUrl, renderComp } from "@/utils/colorChain";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPieces } from "@/utils/compTransform";
 import { COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, type CompInputFilter, type BlurFilterType } from "@/types/comp";
@@ -15,11 +15,6 @@ import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/t
 import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
 import { cheapUrlKey } from "@/utils/renderSignature";
 import { DockedViewer } from "@/components/ViewerFeed";
-
-/** Longest edge of the live preview canvas, in px. Generous enough to be ~1:1
- *  at fit-to-window on a large display, ~6x cheaper than compositing at a
- *  24MP source resolution nobody can see. */
-const PREVIEW_MAX_DIM = 2560;
 
 type Pt = { x: number; y: number };
 type NumKey = "hPos" | "vPos" | "rotation" | "scaleX" | "scaleY";
@@ -173,20 +168,33 @@ export function CompModal() {
         : "",
     [data],
   );
+  // Preview resolution, quantised to octaves and debounced, so a wheel-zoom
+  // doesn't recomposite on every notch — only when it crosses a power of two.
+  const [renderScale, setRenderScale] = useState(1);
+  useEffect(() => {
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    const target = Math.min(1, Math.max(0.02, scale * dpr));
+    const octave = Math.min(1, Math.pow(2, Math.ceil(Math.log2(target))));
+    const t = setTimeout(() => setRenderScale(octave), 140);
+    return () => clearTimeout(t);
+  }, [scale]);
+
   useEffect(() => {
     if (!isModalOpen || !data || !sourceNodeId || !offscreen) return;
     let cancelled = false;
     const urls = { bg: data.bgImage, bgAlpha: data.bgAlphaImage, fg: data.fgImage, fgAlpha: data.fgAlphaImage, matte: data.matteImage };
     const run = async () => {
       if (!urls.bg) return;
-      // Cap the preview canvas to roughly the viewport. The Konva Image is
-      // still laid out at outW x outH, so nothing moves — only the source
-      // resolution drops, turning a 24MP clearRect + drawImage (and Konva's
-      // 5.7x filter-downscale of a 96MB canvas on every redraw) into a few
-      // megapixels. Zooming past ~1.15x fit softens the preview; the committed
-      // output is unaffected and stays full-res.
-      const ok = await renderCompToCanvas(
-        buildCompInputs(urls, srcs), buildCompParams(data), sourceNodeId, offscreen, PREVIEW_MAX_DIM,
+      // PROXY preview: composite at the editor's zoom level, not at source
+      // resolution. At fit-to-window on a 6554x3686 comp that is ~12x less
+      // pixel work, and it tracks zoom so detail comes back as you go in
+      // (unlike a fixed cap, which just went soft). The Konva Image is still
+      // laid out at outW x outH, so nothing moves.
+      //
+      // This deliberately does NOT publish the float texture — see the commit
+      // effect below.
+      const ok = await renderCompPreviewToCanvas(
+        buildCompInputs(urls, srcs), buildCompParams(data), sourceNodeId, offscreen, renderScale,
       );
       if (!cancelled && !ok) {
         const { dataUrl, outW: w, outH: h } = await compositeCompForExecutor(urls, srcs, data, sourceNodeId);
@@ -197,23 +205,32 @@ export function CompModal() {
     };
     const raf = requestAnimationFrame(run);
     return () => { cancelled = true; cancelAnimationFrame(raf); };
-  }, [previewSig, isModalOpen, srcs, sourceNodeId, offscreen]);
+  }, [previewSig, isModalOpen, srcs, sourceNodeId, offscreen, renderScale]);
 
-  // Publish the composite WHILE the editor is open. CompNode's own render is
-  // suspended for the node being edited (the modal owns the canvas), so without
-  // this nothing downstream — including a Viewer — would move until Done. The
-  // preview pass above already published this node's float texture, so the only
-  // added cost is the PNG encode, debounced to once per settle.
+  // COMMIT, on settle. CompNode's own render is suspended for the node being
+  // edited (the modal owns the canvas), so without this nothing downstream —
+  // including a Viewer — would move until Done.
+  //
+  // This now does its own FULL-RES render: the preview above is a proxy that
+  // deliberately never touches the float registry, so the texture the chain
+  // reads and the PNG written to `outputImage` must both come from a real
+  // full-res composite. That is the expensive operation in this editor (a 24MP
+  // toDataURL alone measures 1.0-1.8s here), which is exactly why it belongs
+  // behind a settle rather than in the drag loop — hence the longer debounce.
   useEffect(() => {
     if (!isModalOpen || !sourceNodeId || !data?.bgImage) return;
+    let cancelled = false;
+    const urls = { bg: data.bgImage, bgAlpha: data.bgAlphaImage, fg: data.fgImage, fgAlpha: data.fgAlphaImage, matte: data.matteImage };
     const t = setTimeout(async () => {
+      const res = await renderComp(buildCompInputs(urls, srcs), buildCompParams(data), sourceNodeId);
+      if (cancelled || !res) return;
       const url = await floatNodeToDataUrl(sourceNodeId);
-      if (url) {
+      if (!cancelled && url) {
         updateNodeData(sourceNodeId, { outputImage: url, outputImageRef: undefined });
         void propagateFromNode(sourceNodeId);
       }
-    }, 350);
-    return () => clearTimeout(t);
+    }, 700);
+    return () => { cancelled = true; clearTimeout(t); };
     // previewSig covers every input + parameter the composite depends on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewSig, isModalOpen, sourceNodeId]);

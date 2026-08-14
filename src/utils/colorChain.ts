@@ -714,8 +714,26 @@ function compUniforms(
   return u;
 }
 
-/** Internal (no lock): render the comp into destNodeId's float texture. */
-async function renderCompUnlocked(c: Ctx, inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string): Promise<{ w: number; h: number } | null> {
+/**
+ * Internal (no lock): render the comp.
+ *
+ * COMMIT (preview omitted) writes destNodeId's float texture in the registry —
+ * that texture is DATA: downstream colour nodes chain off it and `outputImage`
+ * is derived from it, so it must always be full-res.
+ *
+ * PREVIEW writes a pooled scratch texture at `preview.scale` and never touches
+ * the registry, so a proxy render can never leak into the chain or onto disk.
+ * `u_outSize` stays the SOURCE size while only the viewport shrinks, which
+ * makes this a plain downsample — every transform, reformat and black-outside
+ * calculation is expressed against u_outSize and is therefore untouched.
+ */
+async function renderCompUnlocked(
+  c: Ctx,
+  inputs: CompRenderInputs,
+  params: CompRenderParams,
+  destNodeId: string,
+  preview?: { scale: number },
+): Promise<{ w: number; h: number; entry: FloatTex } | null> {
   const { gl, quad } = c;
   let bg = await resolveComp(gl, inputs.bg);
   if (!bg) return null;
@@ -738,26 +756,36 @@ async function renderCompUnlocked(c: Ctx, inputs: CompRenderInputs, params: Comp
   const sizeSrc = params.outputResolution === "fg" && fg ? fg : bg;
   const w = sizeSrc.w, h = sizeSrc.h;
 
-  const prev = floatRegistry.get(destNodeId);
-  let outTex = prev?.tex;
-  if (!outTex || prev!.w !== w || prev!.h !== h) {
-    if (outTex) gl.deleteTexture(outTex);
-    outTex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, outTex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  // Framebuffer size: full-res on commit, viewport-scaled on preview.
+  const dw = preview ? Math.max(1, Math.round(w * preview.scale)) : w;
+  const dh = preview ? Math.max(1, Math.round(h * preview.scale)) : h;
+
+  let target: FloatTex;
+  if (preview) {
+    target = ensureBlurTex(c, `${destNodeId}:preview`, dw, dh);
+  } else {
+    const prev = floatRegistry.get(destNodeId);
+    let outTex = prev?.tex;
+    if (!outTex || prev!.w !== w || prev!.h !== h) {
+      if (outTex) gl.deleteTexture(outTex);
+      outTex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, outTex);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    }
+    target = { tex: outTex, w, h };
+    floatRegistry.set(destNodeId, target);
   }
-  floatRegistry.set(destNodeId, { tex: outTex, w, h });
 
   const fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, outTex, 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target.tex, 0);
   if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteFramebuffer(fbo);
-    floatRegistry.delete(destNodeId); gl.deleteTexture(outTex);
+    if (!preview) { floatRegistry.delete(destNodeId); gl.deleteTexture(target.tex); }
     return null;
   }
   const prog = getProgram(gl, COMP_FRAG);
@@ -770,15 +798,17 @@ async function renderCompUnlocked(c: Ctx, inputs: CompRenderInputs, params: Comp
     gl.uniform1i(gl.getUniformLocation(prog, name), unit);
   };
   bind(0, bg, "u_bg"); bind(1, fg, "u_fg"); bind(2, fa, "u_fa"); bind(3, mt, "u_mt"); bind(4, ba, "u_ba");
+  // u_outSize is the SOURCE size in both modes — it defines the coordinate
+  // space the transforms are solved in, not the framebuffer.
   setUniforms(gl, prog, compUniforms(params, w, h, bg, ba, fg, fa, mt));
   gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 0.0); // FBO: preserve orientation
-  gl.viewport(0, 0, w, h);
+  gl.viewport(0, 0, dw, dh);
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.deleteFramebuffer(fbo);
-  return { w, h };
+  return { w, h, entry: target };
 }
 
 /**
@@ -833,8 +863,14 @@ export function renderComp(inputs: CompRenderInputs, params: CompRenderParams, d
   });
 }
 
-/** Render the comp and blit the display-clamped result to a visible canvas.
- *  `maxDim` caps the DESTINATION canvas — see blitFloatToCanvasUnlocked. */
+/**
+ * Render the comp FULL-RES (publishing the float texture) and blit the
+ * display-clamped result to a visible canvas. `maxDim` caps the DESTINATION
+ * canvas only — see blitFloatToCanvasUnlocked.
+ *
+ * For interactive editing prefer renderCompPreviewToCanvas, which composites at
+ * the viewport's resolution instead of the source's.
+ */
 export function renderCompToCanvas(inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string, destCanvas: HTMLCanvasElement, maxDim?: number): Promise<boolean> {
   return withLock(async () => {
     const c = getCtx();
@@ -842,6 +878,44 @@ export function renderCompToCanvas(inputs: CompRenderInputs, params: CompRenderP
     const res = await renderCompUnlocked(c, inputs, params, destNodeId);
     if (!res) return false;
     return blitFloatToCanvasUnlocked(c, destNodeId, destCanvas, maxDim);
+  });
+}
+
+/** Newest requested preview per node — anything older bails at the lock. */
+const previewGeneration = new Map<string, number>();
+
+/**
+ * PREVIEW render: composite at `scale` into a scratch texture and blit it to a
+ * visible canvas. Never touches the float registry, so the chain and everything
+ * derived from it (downstream colour nodes, `outputImage`, the saved asset)
+ * only ever see a full-res commit.
+ *
+ * `scale` should track the editor's zoom: at fit-to-window on a 6554x3686 comp
+ * that is ~0.29, which is ~12x less pixel work than compositing at source
+ * resolution to fill a ~1150px viewport.
+ *
+ * Superseded renders are dropped rather than run: withLock serialises calls,
+ * and without a generation check every intermediate frame of a drag still paid
+ * for a full composite before the newest one could start.
+ */
+export function renderCompPreviewToCanvas(
+  inputs: CompRenderInputs,
+  params: CompRenderParams,
+  destNodeId: string,
+  destCanvas: HTMLCanvasElement,
+  scale: number,
+): Promise<boolean> {
+  const gen = (previewGeneration.get(destNodeId) ?? 0) + 1;
+  previewGeneration.set(destNodeId, gen);
+  return withLock(async () => {
+    if (previewGeneration.get(destNodeId) !== gen) return false; // superseded while queued
+    const c = getCtx();
+    if (!c || !c.floatOK) return false;
+    const res = await renderCompUnlocked(c, inputs, params, destNodeId, {
+      scale: Math.max(0.02, Math.min(1, scale)),
+    });
+    if (!res) return false;
+    return blitEntryToCanvasUnlocked(c, res.entry, destCanvas);
   });
 }
 
