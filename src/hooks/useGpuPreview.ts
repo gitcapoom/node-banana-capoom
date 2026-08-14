@@ -18,6 +18,7 @@ import {
 } from "@/utils/colorChain";
 
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
+import { createImageThumbnailWithMeta } from "@/utils/createImageThumbnail";
 
 /** Last committed render per color node — see RenderSignatureCache. */
 const committedSignatures = new RenderSignatureCache();
@@ -164,8 +165,16 @@ export function useColorNode(args: UseColorNodeArgs): void {
     return { url: sourceImage };
   };
 
-  // ── Live preview (node canvas + overlay canvas) ──
+  // ── Live preview — EDITOR ONLY ──
+  //
+  // The node body deliberately shows the committed thumbnail instead of a live
+  // canvas. A per-node WebGL canvas has to be re-rendered every time the node
+  // mounts, and React Flow's viewport culling remounts nodes constantly while
+  // you navigate — so a canvas-bodied node re-runs a full-res shader pass just
+  // for having scrolled past, on top of any real edit. Only the full-screen
+  // editor, where the pixels are actually being judged, gets the live canvas.
   useEffect(() => {
+    if (!overlayOpen) return;
     const input = resolveInput();
     if (!input) return;
     let cancelled = false;
@@ -180,8 +189,7 @@ export function useColorNode(args: UseColorNodeArgs): void {
           .catch((e) => console.error("useColorNode preview fallback:", e));
       }
     };
-    drawTo(nodeCanvasRef.current);
-    if (overlayOpen) drawTo(overlayCanvasRef.current);
+    drawTo(overlayCanvasRef.current);
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, sourceImage, upstreamColorNodeId, shaderSource, uniformsKey, overlayOpen]);
@@ -227,7 +235,16 @@ export function useColorNode(args: UseColorNodeArgs): void {
         input, shaderSource, effUniformsRef.current, id, isIdentity, sourceImage,
       );
       committedSignatures.set(id, signature);
-      updateNodeData(id, { outputImage: displayUrl, outputImageRef: undefined });
+      // The node body shows this thumb, not the full-res result: a constant
+      // small image keeps the canvas cheap however large the source is.
+      const meta = await createImageThumbnailWithMeta(displayUrl).catch(() => null);
+      updateNodeData(id, {
+        outputImage: displayUrl,
+        outputImageRef: undefined,
+        ...(meta
+          ? { outputImageThumb: meta.thumb, outputImageDims: { width: meta.width, height: meta.height } }
+          : {}),
+      });
     }, commitDelay);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type CSSProperties } from "react";
+import { useCallback, useEffect, type CSSProperties } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { useShallow } from "zustand/react/shallow";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useCompStore } from "@/store/compStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { releaseColorNode, renderCompToCanvas, floatNodeToDataUrl } from "@/utils/colorChain";
+import { releaseColorNode, renderComp, floatNodeToDataUrl } from "@/utils/colorChain";
+import { createImageThumbnailWithMeta } from "@/utils/createImageThumbnail";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
 import type { CompNodeData } from "@/types";
@@ -39,7 +40,6 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   const loadNodeFullResInputs = useWorkflowStore((s) => s.loadNodeFullResInputs);
   const openModal = useCompStore((s) => s.openModal);
   const modalOpenForThis = useCompStore((s) => s.isModalOpen && s.sourceNodeId === id);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Resolve the 4 inputs (url + producing node id) by targetHandle.
   const incoming = useWorkflowStore(
@@ -109,9 +109,9 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   useEffect(() => {
     if (modalOpenForThis) return; // editor owns rendering while open
     let cancelled = false;
-    // Scrolled back into view with nothing changed: the canvas still has to be
-    // repainted (it was torn down with the node), but the PNG encode and the
-    // store write would reproduce byte-identical output — skip both.
+    // Scrolled back into view with nothing changed: republish the float texture
+    // for downstream chaining, but skip the PNG encode and the store write —
+    // they would reproduce byte-identical output.
     const republishOnly = committedComps.matches(id, sig) && !!nodeData.outputImage;
     const urls = { bg: incoming.bg, bgAlpha: incoming.bgAlpha, fg: incoming.fg, fgAlpha: incoming.fgAlpha, matte: incoming.matte };
     const srcs = { bgSrc: incoming.bgSrc, baSrc: incoming.baSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc };
@@ -126,30 +126,42 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         void loadNodeFullResInputs(id);
         return;
       }
-      const canvas = canvasRef.current;
-      const ok = canvas ? await renderCompToCanvas(buildCompInputs(urls, srcs), buildCompParams(nodeData), id, canvas) : false;
+      // Render OFFSCREEN into this node's float texture — the node body shows
+      // the committed thumbnail, not a live canvas, so nothing has to be
+      // blitted per mount as the node scrolls in and out of view.
+      const res = await renderComp(buildCompInputs(urls, srcs), buildCompParams(nodeData), id);
       if (cancelled) return;
-      if (ok) {
-        // Canvas repainted and the float texture is republished — that's all a
-        // re-entry needs.
+      if (res) {
+        // Float texture republished — that's all a re-entry needs.
         if (republishOnly) return;
         const url = await floatNodeToDataUrl(id);
         if (!cancelled && url && url !== nodeData.outputImage) {
+          const meta = await createImageThumbnailWithMeta(url, undefined, 0.8, "png").catch(() => null);
           committedComps.set(id, sig);
-          updateNodeData(id, { outputImage: url, outputImageRef: undefined });
+          updateNodeData(id, {
+            outputImage: url,
+            outputImageRef: undefined,
+            outputWidth: res.w,
+            outputHeight: res.h,
+            outputImageDims: { width: res.w, height: res.h },
+            ...(meta ? { outputImageThumb: meta.thumb } : {}),
+          });
         }
       } else {
         const { dataUrl, outW, outH } = await compositeCompForExecutor(urls, srcs, nodeData, id);
         if (cancelled || !dataUrl) return;
-        if (canvas && outW > 0) {
-          const img = new Image();
-          img.onload = () => { if (cancelled || !canvasRef.current) return; canvasRef.current.width = outW; canvasRef.current.height = outH; canvasRef.current.getContext("2d")?.drawImage(img, 0, 0); };
-          img.src = dataUrl;
-        }
         if (republishOnly) return;
         if (dataUrl !== nodeData.outputImage) {
+          const meta = await createImageThumbnailWithMeta(dataUrl, undefined, 0.8, "png").catch(() => null);
           committedComps.set(id, sig);
-          updateNodeData(id, { outputImage: dataUrl, outputImageRef: undefined, outputWidth: outW, outputHeight: outH });
+          updateNodeData(id, {
+            outputImage: dataUrl,
+            outputImageRef: undefined,
+            outputWidth: outW,
+            outputHeight: outH,
+            outputImageDims: { width: outW, height: outH },
+            ...(meta ? { outputImageThumb: meta.thumb } : {}),
+          });
         }
       }
     };
@@ -172,6 +184,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   // thumbnail until the editor opens / a run loads the inputs.
   const hasBg = !!nodeData.bgImage;
   const thumb = nodeData.outputImageThumb;
+  const preview = thumb ?? nodeData.outputImage;
 
   // Whole node = the GPU-rendered composite (full-bleed), sized to the output.
   // No controls live on the node — double-click opens the editor for everything.
@@ -204,16 +217,9 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         onDoubleClick={handleEdit}
         title={hasBg || thumb ? "Double-click to open the comp editor" : "Connect a BG image"}
       >
-        {hasBg && allInputsResolved ? (
+        {preview ? (
           <>
-            <canvas ref={canvasRef} className="w-full h-full object-contain" />
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center pointer-events-none">
-              <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 bg-black/50 px-2 py-1 rounded">Double-click to edit</span>
-            </div>
-          </>
-        ) : thumb ? (
-          <>
-            <img src={thumb} alt="Comp" className="w-full h-full object-contain" />
+            <img src={preview} alt="Comp" className="w-full h-full object-contain" draggable={false} />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors flex items-center justify-center pointer-events-none">
               <span className="text-[10px] font-medium text-white opacity-0 group-hover:opacity-100 bg-black/50 px-2 py-1 rounded">Double-click to edit</span>
             </div>

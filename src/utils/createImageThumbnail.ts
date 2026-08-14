@@ -10,14 +10,16 @@
  * image/ref intact rather than poisoning the field with a bad thumb.
  */
 
+import { getThumbnailMaxDim } from "@/lib/thumbnailSize";
+
 /**
- * Max thumbnail edge, in px — one fixed size for every thumb-writing path, on
- * purpose. Node previews render at ~200-300 CSS px, so this is display-accurate
- * without the cost of the old 384px thumbs, which carried 2.3x the pixels: that
- * weight lands in the workflow JSON and in every canvas paint, and in large
- * setups dozens of them decode at once.
+ * Max thumbnail edge, in px. Re-exported from the user setting so every
+ * thumb-writing path shares one number — see src/lib/thumbnailSize.ts for why
+ * it matters and what the options cost.
  */
-export const THUMB_MAX_DIM = 256;
+export function thumbMaxDim(): number {
+  return getThumbnailMaxDim();
+}
 
 export interface ThumbnailWithMeta {
   thumb: string;
@@ -37,7 +39,7 @@ export interface ThumbnailWithMeta {
  */
 export async function createImageThumbnailWithMeta(
   srcDataUrl: string,
-  maxDim = THUMB_MAX_DIM,
+  maxDim = thumbMaxDim(),
   quality = 0.72,
   format: "jpeg" | "png" = "jpeg",
 ): Promise<ThumbnailWithMeta> {
@@ -72,7 +74,7 @@ export async function createImageThumbnailWithMeta(
 /** Thumbnail only — see createImageThumbnailWithMeta when the source size matters. */
 export async function createImageThumbnail(
   srcDataUrl: string,
-  maxDim = THUMB_MAX_DIM,
+  maxDim = thumbMaxDim(),
   quality = 0.72,
   format: "jpeg" | "png" = "jpeg",
 ): Promise<string> {

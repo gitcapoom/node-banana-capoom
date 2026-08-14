@@ -9,6 +9,13 @@ import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
 import { FileOpenDialog } from "./FileOpenDialog";
 import { useToast } from "./Toast";
 import { useDynamicPinsEnabled, setDynamicPinsEnabled } from "@/lib/dynamicPins";
+import {
+  useThumbnailMaxDim,
+  setThumbnailMaxDim,
+  THUMBNAIL_SIZE_OPTIONS,
+  DEFAULT_THUMBNAIL_SIZE,
+  type ThumbnailSize,
+} from "@/lib/thumbnailSize";
 
 function CommentsNavigationIcon() {
   // Subscribe to nodes so we re-render when comments change
@@ -58,6 +65,37 @@ function CommentsNavigationIcon() {
         </span>
       )}
     </button>
+  );
+}
+
+/**
+ * Thumbnail resolution selector.
+ *
+ * Every node preview on the canvas is a thumbnail, so this one number decides
+ * how heavy the canvas is — what decodes on open, what repaints while panning,
+ * and how much weight the saved JSON carries. It applies to thumbnails written
+ * from here on; existing ones keep their size until their node next re-saves.
+ */
+function ThumbnailSizeSelect() {
+  const size = useThumbnailMaxDim();
+  return (
+    <label
+      className="flex items-center gap-1 text-[11px] text-neutral-400"
+      title="Thumbnail resolution for node previews. Larger looks sharper on big monitors but costs canvas performance and workflow size. Applies to newly written thumbnails."
+    >
+      <span className="hidden xl:inline">Thumbs</span>
+      <select
+        value={size}
+        onChange={(e) => setThumbnailMaxDim(Number(e.target.value) as ThumbnailSize)}
+        className="bg-neutral-800 text-neutral-200 text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700 hover:border-neutral-600 transition-colors"
+      >
+        {THUMBNAIL_SIZE_OPTIONS.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}px{opt === DEFAULT_THUMBNAIL_SIZE ? " (default)" : ""}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -439,6 +477,7 @@ export function Header() {
               Revert AI Changes
             </button>
           )}
+          <ThumbnailSizeSelect />
           <DynamicPinsToggle />
           <CommentsNavigationIcon />
           <span className="text-neutral-400">
