@@ -8,6 +8,7 @@ import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { reformatImage } from "@/utils/reformatImage";
 import { RESAMPLE_FILTER_LABELS, type ResampleFilter } from "@/utils/resampleFilters";
 import type { ReformatNodeData } from "@/types";
+import { previewSrc } from "@/utils/nodePreview";
 
 type ReformatNodeType = Node<ReformatNodeData, "reformat">;
 
@@ -63,7 +64,8 @@ export function ReformatNode({ id, data, selected }: NodeProps<ReformatNodeType>
   );
 
   const displayImage =
-    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
+    previewSrc(nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageRef) ||
+    previewSrc(nodeData.sourceImage, nodeData.sourceImageThumb, nodeData.sourceImageRef);
 
   return (
     <BaseNode id={id} selected={selected} contentClassName="flex-1 min-h-0 overflow-clip flex flex-col" aspectFitMedia={nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImageThumb}>

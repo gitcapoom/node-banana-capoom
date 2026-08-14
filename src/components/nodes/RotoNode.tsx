@@ -9,6 +9,7 @@ import { useFullResField } from "@/hooks/useFullResField";
 import { ensureFullResForNodes } from "@/store/execution/hydrateForRun";
 import { rasterizeRoto } from "@/utils/rasterizeRoto";
 import { RotoNodeData } from "@/types";
+import { previewSrc } from "@/utils/nodePreview";
 
 type RotoNodeType = Node<RotoNodeData, "roto">;
 
@@ -84,7 +85,7 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
     updateNodeData(id, { sourceImage: null, shapes: [], outputMask: null });
   }, [id, updateNodeData]);
 
-  const displayImage = nodeData.outputMask ?? nodeData.outputMaskThumb;
+  const displayImage = previewSrc(nodeData.outputMask, nodeData.outputMaskThumb, nodeData.outputMaskRef);
   const shapeCount = nodeData.shapes?.length ?? 0;
 
   return (

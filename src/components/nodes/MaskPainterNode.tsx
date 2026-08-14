@@ -7,6 +7,7 @@ import { useMaskPainterStore } from "@/store/maskPainterStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useFullResField } from "@/hooks/useFullResField";
 import { MaskPainterNodeData } from "@/types";
+import { previewSrc } from "@/utils/nodePreview";
 
 type MaskPainterNodeType = Node<MaskPainterNodeData, "maskPainter">;
 
@@ -46,7 +47,7 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
 
   // Only show the painted mask output — sourceImage is the reference for the modal, not the node preview.
   // Falls back to the inline thumb when full-res isn't loaded (lazy on open).
-  const displayImage = nodeData.outputMask ?? nodeData.outputMaskThumb;
+  const displayImage = previewSrc(nodeData.outputMask, nodeData.outputMaskThumb, nodeData.outputMaskRef);
 
   return (
     <BaseNode

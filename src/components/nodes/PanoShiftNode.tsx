@@ -7,6 +7,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { shiftImageX } from "@/utils/panoShift";
 import type { PanoShiftNodeData } from "@/types";
+import { previewSrc } from "@/utils/nodePreview";
 
 type PanoShiftNodeType = Node<PanoShiftNodeData, "panoShift">;
 
@@ -101,7 +102,8 @@ export function PanoShiftNode({ id, data, selected }: NodeProps<PanoShiftNodeTyp
   }, [id, fingerprint, updateNodeData]);
 
   const displayImage =
-    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
+    previewSrc(nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageRef) ||
+    previewSrc(nodeData.sourceImage, nodeData.sourceImageThumb, nodeData.sourceImageRef);
   const isIdentity = shiftX === 0;
 
   return (

@@ -7,6 +7,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { applyCubemapEquirect } from "@/utils/cubemapEquirect";
 import type { CubemapEquirectMode, CubemapEquirectNodeData } from "@/types";
+import { previewSrc } from "@/utils/nodePreview";
 
 type CubemapEquirectNodeType = Node<CubemapEquirectNodeData, "cubemapEquirect">;
 
@@ -94,7 +95,8 @@ export function CubemapEquirectNode({ id, data, selected }: NodeProps<CubemapEqu
   );
 
   const displayImage =
-    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
+    previewSrc(nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageRef) ||
+    previewSrc(nodeData.sourceImage, nodeData.sourceImageThumb, nodeData.sourceImageRef);
   const sizeLabel = nodeData.mode === "cubeToEquirect" ? "Equirect width" : "Face size";
 
   return (

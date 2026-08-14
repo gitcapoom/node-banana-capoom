@@ -8,6 +8,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { cropImageToDataUrl } from "@/utils/cropImage";
 import type { ImageCropNodeData } from "@/types";
+import { previewSrc } from "@/utils/nodePreview";
 
 type ImageCropNodeType = Node<ImageCropNodeData, "imageCrop">;
 
@@ -108,7 +109,8 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
   }, [id, updateNodeData]);
 
   const displayImage =
-    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
+    previewSrc(nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageRef) ||
+    previewSrc(nodeData.sourceImage, nodeData.sourceImageThumb, nodeData.sourceImageRef);
 
   return (
     <BaseNode

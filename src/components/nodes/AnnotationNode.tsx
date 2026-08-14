@@ -7,6 +7,7 @@ import { useAnnotationStore } from "@/store/annotationStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useFullResField } from "@/hooks/useFullResField";
 import { AnnotationNodeData } from "@/types";
+import { previewSrc } from "@/utils/nodePreview";
 
 type AnnotationNodeType = Node<AnnotationNodeData, "annotation">;
 
@@ -52,7 +53,8 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
   }, [id, updateNodeData]);
 
   const displayImage =
-    nodeData.outputImage || nodeData.outputImageThumb || nodeData.sourceImage || nodeData.sourceImageThumb;
+    previewSrc(nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageRef) ||
+    previewSrc(nodeData.sourceImage, nodeData.sourceImageThumb, nodeData.sourceImageRef);
 
   return (
     <BaseNode

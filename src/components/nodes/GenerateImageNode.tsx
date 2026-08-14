@@ -21,6 +21,7 @@ import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { browseRegistry } from "@/utils/browseRegistry";
 import { MediaOverlay } from "../MediaOverlay";
+import { previewSrc } from "@/utils/nodePreview";
 
 /** Reorder items so they read column-first in a row-based CSS grid.
  *  e.g. [1,2,3,4,5,6,7,8] with 2 cols → [1,5,2,6,3,7,4,8] */
@@ -586,7 +587,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
       hasError={nodeData.status === "error"}
       fullBleed
       settingsExpanded={inlineParametersEnabled && isParamsExpanded}
-      aspectFitMedia={nodeData.outputImage}
+      aspectFitMedia={previewSrc(nodeData.outputImage as string | null | undefined, nodeData.outputImageThumb as string | null | undefined, nodeData.outputImageRef as string | null | undefined)}
       settingsPanel={inlineParametersEnabled ? (
         <InlineParameterPanel
           expanded={isParamsExpanded}
@@ -955,7 +956,7 @@ export function GenerateImageNode({ id, data, selected }: NodeProps<NanoBananaNo
           <>
             {nodeData.outputImage ? (
               <img
-                src={nodeData.outputImage}
+                src={previewSrc(nodeData.outputImage as string | null | undefined, nodeData.outputImageThumb as string | null | undefined, nodeData.outputImageRef as string | null | undefined) ?? undefined}
                 alt="Generated"
                 className="w-full h-full object-contain cursor-pointer"
                 onDoubleClick={(e) => { e.stopPropagation(); setShowOverlay(true); }}
