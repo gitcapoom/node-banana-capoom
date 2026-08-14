@@ -8,8 +8,9 @@
  * buy sharpness on a large monitor at a steep cost, and 128 keeps very large
  * graphs light.
  *
- * The value applies to thumbnails written from now on — existing thumbs keep
- * whatever size they were saved at until their node next re-saves.
+ * Changing it re-renders every existing thumbnail (see useThumbRegeneration),
+ * with per-node "rendering" badges and an overall progress readout — a setting
+ * whose effect only showed up on the next save read as a broken control.
  *
  * Same shape as the dynamic-pins flag: one localStorage key, no store coupling,
  * usable from both React (`useThumbnailMaxDim`) and plain logic
@@ -73,6 +74,60 @@ export function markAllThumbnailsPending(nodeIds: string[]): void {
   pendingNodes.clear();
   nodeIds.forEach((id) => pendingNodes.add(id));
   listeners.forEach((l) => l());
+}
+
+// ─── regeneration progress ────────────────────────────────────────
+//
+// Re-rendering every thumbnail on a large graph decodes and re-encodes every
+// image on the canvas, which takes real time. Per-node "rendering" badges tell
+// you a given preview is stale but not whether the job as a whole is moving or
+// finished, so the sweep reports overall progress here.
+
+export interface ThumbnailProgress {
+  /** Total thumbnails in the current sweep. */
+  total: number;
+  /** How many have been re-rendered. */
+  done: number;
+  running: boolean;
+  /** True briefly after a sweep finishes, so the UI can say so and fade. */
+  justFinished: boolean;
+}
+
+const IDLE_PROGRESS: ThumbnailProgress = { total: 0, done: 0, running: false, justFinished: false };
+// Replaced (never mutated) so useSyncExternalStore sees a stable reference
+// between changes — returning a fresh object per read would loop forever.
+let progress: ThumbnailProgress = IDLE_PROGRESS;
+let finishedTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function getThumbnailProgress(): ThumbnailProgress {
+  return progress;
+}
+
+export function startThumbnailProgress(total: number): void {
+  if (finishedTimer) { clearTimeout(finishedTimer); finishedTimer = null; }
+  progress = { total, done: 0, running: true, justFinished: false };
+  listeners.forEach((l) => l());
+}
+
+export function advanceThumbnailProgress(): void {
+  if (!progress.running) return;
+  progress = { ...progress, done: Math.min(progress.total, progress.done + 1) };
+  listeners.forEach((l) => l());
+}
+
+export function endThumbnailProgress(): void {
+  progress = { ...progress, running: false, justFinished: true };
+  listeners.forEach((l) => l());
+  finishedTimer = setTimeout(() => {
+    progress = IDLE_PROGRESS;
+    finishedTimer = null;
+    listeners.forEach((l) => l());
+  }, 2500);
+}
+
+/** React hook — overall progress of a thumbnail-resolution re-render. */
+export function useThumbnailProgress(): ThumbnailProgress {
+  return useSyncExternalStore(subscribe, getThumbnailProgress, () => IDLE_PROGRESS);
 }
 
 /** Non-React getter — used by the save path and the GPU commit paths. */

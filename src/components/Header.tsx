@@ -11,6 +11,7 @@ import { useToast } from "./Toast";
 import { useDynamicPinsEnabled, setDynamicPinsEnabled } from "@/lib/dynamicPins";
 import {
   useThumbnailMaxDim,
+  useThumbnailProgress,
   setThumbnailMaxDim,
   THUMBNAIL_SIZE_OPTIONS,
   DEFAULT_THUMBNAIL_SIZE,
@@ -81,7 +82,7 @@ function ThumbnailSizeSelect() {
   return (
     <label
       className="flex items-center gap-1 text-[11px] text-neutral-400"
-      title="Thumbnail resolution for node previews. Larger looks sharper on big monitors but costs canvas performance and workflow size. Applies to newly written thumbnails."
+      title="Thumbnail resolution for node previews. Larger looks sharper on big monitors but costs canvas performance and workflow size. Changing it re-renders every existing thumbnail."
     >
       <span className="hidden xl:inline">Thumbs</span>
       <select
@@ -95,7 +96,39 @@ function ThumbnailSizeSelect() {
           </option>
         ))}
       </select>
+      <ThumbnailProgressIndicator />
     </label>
+  );
+}
+
+/**
+ * Progress for the re-render that follows a thumbnail-resolution change.
+ *
+ * Changing the setting re-renders EVERY thumbnail on the canvas — a decode and
+ * re-encode per image — which on a large graph takes long enough that silence
+ * reads as nothing having happened. Per-node badges say a given preview is
+ * stale; this says whether the job is moving and when it is finished.
+ */
+function ThumbnailProgressIndicator() {
+  const { total, done, running, justFinished } = useThumbnailProgress();
+  if (!running && !justFinished) return null;
+  return (
+    <span
+      className={`ml-1.5 flex items-center gap-1 text-[10px] tabular-nums ${running ? "text-amber-300/90" : "text-emerald-300/90"}`}
+      title={running ? "Re-rendering node thumbnails at the new resolution" : "All thumbnails re-rendered"}
+    >
+      {running ? (
+        <>
+          <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+          </svg>
+          {done}/{total}
+        </>
+      ) : (
+        <>✓ {total} thumbnails</>
+      )}
+    </span>
   );
 }
 
