@@ -19,6 +19,7 @@ import { getVideoDimensions, calculateNodeSizePreservingHeight } from "@/utils/n
 import { ProviderBadge } from "./ProviderBadge";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { captureVideoThumbnail } from "@/utils/mediaCapture";
+import { cheapUrlKey } from "@/utils/renderSignature";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { browseRegistry } from "@/utils/browseRegistry";
 import { MediaOverlay } from "../MediaOverlay";
@@ -448,6 +449,16 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
   // Generate thumbnail when outputVideo changes — persist to node data for save/reload
   useEffect(() => {
     if (nodeData.outputVideo) {
+      // Already have a thumbnail captured from THIS video? Then don't capture
+      // it again. Capturing means loading the entire video (a multi-MB data
+      // URL), seeking four times and compositing a 2x2 grid, then writing it
+      // to disk — and this effect fires whenever outputVideo becomes non-null,
+      // which includes every hydration on workflow open. With several video
+      // nodes that was several full video decodes to reproduce thumbnails the
+      // workflow had already saved.
+      if (nodeData.thumbnailImage && nodeData.thumbnailImageKey === cheapUrlKey(nodeData.outputVideo)) {
+        return;
+      }
       captureVideoThumbnail(nodeData.outputVideo).then(async (thumb) => {
         setVideoThumbnail(thumb);
         if (thumb) {
@@ -463,7 +474,11 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
             );
             if (refId) thumbnailImageRef = refId;
           }
-          updateNodeData(id, { thumbnailImage: thumb, thumbnailImageRef });
+          updateNodeData(id, {
+            thumbnailImage: thumb,
+            thumbnailImageRef,
+            thumbnailImageKey: cheapUrlKey(nodeData.outputVideo),
+          });
         }
       });
     } else {
