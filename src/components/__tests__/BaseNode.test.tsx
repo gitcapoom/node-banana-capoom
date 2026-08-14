@@ -11,6 +11,11 @@ vi.mock("@/store/workflowStore", () => ({
   useWorkflowStore: (selector: (state: unknown) => unknown) => mockUseWorkflowStore(selector),
 }));
 
+vi.mock("@/store/nodeMediaViewerStore", () => ({
+  useNodeMediaViewer: (selector: (state: unknown) => unknown) =>
+    selector({ target: null, open: vi.fn(), close: vi.fn() }),
+}));
+
 // Mock isPanningRef
 vi.mock("@/components/WorkflowCanvas", () => ({
   isPanningRef: { current: false },
@@ -44,6 +49,9 @@ describe("BaseNode", () => {
         currentNodeIds: [] as string[],
         hoveredNodeId: null,
         setHoveredNodeId: mockSetHoveredNodeId,
+        // BaseNode reads its own node's stored media dimensions for the
+        // resolution badge.
+        nodes: [] as Array<{ id: string; data: Record<string, unknown> }>,
       };
       return selector(state);
     });
@@ -107,6 +115,7 @@ describe("BaseNode", () => {
           currentNodeIds: ["test-node-1"],
           hoveredNodeId: null,
           setHoveredNodeId: mockSetHoveredNodeId,
+          nodes: [] as Array<{ id: string; data: Record<string, unknown> }>,
         };
         return selector(state);
       });

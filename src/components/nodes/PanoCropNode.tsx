@@ -26,6 +26,7 @@ export function PanoCropNode({ id, data, selected }: NodeProps<PanoCropNodeType>
     <BaseNode
       id={id}
       selected={selected}
+      aspectFitMedia={nodeData.image}
     >
       {/* Output Handle — perspective snapshot */}
       <Handle
