@@ -6,7 +6,8 @@ import { useShallow } from "zustand/react/shallow";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { releaseColorNode, renderBlurNodeToCanvas, commitBlurNode, type BlurNodeParams } from "@/utils/colorChain";
+import { releaseColorNode, commitBlurNode, type BlurNodeParams } from "@/utils/colorChain";
+import { createImageThumbnailWithMeta } from "@/utils/createImageThumbnail";
 import { resolveInputRef } from "@/utils/compComposite";
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
 import type { BlurNodeData, BlurFilterType } from "@/types";
@@ -38,7 +39,6 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const loadNodeFullResInputs = useWorkflowStore((s) => s.loadNodeFullResInputs);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Resolve the two inputs (url + producing node id) by targetHandle.
   const incoming = useWorkflowStore(
@@ -88,24 +88,14 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
   const latest = useRef({ incoming, params });
   latest.current = { incoming, params };
 
-  // Live preview into the node canvas (fast GPU path, no PNG encode).
+  // No in-node live canvas: the body shows the committed thumbnail. A per-node
+  // WebGL canvas would have to re-render on every mount, and React Flow remounts
+  // nodes constantly as they scroll in and out of view — so simply navigating a
+  // large graph re-ran a full-res blur per node. The debounced commit below is
+  // the only GPU work, and it runs when something actually changes.
   useEffect(() => {
-    let cancelled = false;
-    const run = async () => {
-      const { incoming: inc, params: p } = latest.current;
-      if (!inc.src) return;
-      if (!allInputsResolved) { void loadNodeFullResInputs(id); return; }
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ok = await renderBlurNodeToCanvas(
-        resolveInputRef(inc.src, inc.srcId), resolveInputRef(inc.matte, inc.matteId), p, id, canvas,
-      );
-      if (!ok && !cancelled) console.warn("[blur] GPU preview unavailable", { id });
-    };
-    const t = setTimeout(run, 60);
-    return () => { cancelled = true; clearTimeout(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, allInputsResolved, id]);
+    if (!allInputsResolved && latest.current.incoming.src) void loadNodeFullResInputs(id);
+  }, [allInputsResolved, id, loadNodeFullResInputs]);
 
   // Debounced commit: publish the float texture + 8-bit PNG to outputImage.
   useEffect(() => {
@@ -127,7 +117,15 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
         resolveInputRef(cur.src, cur.srcId), resolveInputRef(cur.matte, cur.matteId), p, id, cur.src,
       );
       committedBlurs.set(id, sig);
-      updateNodeData(id, { outputImage: out, outputImageRef: undefined });
+      const meta = await createImageThumbnailWithMeta(out, undefined, 0.8, "png").catch(() => null);
+      committedBlurs.set(id, sig);
+      updateNodeData(id, {
+        outputImage: out,
+        outputImageRef: undefined,
+        ...(meta
+          ? { outputImageThumb: meta.thumb, outputImageDims: { width: meta.width, height: meta.height } }
+          : {}),
+      });
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,8 +139,8 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
     [id, updateNodeData],
   );
 
-  const hasSrc = !!nodeData.sourceImage;
   const thumb = nodeData.outputImageThumb;
+  const preview = thumb ?? nodeData.outputImage;
   const isMotion = (nodeData.filter ?? "gaussian") === "motion";
 
   return (
@@ -165,10 +163,8 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
         className="relative w-full aspect-square bg-neutral-900/60 rounded overflow-hidden cursor-pointer"
         title="Double-click to view full screen"
       >
-        {hasSrc && allInputsResolved ? (
-          <canvas ref={canvasRef} className="w-full h-full object-contain" />
-        ) : thumb ? (
-          <img src={thumb} alt="Blur" className="w-full h-full object-contain" />
+        {preview ? (
+          <img src={preview} alt="Blur" className="w-full h-full object-contain" />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-[10px] text-neutral-500">
             Connect an image

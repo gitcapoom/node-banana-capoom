@@ -34,14 +34,28 @@ describe("MediaResolutionBadge", () => {
     expect(await screen.findByText("1920 × 1080")).toBeTruthy();
   });
 
-  it("reports nothing when the only measurement is thumbnail-sized", async () => {
-    // 236px cap → this can only be the thumb, not the real asset.
-    mockGetMediaDimensions.mockResolvedValue({ width: 236, height: 133 });
+  it("stays silent when the media is a thumbnail and nothing was stored", async () => {
+    // Measuring would report the THUMBNAIL's size as the image's resolution.
+    mockGetMediaDimensions.mockResolvedValue({ width: 256, height: 144 });
 
-    const { container } = render(<MediaResolutionBadge media="data:image/jpeg;base64,THUMB" />);
+    const { container } = render(
+      <MediaResolutionBadge media="data:image/jpeg;base64,THUMB" mediaIsThumb />
+    );
 
     await waitFor(() => expect(mockGetMediaDimensions).toHaveBeenCalled());
     expect(container.textContent).toBe("");
+  });
+
+  it("reports a thumbnail's SOURCE size when it was recorded", async () => {
+    render(
+      <MediaResolutionBadge
+        media="data:image/jpeg;base64,THUMB"
+        mediaIsThumb
+        storedDims={{ width: 2048, height: 1152 }}
+      />
+    );
+
+    expect(await screen.findByText("2048 × 1152")).toBeTruthy();
   });
 
   it("renders nothing without media", () => {

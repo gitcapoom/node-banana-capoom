@@ -1,6 +1,6 @@
 import { WorkflowNode, WorkflowNodeData } from "@/types";
 import { WorkflowFile } from "@/store/workflowStore";
-import { createImageThumbnailWithMeta, THUMB_MAX_DIM } from "./createImageThumbnail";
+import { createImageThumbnailWithMeta, thumbMaxDim } from "./createImageThumbnail";
 import crypto from "crypto";
 
 /**
@@ -145,7 +145,7 @@ async function externalizeDisplayField(
     // keep the ref, just make sure a thumb exists, then drop the heavy inline data.
     if (!d[thumbKey]) {
       try {
-        const t = await createImageThumbnailWithMeta(raw, THUMB_MAX_DIM, 0.72, thumbFormat);
+        const t = await createImageThumbnailWithMeta(raw, thumbMaxDim(), 0.72, thumbFormat);
         next[thumbKey] = t.thumb;
         // Source size, captured while the full-res is still decodable — this is
         // what the node's resolution readout reads back after a reload.
@@ -157,7 +157,7 @@ async function externalizeDisplayField(
     // New / changed full-res, OR a foreign ref (pasted from another project whose
     // file isn't here) — (re)generate the thumb and save a fresh ref in THIS project.
     try {
-      const t = await createImageThumbnailWithMeta(raw, THUMB_MAX_DIM, 0.72, thumbFormat);
+      const t = await createImageThumbnailWithMeta(raw, thumbMaxDim(), 0.72, thumbFormat);
       next[thumbKey] = t.thumb;
       // Source size, captured while the full-res is still decodable — this is
       // what the node's resolution readout reads back after a reload.

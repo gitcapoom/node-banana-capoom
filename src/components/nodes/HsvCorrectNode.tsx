@@ -100,6 +100,9 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
   // saved thumb until the editor opens / a run loads it. No WebGL work on open.
   const hasFullRes = !!nodeData.sourceImage;
   const thumb = nodeData.outputImageThumb;
+  // The node body shows the committed thumbnail, never a live canvas —
+  // see useColorNode for why.
+  const preview = thumb ?? nodeData.outputImage;
   const handleOpenEditor = useCallback(() => {
     setOverlayOpen(true);
     void loadNodeFullResInputs(id);
@@ -127,10 +130,8 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
           onDoubleClick={handleOpenEditor}
           title={hasFullRes || thumb ? "Double-click to open full-screen editor" : "Connect an image"}
         >
-          {hasFullRes ? (
-            <canvas ref={nodeCanvasRef} className="w-full h-full object-contain" />
-          ) : thumb ? (
-            <img src={thumb} alt="HSV correct" className="w-full h-full object-contain" />
+          {preview ? (
+            <img src={preview} alt="HSV correct" className="w-full h-full object-contain" />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-[10px] text-neutral-500">
               Connect an image

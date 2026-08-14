@@ -92,6 +92,21 @@ export function BaseNode({
       null) as { width: number; height: number } | null;
   });
 
+  // Is the media we're displaying one of this node's thumbnails? Nodes render
+  // `fullRes ?? thumb`, so this is an identity check rather than a guess — and
+  // it keeps the resolution badge from reporting a thumbnail's size as fact.
+  const mediaIsThumb = useWorkflowStore((state) => {
+    if (!aspectFitMedia) return false;
+    const data = state.nodes.find((n) => n.id === id)?.data as Record<string, unknown> | undefined;
+    if (!data) return false;
+    return (
+      aspectFitMedia === data.outputImageThumb ||
+      aspectFitMedia === data.imageThumb ||
+      aspectFitMedia === data.sourceImageThumb ||
+      aspectFitMedia === data.outputMaskThumb
+    );
+  });
+
   const settingsPanelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const trackedSettingsHeightRef = useRef(0);
@@ -347,7 +362,7 @@ export function BaseNode({
         <div ref={contentRef} className={contentClassName ?? (fullBleed ? "flex-1 min-h-0 relative" : "px-3 pb-4 flex-1 min-h-0 overflow-hidden flex flex-col")}>{children}</div>
         {/* Resolution readout — every node that shows media gets one, since
             aspectFitMedia is already the node's displayed image/video. */}
-        <MediaResolutionBadge media={aspectFitMedia} storedDims={storedDims} />
+        <MediaResolutionBadge media={aspectFitMedia} storedDims={storedDims} mediaIsThumb={mediaIsThumb} />
       </div>
       {settingsPanel && (
         <div ref={settingsPanelRef}>

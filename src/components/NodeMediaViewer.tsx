@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { useShallow } from "zustand/react/shallow";
 import { MediaOverlay } from "./MediaOverlay";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useNodeMediaViewer } from "@/store/nodeMediaViewerStore";
@@ -27,12 +26,18 @@ export function NodeMediaViewer() {
   // Every Viewer node on the canvas is offered as an alternative feed, so a
   // full-screen view opened from ANY node can be switched to the live tap at
   // the end of the chain — and stays live while an editor is worked on.
-  const viewerNodes = useWorkflowStore(
-    useShallow((s) =>
-      s.nodes
+  //
+  // Derived with useMemo from the (reference-stable) nodes array rather than
+  // built inside the selector: a selector that maps to fresh objects returns a
+  // new array identity on every store read, which useShallow cannot settle —
+  // React then re-subscribes forever ("getSnapshot should be cached").
+  const nodes = useWorkflowStore((s) => s.nodes);
+  const viewerNodes = useMemo(
+    () =>
+      nodes
         .filter((n) => n.type === "viewer")
         .map((n) => ({ id: n.id, title: (n.data as { customTitle?: string })?.customTitle || "Viewer" })),
-    ),
+    [nodes],
   );
 
   const content = useWorkflowStore((s) => {

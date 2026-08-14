@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { getMediaDimensions } from "@/utils/nodeDimensions";
-import { THUMB_MAX_DIM } from "@/utils/createImageThumbnail";
 
 export interface Dims {
   width: number;
@@ -18,6 +17,12 @@ interface MediaResolutionBadgeProps {
    * reload `media` is only the downscaled thumb.
    */
   storedDims?: Dims | null;
+  /**
+   * True when `media` is a thumbnail rather than the real asset. Measuring it
+   * would report the thumbnail's size as the image's resolution, so without
+   * stored dimensions the badge stays silent instead of stating a wrong number.
+   */
+  mediaIsThumb?: boolean;
 }
 
 /**
@@ -34,7 +39,7 @@ interface MediaResolutionBadgeProps {
  * that comes back no larger than a thumbnail is suppressed rather than shown as
  * fact.
  */
-export function MediaResolutionBadge({ media, storedDims }: MediaResolutionBadgeProps) {
+export function MediaResolutionBadge({ media, storedDims, mediaIsThumb }: MediaResolutionBadgeProps) {
   const [measured, setMeasured] = useState<Dims | null>(null);
 
   useEffect(() => {
@@ -49,9 +54,9 @@ export function MediaResolutionBadge({ media, storedDims }: MediaResolutionBadge
   const dims = storedDims ?? measured;
   if (!dims || dims.width <= 0 || dims.height <= 0) return null;
 
-  // A measurement at or below the thumbnail cap is almost certainly the thumb
-  // itself, not the real asset — report nothing rather than something false.
-  if (!storedDims && Math.max(dims.width, dims.height) <= THUMB_MAX_DIM) return null;
+  // Measured a thumbnail with no recorded source size: say nothing rather than
+  // report the thumbnail's own dimensions as the image's resolution.
+  if (!storedDims && mediaIsThumb) return null;
 
   return (
     <div

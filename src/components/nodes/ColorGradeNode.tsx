@@ -521,6 +521,9 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
   // loads the source. Double-click loads full-res inputs, then shows the editor.
   const hasFullRes = !!nodeData.sourceImage;
   const thumb = nodeData.outputImageThumb;
+  // The node body shows the committed thumbnail, never a live canvas —
+  // see useColorNode for why.
+  const preview = thumb ?? nodeData.outputImage;
   const handleOpenEditor = useCallback(() => {
     setOverlayOpen(true);
     void loadNodeFullResInputs(id);
@@ -580,21 +583,13 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
         />
       </div>
 
-      {hasFullRes ? (
+      {preview ? (
         <div
           className="relative w-full flex-1 min-h-0 cursor-pointer"
           onDoubleClick={handleOpenEditor}
           title="Double-click for full-screen editor"
         >
-          <canvas ref={nodeCanvasRef} className="w-full h-full object-contain" />
-        </div>
-      ) : thumb ? (
-        <div
-          className="relative w-full flex-1 min-h-0 cursor-pointer"
-          onDoubleClick={handleOpenEditor}
-          title="Double-click for full-screen editor"
-        >
-          <img src={thumb} alt="Color grade" className="w-full h-full object-contain" />
+          <img src={preview} alt="Color grade" className="w-full h-full object-contain" />
         </div>
       ) : (
         <div className="w-full flex-1 min-h-0 bg-neutral-900/40 flex flex-col items-center justify-center">
