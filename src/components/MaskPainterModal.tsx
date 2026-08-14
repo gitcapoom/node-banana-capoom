@@ -529,8 +529,8 @@ export function MaskPainterModal() {
       </div>
 
       {/* Canvas Container */}
-      <div ref={containerRef} className="flex-1 overflow-hidden bg-neutral-900">
-          <DockedViewer className="bottom-4 right-4" />
+      <div ref={containerRef} className="relative flex-1 overflow-hidden bg-neutral-900">
+          <DockedViewer />
         <Stage
           ref={stageRef}
           width={containerRef.current?.clientWidth || 800}
