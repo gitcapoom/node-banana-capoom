@@ -12,6 +12,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { ImageCompareNodeData } from "@/types";
 import { ZoomPanView } from "../ZoomPanView";
+import { previewSrc } from "@/utils/nodePreview";
 
 type ImageCompareNodeType = Node<ImageCompareNodeData, "imageCompare">;
 
@@ -89,6 +90,12 @@ export function ImageCompareNode({
       b || nodeData.imageB || nodeData.imageBThumb || null,
     ];
   }, [edges, nodes, id, nodeData.imageA, nodeData.imageB, nodeData.imageAThumb, nodeData.imageBThumb]);
+
+  // In-node previews are ~70px wide, so they show the externalized thumb when
+  // its ref proves it current. The full-screen overlay below keeps imageA/imageB
+  // — that is where real resolution actually matters.
+  const previewA = previewSrc(imageA, nodeData.imageAThumb, nodeData.imageARef);
+  const previewB = previewSrc(imageB, nodeData.imageBThumb, nodeData.imageBRef);
 
   // Full-screen overlay
   const [showOverlay, setShowOverlay] = useState(false);
@@ -191,14 +198,14 @@ export function ImageCompareNode({
               <ReactCompareSlider
                 itemOne={
                   <ReactCompareSliderImage
-                    src={imageA}
+                    src={previewA ?? undefined}
                     alt="Image A"
                     style={{ objectFit: "contain" }}
                   />
                 }
                 itemTwo={
                   <ReactCompareSliderImage
-                    src={imageB}
+                    src={previewB ?? undefined}
                     alt="Image B"
                     style={{ objectFit: "contain" }}
                   />
@@ -219,13 +226,13 @@ export function ImageCompareNode({
           {compareMode === "blend" && (
             <div className="relative w-full h-full" style={{ minHeight: 200 }}>
               <img
-                src={imageA}
+                src={previewA ?? undefined}
                 alt="Image A"
                 className="w-full h-full object-contain"
                 draggable={false}
               />
               <img
-                src={imageB}
+                src={previewB ?? undefined}
                 alt="Image B"
                 className="absolute inset-0 w-full h-full object-contain"
                 style={{ opacity: blendOpacity }}
@@ -244,13 +251,13 @@ export function ImageCompareNode({
           {compareMode === "difference" && (
             <div className="relative w-full h-full" style={{ minHeight: 200 }}>
               <img
-                src={imageA}
+                src={previewA ?? undefined}
                 alt="Image A"
                 className="w-full h-full object-contain"
                 draggable={false}
               />
               <img
-                src={imageB}
+                src={previewB ?? undefined}
                 alt="Image B"
                 className="absolute inset-0 w-full h-full object-contain"
                 style={{

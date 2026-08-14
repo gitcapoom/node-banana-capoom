@@ -299,12 +299,30 @@ async function externalizeNodeImages(
         }
       }
 
+      // A generated frame needs a display thumb beside its ref, the way
+      // externalizeDisplayField writes one for every other image field. Without
+      // it the node reopens with only full-res to paint, and a 6554x3686 frame
+      // gets decoded into a ~60px preview on every viewport remount.
+      let outputImageThumb = d.outputImageThumb;
+      let outputImageDims = d.outputImageDims;
+      if (isBase64DataUrl(d.outputImage) && (!outputImageThumb || outputImageRef !== d.outputImageRef)) {
+        try {
+          const t = await createImageThumbnailWithMeta(d.outputImage!, thumbMaxDim(), 0.72, "jpeg");
+          outputImageThumb = t.thumb;
+          outputImageDims = { width: t.width, height: t.height };
+        } catch {
+          /* no thumb — the preview falls back to full-res, as before */
+        }
+      }
+
       newData = {
         ...d,
         inputImages: inputImages.length > 0 && inputImages.every(i => i === "") ? [] : inputImages,
         inputImageRefs: inputImageRefs.length > 0 ? inputImageRefs : undefined,
         outputImage,
         outputImageRef,
+        outputImageThumb,
+        outputImageDims,
       };
       break;
     }

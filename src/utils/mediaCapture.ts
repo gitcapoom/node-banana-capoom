@@ -37,6 +37,8 @@ function seekAndCapture(
  *
  * Returns a base64 PNG data URL, or null on failure.
  */
+import { getThumbnailMaxDim } from "@/lib/thumbnailSize";
+
 export function captureVideoThumbnail(videoDataUrl: string): Promise<string | null> {
   return new Promise((resolve) => {
     const video = document.createElement("video");
@@ -55,14 +57,16 @@ export function captureVideoThumbnail(videoDataUrl: string): Promise<string | nu
           video.currentTime = 0;
           video.onseeked = () => {
             try {
+              const cap = getThumbnailMaxDim();
+              const s1 = Math.min(1, cap / Math.max(video.videoWidth, video.videoHeight));
               const canvas = document.createElement("canvas");
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
+              canvas.width = Math.max(1, Math.round(video.videoWidth * s1));
+              canvas.height = Math.max(1, Math.round(video.videoHeight * s1));
               const ctx = canvas.getContext("2d");
               if (ctx) {
-                ctx.drawImage(video, 0, 0);
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 clearTimeout(timeout);
-                resolve(canvas.toDataURL("image/png"));
+                resolve(canvas.toDataURL("image/jpeg", 0.72));
               } else {
                 clearTimeout(timeout);
                 resolve(null);
@@ -98,9 +102,15 @@ export function captureVideoThumbnail(videoDataUrl: string): Promise<string | nu
           return;
         }
 
-        // Composite into a 2×2 grid
-        const fw = video.videoWidth;
-        const fh = video.videoHeight;
+        // Composite into a 2×2 grid, scaled to the same budget as every other
+        // node thumbnail. At source resolution this canvas is 2x the video on
+        // each axis — a 4K clip produced a 7680x4312 PNG poster (~75MB of
+        // base64) to fill a ~90px preview, and that got re-decoded on every
+        // viewport remount.
+        const cellCap = getThumbnailMaxDim() / 2;
+        const scale = Math.min(1, cellCap / Math.max(video.videoWidth, video.videoHeight));
+        const fw = Math.max(1, Math.round(video.videoWidth * scale));
+        const fh = Math.max(1, Math.round(video.videoHeight * scale));
         const canvas = document.createElement("canvas");
         canvas.width = fw * 2;
         canvas.height = fh * 2;
@@ -145,9 +155,10 @@ export function captureVideoThumbnail(videoDataUrl: string): Promise<string | nu
         ctx.moveTo(0, fh);
         ctx.lineTo(canvas.width, fh);
         ctx.stroke();
+        // JPEG: these are photographic frames, and PNG kept them ~20x larger.
 
         clearTimeout(timeout);
-        resolve(canvas.toDataURL("image/png"));
+        resolve(canvas.toDataURL("image/jpeg", 0.72));
       } catch {
         clearTimeout(timeout);
         resolve(null);

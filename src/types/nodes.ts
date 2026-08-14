@@ -826,6 +826,10 @@ export interface LLMGenerateNodeData extends BaseNodeData {
  * Output node - displays final workflow results
  */
 export interface OutputNodeData extends BaseNodeData {
+  /** In-memory display thumb for the inline preview (never persisted). */
+  imageThumb?: string | null;
+  /** cheapUrlKey of the image `imageThumb` was made from — proves it current. */
+  imageThumbKey?: string | null;
   image: string | null;
   imageRef?: string; // External image reference for storage optimization
   video?: string | null; // Video data URL or HTTP URL
