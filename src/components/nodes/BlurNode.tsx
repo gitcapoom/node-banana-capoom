@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { useShallow } from "zustand/react/shallow";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { releaseColorNode, commitBlurNode, type BlurNodeParams } from "@/utils/colorChain";
+import { releaseColorNode, renderBlurNodeToCanvas, commitBlurNode, type BlurNodeParams } from "@/utils/colorChain";
 import { createImageThumbnailWithMeta } from "@/utils/createImageThumbnail";
 import { resolveInputRef } from "@/utils/compComposite";
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
@@ -85,17 +85,44 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
     src: cheapUrlKey(incoming.src), srcId: incoming.srcId,
     mt: cheapUrlKey(incoming.matte), mtId: incoming.matteId, p: params,
   });
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const latest = useRef({ incoming, params });
   latest.current = { incoming, params };
 
-  // No in-node live canvas: the body shows the committed thumbnail. A per-node
-  // WebGL canvas would have to re-render on every mount, and React Flow remounts
-  // nodes constantly as they scroll in and out of view — so simply navigating a
-  // large graph re-ran a full-res blur per node. The debounced commit below is
-  // the only GPU work, and it runs when something actually changes.
+  // Live canvas while the node is being ADJUSTED — dragging radius has to feel
+  // immediate. It must not repaint merely because the node mounted, though:
+  // React Flow remounts nodes constantly as they scroll in and out of view, so
+  // a canvas that renders on mount re-runs a full-res blur for every node you
+  // pan across. `live` turns on for real changes only and lapses shortly after.
+  const [live, setLive] = useState(false);
+  const firstRunRef = useRef(true);
+  useEffect(() => {
+    if (firstRunRef.current) { firstRunRef.current = false; return; }
+    setLive(true);
+    const t = setTimeout(() => setLive(false), 1500);
+    return () => clearTimeout(t);
+  }, [sig]);
+
   useEffect(() => {
     if (!allInputsResolved && latest.current.incoming.src) void loadNodeFullResInputs(id);
   }, [allInputsResolved, id, loadNodeFullResInputs]);
+
+  useEffect(() => {
+    if (!live || !allInputsResolved) return;
+    let cancelled = false;
+    const run = async () => {
+      const { incoming: inc, params: p } = latest.current;
+      const canvas = canvasRef.current;
+      if (!inc.src || !canvas) return;
+      const ok = await renderBlurNodeToCanvas(
+        resolveInputRef(inc.src, inc.srcId), resolveInputRef(inc.matte, inc.matteId), p, id, canvas,
+      );
+      if (!ok && !cancelled) console.warn("[blur] GPU preview unavailable", { id });
+    };
+    void run();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig, live, allInputsResolved, id]);
 
   // Debounced commit: publish the float texture + 8-bit PNG to outputImage.
   useEffect(() => {
@@ -117,19 +144,31 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
         resolveInputRef(cur.src, cur.srcId), resolveInputRef(cur.matte, cur.matteId), p, id, cur.src,
       );
       committedBlurs.set(id, sig);
-      const meta = await createImageThumbnailWithMeta(out, undefined, 0.8, "png").catch(() => null);
       committedBlurs.set(id, sig);
-      updateNodeData(id, {
-        outputImage: out,
-        outputImageRef: undefined,
-        ...(meta
-          ? { outputImageThumb: meta.thumb, outputImageDims: { width: meta.width, height: meta.height } }
-          : {}),
-      });
+      updateNodeData(id, { outputImage: out, outputImageRef: undefined });
     }, 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig, allInputsResolved, id]);
+
+  // Display thumbnail, generated only once the node has been quiet — encoding
+  // one per slider tick is what made adjusting feel broken.
+  useEffect(() => {
+    const full = nodeData.outputImage;
+    if (!full || live) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const meta = await createImageThumbnailWithMeta(full, undefined, 0.8, "png");
+        if (cancelled) return;
+        updateNodeData(id, {
+          outputImageThumb: meta.thumb,
+          outputImageDims: { width: meta.width, height: meta.height },
+        });
+      } catch { /* preview falls back to the full-res image */ }
+    }, 900);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [id, nodeData.outputImage, live, updateNodeData]);
 
   // Free the float texture + pooled blur targets when the node is removed.
   useEffect(() => () => releaseColorNode(id), [id]);
@@ -163,7 +202,9 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
         className="relative w-full aspect-square bg-neutral-900/60 rounded overflow-hidden cursor-pointer"
         title="Double-click to view full screen"
       >
-        {preview ? (
+        {live && allInputsResolved ? (
+          <canvas ref={canvasRef} className="w-full h-full object-contain" />
+        ) : preview ? (
           <img src={preview} alt="Blur" className="w-full h-full object-contain" />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-[10px] text-neutral-500">

@@ -64,7 +64,7 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
     [nodeData.hueShift, nodeData.saturation, nodeData.value],
   );
 
-  useColorNode({
+  const { liveActive } = useColorNode({
     id,
     sourceImage: nodeData.sourceImage,
     upstreamColorNodeId,
@@ -122,7 +122,11 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
           onDoubleClick={handleOpenEditor}
           title={hasFullRes || thumb ? "Double-click to open full-screen editor" : "Connect an image"}
         >
-          {preview ? (
+          {liveActive ? (
+            // Live GPU canvas while the node is being adjusted; the committed
+            // image the rest of the time (see useColorNode).
+            <canvas ref={nodeCanvasRef} className="w-full h-full object-contain" />
+          ) : preview ? (
             <img src={preview} alt="HSV correct" className="w-full h-full object-contain" />
           ) : (
             <div className="absolute inset-0 flex items-center justify-center text-[10px] text-neutral-500">

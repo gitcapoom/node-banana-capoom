@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useNodesData } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import {
   renderShaderToCanvas,
@@ -19,6 +20,11 @@ import {
 
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
 import { createImageThumbnailWithMeta } from "@/utils/createImageThumbnail";
+
+/** How long the live canvas keeps rendering after the last change. */
+const LIVE_LINGER_MS = 1500;
+/** Quiet period before a display thumbnail is (re)encoded. */
+const THUMB_IDLE_MS = 900;
 
 /** Last committed render per color node — see RenderSignatureCache. */
 const committedSignatures = new RenderSignatureCache();
@@ -137,7 +143,7 @@ export interface UseColorNodeArgs {
  *    support is unavailable, so behaviour degrades to today's.
  *  - Releases the node's float texture on unmount.
  */
-export function useColorNode(args: UseColorNodeArgs): void {
+export function useColorNode(args: UseColorNodeArgs): { liveActive: boolean } {
   const {
     id, sourceImage, upstreamColorNodeId, shaderSource, uniforms,
     clampBlacks, clampWhites, isIdentity,
@@ -165,16 +171,36 @@ export function useColorNode(args: UseColorNodeArgs): void {
     return { url: sourceImage };
   };
 
-  // ── Live preview — EDITOR ONLY ──
+  // ── Live preview ──
   //
-  // The node body deliberately shows the committed thumbnail instead of a live
-  // canvas. A per-node WebGL canvas has to be re-rendered every time the node
-  // mounts, and React Flow's viewport culling remounts nodes constantly while
-  // you navigate — so a canvas-bodied node re-runs a full-res shader pass just
-  // for having scrolled past, on top of any real edit. Only the full-screen
-  // editor, where the pixels are actually being judged, gets the live canvas.
+  // The canvas renders while the node is being WORKED ON — dragging a slider
+  // has to feel immediate, and that means a real GPU pass per change, not a
+  // thumbnail arriving a beat later.
+  //
+  // What it must NOT do is re-render for merely existing. React Flow unmounts
+  // nodes scrolled out of view and remounts them on the way back, so a canvas
+  // that repaints on mount re-runs a full-res shader pass for every node you
+  // pan across. `live` separates the two: it turns on when the render inputs
+  // actually change (or the editor is open) and lapses shortly after, leaving
+  // the node showing its committed image while you navigate.
+  const [live, setLive] = useState(false);
+  const firstRunRef = useRef(true);
+
   useEffect(() => {
-    if (!overlayOpen) return;
+    // Mount is not an edit — only a genuine change to the inputs is.
+    if (firstRunRef.current) {
+      firstRunRef.current = false;
+      return;
+    }
+    setLive(true);
+    const t = setTimeout(() => setLive(false), LIVE_LINGER_MS);
+    return () => clearTimeout(t);
+  }, [sourceImage, upstreamColorNodeId, uniformsKey, isIdentity]);
+
+  const liveActive = live || overlayOpen;
+
+  useEffect(() => {
+    if (!liveActive) return;
     const input = resolveInput();
     if (!input) return;
     let cancelled = false;
@@ -189,10 +215,11 @@ export function useColorNode(args: UseColorNodeArgs): void {
           .catch((e) => console.error("useColorNode preview fallback:", e));
       }
     };
-    drawTo(overlayCanvasRef.current);
+    drawTo(nodeCanvasRef.current);
+    if (overlayOpen) drawTo(overlayCanvasRef.current);
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, sourceImage, upstreamColorNodeId, shaderSource, uniformsKey, overlayOpen]);
+  }, [id, sourceImage, upstreamColorNodeId, shaderSource, uniformsKey, overlayOpen, liveActive]);
 
   // ── Debounced commit (float texture + display URL) ──
   useEffect(() => {
@@ -235,20 +262,36 @@ export function useColorNode(args: UseColorNodeArgs): void {
         input, shaderSource, effUniformsRef.current, id, isIdentity, sourceImage,
       );
       committedSignatures.set(id, signature);
-      // The node body shows this thumb, not the full-res result: a constant
-      // small image keeps the canvas cheap however large the source is.
-      const meta = await createImageThumbnailWithMeta(displayUrl).catch(() => null);
-      updateNodeData(id, {
-        outputImage: displayUrl,
-        outputImageRef: undefined,
-        ...(meta
-          ? { outputImageThumb: meta.thumb, outputImageDims: { width: meta.width, height: meta.height } }
-          : {}),
-      });
+      updateNodeData(id, { outputImage: displayUrl, outputImageRef: undefined });
     }, commitDelay);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, sourceImage, upstreamColorNodeId, shaderSource, uniformsKey, isIdentity, commitDelay]);
+
+  // ── Display thumbnail, well after the dust settles ──
+  //
+  // Deliberately NOT part of the commit: decoding and re-encoding a full-res
+  // PNG on every slider tick added hundreds of ms to each change. This runs
+  // once the node has been quiet, purely so there is something cheap to show
+  // when the live canvas steps aside.
+  const outputImage = useNodesData(id)?.data as { outputImage?: string | null; outputImageThumb?: string | null } | undefined;
+  useEffect(() => {
+    const full = outputImage?.outputImage;
+    if (!full || liveActive) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const meta = await createImageThumbnailWithMeta(full);
+        if (cancelled) return;
+        updateNodeData(id, {
+          outputImageThumb: meta.thumb,
+          outputImageDims: { width: meta.width, height: meta.height },
+        });
+      } catch { /* preview falls back to the full-res image */ }
+    }, THUMB_IDLE_MS);
+    return () => { cancelled = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, outputImage?.outputImage, liveActive]);
 
   // ── Release the float texture on unmount ──
   // The commit signature deliberately OUTLIVES the unmount: it is what lets a
@@ -256,4 +299,7 @@ export function useColorNode(args: UseColorNodeArgs): void {
   useEffect(() => {
     return () => releaseColorNode(id);
   }, [id]);
+
+  // Lets the node body choose a live canvas over its static image.
+  return { liveActive };
 }
