@@ -118,7 +118,7 @@ export function HsvCorrectNode({ id, data, selected }: NodeProps<HsvCorrectNodeT
 
   return (
     <>
-      <BaseNode id={id} selected={selected} contentClassName="flex flex-col gap-1 p-2">
+      <BaseNode id={id} selected={selected} contentClassName="flex flex-col gap-1 p-2" aspectFitMedia={nodeData.outputImage ?? thumb}>
         <Handle type="target" position={Position.Left} id="image" data-handletype="image" />
         <Handle type="source" position={Position.Right} id="image" data-handletype="image" />
 

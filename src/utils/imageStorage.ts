@@ -1,6 +1,6 @@
 import { WorkflowNode, WorkflowNodeData } from "@/types";
 import { WorkflowFile } from "@/store/workflowStore";
-import { createImageThumbnail, THUMB_MAX_DIM } from "./createImageThumbnail";
+import { createImageThumbnailWithMeta, THUMB_MAX_DIM } from "./createImageThumbnail";
 import crypto from "crypto";
 
 /**
@@ -144,13 +144,25 @@ async function externalizeDisplayField(
     // Hydrated/loaded full-res that already has a matching ref IN THIS PROJECT —
     // keep the ref, just make sure a thumb exists, then drop the heavy inline data.
     if (!d[thumbKey]) {
-      try { next[thumbKey] = await createImageThumbnail(raw, THUMB_MAX_DIM, 0.72, thumbFormat); } catch { /* leave thumb unset */ }
+      try {
+        const t = await createImageThumbnailWithMeta(raw, THUMB_MAX_DIM, 0.72, thumbFormat);
+        next[thumbKey] = t.thumb;
+        // Source size, captured while the full-res is still decodable — this is
+        // what the node's resolution readout reads back after a reload.
+        next[`${rawKey}Dims`] = { width: t.width, height: t.height };
+      } catch { /* leave thumb unset */ }
     }
     next[rawKey] = null;
   } else if (isBase64DataUrl(raw)) {
     // New / changed full-res, OR a foreign ref (pasted from another project whose
     // file isn't here) — (re)generate the thumb and save a fresh ref in THIS project.
-    try { next[thumbKey] = await createImageThumbnail(raw, THUMB_MAX_DIM, 0.72, thumbFormat); } catch { /* leave thumb unset */ }
+    try {
+      const t = await createImageThumbnailWithMeta(raw, THUMB_MAX_DIM, 0.72, thumbFormat);
+      next[thumbKey] = t.thumb;
+      // Source size, captured while the full-res is still decodable — this is
+      // what the node's resolution readout reads back after a reload.
+      next[`${rawKey}Dims`] = { width: t.width, height: t.height };
+    } catch { /* leave thumb unset */ }
     next[refKey] = await saveImageAndGetId(raw, workflowPath, savedImageIds, folder);
     next[rawKey] = null;
   }

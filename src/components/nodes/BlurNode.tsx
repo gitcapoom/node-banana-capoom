@@ -146,7 +146,7 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
   const isMotion = (nodeData.filter ?? "gaussian") === "motion";
 
   return (
-    <BaseNode id={id} selected={selected} contentClassName="flex flex-col gap-1.5 p-2">
+    <BaseNode id={id} selected={selected} contentClassName="flex flex-col gap-1.5 p-2" aspectFitMedia={nodeData.outputImage ?? thumb}>
       <Handle type="target" position={Position.Left} id="image" data-handletype="image" style={{ top: "35%" }} />
       <Handle
         type="target" position={Position.Left} id="image-blur_matte" data-handletype="image"

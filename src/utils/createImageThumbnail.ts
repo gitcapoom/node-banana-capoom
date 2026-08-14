@@ -19,12 +19,28 @@
  */
 export const THUMB_MAX_DIM = 236;
 
-export async function createImageThumbnail(
+export interface ThumbnailWithMeta {
+  thumb: string;
+  /** Dimensions of the SOURCE image, not of the thumbnail. */
+  width: number;
+  height: number;
+}
+
+/**
+ * Thumbnail + the source's true dimensions.
+ *
+ * The source is decoded here anyway, so its real size is free at this point —
+ * and it's the only moment it's cheaply available: once a workflow reopens,
+ * only the downscaled thumb is in memory, and nothing can recover "this was
+ * 3840×2160" from a 236px copy. Callers persist it alongside the thumb so the
+ * node's resolution readout survives a reload.
+ */
+export async function createImageThumbnailWithMeta(
   srcDataUrl: string,
   maxDim = THUMB_MAX_DIM,
   quality = 0.72,
   format: "jpeg" | "png" = "jpeg",
-): Promise<string> {
+): Promise<ThumbnailWithMeta> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     if (!srcDataUrl.startsWith("data:") && !srcDataUrl.startsWith("blob:")) img.crossOrigin = "anonymous";
@@ -42,9 +58,23 @@ export async function createImageThumbnail(
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, 0, 0, w, h);
-      resolve(format === "png" ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", quality));
+      resolve({
+        thumb: format === "png" ? canvas.toDataURL("image/png") : canvas.toDataURL("image/jpeg", quality),
+        width: sw,
+        height: sh,
+      });
     };
     img.onerror = () => reject(new Error("createImageThumbnail: failed to load image"));
     img.src = srcDataUrl;
   });
+}
+
+/** Thumbnail only — see createImageThumbnailWithMeta when the source size matters. */
+export async function createImageThumbnail(
+  srcDataUrl: string,
+  maxDim = THUMB_MAX_DIM,
+  quality = 0.72,
+  format: "jpeg" | "png" = "jpeg",
+): Promise<string> {
+  return (await createImageThumbnailWithMeta(srcDataUrl, maxDim, quality, format)).thumb;
 }

@@ -52,6 +52,7 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
     <BaseNode
       id={id}
       selected={selected}
+      aspectFitMedia={displayImage}
     >
       <Handle
         type="target"

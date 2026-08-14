@@ -88,7 +88,7 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
   const shapeCount = nodeData.shapes?.length ?? 0;
 
   return (
-    <BaseNode id={id} selected={selected}>
+    <BaseNode id={id} selected={selected} aspectFitMedia={displayImage}>
       <Handle type="target" position={Position.Left} id="image" data-handletype="image" />
       <Handle type="source" position={Position.Right} id="image" data-handletype="image" />
 

@@ -6,6 +6,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { useNodeMediaViewer } from "@/store/nodeMediaViewerStore";
 import { isPanningRef } from "@/components/WorkflowCanvas";
 import { getMediaDimensions, calculateAspectFitSize } from "@/utils/nodeDimensions";
+import { MediaResolutionBadge } from "./MediaResolutionBadge";
 import type { MediaType } from "@/components/MediaOverlay";
 
 const DEFAULT_NODE_DIMENSION = 300;
@@ -76,6 +77,20 @@ export function BaseNode({
   const setHoveredNodeId = useWorkflowStore((state) => state.setHoveredNodeId);
   const isCurrentlyExecuting = currentNodeIds.includes(id);
   const { getNodes, setNodes } = useReactFlow();
+
+  // Source dimensions persisted next to the thumbnail at save time, under
+  // `<field>Dims`. `aspectFitMedia` is the node's displayed media but carries no
+  // field name, so we look at the two conventional display fields — that covers
+  // every node without threading a prop through all of them.
+  const storedDims = useWorkflowStore((state) => {
+    const data = state.nodes.find((n) => n.id === id)?.data as Record<string, unknown> | undefined;
+    if (!data) return null;
+    return (data.outputImageDims ??
+      data.outputMaskDims ??
+      data.imageDims ??
+      data.sourceImageDims ??
+      null) as { width: number; height: number } | null;
+  });
 
   const settingsPanelRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -330,6 +345,9 @@ export function BaseNode({
         }}
       >
         <div ref={contentRef} className={contentClassName ?? (fullBleed ? "flex-1 min-h-0 relative" : "px-3 pb-4 flex-1 min-h-0 overflow-hidden flex flex-col")}>{children}</div>
+        {/* Resolution readout — every node that shows media gets one, since
+            aspectFitMedia is already the node's displayed image/video. */}
+        <MediaResolutionBadge media={aspectFitMedia} storedDims={storedDims} />
       </div>
       {settingsPanel && (
         <div ref={settingsPanelRef}>
