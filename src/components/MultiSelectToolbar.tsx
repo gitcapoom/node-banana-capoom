@@ -2,6 +2,7 @@
 
 import { useReactFlow } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useShallow } from "zustand/react/shallow";
 import { useMemo, useCallback } from "react";
 import JSZip from "jszip";
 import type {
@@ -14,7 +15,17 @@ import type {
 const STACK_GAP = 20;
 
 export function MultiSelectToolbar() {
-  const { nodes, onNodesChange, createGroup, removeNodesFromGroup, loadNodeFullResInputs } = useWorkflowStore();
+  // Selector, not the whole store — see EdgeToolbar.
+  const { nodes, onNodesChange, createGroup, removeNodesFromGroup, loadNodeFullResInputs } =
+    useWorkflowStore(
+      useShallow((s) => ({
+        nodes: s.nodes,
+        onNodesChange: s.onNodesChange,
+        createGroup: s.createGroup,
+        removeNodesFromGroup: s.removeNodesFromGroup,
+        loadNodeFullResInputs: s.loadNodeFullResInputs,
+      })),
+    );
   const { getViewport } = useReactFlow();
 
   const selectedNodes = useMemo(

@@ -113,6 +113,7 @@ export function RotoModal() {
     setTool, setSelectedShape, setSelectedPoint, undo, redo,
   } = useRotoStore();
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
+  const propagateFromNode = useWorkflowStore((s) => s.propagateFromNode);
   const nodes = useWorkflowStore((s) => s.nodes);
   const incrementModalCount = useWorkflowStore((s) => s.incrementModalCount);
   const decrementModalCount = useWorkflowStore((s) => s.decrementModalCount);
@@ -245,12 +246,16 @@ export function RotoModal() {
           imageWidth: image.width,
           imageHeight: image.height,
         });
+        // Push the change through the chain ourselves. Downstream node
+        // components may be unmounted (viewport culling), so relying on them to
+        // notice would leave a Viewer showing a stale frame.
+        void propagateFromNode(sourceNodeId);
       } catch (e) {
         console.error("RotoModal: live matte commit failed", e);
       }
     }, 300);
     return () => clearTimeout(t);
-  }, [isModalOpen, sourceNodeId, image, work, invert, updateNodeData]);
+  }, [isModalOpen, sourceNodeId, image, work, invert, updateNodeData, propagateFromNode]);
 
   const selShape = work.find((s) => s.id === selectedShapeId) || null;
 

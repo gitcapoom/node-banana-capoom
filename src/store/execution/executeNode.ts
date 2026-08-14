@@ -234,6 +234,85 @@ export const LOCAL_PROCESSOR_TYPES: ReadonlySet<string> = new Set([
  * never re-run here (the caller runs them). Failures are best-effort: the
  * processor's executor records its own error state and the main run proceeds.
  */
+/**
+ * Re-execute every LOCAL processor DOWNSTREAM of `rootIds`, in dependency order.
+ *
+ * The live editors (roto, mask, comp) publish their output as you work, and the
+ * chain below them is supposed to follow. That propagation used to rely on the
+ * downstream node COMPONENTS being mounted to notice the change — but React
+ * Flow unmounts nodes scrolled out of view, so with a full-screen editor open
+ * the composite two nodes along might simply not exist, and a Viewer would sit
+ * there showing a stale frame. Running the processors here makes propagation a
+ * property of the graph rather than of what happens to be on screen.
+ *
+ * Generators are never re-run: only the cheap deterministic node types.
+ */
+export async function refreshDownstreamProcessors(
+  rootIds: string[],
+  nodes: WorkflowNode[],
+  edges: Array<{ source: string; target: string }>,
+  buildCtx: (node: WorkflowNode) => NodeExecutionContext,
+  isLocked?: (nodeId: string) => boolean,
+): Promise<void> {
+  // Transitive downstream closure of the roots (roots excluded — the caller
+  // just wrote them).
+  const roots = new Set(rootIds);
+  const closure = new Set<string>();
+  const queue = [...rootIds];
+  while (queue.length > 0) {
+    const cur = queue.pop()!;
+    for (const e of edges) {
+      if (e.source === cur && !closure.has(e.target)) {
+        closure.add(e.target);
+        queue.push(e.target);
+      }
+    }
+  }
+
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const isTarget = (id: string): boolean => {
+    if (roots.has(id)) return false;
+    if (isLocked?.(id)) return false;
+    const t = byId.get(id)?.type;
+    return !!t && LOCAL_PROCESSOR_TYPES.has(t);
+  };
+  if (![...closure].some(isTarget)) return;
+
+  // Dependency order across the closure, so a node runs after its inputs.
+  const indeg = new Map<string, number>();
+  for (const id of closure) indeg.set(id, 0);
+  for (const e of edges) {
+    if (closure.has(e.source) && closure.has(e.target)) {
+      indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
+    }
+  }
+  const ready = [...closure].filter((id) => (indeg.get(id) ?? 0) === 0);
+  const order: string[] = [];
+  while (ready.length > 0) {
+    const id = ready.shift()!;
+    order.push(id);
+    for (const e of edges) {
+      if (e.source === id && closure.has(e.target)) {
+        const d = (indeg.get(e.target) ?? 0) - 1;
+        indeg.set(e.target, d);
+        if (d === 0) ready.push(e.target);
+      }
+    }
+  }
+
+  for (const id of order) {
+    if (!isTarget(id)) continue;
+    const node = byId.get(id);
+    if (!node) continue;
+    try {
+      await executeNode(buildCtx(node), { useStoredFallback: true });
+    } catch (err) {
+      // Best-effort: the node records its own error state; keep propagating.
+      console.warn(`[live] downstream refresh failed for ${id}:`, err);
+    }
+  }
+}
+
 export async function refreshUpstreamProcessors(
   rootIds: string[],
   nodes: WorkflowNode[],

@@ -68,7 +68,7 @@ import { migrateEdgeHandles, conformEdgesToRenderablePins, DYNAMIC_PIN_NODE_TYPE
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { isDynPin } from "@/lib/dynamicPinId";
 import { ensureFullResForNodes } from "./execution/hydrateForRun";
-import { refreshUpstreamProcessors } from "./execution/executeNode";
+import { refreshUpstreamProcessors, refreshDownstreamProcessors } from "./execution/executeNode";
 import { evaluateRule } from "./utils/ruleEvaluation";
 import { computeDimmedNodes } from "./utils/dimmingUtils";
 import { getRunBlocker } from "./utils/runGating";
@@ -494,6 +494,10 @@ interface WorkflowStore {
   /** Load full-res for a node + its upstream from disk (lazy on open). Used by
    *  GPU editors (color / comp) to populate the live preview on double-click. */
   loadNodeFullResInputs: (nodeId: string) => Promise<void>;
+  /** Re-run cheap local processors downstream of a node — used by the live
+   *  editors so their output propagates whether or not those nodes are
+   *  currently mounted on the canvas. */
+  propagateFromNode: (nodeId: string) => Promise<void>;
   executeSelectedNodes: (nodeIds: string[]) => Promise<void>;
   stopWorkflow: () => void;
   setMaxConcurrentCalls: (value: number) => void;
@@ -1968,6 +1972,19 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       } catch (teardownErr) {
         console.error('[regenerateNode] log-session teardown failed:', teardownErr);
       }
+    }
+  },
+
+  propagateFromNode: async (nodeId: string) => {
+    try {
+      await refreshDownstreamProcessors(
+        [nodeId],
+        get().nodes,
+        get().edges,
+        (n) => get()._buildExecutionContext(n),
+      );
+    } catch (err) {
+      console.warn("[live] propagateFromNode failed", nodeId, err);
     }
   },
 

@@ -1,11 +1,16 @@
 "use client";
 
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useShallow } from "zustand/react/shallow";
 import { WorkflowEdgeData } from "@/types";
 import { useMemo, useEffect, useState, useRef } from "react";
 
 export function EdgeToolbar() {
-  const { edges, toggleEdgePause, removeEdge } = useWorkflowStore();
+  // Selector, not the whole store: a bare useWorkflowStore() re-renders this on
+  // EVERY state write (every node commit, every drag frame).
+  const { edges, toggleEdgePause, removeEdge } = useWorkflowStore(
+    useShallow((s) => ({ edges: s.edges, toggleEdgePause: s.toggleEdgePause, removeEdge: s.removeEdge })),
+  );
   const [clickPosition, setClickPosition] = useState<{ x: number; y: number } | null>(null);
   const previousSelectedEdgeId = useRef<string | null>(null);
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { ZoomPanView } from "@/components/ZoomPanView";
 
 export interface ViewerNodeRef {
   id: string;
@@ -258,12 +259,18 @@ export function DockedViewer() {
 
       <div className="relative w-full bg-black" style={{ height: Math.round(prefs.width * 0.5625) }}>
         {selected.image ? (
-          <img
-            src={selected.image}
-            alt={selected.title}
-            className="w-full h-full object-contain"
-            draggable={false}
-          />
+          // Same wheel-zoom / drag-pan as every other image surface — a preview
+          // you cannot push into is not much use for judging a matte edge.
+          <ZoomPanView className="w-full h-full" panMode="free" hint="wheel = zoom · drag = pan · 0 = reset">
+            <div className="w-full h-full flex items-center justify-center">
+              <img
+                src={selected.image}
+                alt={selected.title}
+                className="max-w-full max-h-full object-contain"
+                draggable={false}
+              />
+            </div>
+          </ZoomPanView>
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-[10px] text-neutral-600">
             Viewer has no input
