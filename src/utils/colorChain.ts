@@ -757,7 +757,18 @@ async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | n
     // Prefiltering these still needs solving — see the minification note in
     // sampleFiltered — but it has to go through a texture the chain does not
     // also render into.
-    return floatRegistry.get(input.floatNodeId) ?? null;
+    const entry = floatRegistry.get(input.floatNodeId);
+    if (!entry) return null;
+    // Assert the filter state rather than assume it. Registry textures are
+    // created NEAREST and then REUSED across renders — the creation path only
+    // runs on a size change — so a texture that was switched to
+    // LINEAR_MIPMAP_LINEAR earlier in the session keeps it, stale mip levels
+    // and all, until the page reloads. Setting it here makes recovery
+    // immediate instead of requiring a reload.
+    gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    return entry;
   }
   const hit = compUrlCache.get(input.url);
   if (hit) return hit;
