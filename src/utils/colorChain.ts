@@ -743,17 +743,41 @@ function getDummyTex(gl: WebGL2RenderingContext): WebGLTexture {
 
 async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | null): Promise<FloatTex | null> {
   if (!input) return null;
-  if ("floatNodeId" in input) return floatRegistry.get(input.floatNodeId) ?? null;
+  if ("floatNodeId" in input) {
+    const entry = floatRegistry.get(input.floatNodeId);
+    if (!entry) return null;
+    // Float-chain inputs are render targets, so their mip levels are stale the
+    // moment the node re-renders — rebuild them here, at the point of use.
+    // Without this, minifying the output of an upstream comp/blur/grade aliases
+    // exactly as an un-mipmapped image does. LINEAR_MIPMAP_LINEAR only changes
+    // MINIFICATION; at 1:1 (how the rest of the chain reads these) level 0 is
+    // still what gets sampled, so nothing else in the chain shifts.
+    gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    return entry;
+  }
   const hit = compUrlCache.get(input.url);
   if (hit) return hit;
   const img = await loadImage(input.url);
   const tex = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  // MIPMAPPED. A reconstruction filter answers "what is between the texels";
+  // it cannot answer "what do the 23 texels under this pixel average to". At
+  // Scale 0.2 each output pixel covers ~4.8x4.8 source texels and a 4-tap
+  // kernel reads 4 of them, dropping the rest — that is minification aliasing,
+  // and no choice of kernel fixes it. A mip pyramid is the prefilter that does.
+  //
+  // The shader needs no change: every tap coordinate in sampleFiltered is an
+  // offset from the same base uv, so its screen-space derivatives match and
+  // automatic LOD selection picks the right level for all of them.
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  gl.generateMipmap(gl.TEXTURE_2D); // WebGL2 allows this on NPOT textures
   const entry = { tex, w: img.naturalWidth, h: img.naturalHeight };
   compUrlCache.set(input.url, entry);
   // Evict oldest beyond a small cap.
