@@ -744,19 +744,20 @@ function getDummyTex(gl: WebGL2RenderingContext): WebGLTexture {
 async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | null): Promise<FloatTex | null> {
   if (!input) return null;
   if ("floatNodeId" in input) {
-    const entry = floatRegistry.get(input.floatNodeId);
-    if (!entry) return null;
-    // Float-chain inputs are render targets, so their mip levels are stale the
-    // moment the node re-renders — rebuild them here, at the point of use.
-    // Without this, minifying the output of an upstream comp/blur/grade aliases
-    // exactly as an un-mipmapped image does. LINEAR_MIPMAP_LINEAR only changes
-    // MINIFICATION; at 1:1 (how the rest of the chain reads these) level 0 is
-    // still what gets sampled, so nothing else in the chain shifts.
-    gl.bindTexture(gl.TEXTURE_2D, entry.tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.generateMipmap(gl.TEXTURE_2D);
-    return entry;
+    // NOT mipmapped, deliberately.
+    //
+    // These are RENDER TARGETS. Every render writes level 0 through an FBO and
+    // leaves levels 1..n holding whatever was generated last time, so a sampler
+    // set to LINEAR_MIPMAP_LINEAR reads PREVIOUS frames' pixels at any LOD > 0.
+    // Regenerating on use does not save it either: the commit path renders into
+    // level 0 and downstream consumers sample before anything refreshes the
+    // chain. The result is ghosting that compounds frame over frame, varies
+    // with zoom (zoom picks the LOD) and gets baked into the committed output.
+    //
+    // Prefiltering these still needs solving — see the minification note in
+    // sampleFiltered — but it has to go through a texture the chain does not
+    // also render into.
+    return floatRegistry.get(input.floatNodeId) ?? null;
   }
   const hit = compUrlCache.get(input.url);
   if (hit) return hit;
