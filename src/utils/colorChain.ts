@@ -564,6 +564,8 @@ uniform vec2 u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size;
 uniform vec2 u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 uniform float u_bg_flt, u_ba_flt, u_fg_flt, u_fa_flt, u_mt_flt;
+// 1 when that input's sampling is NOT identity, i.e. the kernel can matter.
+uniform float u_bg_xf, u_ba_xf, u_fg_xf, u_fa_xf, u_mt_xf;
 
 // ── reconstruction filters ────────────────────────────────────────
 //
@@ -597,24 +599,26 @@ float kernelW(float x, float mode) {
   return lanczosW(x, 3.0);
 }
 
-vec4 sampleFiltered(sampler2D tex, vec2 uv, vec2 size, float mode) {
+vec4 sampleFiltered(sampler2D tex, vec2 uv, vec2 size, float mode, float xf) {
+  // NOT TRANSFORMED (xf = 0): the sampling grid lines up with the source grid,
+  // so every kernel here reduces to the texel under the pixel. Take it in one
+  // hardware fetch. This is not a micro-optimisation — without it the kernel
+  // ran for every input on every pixel regardless, so a comp with five inputs
+  // on Keys paid 80 texture fetches per pixel to reproduce what one fetch
+  // gives, and a 24MP commit paid it billions of times.
+  if (xf < 0.5) return texture2D(tex, uv);
+
   vec2 texel = 1.0 / size;
   // 0 = impulse. Snap to the texel centre so the result can't depend on
   // whatever GL filter the texture carries.
   if (mode < 0.5) return texture2D(tex, (floor(uv * size) + 0.5) * texel);
+  // 1 = bilinear IS what the hardware LINEAR filter already does — no reason
+  // to spend four taps reimplementing it.
+  if (mode < 1.5) return texture2D(tex, uv);
 
   vec2 t = uv * size - 0.5;
   vec2 base = floor(t);
   vec2 f = t - base;
-
-  // 1 = bilinear: 2x2 by hand, for the same reason.
-  if (mode < 1.5) {
-    vec4 c00 = texture2D(tex, (base + vec2(0.5, 0.5)) * texel);
-    vec4 c10 = texture2D(tex, (base + vec2(1.5, 0.5)) * texel);
-    vec4 c01 = texture2D(tex, (base + vec2(0.5, 1.5)) * texel);
-    vec4 c11 = texture2D(tex, (base + vec2(1.5, 1.5)) * texel);
-    return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
-  }
 
   // Lanczos6 wants 6 taps per axis, the rest 4. One fixed 6x6 loop with zero
   // weights outside the radius keeps the bounds constant, as GLSL ES requires.
@@ -654,13 +658,13 @@ void main() {
   // whether outside the BG footprint is transparent (bo=1) or edge-held (bo=0).
   vec3 rbg = invSample(O, u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size);
   float bgCov = (u_bg_bo > 0.5) ? rbg.z : 1.0;
-  vec4 bgTex = sampleFiltered(u_bg, rbg.xy, u_bg_size, u_bg_flt);
+  vec4 bgTex = sampleFiltered(u_bg, rbg.xy, u_bg_size, u_bg_flt, u_bg_xf);
   vec3 Brgb = bgTex.rgb * bgCov;
   float bAlphaOwn = bgTex.a;
   float b;
   if (u_ba_has > 0.5) {
     vec3 rba = invSample(O, u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size);
-    b = dot(sampleFiltered(u_ba, rba.xy, u_ba_size, u_ba_flt).rgb, LUMA) * rba.z;
+    b = dot(sampleFiltered(u_ba, rba.xy, u_ba_size, u_ba_flt, u_ba_xf).rgb, LUMA) * rba.z;
   } else {
     b = bAlphaOwn;
   }
@@ -675,14 +679,14 @@ void main() {
   if (u_fg_has > 0.5) {
     vec3 r = invSample(O, u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size);
     fgInside = r.z;
-    vec4 fgTex = sampleFiltered(u_fg, r.xy, u_fg_size, u_fg_flt);
+    vec4 fgTex = sampleFiltered(u_fg, r.xy, u_fg_size, u_fg_flt, u_fg_xf);
     A = fgTex.rgb; fgAlphaOwn = fgTex.a;
   }
   float fgCov = (u_fg_has > 0.5) ? ((u_fg_bo > 0.5) ? fgInside : 1.0) : 0.0;
   float a;
   if (u_fa_has > 0.5) {
     vec3 rfa = invSample(O, u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size);
-    a = dot(sampleFiltered(u_fa, rfa.xy, u_fa_size, u_fa_flt).rgb, LUMA) * rfa.z * fgCov;
+    a = dot(sampleFiltered(u_fa, rfa.xy, u_fa_size, u_fa_flt, u_fa_xf).rgb, LUMA) * rfa.z * fgCov;
   } else {
     a = fgAlphaOwn * fgCov;
   }
@@ -721,7 +725,7 @@ void main() {
   float m = 1.0;
   if (u_mt_has > 0.5) {
     vec3 rmt = invSample(O, u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size);
-    m = dot(sampleFiltered(u_mt, rmt.xy, u_mt_size, u_mt_flt).rgb, LUMA) * rmt.z;
+    m = dot(sampleFiltered(u_mt, rmt.xy, u_mt_size, u_mt_flt, u_mt_xf).rgb, LUMA) * rmt.z;
   }
   gl_FragColor = vec4(mix(Brgb, outRgb, m), mix(b, outA, m));
 }
@@ -775,21 +779,22 @@ async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | n
   const img = await loadImage(input.url);
   const tex = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  // MIPMAPPED. A reconstruction filter answers "what is between the texels";
-  // it cannot answer "what do the 23 texels under this pixel average to". At
-  // Scale 0.2 each output pixel covers ~4.8x4.8 source texels and a 4-tap
-  // kernel reads 4 of them, dropping the rest — that is minification aliasing,
-  // and no choice of kernel fixes it. A mip pyramid is the prefilter that does.
+  // NOT mipmapped. Mipmapping these looked like the right prefilter for
+  // minification, but sampleFiltered derives its tap coordinates from floor(),
+  // which is piecewise-constant — so the screen-space derivatives GL uses to
+  // pick a LOD are 0 inside a texel and jump at every boundary, and the level
+  // chosen is meaningless near 1:1. The visible result was per-texel blotching
+  // that changed with zoom and, because a comp's committed output becomes the
+  // next comp's URL input, accumulated across renders.
   //
-  // The shader needs no change: every tap coordinate in sampleFiltered is an
-  // offset from the same base uv, so its screen-space derivatives match and
-  // automatic LOD selection picks the right level for all of them.
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  // Minification here is therefore still unfiltered and will alias. That needs
+  // a real prefilter (an explicit downsample pass producing its own texture),
+  // not a mip chain sampled through a floor()-based kernel.
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-  gl.generateMipmap(gl.TEXTURE_2D); // WebGL2 allows this on NPOT textures
   const entry = { tex, w: img.naturalWidth, h: img.naturalHeight };
   compUrlCache.set(input.url, entry);
   // Evict oldest beyond a small cap.
@@ -848,6 +853,31 @@ function compUniforms(
     Object.assign(u, piecesToUniforms("u_fa", faPieces));
   }
   if (mt) Object.assign(u, piecesToUniforms("u_mt", computePieces(params.matteTransform, params.matteReformat, bg.w, bg.h, mt.w, mt.h)));
+
+  // Which inputs are actually resampled. An input whose sampling is exactly
+  // 1:1 — no rotation, unit scale, no translation, and the same size as the
+  // output — lands on source texel centres, so every reconstruction kernel
+  // returns that texel and running one is pure cost. Flagging it lets the
+  // shader take a single hardware fetch instead.
+  const isIdentity = (prefix: string, src: FloatTex | null): number => {
+    if (!src) return 0;
+    const rot = u[`${prefix}_rot`] as number[] | undefined;
+    const inv = u[`${prefix}_invs`] as number[] | undefined;
+    const tr = u[`${prefix}_t`] as number[] | undefined;
+    if (!rot || !inv || !tr) return 0;
+    const eq = (a: number, b: number) => Math.abs(a - b) < 1e-6;
+    const identity =
+      eq(rot[0], 1) && eq(rot[1], 0) &&
+      eq(inv[0], 1) && eq(inv[1], 1) &&
+      eq(tr[0], 0) && eq(tr[1], 0) &&
+      src.w === outW && src.h === outH;
+    return identity ? 0 : 1; // u_*_xf: 1 means "transformed, filter it"
+  };
+  u.u_bg_xf = isIdentity("u_bg", bg);
+  u.u_ba_xf = isIdentity("u_ba", ba);
+  u.u_fg_xf = isIdentity("u_fg", fg);
+  u.u_fa_xf = isIdentity("u_fa", fa);
+  u.u_mt_xf = isIdentity("u_mt", mt);
   return u;
 }
 
