@@ -10,7 +10,11 @@ import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { renderCompPreviewToCanvas, floatNodeToDataUrl, renderComp, type CompRoi } from "@/utils/colorChain";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPieces } from "@/utils/compTransform";
-import { COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, type CompInputFilter, type BlurFilterType } from "@/types/comp";
+import {
+  COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, defaultCompResample,
+  COMP_RESAMPLE_FILTERS, COMP_RESAMPLE_LABELS,
+  type CompInputFilter, type BlurFilterType, type CompResampleFilter,
+} from "@/types/comp";
 import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/types";
 import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
 import { cheapUrlKey } from "@/utils/renderSignature";
@@ -164,7 +168,7 @@ export function CompModal() {
   const previewSig = useMemo(
     () =>
       data
-        ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bgF: data.bgFilter, baF: data.bgAlphaFilter, fgF: data.fgFilter, faF: data.fgAlphaFilter, mtF: data.matteFilter, bg: cheapUrlKey(data.bgImage), baU: cheapUrlKey(data.bgAlphaImage), fgU: cheapUrlKey(data.fgImage), faU: cheapUrlKey(data.fgAlphaImage), mtU: cheapUrlKey(data.matteImage) })
+        ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bgF: data.bgFilter, baF: data.bgAlphaFilter, fgF: data.fgFilter, faF: data.fgAlphaFilter, mtF: data.matteFilter, bgR: data.bgResample, baR: data.bgAlphaResample, fgR: data.fgResample, faR: data.fgAlphaResample, mtR: data.matteResample, bg: cheapUrlKey(data.bgImage), baU: cheapUrlKey(data.bgAlphaImage), fgU: cheapUrlKey(data.fgImage), faU: cheapUrlKey(data.fgAlphaImage), mtU: cheapUrlKey(data.matteImage) })
         : "",
     [data],
   );
@@ -275,7 +279,11 @@ export function CompModal() {
   const TKEY = { bg: "bgTransform", bgAlpha: "bgAlphaTransform", fg: "fgTransform", fgAlpha: "fgAlphaTransform", matte: "matteTransform" } as const;
   const FKEY = { bg: "bgFilter", bgAlpha: "bgAlphaFilter", fg: "fgFilter", fgAlpha: "fgAlphaFilter", matte: "matteFilter" } as const;
   const activeKey = TKEY[activeInput];
+  const RKEY = { bg: "bgResample", bgAlpha: "bgAlphaResample", fg: "fgResample", fgAlpha: "fgAlphaResample", matte: "matteResample" } as const;
   const activeFilterKey = FKEY[activeInput];
+  const activeResampleKey = RKEY[activeInput];
+  const activeResample: CompResampleFilter =
+    (data?.[activeResampleKey] as CompResampleFilter | undefined) ?? defaultCompResample();
   const activeFilter: CompInputFilter = {
     ...defaultCompFilter(),
     ...((data?.[activeFilterKey] as Partial<CompInputFilter> | undefined) ?? {}),
@@ -301,6 +309,14 @@ export function CompModal() {
       updateNodeData(sourceNodeId, { [activeKey]: next } as Partial<CompNodeData>);
     },
     [sourceNodeId, data, activeKey, updateNodeData],
+  );
+
+  const patchResample = useCallback(
+    (v: CompResampleFilter) => {
+      if (!sourceNodeId || !data) return;
+      updateNodeData(sourceNodeId, { [activeResampleKey]: v } as Partial<CompNodeData>);
+    },
+    [sourceNodeId, data, activeResampleKey, updateNodeData],
   );
 
   const patchFilter = useCallback(
@@ -679,10 +695,32 @@ export function CompModal() {
                 </select>
               </div>
             )}
-            {/* Per-input filter: blur/defocus this input before the merge */}
+            {/* Reconstruction filter: which kernel rebuilds this input when the
+                transform resamples it. Only bites under scale/rotation/sub-pixel
+                translation — at identity every option is a passthrough. */}
+            <div className="flex flex-col gap-1.5 mt-1 pt-2 border-t border-neutral-800">
+              <div
+                className="flex items-center gap-1.5"
+                title="Reconstruction filter used while TRANSFORMING this input (scale/rotate/sub-pixel move). Impulse is nearest; Bilinear is the old behaviour; Mitchell is a balanced default; Lanczos is sharpest but rings."
+              >
+                <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Filter</label>
+                <select
+                  value={activeResample}
+                  onChange={(e) => patchResample(e.target.value as CompResampleFilter)}
+                  className="nodrag flex-1 min-w-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700"
+                >
+                  {COMP_RESAMPLE_FILTERS.map((f) => (
+                    <option key={f} value={f}>{COMP_RESAMPLE_LABELS[f]}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Blur/defocus applied AFTER sampling — a different thing from the
+                Filter above, which is why it is no longer called "Filter". */}
             <div className="flex flex-col gap-1.5 mt-1 pt-2 border-t border-neutral-800">
               <div className="flex items-center gap-1.5" title="Blur/defocus this input before the merge (float-preserving GPU pre-pass)">
-                <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Filter</label>
+                <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Blur</label>
                 <select
                   value={activeFilter.filter}
                   onChange={(e) => patchFilter({ filter: e.target.value as BlurFilterType | "none" })}

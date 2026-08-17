@@ -9,7 +9,7 @@
  */
 
 import type { CompNodeData } from "@/types";
-import { COMP_OP_INDEX, defaultCompTransform, defaultCompFilter, type CompInputFilter } from "@/types/comp";
+import { COMP_OP_INDEX, defaultCompTransform, defaultCompFilter, defaultCompResample, type CompInputFilter } from "@/types/comp";
 import {
   renderComp,
   floatNodeToDataUrl,
@@ -73,6 +73,13 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
       fg: Fm(data.fgFilter),
       fgAlpha: Fm(data.fgAlphaFilter),
       matte: Fm(data.matteFilter),
+    },
+    resample: {
+      bg: data.bgResample ?? defaultCompResample(),
+      bgAlpha: data.bgAlphaResample ?? defaultCompResample(),
+      fg: data.fgResample ?? defaultCompResample(),
+      fgAlpha: data.fgAlphaResample ?? defaultCompResample(),
+      matte: data.matteResample ?? defaultCompResample(),
     },
   };
 }

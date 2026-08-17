@@ -28,7 +28,8 @@
 
 import { DISPLAY_CLAMP_SHADER } from "./imageShaders";
 import { processImageWithShader, type UniformValue } from "./webglProcess";
-import type { CompTransform, CompReformat, CompInputFilter } from "@/types/comp";
+import type { CompTransform, CompReformat, CompInputFilter, CompResampleFilter } from "@/types/comp";
+import { compResampleIndex } from "@/types/comp";
 import { computePieces, computeFollowPieces, piecesToUniforms } from "./compTransform";
 
 export type ShaderInput = { url: string } | { floatNodeId: string };
@@ -521,6 +522,16 @@ export interface CompRenderParams {
     fgAlpha: CompInputFilter;
     matte: CompInputFilter;
   };
+  /** Per-input RECONSTRUCTION filter used while the transform resamples that
+   *  input. Different thing from `filters` above — this is the kernel that
+   *  rebuilds the source under scale/rotation, not a blur applied after. */
+  resample?: {
+    bg: CompResampleFilter;
+    bgAlpha: CompResampleFilter;
+    fg: CompResampleFilter;
+    fgAlpha: CompResampleFilter;
+    matte: CompResampleFilter;
+  };
 }
 
 /**
@@ -552,6 +563,76 @@ uniform vec2 u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size;
 uniform vec2 u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size;
 uniform vec2 u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+uniform float u_bg_flt, u_ba_flt, u_fg_flt, u_fa_flt, u_mt_flt;
+
+// ── reconstruction filters ────────────────────────────────────────
+//
+// Which kernel rebuilds the source when a transform resamples it. Doing this
+// explicitly (rather than leaning on the texture's GL filter) matters twice
+// over: it makes the choice a parameter, and it fixes float-chain inputs, whose
+// registry textures are NEAREST — so before this, scaling or rotating the
+// output of another GPU node resampled it nearest-neighbour.
+//
+// Only has an effect where the sampling grid misses the source grid — under
+// scale, rotation or sub-pixel translation. At identity every kernel here
+// returns the original texel.
+
+// Mitchell-Netravali family: Keys (0,1/2), Mitchell (1/3,1/3), Parzen (1,0).
+float cubicW(float x, float B, float C) {
+  x = abs(x);
+  float x2 = x * x; float x3 = x2 * x;
+  if (x < 1.0) return ((12.0 - 9.0*B - 6.0*C)*x3 + (-18.0 + 12.0*B + 6.0*C)*x2 + (6.0 - 2.0*B)) / 6.0;
+  if (x < 2.0) return ((-B - 6.0*C)*x3 + (6.0*B + 30.0*C)*x2 + (-12.0*B - 48.0*C)*x + (8.0*B + 24.0*C)) / 6.0;
+  return 0.0;
+}
+float sinc1(float x) { return abs(x) < 1e-5 ? 1.0 : sin(3.14159265 * x) / (3.14159265 * x); }
+float lanczosW(float x, float a) { return abs(x) >= a ? 0.0 : sinc1(x) * sinc1(x / a); }
+
+// 2=keys 3=mitchell 4=parzen 5=lanczos4(a=2) 6=lanczos6(a=3)
+float kernelW(float x, float mode) {
+  if (mode < 2.5) return cubicW(x, 0.0, 0.5);
+  if (mode < 3.5) return cubicW(x, 0.3333333, 0.3333333);
+  if (mode < 4.5) return cubicW(x, 1.0, 0.0);
+  if (mode < 5.5) return lanczosW(x, 2.0);
+  return lanczosW(x, 3.0);
+}
+
+vec4 sampleFiltered(sampler2D tex, vec2 uv, vec2 size, float mode) {
+  vec2 texel = 1.0 / size;
+  // 0 = impulse. Snap to the texel centre so the result can't depend on
+  // whatever GL filter the texture carries.
+  if (mode < 0.5) return texture2D(tex, (floor(uv * size) + 0.5) * texel);
+
+  vec2 t = uv * size - 0.5;
+  vec2 base = floor(t);
+  vec2 f = t - base;
+
+  // 1 = bilinear: 2x2 by hand, for the same reason.
+  if (mode < 1.5) {
+    vec4 c00 = texture2D(tex, (base + vec2(0.5, 0.5)) * texel);
+    vec4 c10 = texture2D(tex, (base + vec2(1.5, 0.5)) * texel);
+    vec4 c01 = texture2D(tex, (base + vec2(0.5, 1.5)) * texel);
+    vec4 c11 = texture2D(tex, (base + vec2(1.5, 1.5)) * texel);
+    return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+  }
+
+  // Lanczos6 wants 6 taps per axis, the rest 4. One fixed 6x6 loop with zero
+  // weights outside the radius keeps the bounds constant, as GLSL ES requires.
+  float radius = (mode > 5.5) ? 3.0 : 2.0;
+  vec4 acc = vec4(0.0);
+  float wsum = 0.0;
+  for (int j = -2; j <= 3; j++) {
+    float dy = float(j) - f.y;
+    float wy = (abs(dy) > radius) ? 0.0 : kernelW(dy, mode);
+    for (int i = -2; i <= 3; i++) {
+      float dx = float(i) - f.x;
+      float w = (abs(dx) > radius) ? 0.0 : wy * kernelW(dx, mode);
+      acc += texture2D(tex, (base + vec2(float(i), float(j)) + 0.5) * texel) * w;
+      wsum += w;
+    }
+  }
+  return wsum > 0.0 ? acc / wsum : texture2D(tex, uv);
+}
 
 // output bottom-left px O -> input uv (top-left); .z = inside flag
 vec3 invSample(vec2 O, vec2 rot, vec2 c, vec2 t, vec2 invs, vec2 size) {
@@ -573,13 +654,13 @@ void main() {
   // whether outside the BG footprint is transparent (bo=1) or edge-held (bo=0).
   vec3 rbg = invSample(O, u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size);
   float bgCov = (u_bg_bo > 0.5) ? rbg.z : 1.0;
-  vec4 bgTex = texture2D(u_bg, rbg.xy);
+  vec4 bgTex = sampleFiltered(u_bg, rbg.xy, u_bg_size, u_bg_flt);
   vec3 Brgb = bgTex.rgb * bgCov;
   float bAlphaOwn = bgTex.a;
   float b;
   if (u_ba_has > 0.5) {
     vec3 rba = invSample(O, u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size);
-    b = dot(texture2D(u_ba, rba.xy).rgb, LUMA) * rba.z;
+    b = dot(sampleFiltered(u_ba, rba.xy, u_ba_size, u_ba_flt).rgb, LUMA) * rba.z;
   } else {
     b = bAlphaOwn;
   }
@@ -594,14 +675,14 @@ void main() {
   if (u_fg_has > 0.5) {
     vec3 r = invSample(O, u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size);
     fgInside = r.z;
-    vec4 fgTex = texture2D(u_fg, r.xy);
+    vec4 fgTex = sampleFiltered(u_fg, r.xy, u_fg_size, u_fg_flt);
     A = fgTex.rgb; fgAlphaOwn = fgTex.a;
   }
   float fgCov = (u_fg_has > 0.5) ? ((u_fg_bo > 0.5) ? fgInside : 1.0) : 0.0;
   float a;
   if (u_fa_has > 0.5) {
     vec3 rfa = invSample(O, u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size);
-    a = dot(texture2D(u_fa, rfa.xy).rgb, LUMA) * rfa.z * fgCov;
+    a = dot(sampleFiltered(u_fa, rfa.xy, u_fa_size, u_fa_flt).rgb, LUMA) * rfa.z * fgCov;
   } else {
     a = fgAlphaOwn * fgCov;
   }
@@ -640,7 +721,7 @@ void main() {
   float m = 1.0;
   if (u_mt_has > 0.5) {
     vec3 rmt = invSample(O, u_mt_rot, u_mt_c, u_mt_t, u_mt_invs, u_mt_size);
-    m = dot(texture2D(u_mt, rmt.xy).rgb, LUMA) * rmt.z;
+    m = dot(sampleFiltered(u_mt, rmt.xy, u_mt_size, u_mt_flt).rgb, LUMA) * rmt.z;
   }
   gl_FragColor = vec4(mix(Brgb, outRgb, m), mix(b, outA, m));
 }
@@ -709,6 +790,12 @@ function compUniforms(
     u_fg_has: fg ? 1 : 0,
     u_fa_has: fa ? 1 : 0,
     u_mt_has: mt ? 1 : 0,
+    // Reconstruction filter per input — see CompResampleFilter.
+    u_bg_flt: compResampleIndex(params.resample?.bg),
+    u_ba_flt: compResampleIndex(params.resample?.bgAlpha),
+    u_fg_flt: compResampleIndex(params.resample?.fg),
+    u_fa_flt: compResampleIndex(params.resample?.fgAlpha),
+    u_mt_flt: compResampleIndex(params.resample?.matte),
   };
   Object.assign(u, piecesToUniforms("u_bg", computePieces(params.bgTransform, "none", bg.w, bg.h, bg.w, bg.h)));
   if (ba) {

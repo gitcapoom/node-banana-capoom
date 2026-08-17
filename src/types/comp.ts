@@ -71,6 +71,59 @@ export function defaultCompFilter(): CompInputFilter {
 }
 
 /**
+ * RECONSTRUCTION filter — which kernel rebuilds the source when a transform
+ * resamples it. This is the Transform-node "filter" in the compositing sense
+ * (Nuke's impulse/cubic/Keys/Mitchell/Parzen/Lanczos), and is a different thing
+ * entirely from CompInputFilter above, which is a blur applied AFTER sampling.
+ *
+ * It only has an effect where the sampling grid does not line up with the
+ * source grid — i.e. under scale, rotation or sub-pixel translation. At
+ * identity it is a passthrough by construction.
+ *
+ *   impulse    nearest neighbour — no interpolation, hard aliased edges
+ *   bilinear   2x2 linear; the previous behaviour, and the default
+ *   keys       Catmull-Rom (B=0, C=1/2) — sharp, mild ringing
+ *   mitchell   Mitchell-Netravali (B=1/3, C=1/3) — balanced, the usual default
+ *   parzen     cubic B-spline (B=1, C=0) — soft, no ringing
+ *   lanczos4   windowed sinc, a=2 — sharp
+ *   lanczos6   windowed sinc, a=3 — sharpest, most ringing, most taps
+ */
+export type CompResampleFilter =
+  | "impulse"
+  | "bilinear"
+  | "keys"
+  | "mitchell"
+  | "parzen"
+  | "lanczos4"
+  | "lanczos6";
+
+/** Order matters: the index is what the shader receives as u_*_flt. */
+export const COMP_RESAMPLE_FILTERS: CompResampleFilter[] = [
+  "impulse", "bilinear", "keys", "mitchell", "parzen", "lanczos4", "lanczos6",
+];
+
+export const COMP_RESAMPLE_LABELS: Record<CompResampleFilter, string> = {
+  impulse: "Impulse",
+  bilinear: "Bilinear",
+  keys: "Keys",
+  mitchell: "Mitchell",
+  parzen: "Parzen",
+  lanczos4: "Lanczos4",
+  lanczos6: "Lanczos6",
+};
+
+/** Bilinear: what every transform did before this was configurable, so
+ *  existing comps keep the look they were built with. */
+export function defaultCompResample(): CompResampleFilter {
+  return "bilinear";
+}
+
+export function compResampleIndex(f: CompResampleFilter | undefined): number {
+  const i = COMP_RESAMPLE_FILTERS.indexOf(f ?? "bilinear");
+  return i < 0 ? 1 : i;
+}
+
+/**
  * Per-input affine transform (FG, FG_Alpha, Matte — never BG).
  * `enabled` is the master checkbox that reveals the on-screen controls; for
  * FG_Alpha, `enabled=false` ALSO means "follow FG" (inherit FG's transform).
@@ -122,11 +175,18 @@ export interface CompNodeData extends BaseNodeData {
 
   // Per-input filters (blur/defocus pre-pass). Optional so legacy saves load
   // untouched — absent ⇒ "none".
+  /** Blur/defocus applied AFTER sampling (labelled "Blur" in the editor). */
   bgFilter?: CompInputFilter;
   bgAlphaFilter?: CompInputFilter;
   fgFilter?: CompInputFilter;
   fgAlphaFilter?: CompInputFilter;
   matteFilter?: CompInputFilter;
+  /** Reconstruction filter used WHILE transforming (labelled "Filter"). */
+  bgResample?: CompResampleFilter;
+  bgAlphaResample?: CompResampleFilter;
+  fgResample?: CompResampleFilter;
+  fgAlphaResample?: CompResampleFilter;
+  matteResample?: CompResampleFilter;
 
   /** Multiply the FG's / BG's RGB by its (effective) alpha before compositing. */
   premultiplyFg: boolean;
@@ -200,6 +260,11 @@ export function defaultCompData(): CompNodeData {
     fgFilter: defaultCompFilter(),
     fgAlphaFilter: defaultCompFilter(),
     matteFilter: defaultCompFilter(),
+    bgResample: defaultCompResample(),
+    bgAlphaResample: defaultCompResample(),
+    fgResample: defaultCompResample(),
+    fgAlphaResample: defaultCompResample(),
+    matteResample: defaultCompResample(),
     premultiplyFg: false,
     premultiplyBg: false,
     bgOpacity: 1,
