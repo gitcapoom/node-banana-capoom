@@ -160,6 +160,91 @@ function DynamicPinsToggle() {
   );
 }
 
+
+/**
+ * Reclaim media that no node references any more.
+ *
+ * Every generation, crop, comp commit and roto writes a new content-addressed file
+ * and nothing has ever removed the superseded one, so a project folder only grows.
+ * Measured on one real shot: 6.6 GB of 7.9 GB unreferenced.
+ *
+ * Deliberately manual, deliberately two-step, and it MOVES rather than deletes —
+ * the server scans every manifest in the folder including the rolling .bak, then
+ * relocates orphans to `_trash/<timestamp>/`. Requires a clean save first, because
+ * in-session undo history still points at refs the saved file no longer mentions.
+ */
+function CleanUpMediaButton() {
+  const saveDirectoryPath = useWorkflowStore((s) => s.saveDirectoryPath);
+  const hasUnsavedChanges = useWorkflowStore((s) => s.hasUnsavedChanges);
+  const [busy, setBusy] = useState(false);
+  const show = useToast((s) => s.show);
+
+  const mb = (b: number) => (b / 1048576 >= 1024 ? (b / 1073741824).toFixed(1) + " GB" : Math.round(b / 1048576) + " MB");
+
+  const run = useCallback(async () => {
+    if (!saveDirectoryPath || busy) return;
+    if (hasUnsavedChanges) {
+      show("Save the workflow first — unsaved changes still reference images on disk.", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      const scan = await (await fetch(`/api/workflow-media-gc?workflowPath=${encodeURIComponent(saveDirectoryPath)}`)).json();
+      if (!scan.success) { show(`Scan failed: ${scan.error}`, "error"); return; }
+      if (!scan.orphans?.length) { show("No unused images — nothing to clean up.", "info"); return; }
+      const ok = window.confirm(
+        `Move ${scan.orphans.length} unused files (${mb(scan.orphanBytes)}) to _trash?
+
+` +
+        `Keeping ${scan.referencedCount} referenced files (${mb(scan.referencedBytes)}).
+` +
+        `Checked: ${scan.scannedManifests.join(", ")}.
+
+` +
+        `Files are MOVED, not deleted — delete _trash yourself once you're happy.`,
+      );
+      if (!ok) return;
+      const res = await (await fetch("/api/workflow-media-gc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflowPath: saveDirectoryPath }),
+      })).json();
+      if (!res.success) { show(`Clean-up failed: ${res.error}`, "error"); return; }
+      show(
+        `Moved ${res.moved} files (${mb(res.movedBytes)}) to _trash` +
+        (res.failed?.length ? ` — ${res.failed.length} could not be moved` : ""),
+        "success",
+      );
+    } catch (e) {
+      show(`Clean-up failed: ${e instanceof Error ? e.message : "Unknown error"}`, "error");
+    } finally {
+      setBusy(false);
+    }
+  }, [saveDirectoryPath, hasUnsavedChanges, busy, show]);
+
+  if (!saveDirectoryPath) return null;
+  return (
+    <button
+      onClick={run}
+      disabled={busy}
+      className="p-1.5 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded transition-colors disabled:opacity-50"
+      title="Clean up unused images — moves media no node references into _trash"
+    >
+      {busy ? (
+        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+        </svg>
+      ) : (
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+
 export function Header() {
   const {
     workflowName,
@@ -323,6 +408,7 @@ export function Header() {
 
   const settingsButtons = (
     <div className="flex items-center gap-0.5 ml-1 pl-1 border-l border-neutral-700/50">
+      <CleanUpMediaButton />
       <button
         onClick={handleOpenSettings}
         className="p-1.5 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded transition-colors"
