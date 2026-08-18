@@ -8,6 +8,7 @@ import {
   executeImageCompare,
   executeGlbViewer,
   executeBlur,
+  executeComp,
 } from "../simpleNodeExecutors";
 
 // executeBlur's GPU commit + run-hydration are environment-bound — stub them.
@@ -18,6 +19,17 @@ vi.mock("@/utils/colorChain", async (importOriginal) => {
 vi.mock("@/store/execution/hydrateForRun", () => ({
   ensureFullResForNodes: vi.fn().mockResolvedValue(undefined),
 }));
+// The comp composite is GPU/canvas-bound; the assertions here are about WHETHER
+// it runs, not what it produces.
+vi.mock("@/utils/compComposite", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/utils/compComposite")>();
+  return {
+    ...actual,
+    compositeCompForExecutor: vi.fn().mockResolvedValue({
+      dataUrl: "data:image/png;base64,COMPED", outW: 10, outH: 10,
+    }),
+  };
+});
 import type { NodeExecutionContext } from "../types";
 import type { WorkflowNode, WorkflowEdge } from "@/types";
 
@@ -657,5 +669,80 @@ describe("executeBlur", () => {
 
     expect(ctx.updateNodeData).toHaveBeenCalledWith("blur1", { outputImage: null, outputImageRef: undefined, outputImageThumbKey: null });
     expect(commitBlurNode).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeComp — skip when already current", () => {
+  const IMG = "data:image/png;base64,BG";
+
+  function compSetup(compData: Record<string, unknown>) {
+    const src = makeNode("in1", "imageInput", { image: IMG, imageRef: "img-bg" });
+    const node = makeNode("comp1", "comp", {
+      mergeOp: "over", bgImage: null, bgOpacity: 1, fgOpacity: 1, ...compData,
+    });
+    const ctx = makeCtx(node, {
+      getEdges: vi.fn().mockReturnValue([
+        { id: "e1", source: "in1", target: "comp1", targetHandle: "image-comp_bg" } as WorkflowEdge,
+      ]),
+      getNodes: vi.fn().mockReturnValue([node, src]),
+    });
+    return { ctx, node, src };
+  }
+
+  it("composites when there is no recorded signature", async () => {
+    const { compositeCompForExecutor } = await import("@/utils/compComposite");
+    vi.mocked(compositeCompForExecutor).mockClear();
+    const { ctx } = compSetup({});
+    await executeComp(ctx);
+    expect(compositeCompForExecutor).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips the composite when the recorded signature still matches", async () => {
+    const { compositeCompForExecutor } = await import("@/utils/compComposite");
+    const { compCommitSignature } = await import("@/utils/compSignature");
+    vi.mocked(compositeCompForExecutor).mockClear();
+    const src = makeNode("in1", "imageInput", { image: IMG, imageRef: "img-bg" });
+    const data: Record<string, unknown> = { mergeOp: "over", bgImage: null, bgOpacity: 1, fgOpacity: 1 };
+    const sig = compCommitSignature(data, {
+      bg: { srcId: "in1", node: src, value: IMG },
+      bgAlpha: { srcId: null, node: null, value: null },
+      fg: { srcId: null, node: null, value: null },
+      fgAlpha: { srcId: null, node: null, value: null },
+      matte: { srcId: null, node: null, value: null },
+    });
+    const node = makeNode("comp1", "comp", { ...data, compCommitSig: sig, outputImage: "data:image/png;base64,OLD" });
+    const ctx = makeCtx(node, {
+      getEdges: vi.fn().mockReturnValue([
+        { id: "e1", source: "in1", target: "comp1", targetHandle: "image-comp_bg" } as WorkflowEdge,
+      ]),
+      getNodes: vi.fn().mockReturnValue([node, src]),
+    });
+    await executeComp(ctx);
+    expect(compositeCompForExecutor).not.toHaveBeenCalled();
+  });
+
+  it("does NOT skip when the signature matches but the output is missing", async () => {
+    // A deleted ref file leaves the signature intact and the pixels gone.
+    const { compositeCompForExecutor } = await import("@/utils/compComposite");
+    const { compCommitSignature } = await import("@/utils/compSignature");
+    vi.mocked(compositeCompForExecutor).mockClear();
+    const src = makeNode("in1", "imageInput", { image: IMG, imageRef: "img-bg" });
+    const data: Record<string, unknown> = { mergeOp: "over", bgImage: null, bgOpacity: 1, fgOpacity: 1 };
+    const sig = compCommitSignature(data, {
+      bg: { srcId: "in1", node: src, value: IMG },
+      bgAlpha: { srcId: null, node: null, value: null },
+      fg: { srcId: null, node: null, value: null },
+      fgAlpha: { srcId: null, node: null, value: null },
+      matte: { srcId: null, node: null, value: null },
+    });
+    const node = makeNode("comp1", "comp", { ...data, compCommitSig: sig, outputImage: null });
+    const ctx = makeCtx(node, {
+      getEdges: vi.fn().mockReturnValue([
+        { id: "e1", source: "in1", target: "comp1", targetHandle: "image-comp_bg" } as WorkflowEdge,
+      ]),
+      getNodes: vi.fn().mockReturnValue([node, src]),
+    });
+    await executeComp(ctx);
+    expect(compositeCompForExecutor).toHaveBeenCalledTimes(1);
   });
 });

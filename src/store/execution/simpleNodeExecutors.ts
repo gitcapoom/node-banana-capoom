@@ -34,6 +34,7 @@ import { applyCubemapEquirect, splitCubemap, combineCubemap, CUBE_FACES, type Cu
 import { coerceChannel } from "@/utils/colorGrade";
 import { shiftImageX } from "@/utils/panoShift";
 import { renderSphereLight } from "@/utils/renderSphereLight";
+import { compCommitSignature } from "@/utils/compSignature";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { ensureFullResForNodes } from "@/store/execution/hydrateForRun";
 import { commitProcessorOutput } from "@/store/execution/commitProcessorOutput";
@@ -559,6 +560,32 @@ export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
       if (data.outputImage !== null) await commitProcessorOutput(updateNodeData, node.id, null);
       return;
     }
+    // ALREADY CURRENT? Then don't redo it.
+    //
+    // The component and this executor each composite and encode the same comp, so
+    // a 7-deep chain paid ~14 full-res encodes at 1.0-1.8s apiece. Worse, the
+    // updateNodeData below changes the downstream comp's inputs, which makes ITS
+    // signature change, which makes its component re-render — so the duplication
+    // cascades. Skipping here cuts the cascade at the source.
+    //
+    // Two safety valves, because a signature bug now shows up as a STALE render
+    // on Run rather than only a slow one:
+    //   - never skip when outputImage is null after hydration (a deleted ref file)
+    //   - never skip when the node carries an error
+    const freshNodes = getNodes();
+    const byId = new Map(freshNodes.map((n) => [n.id, n]));
+    const pinOf = (srcId: string | null, value: string | null) => ({
+      srcId, node: srcId ? byId.get(srcId) ?? null : null, value,
+    });
+    const runSig = compCommitSignature(data as unknown as Record<string, unknown>, {
+      bg: pinOf(bgSrc, bg), bgAlpha: pinOf(baSrc, ba), fg: pinOf(fgSrc, fg),
+      fgAlpha: pinOf(faSrc, fa), matte: pinOf(mtSrc, mt),
+    });
+    const freshData = (byId.get(node.id)?.data ?? data) as import("@/types").CompNodeData;
+    if (freshData.compCommitSig === runSig && freshData.outputImage && !freshData.error) {
+      return;
+    }
+
     const { compositeCompForExecutor } = await import("@/utils/compComposite");
     const { dataUrl, outW, outH } = await compositeCompForExecutor(
       { bg, bgAlpha: ba, fg, fgAlpha: fa, matte: mt },
@@ -567,7 +594,8 @@ export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
       node.id,
     );
     updateNodeData(node.id, {
-      outputImage: dataUrl, outputImageRef: undefined, outputWidth: outW, outputHeight: outH, error: null,
+      outputImage: dataUrl, outputImageRef: undefined, outputWidth: outW, outputHeight: outH,
+      compCommitSig: runSig, error: null,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
