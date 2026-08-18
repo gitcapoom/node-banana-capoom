@@ -167,6 +167,22 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         return;
       }
       if (!urls.bg || !allInputsResolved) {
+        // NOTHING TO RENDER -> DON'T PULL THE PIXELS. The committed output
+        // already matches this exact input set, so hydrating up to five full-res
+        // pins would buy nothing. This line used to sit above the guard, and on
+        // open EVERY comp took it, because lazy loading leaves `urls.bg` null.
+        // Measured on the real graph: 43 distinct full-res images dragged off the
+        // network share after a single open, the slowest taking 44 SECONDS, all
+        // to feed composites that were then skipped. That queue is what made the
+        // canvas sluggish for minutes and starved concurrent saves.
+        //
+        // Consequence, same one already accepted at the `hasFloat` guard below:
+        // this comp does not republish its float texture, so a downstream comp
+        // that genuinely re-renders chains through the 8-bit `outputImage`
+        // instead. Its own render path hydrates what it needs, so the result is
+        // lower precision on that path, never a missing input. The committed
+        // output is untouched — only a real full-res render ever writes it.
+        if (republishOnly) return;
         // A connected pin is lazily unloaded — load the inputs and wait.
         // Rendering now would drop it and flatten the output to opaque.
         void loadNodeFullResInputs(id);

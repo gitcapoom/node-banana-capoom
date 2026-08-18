@@ -84,21 +84,57 @@ export async function saveMediaImmediately(
 }
 
 /**
+ * In-flight de-duplication for loadMediaById.
+ *
+ * Every consumer resolves its own inputs independently, so N nodes sharing one
+ * upstream fire N identical full-res reads at the same instant. Measured on a
+ * real project immediately after opening it: 87 requests for 43 distinct files,
+ * one of them fetched 8 times over, each taking up to 59 SECONDS from the
+ * network share. That queue is what makes a freshly opened workflow sluggish for
+ * minutes and starves every other request behind it — including saves, which is
+ * how this was found.
+ *
+ * Deliberately NOT a result cache: entries are dropped the moment the request
+ * settles, so nothing retains a ~30MB data URL. Callers already keep what they
+ * need in node data. `loadImageById` in imageStorage.ts has had both this and a
+ * result cache all along; this is the sibling that never got either.
+ */
+const inFlightMediaLoads = new Map<string, Promise<string | null>>();
+
+/**
  * Load media content from disk by ref ID.
  * Tries the workflow-images API first, then falls back to load-generation.
+ *
+ * Concurrent calls for the same (path, folder, ref) share one request.
  *
  * @param refId - The ref ID to load
  * @param saveDirectoryPath - Project directory path
  * @param folder - "inputs" or "generations"
  * @returns Base64 data URL on success, or null on failure
  */
-export async function loadMediaById(
+export function loadMediaById(
   refId: string,
   saveDirectoryPath: string,
   folder: "inputs" | "generations" = "inputs"
 ): Promise<string | null> {
-  if (!refId || !saveDirectoryPath) return null;
+  if (!refId || !saveDirectoryPath) return Promise.resolve(null);
 
+  const key = `${saveDirectoryPath}::${folder}::${refId}`;
+  const existing = inFlightMediaLoads.get(key);
+  if (existing) return existing;
+
+  const pending = fetchMediaById(refId, saveDirectoryPath, folder).finally(() => {
+    inFlightMediaLoads.delete(key);
+  });
+  inFlightMediaLoads.set(key, pending);
+  return pending;
+}
+
+async function fetchMediaById(
+  refId: string,
+  saveDirectoryPath: string,
+  folder: "inputs" | "generations"
+): Promise<string | null> {
   try {
     // Try workflow-images API first
     const params = new URLSearchParams({
