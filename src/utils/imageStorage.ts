@@ -51,11 +51,14 @@ function computeContentHash(data: string): string {
   const memo = hashMemo.get(data);
   if (memo) return memo;
   const CHUNK = 8 * 1024 * 1024; // 8M chars per update
+  const t0 = performance.now();
   const hash = crypto.createHash("md5");
   for (let i = 0; i < data.length; i += CHUNK) {
     hash.update(data.slice(i, i + CHUNK));
   }
   const digest = hash.digest("hex");
+  saveStats.hashCount++;
+  saveStats.hashMs += performance.now() - t0;
   hashMemo.set(data, digest);
   trimHashMemo();
   return digest;
@@ -96,6 +99,37 @@ export function resetImageStorageCaches(): void {
 }
 
 /**
+ * Where a save actually spends its time. Logged once per save.
+ *
+ * Saves have been slow for reasons that were not guessable from the code — the
+ * candidate costs are a pure-JS md5, a LAN round-trip per image, and a stat over
+ * SMB, and which one dominates changes with the project. One line per save beats
+ * another round of speculation.
+ */
+const saveStats = {
+  hashCount: 0, hashMs: 0,
+  checkCount: 0, checkMs: 0,
+  uploadCount: 0, uploadMs: 0, uploadMB: 0,
+  skippedCount: 0, skippedMB: 0,
+};
+function resetSaveStats(): void {
+  saveStats.hashCount = 0; saveStats.hashMs = 0;
+  saveStats.checkCount = 0; saveStats.checkMs = 0;
+  saveStats.uploadCount = 0; saveStats.uploadMs = 0; saveStats.uploadMB = 0;
+  saveStats.skippedCount = 0; saveStats.skippedMB = 0;
+}
+
+/** Decoded byte length of a base64 data URL, without decoding it. */
+function base64ByteLength(dataUrl: string): number {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return -1;
+  const n = dataUrl.length - comma - 1;
+  if (n <= 0) return -1;
+  const pad = dataUrl.endsWith("==") ? 2 : dataUrl.endsWith("=") ? 1 : 0;
+  return Math.floor((n * 3) / 4) - pad;
+}
+
+/**
  * Generate a unique image ID for external storage
  */
 export function generateImageId(): string {
@@ -116,16 +150,28 @@ function isBase64DataUrl(str: string | null | undefined): str is string {
  * THIS project? Used at save-time so a ref carried in from another project (via
  * copy-paste) gets re-saved here instead of left dangling.
  */
-async function imageRefExists(workflowPath: string, ref: string, folder: "inputs" | "generations"): Promise<boolean> {
+async function imageRefStat(
+  workflowPath: string,
+  ref: string,
+  folder: "inputs" | "generations"
+): Promise<{ exists: boolean; size: number }> {
+  const t0 = performance.now();
   try {
     const params = new URLSearchParams({ workflowPath, imageId: ref, folder, check: "1" });
     const res = await fetch(`/api/workflow-images?${params.toString()}`);
-    if (!res.ok) return false;
+    if (!res.ok) return { exists: false, size: -1 };
     const j = await res.json();
-    return !!j.exists;
+    return { exists: !!j.exists, size: typeof j.size === "number" ? j.size : -1 };
   } catch {
-    return false;
+    return { exists: false, size: -1 };
+  } finally {
+    saveStats.checkCount++;
+    saveStats.checkMs += performance.now() - t0;
   }
+}
+
+async function imageRefExists(workflowPath: string, ref: string, folder: "inputs" | "generations"): Promise<boolean> {
+  return (await imageRefStat(workflowPath, ref, folder)).exists;
 }
 
 /**
@@ -219,6 +265,8 @@ export async function externalizeWorkflowImages(
   workflowPath: string
 ): Promise<WorkflowFile> {
   const savedImageIds = new Map<string, string>(); // base64 hash -> imageId (for deduplication)
+  resetSaveStats();
+  const saveT0 = performance.now();
 
   // Process nodes in parallel batches with controlled concurrency
   const BATCH_SIZE = 3;
@@ -238,10 +286,20 @@ export async function externalizeWorkflowImages(
     }
   }
 
-  return {
+  const out = {
     ...workflow,
     nodes: restampCompSignatures(externalizedNodes, workflow.edges ?? []),
   };
+
+  console.info(
+    `[save] ${Math.round(performance.now() - saveT0)}ms total — ` +
+    `hash ${saveStats.hashCount}x/${Math.round(saveStats.hashMs)}ms, ` +
+    `exists-check ${saveStats.checkCount}x/${Math.round(saveStats.checkMs)}ms, ` +
+    `upload ${saveStats.uploadCount}x/${Math.round(saveStats.uploadMs)}ms/${saveStats.uploadMB.toFixed(1)}MB, ` +
+    `skipped ${saveStats.skippedCount}x/${saveStats.skippedMB.toFixed(1)}MB`
+  );
+
+  return out;
 }
 
 /**
@@ -924,6 +982,31 @@ async function saveImageAndGetId(
   const imageId = existingId || `img-${contentHash}`;
 
   const savePromise = (async () => {
+    // Already on disk? Then the upload is pure waste. Filenames are content
+    // addressed (`img-<md5>`), so a file of this name holds exactly these bytes —
+    // re-sending 30MB over the LAN for the server to overwrite it with identical
+    // content is the bulk of a slow save. Measured: a 15-minute save of this
+    // project wrote ZERO new files.
+    //
+    // Size is compared, not just existence: a half-written file from an
+    // interrupted save would otherwise be trusted forever, and nothing else in
+    // the pipeline would ever notice. On any mismatch — or if the check itself
+    // fails — fall through and upload.
+    //
+    // Only for content-addressed ids. With an explicit `existingId` the caller
+    // picked the name, so the name says nothing about the bytes.
+    if (!existingId) {
+      const expected = base64ByteLength(imageData);
+      const stat = await imageRefStat(workflowPath, imageId, folder);
+      if (stat.exists && expected > 0 && stat.size === expected) {
+        saveStats.skippedCount++;
+        saveStats.skippedMB += expected / 1048576;
+        savedImageIds.set(hash, imageId);
+        return imageId;
+      }
+    }
+
+    const t0 = performance.now();
     const response = await fetchWithTimeout(
       "/api/workflow-images",
       {
@@ -939,6 +1022,9 @@ async function saveImageAndGetId(
     );
 
     const result = await response.json();
+    saveStats.uploadCount++;
+    saveStats.uploadMs += performance.now() - t0;
+    saveStats.uploadMB += imageData.length / 1048576;
 
     if (!result.success) {
       throw new Error(`Failed to save image: ${result.error}`);

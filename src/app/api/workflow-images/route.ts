@@ -296,8 +296,15 @@ export async function GET(request: NextRequest) {
     }
 
     // Lightweight existence check (used by save-time ref validation) — no file read.
+    // Returns the byte size too: the save path compares it against what it was
+    // about to upload, so a truncated file from an interrupted save is detected
+    // and rewritten rather than trusted forever.
     if (request.nextUrl.searchParams.get("check") === "1") {
-      return NextResponse.json({ success: true, exists: !!filePath });
+      let size = -1;
+      if (filePath) {
+        try { size = (await fs.stat(filePath)).size; } catch { size = -1; }
+      }
+      return NextResponse.json({ success: true, exists: !!filePath, size });
     }
 
     if (!filePath) {
