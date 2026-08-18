@@ -224,6 +224,65 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+/** Either decode product; both are valid `texImage2D` sources. */
+type DecodedImage = ImageBitmap | HTMLImageElement;
+
+function decodedW(d: DecodedImage): number { return "naturalWidth" in d ? d.naturalWidth : d.width; }
+function decodedH(d: DecodedImage): number { return "naturalHeight" in d ? d.naturalHeight : d.height; }
+/** ImageBitmaps pin their pixels (~96MB for a 24MP frame) until closed. */
+function closeDecoded(d: DecodedImage): void {
+  if ("close" in d && typeof d.close === "function") d.close();
+}
+
+/**
+ * EVERY option here is set deliberately. The committed pixels of every existing
+ * project depend on this decode matching what an <img> upload produced, and the
+ * defaults do not.
+ *
+ * Verified in Chrome by uploading both decodes into an RGBA8 texture with
+ * identical unpack state and reading the texels back:
+ *
+ *  - premultiplyAlpha:"none" is byte-identical to <img>. Leaving it to the UA
+ *    default is NOT harmless — on a full alpha ramp 72% of bytes differed, max
+ *    delta 254. That is every soft edge in the comp silently wrong, and no test
+ *    in jsdom can see it.
+ *  - colorSpaceConversion:"default" and imageOrientation:"from-image" are what
+ *    match <img> + BROWSER_DEFAULT_WEBGL. The "none"/"none" pair measured
+ *    identical too, but only because nothing in the test project carries an ICC
+ *    profile or an EXIF orientation (checked: 0 PNGs with iCCP, 0 JPEGs with an
+ *    orientation tag). A phone photo dropped on an imageInput has both, and
+ *    "none" would upload it unrotated and unconverted.
+ */
+const BITMAP_OPTS: ImageBitmapOptions = {
+  premultiplyAlpha: "none",
+  colorSpaceConversion: "default",
+  imageOrientation: "from-image",
+};
+
+/**
+ * Decode to a texture-uploadable image, off the main thread when possible.
+ *
+ * `new Image()` decodes on the main thread and, because resolveComp used to
+ * await it while holding the GL mutex, 35 of them ran strictly one after
+ * another. createImageBitmap decodes on a worker thread and lets the five
+ * inputs of a comp overlap.
+ *
+ * Falls back to <img> on any failure — an unsupported blob source, a fetch
+ * rejection — so the decode path can never become the reason a comp fails to
+ * render.
+ */
+async function decodeImage(src: string): Promise<DecodedImage> {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const blob = await (await fetch(src)).blob();
+      return await createImageBitmap(blob, BITMAP_OPTS);
+    } catch {
+      // fall through
+    }
+  }
+  return loadImage(src);
+}
+
 /** Resolve a ShaderInput to a bound-able input texture. Returns null when
  *  a float input was requested but its texture isn't in the registry. */
 async function resolveInput(gl: WebGL2RenderingContext, input: ShaderInput): Promise<FloatTex | null> {
@@ -235,7 +294,7 @@ async function resolveInput(gl: WebGL2RenderingContext, input: ShaderInput): Pro
     return { tex: urlTexCache.tex, w: urlTexCache.w, h: urlTexCache.h };
   }
   if (urlTexCache) gl.deleteTexture(urlTexCache.tex);
-  const img = await loadImage(input.url);
+  const img = await decodeImage(input.url);
   const tex = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -243,8 +302,10 @@ async function resolveInput(gl: WebGL2RenderingContext, input: ShaderInput): Pro
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-  urlTexCache = { url: input.url, tex, w: img.naturalWidth, h: img.naturalHeight };
-  return { tex, w: img.naturalWidth, h: img.naturalHeight };
+  const iw = decodedW(img), ih = decodedH(img);
+  closeDecoded(img);
+  urlTexCache = { url: input.url, tex, w: iw, h: ih };
+  return { tex, w: iw, h: ih };
 }
 
 function setUniforms(gl: WebGL2RenderingContext, prog: WebGLProgram, uniforms: Record<string, UniformValue>) {
@@ -807,7 +868,11 @@ function getDummyTex(gl: WebGL2RenderingContext): WebGLTexture {
   return tex;
 }
 
-async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | null): Promise<FloatTex | null> {
+async function resolveComp(
+  gl: WebGL2RenderingContext,
+  input: CompResolvable | null,
+  decoded?: Map<string, DecodedImage>,
+): Promise<FloatTex | null> {
   if (!input) return null;
   if ("floatNodeId" in input) {
     // NOT mipmapped, deliberately.
@@ -838,7 +903,9 @@ async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | n
   }
   const hit = compUrlCache.get(input.url);
   if (hit) return hit;
-  const img = await loadImage(input.url);
+  // Decoded before the lock was taken, when possible — see predecodeComp.
+  const pre = decoded?.get(input.url);
+  const img = pre ?? await decodeImage(input.url);
   const tex = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, tex);
   // NOT mipmapped. Mipmapping these looked like the right prefilter for
@@ -857,7 +924,10 @@ async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | n
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-  const entry = { tex, w: img.naturalWidth, h: img.naturalHeight };
+  const entry = { tex, w: decodedW(img), h: decodedH(img) };
+  // A pre-decoded image belongs to the caller's map and is closed there; one we
+  // decoded ourselves is ours to release the moment it is on the GPU.
+  if (!pre) closeDecoded(img);
   // RGBA8 upload above, so 4 bytes per texel.
   compUrlCache.set(input.url, entry, entry.w * entry.h * 4);
   return entry;
@@ -948,20 +1018,57 @@ function compUniforms(
  * makes this a plain downsample — every transform, reformat and black-outside
  * calculation is expressed against u_outSize and is therefore untouched.
  */
+/**
+ * Decode a comp's URL inputs CONCURRENTLY, before the GL mutex is taken.
+ *
+ * resolveComp used to await its decode inside the lock, so a comp's five inputs
+ * decoded one after another and every other comp on the canvas queued behind
+ * them. Decoding here means the five overlap, on worker threads, while the lock
+ * is free for someone else's render.
+ *
+ * Skips URLs whose texture is already cached — that path never decodes. A
+ * failure is swallowed on purpose: resolveComp will simply decode it itself
+ * inside the lock, which is the old behaviour, not an error.
+ *
+ * The returned map is owned by the caller, which MUST close it (bitmaps pin
+ * their pixels). Keeping it local rather than module-level is deliberate:
+ * concurrent renders cannot then close each other's images.
+ */
+async function predecodeComp(inputs: CompRenderInputs): Promise<Map<string, DecodedImage>> {
+  const urls = new Set<string>();
+  for (const i of [inputs.bg, inputs.bgAlpha, inputs.fg, inputs.fgAlpha, inputs.matte]) {
+    if (i && "url" in i && !compUrlCache.has(i.url)) urls.add(i.url);
+  }
+  const out = new Map<string, DecodedImage>();
+  await Promise.all(
+    [...urls].map(async (u) => {
+      try { out.set(u, await decodeImage(u)); } catch { /* resolveComp retries */ }
+    }),
+  );
+  return out;
+}
+
+/** Release every image in a predecode map. */
+function closeDecodedMap(m: Map<string, DecodedImage>): void {
+  for (const d of m.values()) closeDecoded(d);
+  m.clear();
+}
+
 async function renderCompUnlocked(
   c: Ctx,
   inputs: CompRenderInputs,
   params: CompRenderParams,
   destNodeId: string,
   preview?: { scale: number; roi?: CompRoi },
+  decoded?: Map<string, DecodedImage>,
 ): Promise<{ w: number; h: number; entry: FloatTex; roi: CompRoi } | null> {
   const { gl, quad } = c;
-  let bg = await resolveComp(gl, inputs.bg);
+  let bg = await resolveComp(gl, inputs.bg, decoded);
   if (!bg) return null;
-  let ba = await resolveComp(gl, inputs.bgAlpha);
-  let fg = await resolveComp(gl, inputs.fg);
-  let fa = await resolveComp(gl, inputs.fgAlpha);
-  let mt = await resolveComp(gl, inputs.matte);
+  let ba = await resolveComp(gl, inputs.bgAlpha, decoded);
+  let fg = await resolveComp(gl, inputs.fg, decoded);
+  let fa = await resolveComp(gl, inputs.fgAlpha, decoded);
+  let mt = await resolveComp(gl, inputs.matte, decoded);
 
   // Per-input filter pre-passes (no-ops for identity params). Dims unchanged,
   // so the transform math downstream is unaffected.
@@ -1096,12 +1203,17 @@ function blitFloatToCanvasUnlocked(c: Ctx, nodeId: string, destCanvas: HTMLCanva
 
 /** Render the comp into destNodeId's float texture (for the chain). null ⇒
  *  float unsupported / no BG (caller falls back). */
-export function renderComp(inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string): Promise<{ w: number; h: number } | null> {
-  return withLock(async () => {
-    const c = getCtx();
-    if (!c || !c.floatOK) return null;
-    return renderCompUnlocked(c, inputs, params, destNodeId);
-  });
+export async function renderComp(inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string): Promise<{ w: number; h: number } | null> {
+  const decoded = await predecodeComp(inputs);
+  try {
+    return await withLock(async () => {
+      const c = getCtx();
+      if (!c || !c.floatOK) return null;
+      return renderCompUnlocked(c, inputs, params, destNodeId, undefined, decoded);
+    });
+  } finally {
+    closeDecodedMap(decoded);
+  }
 }
 
 /**
@@ -1112,14 +1224,19 @@ export function renderComp(inputs: CompRenderInputs, params: CompRenderParams, d
  * For interactive editing prefer renderCompPreviewToCanvas, which composites at
  * the viewport's resolution instead of the source's.
  */
-export function renderCompToCanvas(inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string, destCanvas: HTMLCanvasElement, maxDim?: number): Promise<boolean> {
-  return withLock(async () => {
-    const c = getCtx();
-    if (!c || !c.floatOK) return false;
-    const res = await renderCompUnlocked(c, inputs, params, destNodeId);
-    if (!res) return false;
-    return blitFloatToCanvasUnlocked(c, destNodeId, destCanvas, maxDim);
-  });
+export async function renderCompToCanvas(inputs: CompRenderInputs, params: CompRenderParams, destNodeId: string, destCanvas: HTMLCanvasElement, maxDim?: number): Promise<boolean> {
+  const decoded = await predecodeComp(inputs);
+  try {
+    return await withLock(async () => {
+      const c = getCtx();
+      if (!c || !c.floatOK) return false;
+      const res = await renderCompUnlocked(c, inputs, params, destNodeId, undefined, decoded);
+      if (!res) return false;
+      return blitFloatToCanvasUnlocked(c, destNodeId, destCanvas, maxDim);
+    });
+  } finally {
+    closeDecodedMap(decoded);
+  }
 }
 
 /** Newest requested preview per node — anything older bails at the lock. */
@@ -1139,7 +1256,7 @@ const previewGeneration = new Map<string, number>();
  * and without a generation check every intermediate frame of a drag still paid
  * for a full composite before the newest one could start.
  */
-export function renderCompPreviewToCanvas(
+export async function renderCompPreviewToCanvas(
   inputs: CompRenderInputs,
   params: CompRenderParams,
   destNodeId: string,
@@ -1149,19 +1266,26 @@ export function renderCompPreviewToCanvas(
 ): Promise<CompRoi | null> {
   const gen = (previewGeneration.get(destNodeId) ?? 0) + 1;
   previewGeneration.set(destNodeId, gen);
-  return withLock(async () => {
-    if (previewGeneration.get(destNodeId) !== gen) return null; // superseded while queued
-    const c = getCtx();
-    if (!c || !c.floatOK) return null;
-    const res = await renderCompUnlocked(c, inputs, params, destNodeId, {
-      scale: Math.max(0.02, Math.min(1, scale)),
-      roi,
+  // Decode before the lock. The generation bump above still happens first, so a
+  // newer request supersedes this one even while its decode is in flight.
+  const decoded = await predecodeComp(inputs);
+  try {
+    return await withLock(async () => {
+      if (previewGeneration.get(destNodeId) !== gen) return null; // superseded while queued
+      const c = getCtx();
+      if (!c || !c.floatOK) return null;
+      const res = await renderCompUnlocked(c, inputs, params, destNodeId, {
+        scale: Math.max(0.02, Math.min(1, scale)),
+        roi,
+      }, decoded);
+      if (!res) return null;
+      // The caller must lay the result out at the ROI it actually got back —
+      // clamping may have shrunk the requested rect at the frame edges.
+      return blitEntryToCanvasUnlocked(c, res.entry, destCanvas) ? res.roi : null;
     });
-    if (!res) return null;
-    // The caller must lay the result out at the ROI it actually got back —
-    // clamping may have shrunk the requested rect at the frame edges.
-    return blitEntryToCanvasUnlocked(c, res.entry, destCanvas) ? res.roi : null;
-  });
+  } finally {
+    closeDecodedMap(decoded);
+  }
 }
 
 // ─── Blur passes (Blur node + comp per-input filters) ─────────────────────
