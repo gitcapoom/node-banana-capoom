@@ -2056,7 +2056,10 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   loadNodeFullResInputs: async (nodeId: string) => {
     const { nodes, edges, updateNodeData, saveDirectoryPath } = get();
     try {
-      await ensureFullResForNodes([nodeId], nodes, edges, updateNodeData, saveDirectoryPath);
+      // "consumer": this node wants to DISPLAY its inputs, not run the graph.
+      // The run pre-pass was being reused here and hydrated the whole transitive
+      // closure — 31 full-res images and ~45s to open one comp editor.
+      await ensureFullResForNodes([nodeId], nodes, edges, updateNodeData, saveDirectoryPath, "consumer");
     } catch (err) {
       logger.warn('node.execution', 'loadNodeFullResInputs failed', { nodeId, error: String(err) });
     }

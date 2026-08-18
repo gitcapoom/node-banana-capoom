@@ -14,6 +14,7 @@
 import type { WorkflowNode, WorkflowNodeData, NodeType } from "@/types";
 import { RUN_FULLRES_FIELDS } from "@/utils/imageFieldMap";
 import { loadMediaById } from "@/utils/mediaStorage";
+import { __OUTPUT_REF_FIELD } from "@/utils/compSignature";
 
 interface MinimalEdge {
   source: string;
@@ -38,6 +39,65 @@ const RUN_FULLRES_ARRAY_FIELDS: Partial<
   generateVideo: [{ raw: "inputImages", refs: "inputImageRefs", folder: "inputs" }],
 };
 
+/**
+ * The ref FIELD NAME holding this node's output, or null if it has no known
+ * output. Mirrors `outputRefField` in compSignature (which returns the value)
+ * and shares its table, so the two cannot drift.
+ */
+function outputRefFieldName(node: WorkflowNode): string | null {
+  if (node.type === "imageInput") {
+    const d = node.data as Record<string, unknown>;
+    return d.flipHorizontal || d.flipVertical ? "outputImageRef" : "imageRef";
+  }
+  return __OUTPUT_REF_FIELD[node.type as NodeType] ?? null;
+}
+
+/**
+ * Nodes needed to SHOW `rootIds` their inputs — as opposed to running them.
+ *
+ * Walks upstream like `collectWithUpstream`, but stops at any producer that can
+ * already serve its own output from disk: if a crop has an `outputImageRef`,
+ * loading that one file is everything a consumer needs, and the crop's own
+ * source is irrelevant. Only a producer with NO committed output has to be
+ * traced further back, because it would have to recompute to produce anything.
+ *
+ * Why this exists: opening one comp editor hydrated the whole transitive
+ * closure — measured at 31 full-res images and ~45s for a single node — because
+ * the run pre-pass was reused verbatim for a job that never runs anything.
+ */
+function collectForConsumer(
+  rootIds: string[],
+  edges: MinimalEdge[],
+  byId: Map<string, WorkflowNode>,
+): { need: Set<string>; satisfied: Set<string> } {
+  const need = new Set<string>(rootIds);
+  // Producers we STOPPED at because their output is already on disk. Only these
+  // may have their field list narrowed to the output — a node we traced PAST has
+  // to recompute, and needs its source to do it.
+  const satisfied = new Set<string>();
+  const queue = [...rootIds];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const e of edges) {
+      if (e.target !== cur || need.has(e.source)) continue;
+      need.add(e.source);
+      const src = byId.get(e.source);
+      const refField = src ? outputRefFieldName(src) : null;
+      const hasCommittedOutput =
+        !!src && !!refField && typeof (src.data as Record<string, unknown>)[refField] === "string";
+      // Committed output on disk -> its inputs buy us nothing. Unknown node type
+      // (no entry in the table) falls through and is traced, which is the
+      // conservative direction: extra loads, never a missing one.
+      if (hasCommittedOutput) {
+        satisfied.add(e.source);
+        continue;
+      }
+      queue.push(e.source);
+    }
+  }
+  return { need, satisfied };
+}
+
 /** All nodes that feed (directly or transitively) any of `rootIds`, plus the roots. */
 function collectWithUpstream(rootIds: string[], edges: MinimalEdge[]): Set<string> {
   const need = new Set<string>(rootIds);
@@ -60,11 +120,26 @@ export async function ensureFullResForNodes(
   edges: MinimalEdge[],
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void,
   saveDirectoryPath: string | null,
+  /**
+   * "run" (default) loads the whole transitive upstream and every full-res field
+   * on it, because an executor may re-run any of those nodes and fall back to
+   * their stored sources.
+   *
+   * "consumer" is for a node that only needs to DISPLAY its inputs (an editor
+   * opening, a GPU node rendering). It stops at producers with a committed
+   * output, and for those loads only the output field — not the `sourceImage`
+   * beside it, which no consumer ever reads.
+   */
+  mode: "run" | "consumer" = "run",
 ): Promise<void> {
   if (!saveDirectoryPath || rootIds.length === 0) return;
 
-  const need = collectWithUpstream(rootIds, edges);
   const byId = new Map(nodes.map((n) => [n.id, n]));
+  const consumer = mode === "consumer";
+  const collected = consumer ? collectForConsumer(rootIds, edges, byId) : null;
+  const need = collected ? collected.need : collectWithUpstream(rootIds, edges);
+  const satisfied = collected ? collected.satisfied : new Set<string>();
+  const rootSet = new Set(rootIds);
 
   const tasks: Promise<void>[] = [];
   for (const id of need) {
@@ -72,7 +147,11 @@ export async function ensureFullResForNodes(
     if (!node) continue;
     const data = node.data as Record<string, unknown>;
 
-    for (const af of RUN_FULLRES_ARRAY_FIELDS[node.type as NodeType] ?? []) {
+    // Generator input mirrors are an execution-only fallback — nothing displays
+    // them, so a consumer never needs an upstream's copy.
+    const arrayFields =
+      consumer && !rootSet.has(id) ? [] : RUN_FULLRES_ARRAY_FIELDS[node.type as NodeType] ?? [];
+    for (const af of arrayFields) {
       const refs = data[af.refs] as Array<string | null | undefined> | undefined;
       if (!Array.isArray(refs) || refs.length === 0) continue;
       const cur = (data[af.raw] as Array<string | null | undefined> | undefined) ?? [];
@@ -93,8 +172,18 @@ export async function ensureFullResForNodes(
       );
     }
 
-    const fields = RUN_FULLRES_FIELDS[node.type as NodeType];
+    let fields = RUN_FULLRES_FIELDS[node.type as NodeType];
     if (!fields) continue;
+    if (consumer && satisfied.has(id)) {
+      // A SATISFIED upstream is only ever read through its output. Loading its
+      // source too doubled the traffic for every crop/roto/colour node in a
+      // chain, each of which lists both. Deliberately keyed on `satisfied` and
+      // not merely "not a root": a node traced past has no committed output, so
+      // filtering to that output would load NOTHING and leave it unable to
+      // recompute — a blank editor. A test pins exactly this.
+      const outRef = outputRefFieldName(node);
+      if (outRef) fields = fields.filter((f) => f.ref === outRef);
+    }
     for (const f of fields) {
       const raw = data[f.raw] as string | null | undefined;
       const ref = data[f.ref] as string | undefined;
