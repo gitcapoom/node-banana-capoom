@@ -30,6 +30,7 @@ import { DISPLAY_CLAMP_SHADER } from "./imageShaders";
 import { processImageWithShader, type UniformValue } from "./webglProcess";
 import type { CompTransform, CompReformat, CompInputFilter, CompResampleFilter } from "@/types/comp";
 import { compResampleIndex } from "@/types/comp";
+import { TexCache } from "@/utils/texCache";
 import { computePieces, computeFollowPieces, piecesToUniforms } from "./compTransform";
 
 export type ShaderInput = { url: string } | { floatNodeId: string };
@@ -93,7 +94,10 @@ function getCtx(): Ctx | null {
       urlTexCache = null;
       programCache.clear();
       blurTexPool.clear();
-      compUrlCache.clear();
+      // Replace rather than clear(): the context is gone, so the textures are
+      // already destroyed and calling deleteTexture on them is meaningless.
+      // clear() would run the disposer over every entry for nothing.
+      compUrlCache = newCompTexCache();
       dummyTex = null;
     });
     ctx = { canvas, gl, quad, floatOK };
@@ -131,6 +135,49 @@ export function releaseColorNode(nodeId: string): void {
       blurTexPool.delete(key);
     }
   }
+}
+
+/**
+ * Drop every GPU resource this module holds. Call when the graph those resources
+ * described is replaced — i.e. on workflow load.
+ *
+ * Without this, each successive open in a session inherited the previous
+ * workflow's textures: the comp input cache alone could retain 1.16 GB, and node
+ * ids repeat across workflows so the commit-signature caches cross-contaminated
+ * (workflow B's `comp-1` adopting workflow A's committed state). Opens got
+ * progressively slower until the context was lost.
+ *
+ * Distinct from the `webglcontextlost` handler, which clears the same maps but
+ * must NOT delete: there the context is already gone.
+ */
+export function resetColorChainCaches(): void {
+  const c = ctx;
+  if (c) {
+    for (const entry of floatRegistry.values()) c.gl.deleteTexture(entry.tex);
+    for (const entry of blurTexPool.values()) c.gl.deleteTexture(entry.tex);
+    if (urlTexCache) c.gl.deleteTexture(urlTexCache.tex);
+  }
+  floatRegistry.clear();
+  blurTexPool.clear();
+  urlTexCache = null;
+  compUrlCache.clear();
+  previewGeneration.clear();
+  // Programs are keyed by shader source and are workflow-independent — keeping
+  // them avoids recompiling every shader on each open.
+}
+
+/** Bytes currently held in GPU textures by this module. GL memory is invisible to
+ *  devtools, so this is the only way to see whether the budget is working. */
+export function colorChainTextureBytes(): { comp: number; float: number; pool: number; total: number } {
+  let flt = 0;
+  for (const e of floatRegistry.values()) flt += e.w * e.h * 8; // RGBA16F
+  let pool = 0;
+  for (const [k, e] of blurTexPool.entries()) {
+    // `:preview` is RGBA8 (display-only); every other pool slot is RGBA16F.
+    pool += e.w * e.h * (k.endsWith(":preview") ? 4 : 8);
+  }
+  const comp = compUrlCache.bytes;
+  return { comp, float: flt, pool, total: comp + flt + pool };
 }
 
 // ─── shader / program ────────────────────────────────────────────
@@ -731,9 +778,24 @@ void main() {
 }
 `;
 
-// Multi-slot URL texture cache for comp inputs (the single urlTexCache can't
-// hold 4 distinct inputs at once). Keyed by url; capped to avoid leaks.
-const compUrlCache = new Map<string, FloatTex>();
+/**
+ * Multi-slot URL texture cache for comp inputs (the single urlTexCache can't hold
+ * 4 distinct inputs at once).
+ *
+ * Budgeted in BYTES and evicted LRU. It used to cap at 12 ENTRIES with FIFO
+ * eviction, which at 6554x3686 RGBA8 is 1.16 GB of VRAM, and — because `Map.get`
+ * does not reorder — evicted hot entries while cold ones survived. With ~29
+ * distinct inputs on a large graph the hit rate was ~0, and every miss decoded a
+ * 24MP image inside the render mutex.
+ */
+const COMP_TEX_BUDGET_BYTES = 600 * 1024 * 1024;
+const newCompTexCache = () =>
+  new TexCache<FloatTex>(COMP_TEX_BUDGET_BYTES, (t) => {
+    // Read ctx lazily: on context loss the cache is REPLACED rather than cleared,
+    // so this never runs against a dead context.
+    if (ctx) ctx.gl.deleteTexture(t.tex);
+  });
+let compUrlCache = newCompTexCache();
 let dummyTex: WebGLTexture | null = null;
 
 function getDummyTex(gl: WebGL2RenderingContext): WebGLTexture {
@@ -796,16 +858,8 @@ async function resolveComp(gl: WebGL2RenderingContext, input: CompResolvable | n
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
   const entry = { tex, w: img.naturalWidth, h: img.naturalHeight };
-  compUrlCache.set(input.url, entry);
-  // Evict oldest beyond a small cap.
-  if (compUrlCache.size > 12) {
-    const firstKey = compUrlCache.keys().next().value as string | undefined;
-    if (firstKey && firstKey !== input.url) {
-      const old = compUrlCache.get(firstKey);
-      if (old) gl.deleteTexture(old.tex);
-      compUrlCache.delete(firstKey);
-    }
-  }
+  // RGBA8 upload above, so 4 bytes per texel.
+  compUrlCache.set(input.url, entry, entry.w * entry.h * 4);
   return entry;
 }
 
@@ -943,7 +997,7 @@ async function renderCompUnlocked(
 
   let target: FloatTex;
   if (preview) {
-    target = ensureBlurTex(c, `${destNodeId}:preview`, dw, dh);
+    target = ensureBlurTex(c, `${destNodeId}:preview`, dw, dh, /* eightBit */ true);
   } else {
     const prev = floatRegistry.get(destNodeId);
     let outTex = prev?.tex;
@@ -1197,7 +1251,17 @@ void main() {
 /** Pooled pass targets, keyed `${nodeId}:${slot}` (freed by releaseColorNode). */
 const blurTexPool = new Map<string, FloatTex>();
 
-function ensureBlurTex(c: Ctx, key: string, w: number, h: number): FloatTex {
+/**
+ * `eightBit` forces RGBA8 for targets that are DISPLAY-ONLY.
+ *
+ * The pool defaults to RGBA16F because most of these slots feed the chain, where
+ * unclamped intermediates are the whole point. The comp editor's `:preview`
+ * target is the exception: it is blitted straight to a 2D canvas, which is 8-bit
+ * by definition, so half its bytes were being thrown away at the last step. At
+ * 6554x3686 that is 193 MB down to 97 MB per open editor, for no quality change
+ * whatsoever. Do NOT pass it for the `:a`/`:b`/`f_*` slots.
+ */
+function ensureBlurTex(c: Ctx, key: string, w: number, h: number, eightBit = false): FloatTex {
   const { gl } = c;
   const prev = blurTexPool.get(key);
   if (prev && prev.w === w && prev.h === h) return prev;
@@ -1209,7 +1273,7 @@ function ensureBlurTex(c: Ctx, key: string, w: number, h: number): FloatTex {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  if (c.floatOK) {
+  if (c.floatOK && !eightBit) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
   } else {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);

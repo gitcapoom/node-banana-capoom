@@ -30,6 +30,7 @@ import {
 } from "@/types";
 import { useToast } from "@/components/Toast";
 import { logger } from "@/utils/logger";
+import { resetCommitSignatureCaches } from "@/utils/renderSignature";
 import { externalizeWorkflowImages, hydrateWorkflowImages } from "@/utils/imageStorage";
 import { relocalizeNodeImageRefs } from "@/utils/mediaStorage";
 import { EditOperation, applyEditOperations as executeEditOps } from "@/lib/chat/editOperations";
@@ -2405,6 +2406,19 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // Free old workflow data before loading new one to reduce peak memory
     deletedNodesCache.clear();
     pendingImageSyncs.clear();
+    // GPU textures and the per-node commit caches describe the graph being
+    // replaced. Without this each successive open inherited the previous
+    // workflow's textures (the comp input cache alone can retain ~1.16 GB), and
+    // node ids repeat across workflows so the signature caches cross-contaminated
+    // — workflow B's `comp-1` adopting workflow A's committed state. Opens got
+    // progressively slower through a session.
+    try {
+      const { resetColorChainCaches } = await import("@/utils/colorChain");
+      resetColorChainCaches();
+    } catch {
+      /* colour chain never initialised (no WebGL) — nothing to free */
+    }
+    resetCommitSignatureCaches();
     set({ nodes: [], edges: [], undoStack: [], redoStack: [], groups: {} });
 
     // Update nodeIdCounter to avoid ID collisions

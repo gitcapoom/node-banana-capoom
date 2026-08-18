@@ -28,7 +28,42 @@ export function cheapUrlKey(url: string | null | undefined): string {
  * Per-node memory of the last committed render, module-level so it outlives
  * the unmount/remount cycle of viewport culling.
  */
+
+/**
+ * Every RenderSignatureCache, plus any extra reset hooks, so a workflow load can
+ * drop them all in one call.
+ *
+ * These caches are module-level ON PURPOSE — React Flow viewport-culls nodes, and
+ * a per-instance ref would die with the unmount and re-run the work on the way
+ * back. But module-level also means they outlive the WORKFLOW, and node ids repeat
+ * across workflows (`comp-1` exists in every file), so without a reset the second
+ * workflow opened in a session inherits the first one's "already committed"
+ * memory and skips work it genuinely needs to do.
+ */
+const allCaches: RenderSignatureCache[] = [];
+const extraResets: Array<() => void> = [];
+
+/** Register a non-RenderSignatureCache structure that must also clear on load. */
+export function registerSignatureReset(fn: () => void): void {
+  extraResets.push(fn);
+}
+
+/** Clear every registered commit-signature cache. Call on workflow load. */
+export function resetCommitSignatureCaches(): void {
+  for (const c of allCaches) c.clear();
+  for (const fn of extraResets) fn();
+}
+
 export class RenderSignatureCache {
+  constructor() {
+    allCaches.push(this);
+  }
+
+  /** Drop every remembered signature. See resetCommitSignatureCaches. */
+  clear(): void {
+    this.map.clear();
+  }
+
   private readonly map = new Map<string, string>();
 
   /** True when `signature` is exactly what was last committed for `nodeId`. */

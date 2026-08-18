@@ -10,7 +10,7 @@ import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { releaseColorNode, renderComp, floatNodeToDataUrl, floatNodeToThumbDataUrl, hasFloat } from "@/utils/colorChain";
 import { createImageThumbnailWithMeta, thumbMaxDim } from "@/utils/createImageThumbnail";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
-import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
+import { cheapUrlKey, RenderSignatureCache, registerSignatureReset } from "@/utils/renderSignature";
 import type { CompNodeData } from "@/types";
 
 type CompNodeType = Node<CompNodeData, "comp">;
@@ -21,6 +21,9 @@ const committedComps = new RenderSignatureCache();
  *  page session, so a fresh load never re-flattens a float texture it already
  *  has an answer for. Module-level: it must outlive viewport-culling remounts. */
 const adoptedComps = new Set<string>();
+// Module-level like the caches above, so it must clear when the workflow does —
+// node ids repeat across workflows.
+registerSignatureReset(() => adoptedComps.clear());
 
 const CHECKER_STYLE: CSSProperties = {
   backgroundColor: "#454545",
