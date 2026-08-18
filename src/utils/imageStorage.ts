@@ -2,7 +2,7 @@ import { WorkflowNode, WorkflowNodeData } from "@/types";
 import { WorkflowFile } from "@/store/workflowStore";
 import { createImageThumbnail, createImageThumbnailWithMeta, thumbMaxDim } from "./createImageThumbnail";
 import crypto from "crypto";
-import { compCommitSignature, type CompPins } from "./compSignature";
+import { compCommitSignature, compPinToken, type CompPins } from "./compSignature";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 
 /**
@@ -48,12 +48,51 @@ async function fetchWithTimeout(
  * the per-call allocation; the digest is identical.
  */
 function computeContentHash(data: string): string {
+  const memo = hashMemo.get(data);
+  if (memo) return memo;
   const CHUNK = 8 * 1024 * 1024; // 8M chars per update
   const hash = crypto.createHash("md5");
   for (let i = 0; i < data.length; i += CHUNK) {
     hash.update(data.slice(i, i + CHUNK));
   }
-  return hash.digest("hex");
+  const digest = hash.digest("hex");
+  hashMemo.set(data, digest);
+  trimHashMemo();
+  return digest;
+}
+
+/**
+ * data URL string -> md5, for the current session.
+ *
+ * computeContentHash runs in the BROWSER on crypto-browserify — pure JS, 5-20x
+ * slower than native (native md5 of 30MB is ~107ms, so this is seconds per
+ * image). The same string is hashed repeatedly: once per field holding it, and
+ * again on the next save of an unchanged node.
+ *
+ * Keyed on the FULL string deliberately. A shorter key (a length+head+tail digest
+ * like cheapUrlKey) would be cheaper but two different images could collide, and
+ * the hash decides the FILENAME — a collision would point a node at someone
+ * else's pixels. Not a trade worth making to save a few microseconds.
+ *
+ * The key is a reference to a string node data already holds, so this costs a
+ * pointer per entry rather than a copy. Bounded and cleared on workflow load so a
+ * dropped image cannot be pinned indefinitely.
+ */
+const HASH_MEMO_MAX = 64;
+const hashMemo = new Map<string, string>();
+
+/** Called on workflow load — see resetImageStorageCaches. */
+function trimHashMemo(): void {
+  while (hashMemo.size > HASH_MEMO_MAX) {
+    const oldest = hashMemo.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    hashMemo.delete(oldest);
+  }
+}
+
+/** Drop per-workflow client caches. */
+export function resetImageStorageCaches(): void {
+  hashMemo.clear();
 }
 
 /**
@@ -235,7 +274,7 @@ function restampCompSignatures(nodes: WorkflowNode[], edges: WorkflowFile["edges
     "image-comp_fg_alpha": "fgAlpha",
     "image-comp_matte": "matte",
   };
-  const emptyPin = () => ({ srcId: null, node: null, value: null });
+  const emptyPin = () => ({ srcId: null, token: "-" });
   return nodes.map((n) => {
     const data = n.data as Record<string, unknown>;
     if (n.type !== "comp" || !data?.compCommitSig) return n;
@@ -250,7 +289,7 @@ function restampCompSignatures(nodes: WorkflowNode[], edges: WorkflowFile["edges
       if (!src) continue;
       const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
       if (out.type !== "image") continue;
-      pins[pin] = { srcId: src.id, node: src, value: out.value };
+      pins[pin] = { srcId: src.id, token: compPinToken(src, out.value) };
     }
     return { ...n, data: { ...data, compCommitSig: compCommitSignature(data, pins) } };
   });

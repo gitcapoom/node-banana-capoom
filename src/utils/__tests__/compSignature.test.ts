@@ -7,11 +7,11 @@ const node = (type: string, data: Record<string, unknown>): WorkflowNode =>
   ({ id: `${type}-1`, type, position: { x: 0, y: 0 }, data } as unknown as WorkflowNode);
 
 const pins = (over: Partial<CompPins> = {}): CompPins => ({
-  bg: { srcId: null, node: null, value: null },
-  bgAlpha: { srcId: null, node: null, value: null },
-  fg: { srcId: null, node: null, value: null },
-  fgAlpha: { srcId: null, node: null, value: null },
-  matte: { srcId: null, node: null, value: null },
+  bg: { srcId: null, token: "-" },
+  bgAlpha: { srcId: null, token: compPinToken(null, null) },
+  fg: { srcId: null, token: compPinToken(null, null) },
+  fgAlpha: { srcId: null, token: compPinToken(null, null) },
+  matte: { srcId: null, token: compPinToken(null, null) },
   ...over,
 });
 
@@ -54,8 +54,8 @@ describe("compPinToken", () => {
 });
 
 describe("compCommitSignature", () => {
-  const bgUnloaded = { srcId: "comp-9", node: node("comp", { outputImageRef: "img-bg", outputImage: null }), value: null };
-  const bgHydrated = { srcId: "comp-9", node: node("comp", { outputImageRef: "img-bg", outputImage: "data:x" }), value: "data:x" };
+  const bgUnloaded = { srcId: "comp-9", token: compPinToken(node("comp", { outputImageRef: "img-bg", outputImage: null }), null) };
+  const bgHydrated = { srcId: "comp-9", token: compPinToken(node("comp", { outputImageRef: "img-bg", outputImage: "data:x" }), "data:x") };
 
   it("survives the load boundary — identical before and after hydration", () => {
     expect(compCommitSignature(DATA, pins({ bg: bgUnloaded })))
@@ -68,7 +68,7 @@ describe("compCommitSignature", () => {
   });
 
   it("differs when the pin is rewired to a different node with the same pixels", () => {
-    const other = { srcId: "comp-77", node: node("comp", { outputImageRef: "img-bg" }), value: null };
+    const other = { srcId: "comp-77", token: compPinToken(node("comp", { outputImageRef: "img-bg" }), null) };
     expect(compCommitSignature(DATA, pins({ bg: bgUnloaded })))
       .not.toBe(compCommitSignature(DATA, pins({ bg: other })));
   });
@@ -79,7 +79,7 @@ describe("compCommitSignature", () => {
   });
 
   it("differs when the upstream ref changes (new pixels)", () => {
-    const changed = { srcId: "comp-9", node: node("comp", { outputImageRef: "img-DIFFERENT" }), value: null };
+    const changed = { srcId: "comp-9", token: compPinToken(node("comp", { outputImageRef: "img-DIFFERENT" }), null) };
     expect(compCommitSignature(DATA, pins({ bg: bgUnloaded })))
       .not.toBe(compCommitSignature(DATA, pins({ bg: changed })));
   });
@@ -104,5 +104,36 @@ describe("drift guard", () => {
       if (!(type in __OUTPUT_REF_FIELD)) missing.push(type);
     }
     expect(missing).toEqual([]);
+  });
+});
+
+describe("one serializer, or the persisted signature never matches", () => {
+  /**
+   * The bug this pins: CompNode used to build its own JSON.stringify of the same
+   * facts while the save path used compCommitSignature. Two different
+   * serialisations meant `nodeData.compCommitSig === sig` could never be true, so
+   * every comp re-composited on every open — the guard looked correct and did
+   * nothing. Any call site that stops going through compCommitSignature
+   * reintroduces it.
+   */
+  const src = node("comp", { outputImageRef: "img-bg", outputImage: null });
+  const data = { mergeOp: "over", bgOpacity: 1, fgOpacity: 1, fgResample: "keys" };
+
+  it("produces the same string whether the token was precomputed or derived", () => {
+    // Component path: token already in hand from the store selector.
+    const fromComponent = compCommitSignature(data, pins({
+      bg: { srcId: "comp-9", token: "r:img-bg" },
+    }));
+    // Save / executor path: token derived from the node.
+    const fromSave = compCommitSignature(data, pins({
+      bg: { srcId: "comp-9", token: compPinToken(src, null) },
+    }));
+    expect(fromComponent).toBe(fromSave);
+  });
+
+  it("is deterministic across repeated calls with equal input", () => {
+    const a = compCommitSignature(data, pins({ bg: { srcId: "comp-9", token: "r:img-bg" } }));
+    const b = compCommitSignature({ ...data }, pins({ bg: { srcId: "comp-9", token: "r:img-bg" } }));
+    expect(a).toBe(b);
   });
 });

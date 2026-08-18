@@ -93,8 +93,11 @@ export function compPinToken(node: WorkflowNode | null | undefined, value: strin
 export interface CompPinInput {
   /** Source node id, so a rewire invalidates even when the pixels match. */
   srcId: string | null;
-  node: WorkflowNode | null;
-  value: string | null;
+  /** Pre-computed via compPinToken. Passed in rather than derived here because
+   *  the node component already has it from its store selector and does not hold
+   *  the source node objects — and because EVERY caller must produce the same
+   *  string, which is only guaranteed if they all go through one function. */
+  token: string;
 }
 
 export interface CompPins {
@@ -111,7 +114,7 @@ export interface CompPins {
  * cannot disagree about whether a comp is current.
  */
 export function compCommitSignature(data: Record<string, unknown>, pins: CompPins): string {
-  const pin = (p: CompPinInput) => `${p.srcId ?? "-"}#${compPinToken(p.node, p.value)}`;
+  const pin = (p: CompPinInput) => `${p.srcId ?? "-"}#${p.token}`;
   return JSON.stringify({
     v: 1,
     bg: pin(pins.bg), ba: pin(pins.bgAlpha), fg: pin(pins.fg), fa: pin(pins.fgAlpha), mt: pin(pins.matte),

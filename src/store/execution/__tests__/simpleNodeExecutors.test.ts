@@ -699,16 +699,16 @@ describe("executeComp — skip when already current", () => {
 
   it("skips the composite when the recorded signature still matches", async () => {
     const { compositeCompForExecutor } = await import("@/utils/compComposite");
-    const { compCommitSignature } = await import("@/utils/compSignature");
+    const { compCommitSignature, compPinToken } = await import("@/utils/compSignature");
     vi.mocked(compositeCompForExecutor).mockClear();
     const src = makeNode("in1", "imageInput", { image: IMG, imageRef: "img-bg" });
     const data: Record<string, unknown> = { mergeOp: "over", bgImage: null, bgOpacity: 1, fgOpacity: 1 };
     const sig = compCommitSignature(data, {
-      bg: { srcId: "in1", node: src, value: IMG },
-      bgAlpha: { srcId: null, node: null, value: null },
-      fg: { srcId: null, node: null, value: null },
-      fgAlpha: { srcId: null, node: null, value: null },
-      matte: { srcId: null, node: null, value: null },
+      bg: { srcId: "in1", token: compPinToken(src, IMG) },
+      bgAlpha: { srcId: null, token: compPinToken(null, null) },
+      fg: { srcId: null, token: compPinToken(null, null) },
+      fgAlpha: { srcId: null, token: compPinToken(null, null) },
+      matte: { srcId: null, token: compPinToken(null, null) },
     });
     const node = makeNode("comp1", "comp", { ...data, compCommitSig: sig, outputImage: "data:image/png;base64,OLD" });
     const ctx = makeCtx(node, {
@@ -724,16 +724,16 @@ describe("executeComp — skip when already current", () => {
   it("does NOT skip when the signature matches but the output is missing", async () => {
     // A deleted ref file leaves the signature intact and the pixels gone.
     const { compositeCompForExecutor } = await import("@/utils/compComposite");
-    const { compCommitSignature } = await import("@/utils/compSignature");
+    const { compCommitSignature, compPinToken } = await import("@/utils/compSignature");
     vi.mocked(compositeCompForExecutor).mockClear();
     const src = makeNode("in1", "imageInput", { image: IMG, imageRef: "img-bg" });
     const data: Record<string, unknown> = { mergeOp: "over", bgImage: null, bgOpacity: 1, fgOpacity: 1 };
     const sig = compCommitSignature(data, {
-      bg: { srcId: "in1", node: src, value: IMG },
-      bgAlpha: { srcId: null, node: null, value: null },
-      fg: { srcId: null, node: null, value: null },
-      fgAlpha: { srcId: null, node: null, value: null },
-      matte: { srcId: null, node: null, value: null },
+      bg: { srcId: "in1", token: compPinToken(src, IMG) },
+      bgAlpha: { srcId: null, token: compPinToken(null, null) },
+      fg: { srcId: null, token: compPinToken(null, null) },
+      fgAlpha: { srcId: null, token: compPinToken(null, null) },
+      matte: { srcId: null, token: compPinToken(null, null) },
     });
     const node = makeNode("comp1", "comp", { ...data, compCommitSig: sig, outputImage: null });
     const ctx = makeCtx(node, {

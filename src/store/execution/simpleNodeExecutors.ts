@@ -34,7 +34,7 @@ import { applyCubemapEquirect, splitCubemap, combineCubemap, CUBE_FACES, type Cu
 import { coerceChannel } from "@/utils/colorGrade";
 import { shiftImageX } from "@/utils/panoShift";
 import { renderSphereLight } from "@/utils/renderSphereLight";
-import { compCommitSignature } from "@/utils/compSignature";
+import { compCommitSignature, compPinToken } from "@/utils/compSignature";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { ensureFullResForNodes } from "@/store/execution/hydrateForRun";
 import { commitProcessorOutput } from "@/store/execution/commitProcessorOutput";
@@ -575,7 +575,7 @@ export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
     const freshNodes = getNodes();
     const byId = new Map(freshNodes.map((n) => [n.id, n]));
     const pinOf = (srcId: string | null, value: string | null) => ({
-      srcId, node: srcId ? byId.get(srcId) ?? null : null, value,
+      srcId, token: compPinToken(srcId ? byId.get(srcId) ?? null : null, value),
     });
     const runSig = compCommitSignature(data as unknown as Record<string, unknown>, {
       bg: pinOf(bgSrc, bg), bgAlpha: pinOf(baSrc, ba), fg: pinOf(fgSrc, fg),

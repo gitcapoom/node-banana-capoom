@@ -11,7 +11,7 @@ import { releaseColorNode, renderComp, floatNodeToDataUrl, floatNodeToThumbDataU
 import { createImageThumbnailWithMeta, thumbMaxDim } from "@/utils/createImageThumbnail";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
-import { compPinToken } from "@/utils/compSignature";
+import { compPinToken, compCommitSignature } from "@/utils/compSignature";
 import type { CompNodeData } from "@/types";
 
 type CompNodeType = Node<CompNodeData, "comp">;
@@ -113,19 +113,17 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   // Live preview + commit whenever inputs/params change. The input URLs are
   // full-res data URLs (tens of MB each), so they go in by CHEAP KEY — a raw
   // JSON.stringify of five of them would copy every image on every render.
-  const sig = JSON.stringify({
-    bgSrc: incoming.bgSrc, baSrc: incoming.baSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc,
-    op: nodeData.mergeOp, pm: nodeData.premultiplyFg, pmb: nodeData.premultiplyBg, sw: nodeData.swapBgFg, res: nodeData.outputResolution, bo: [nodeData.bgBlackOutside, nodeData.fgBlackOutside], bgo: nodeData.bgOpacity, fgo: nodeData.fgOpacity,
-    bgT: nodeData.bgTransform, baT: nodeData.bgAlphaTransform, fgT: nodeData.fgTransform, faT: nodeData.fgAlphaTransform, mtT: nodeData.matteTransform,
-    bar: nodeData.bgAlphaReformat, far: nodeData.fgAlphaReformat, mtr: nodeData.matteReformat,
-    bgF: nodeData.bgFilter, baF: nodeData.bgAlphaFilter, fgF: nodeData.fgFilter, faF: nodeData.fgAlphaFilter, mtF: nodeData.matteFilter,
-    bgR: nodeData.bgResample, baR: nodeData.bgAlphaResample, fgR: nodeData.fgResample,
-    faR: nodeData.fgAlphaResample, mtR: nodeData.matteResample,
-    // Load-boundary-stable pin tokens, NOT raw url keys. A url key flips the
-    // moment an upstream hydrates (null -> 35MB data URL), which made the guard
-    // miss on every open and re-encode output identical to what was on disk.
-    bgTok: incoming.bgTok, baTok: incoming.baTok, fgTok: incoming.fgTok,
-    faTok: incoming.faTok, mtTok: incoming.mtTok,
+  // MUST come from compCommitSignature — the same function the executor and the
+  // save-time restamp use. Building a bespoke object here is exactly the bug that
+  // made `nodeData.compCommitSig === sig` unmatchable: two different
+  // serialisations of the same facts, so the persisted signature never hit and
+  // every comp re-composited on every open.
+  const sig = compCommitSignature(nodeData as unknown as Record<string, unknown>, {
+    bg: { srcId: incoming.bgSrc, token: incoming.bgTok },
+    bgAlpha: { srcId: incoming.baSrc, token: incoming.baTok },
+    fg: { srcId: incoming.fgSrc, token: incoming.fgTok },
+    fgAlpha: { srcId: incoming.faSrc, token: incoming.faTok },
+    matte: { srcId: incoming.mtSrc, token: incoming.mtTok },
   });
 
   useEffect(() => {
