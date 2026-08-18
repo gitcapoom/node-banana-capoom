@@ -671,7 +671,7 @@ const SKIP_UNDO_KEYS = new Set([
   "imageHistory", "videoHistory", "model3dHistory", "audioHistory",
   "selectedHistoryIndex", "selectedVideoHistoryIndex",
   // display derivatives
-  "outputImageThumb", "outputImageThumbKey", "outputImageDims",
+  "outputImageThumb", "outputImageThumbKey", "outputImageDims", "compCommitSig",
   "outputMaskThumb", "outputMaskDims", "imageThumb", "imageThumbKey", "imageDims",
   "thumbnailImage", "thumbnailImageRef", "thumbnailImageKey",
   "sourceImageThumb", "sourceImageDims",

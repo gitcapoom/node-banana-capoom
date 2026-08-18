@@ -2,6 +2,8 @@ import { WorkflowNode, WorkflowNodeData } from "@/types";
 import { WorkflowFile } from "@/store/workflowStore";
 import { createImageThumbnail, createImageThumbnailWithMeta, thumbMaxDim } from "./createImageThumbnail";
 import crypto from "crypto";
+import { compCommitSignature, type CompPins } from "./compSignature";
+import { getSourceOutput } from "@/store/utils/connectedInputs";
 
 /**
  * Fetch with timeout support using AbortController
@@ -199,8 +201,59 @@ export async function externalizeWorkflowImages(
 
   return {
     ...workflow,
-    nodes: externalizedNodes,
+    nodes: restampCompSignatures(externalizedNodes, workflow.edges ?? []),
   };
+}
+
+/**
+ * Recompute every comp's `compCommitSig` against the EXTERNALIZED nodes.
+ *
+ * A comp stamps its signature at commit time, when its upstreams are freshly
+ * computed pixels with no file refs yet — so the pin tokens are in their
+ * `u:<urlKey>` form. Externalization then assigns those upstreams refs, which
+ * flips the tokens to `r:<ref>`. Left alone, the signature saved to disk would
+ * describe a state that ceased to exist the moment it was written, and the next
+ * open would recompute every comp — exactly the cost this is meant to remove.
+ *
+ * Must run as a POST-PASS, not inside the per-node `case "comp"`: nodes are
+ * externalized in batches of 3, so when a comp is processed its upstream may not
+ * have been assigned a ref yet.
+ *
+ * Comps with no `compCommitSig` going in are left alone — absent means "never
+ * committed", and inventing one would assert an output is current when nothing
+ * ever verified that.
+ */
+function restampCompSignatures(nodes: WorkflowNode[], edges: WorkflowFile["edges"]): WorkflowNode[] {
+  if (!nodes.some((n) => n.type === "comp" && (n.data as Record<string, unknown>)?.compCommitSig)) {
+    return nodes;
+  }
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const HANDLE_TO_PIN: Record<string, keyof CompPins> = {
+    "image-comp_bg": "bg",
+    "image-comp_bg_alpha": "bgAlpha",
+    "image-comp_fg": "fg",
+    "image-comp_fg_alpha": "fgAlpha",
+    "image-comp_matte": "matte",
+  };
+  const emptyPin = () => ({ srcId: null, node: null, value: null });
+  return nodes.map((n) => {
+    const data = n.data as Record<string, unknown>;
+    if (n.type !== "comp" || !data?.compCommitSig) return n;
+    const pins: CompPins = {
+      bg: emptyPin(), bgAlpha: emptyPin(), fg: emptyPin(), fgAlpha: emptyPin(), matte: emptyPin(),
+    };
+    for (const e of edges) {
+      if (e.target !== n.id) continue;
+      const pin = HANDLE_TO_PIN[e.targetHandle ?? ""];
+      if (!pin) continue;
+      const src = byId.get(e.source);
+      if (!src) continue;
+      const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+      if (out.type !== "image") continue;
+      pins[pin] = { srcId: src.id, node: src, value: out.value };
+    }
+    return { ...n, data: { ...data, compCommitSig: compCommitSignature(data, pins) } };
+  });
 }
 
 /**

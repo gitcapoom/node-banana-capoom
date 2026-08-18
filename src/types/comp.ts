@@ -218,6 +218,14 @@ export interface CompNodeData extends BaseNodeData {
   outputImage: string | null;
   outputImageRef?: string;
   outputImageThumb?: string; // Inline small PNG preview (alpha-preserving)
+  /** The commit signature this node's outputImage was produced from. Persisted so
+   *  a FIRST open can tell "already current" from "needs recompute" — the session
+   *  cache is empty then. See compSignature.ts. */
+  compCommitSig?: string;
+  /** cheapUrlKey of the outputImage this thumb was made from — proves the thumb
+   *  matches the pixels without needing a file ref (the ref is cleared on every
+   *  genuine recompute). Same contract as commitProcessorOutput. */
+  outputImageThumbKey?: string | null;
   outputWidth?: number;   // = BG dims
   outputHeight?: number;
 

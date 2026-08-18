@@ -10,20 +10,14 @@ import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { releaseColorNode, renderComp, floatNodeToDataUrl, floatNodeToThumbDataUrl, hasFloat } from "@/utils/colorChain";
 import { createImageThumbnailWithMeta, thumbMaxDim } from "@/utils/createImageThumbnail";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
-import { cheapUrlKey, RenderSignatureCache, registerSignatureReset } from "@/utils/renderSignature";
+import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
+import { compPinToken } from "@/utils/compSignature";
 import type { CompNodeData } from "@/types";
 
 type CompNodeType = Node<CompNodeData, "comp">;
 
 /** Last committed composite per node — survives viewport-culling remounts. */
 const committedComps = new RenderSignatureCache();
-/** Nodes whose persisted output has been adopted as already-committed this
- *  page session, so a fresh load never re-flattens a float texture it already
- *  has an answer for. Module-level: it must outlive viewport-culling remounts. */
-const adoptedComps = new Set<string>();
-// Module-level like the caches above, so it must clear when the workflow does —
-// node ids repeat across workflows.
-registerSignatureReset(() => adoptedComps.clear());
 
 const CHECKER_STYLE: CSSProperties = {
   backgroundColor: "#454545",
@@ -54,6 +48,10 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       const r = {
         bg: null as string | null, bgAlpha: null as string | null, fg: null as string | null, fgAlpha: null as string | null, matte: null as string | null,
         bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null,
+        // Load-boundary-stable token per pin (ref when saved, url key otherwise).
+        // Computed HERE so the shallow compare stays on strings — returning the
+        // source node objects would re-render on any upstream data change.
+        bgTok: "-", baTok: "-", fgTok: "-", faTok: "-", mtTok: "-",
         // Whether each pin has an incoming EDGE (independent of whether the
         // upstream value is loaded yet — lazy inputs are null until loaded).
         bgConn: false, baConn: false, fgConn: false, faConn: false, mtConn: false,
@@ -68,12 +66,24 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         const src = state.nodes.find((n) => n.id === e.source);
         if (!src) continue;
         const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
-        if (out.type !== "image" || !out.value) continue;
-        if (e.targetHandle === "image-comp_bg") { r.bg = out.value; r.bgSrc = src.id; }
-        else if (e.targetHandle === "image-comp_bg_alpha") { r.bgAlpha = out.value; r.baSrc = src.id; }
-        else if (e.targetHandle === "image-comp_fg") { r.fg = out.value; r.fgSrc = src.id; }
-        else if (e.targetHandle === "image-comp_fg_alpha") { r.fgAlpha = out.value; r.faSrc = src.id; }
-        else if (e.targetHandle === "image-comp_matte") { r.matte = out.value; r.mtSrc = src.id; }
+        if (out.type !== "image") continue;
+        // The token must be recorded even when the VALUE is lazily null — that is
+        // the whole point: on open the ref is present and the pixels are not, and
+        // the signature has to be the same either way.
+        const tok = compPinToken(src, out.value);
+        if (!out.value) {
+          if (e.targetHandle === "image-comp_bg") { r.bgSrc = src.id; r.bgTok = tok; }
+          else if (e.targetHandle === "image-comp_bg_alpha") { r.baSrc = src.id; r.baTok = tok; }
+          else if (e.targetHandle === "image-comp_fg") { r.fgSrc = src.id; r.fgTok = tok; }
+          else if (e.targetHandle === "image-comp_fg_alpha") { r.faSrc = src.id; r.faTok = tok; }
+          else if (e.targetHandle === "image-comp_matte") { r.mtSrc = src.id; r.mtTok = tok; }
+          continue;
+        }
+        if (e.targetHandle === "image-comp_bg") { r.bg = out.value; r.bgSrc = src.id; r.bgTok = tok; }
+        else if (e.targetHandle === "image-comp_bg_alpha") { r.bgAlpha = out.value; r.baSrc = src.id; r.baTok = tok; }
+        else if (e.targetHandle === "image-comp_fg") { r.fg = out.value; r.fgSrc = src.id; r.fgTok = tok; }
+        else if (e.targetHandle === "image-comp_fg_alpha") { r.fgAlpha = out.value; r.faSrc = src.id; r.faTok = tok; }
+        else if (e.targetHandle === "image-comp_matte") { r.matte = out.value; r.mtSrc = src.id; r.mtTok = tok; }
       }
       return r;
     }),
@@ -109,8 +119,13 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     bgT: nodeData.bgTransform, baT: nodeData.bgAlphaTransform, fgT: nodeData.fgTransform, faT: nodeData.fgAlphaTransform, mtT: nodeData.matteTransform,
     bar: nodeData.bgAlphaReformat, far: nodeData.fgAlphaReformat, mtr: nodeData.matteReformat,
     bgF: nodeData.bgFilter, baF: nodeData.bgAlphaFilter, fgF: nodeData.fgFilter, faF: nodeData.fgAlphaFilter, mtF: nodeData.matteFilter,
-    bgUrl: cheapUrlKey(incoming.bg), baUrl: cheapUrlKey(incoming.bgAlpha), fgUrl: cheapUrlKey(incoming.fg),
-    faUrl: cheapUrlKey(incoming.fgAlpha), mtUrl: cheapUrlKey(incoming.matte),
+    bgR: nodeData.bgResample, baR: nodeData.bgAlphaResample, fgR: nodeData.fgResample,
+    faR: nodeData.fgAlphaResample, mtR: nodeData.matteResample,
+    // Load-boundary-stable pin tokens, NOT raw url keys. A url key flips the
+    // moment an upstream hydrates (null -> 35MB data URL), which made the guard
+    // miss on every open and re-encode output identical to what was on disk.
+    bgTok: incoming.bgTok, baTok: incoming.baTok, fgTok: incoming.fgTok,
+    faTok: incoming.faTok, mtTok: incoming.mtTok,
   });
 
   useEffect(() => {
@@ -128,27 +143,49 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     // took the full path and flattened its float texture to a full-res PNG.
     // Measured on the real graph: 6554x3686 encodes at 1.0-1.8s each, three of
     // them for one node drag, 11.3s of blocked main thread.
-    if (!adoptedComps.has(id) && (nodeData.outputImage || nodeData.outputImageThumb)) {
-      adoptedComps.add(id);
-      committedComps.set(id, sig);
-    }
-    // A thumb is equally good evidence of a prior commit, and it is what
-    // survives a save — requiring the full-res copy is what made this miss.
+    // The old adoption block adopted whatever signature happened to be current at
+    // first mount — which on open is the all-null form, since every input is
+    // lazily unloaded. That describes the one state guaranteed not to persist, so
+    // the guard missed the instant anything hydrated. It is gone; the persisted
+    // signature below does the job properly.
+    //
+    // Accept EITHER source of truth: `compCommitSig` is what the save recorded
+    // (pin tokens in their `r:<ref>` form), while the session cache may hold the
+    // `u:<url>` form from a commit that has not been saved yet. Requiring only the
+    // persisted one would re-composite everything right after each autosave.
     const republishOnly =
-      committedComps.matches(id, sig) && !!(nodeData.outputImage || nodeData.outputImageThumb);
+      (committedComps.matches(id, sig) || nodeData.compCommitSig === sig) &&
+      !!(nodeData.outputImage || nodeData.outputImageThumb);
     const urls = { bg: incoming.bg, bgAlpha: incoming.bgAlpha, fg: incoming.fg, fgAlpha: incoming.fgAlpha, matte: incoming.matte };
     const srcs = { bgSrc: incoming.bgSrc, baSrc: incoming.baSrc, fgSrc: incoming.fgSrc, faSrc: incoming.faSrc, mtSrc: incoming.mtSrc };
     const run = async () => {
-      if (!urls.bg) {
+      // NO BG EDGE vs BG EDGE NOT YET LOADED are different situations and were
+      // being conflated. With lazy loading `urls.bg` is null on open for a pin
+      // that IS connected, so clearing here destroyed a perfectly good saved
+      // output. Only an actually-disconnected pin should clear it; the
+      // unloaded case falls through to the hydrate branch below.
+      if (!incoming.bgConn) {
         if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null, outputImageRef: undefined });
         return;
       }
-      if (!allInputsResolved) {
-        // A connected matte / alpha pin is lazily unloaded — load the inputs and
-        // wait. Rendering now would drop it and flatten the output to opaque.
+      if (!urls.bg || !allInputsResolved) {
+        // A connected pin is lazily unloaded — load the inputs and wait.
+        // Rendering now would drop it and flatten the output to opaque.
         void loadNodeFullResInputs(id);
         return;
       }
+      // GUARD BEFORE THE WORK. This used to sit after renderComp, so every
+      // viewport-culling remount paid a full 5-input decode + 5x96.6MB upload +
+      // 24MP composite to produce something it then threw away; only the PNG
+      // encode was skipped. The fallback branch below already had the check in
+      // the right place — this makes the float branch agree with it.
+      //
+      // Consequence worth knowing: skipping renderComp also skips republishing
+      // this node's float texture, so a downstream comp chains through the 8-bit
+      // outputImage until something genuinely re-renders. The COMMITTED output is
+      // unaffected — only a full-res float render ever writes it.
+      if (republishOnly && hasFloat(id)) return;
+
       // Render OFFSCREEN into this node's float texture — the node body shows
       // the committed thumbnail, not a live canvas, so nothing has to be
       // blitted per mount as the node scrolls in and out of view.
@@ -163,6 +200,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
           updateNodeData(id, {
             outputImage: url,
             outputImageRef: undefined,
+            compCommitSig: sig,
             outputWidth: res.w,
             outputHeight: res.h,
             outputImageDims: { width: res.w, height: res.h },
@@ -183,6 +221,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
           updateNodeData(id, {
             outputImage: dataUrl,
             outputImageRef: undefined,
+            compCommitSig: sig,
             outputWidth: outW,
             outputHeight: outH,
             outputImageDims: { width: outW, height: outH },
@@ -201,6 +240,12 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   useEffect(() => {
     const full = nodeData.outputImage;
     if (!full || modalOpenForThis) return;
+    // Already have a thumb made from THESE pixels? Then don't remake it. Without
+    // this the effect fired on any non-null outputImage — including one that had
+    // just been hydrated from disk with its thumb already beside it — and spent
+    // a GPU readback and an encode reproducing what it already had. Same
+    // key-beside-the-thumb contract commitProcessorOutput uses.
+    if (nodeData.outputImageThumb && nodeData.outputImageThumbKey === cheapUrlKey(full)) return;
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
@@ -212,11 +257,13 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         const meta = hasFloat(id)
           ? await floatNodeToThumbDataUrl(id, thumbMaxDim(), "png")
           : await createImageThumbnailWithMeta(full, undefined, 0.8, "png");
-        if (!cancelled && meta) updateNodeData(id, { outputImageThumb: meta.thumb });
+        if (!cancelled && meta) {
+          updateNodeData(id, { outputImageThumb: meta.thumb, outputImageThumbKey: cheapUrlKey(full) });
+        }
       } catch { /* preview falls back to the full-res image */ }
     }, 900);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [id, nodeData.outputImage, modalOpenForThis, updateNodeData]);
+  }, [id, nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageThumbKey, modalOpenForThis, updateNodeData]);
 
   // Free the float texture when the node is removed.
   useEffect(() => () => releaseColorNode(id), [id]);
