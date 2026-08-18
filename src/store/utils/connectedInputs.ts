@@ -77,6 +77,42 @@ function isTextHandle(handleId: string | null | undefined): boolean {
  * Extract output data and type from a source node.
  * sourceHandleId is used for multi-output nodes (e.g. WorldLabs outputs both "image" and "3d").
  */
+/**
+ * A local processor's output, with the legacy "fall back to my own input"
+ * behaviour narrowed to the only case where it is sound.
+ *
+ * `outputImage || sourceImage` silently substitutes a node's INPUT for its
+ * OUTPUT whenever outputImage is null — and lazy loading made that the state of
+ * EVERY processor on EVERY open. Downstream then composites the uncropped,
+ * ungraded, un-reformatted image and COMMITS it as though it were correct.
+ *
+ * Observed on a real project: `reformat-4` exists to take an 8187x4605 crop down
+ * to 3840x2160. On open its outputImage was null, so the comp chain below it was
+ * handed the 8187 SOURCE, rendered at that size, and committed it — doubling the
+ * four crops downstream and every comp after them. Nothing reported an error;
+ * the file simply grew and the pixels were wrong.
+ *
+ * When an `outputImageRef` exists, the correct pixels are on disk. Returning
+ * null there is what we want: the consumer hydrates them instead of quietly
+ * using the wrong image. The fallback survives only for a node that has never
+ * produced an output at all, where passing the input through is the
+ * long-standing behaviour and there is nothing better to return.
+ */
+function processorOutput(
+  data: Record<string, unknown>,
+  refKey = "outputImageRef",
+  rawKey = "outputImage",
+  srcKey = "sourceImage",
+): string | null {
+  const out = data[rawKey];
+  if (typeof out === "string" && out) return out;
+  // Committed output lives on disk — hydrate it, never substitute the input.
+  const ref = data[refKey];
+  if (typeof ref === "string" && ref) return null;
+  const src = data[srcKey];
+  return typeof src === "string" && src ? src : null;
+}
+
 export function getSourceOutput(
   sourceNode: WorkflowNode,
   sourceHandle: string | null | undefined,
@@ -180,33 +216,33 @@ export function getSourceOutput(
     return { type: "video", value: (sourceNode.data as VideoInputNodeData).videoFile };
   } else if (sourceNode.type === "imageCrop") {
     const icData = sourceNode.data as ImageCropNodeData;
-    return { type: "image", value: icData.outputImage || icData.sourceImage || null };
+    return { type: "image", value: processorOutput(icData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "sphereLightRender") {
     return { type: "image", value: (sourceNode.data as import("@/types").SphereLightRenderNodeData).outputImage || null };
   } else if (sourceNode.type === "mirror") {
     const mData = sourceNode.data as import("@/types").MirrorNodeData;
-    return { type: "image", value: mData.outputImage || mData.sourceImage || null };
+    return { type: "image", value: processorOutput(mData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "reformat") {
     const rData = sourceNode.data as import("@/types").ReformatNodeData;
-    return { type: "image", value: rData.outputImage || rData.sourceImage || null };
+    return { type: "image", value: processorOutput(rData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "cubemapEquirect") {
     const ceData = sourceNode.data as import("@/types").CubemapEquirectNodeData;
-    return { type: "image", value: ceData.outputImage || ceData.sourceImage || null };
+    return { type: "image", value: processorOutput(ceData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "colorGrade") {
     const cgData = sourceNode.data as import("@/types").ColorGradeNodeData;
-    return { type: "image", value: cgData.outputImage || cgData.sourceImage || null };
+    return { type: "image", value: processorOutput(cgData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "hsvCorrect") {
     const hData = sourceNode.data as import("@/types").HsvCorrectNodeData;
-    return { type: "image", value: hData.outputImage || hData.sourceImage || null };
+    return { type: "image", value: processorOutput(hData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "contrastAdjust") {
     const cData = sourceNode.data as import("@/types").ContrastAdjustNodeData;
-    return { type: "image", value: cData.outputImage || cData.sourceImage || null };
+    return { type: "image", value: processorOutput(cData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "blur") {
     const bData = sourceNode.data as import("@/types").BlurNodeData;
-    return { type: "image", value: bData.outputImage || bData.sourceImage || null };
+    return { type: "image", value: processorOutput(bData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "panoShift") {
     const psData = sourceNode.data as import("@/types").PanoShiftNodeData;
-    return { type: "image", value: psData.outputImage || psData.sourceImage || null };
+    return { type: "image", value: processorOutput(psData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "cubemapFaces") {
     const cfData = sourceNode.data as import("@/types").CubemapFacesNodeData;
     if (cfData.mode === "split") {

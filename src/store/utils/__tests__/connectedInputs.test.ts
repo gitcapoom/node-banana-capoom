@@ -676,3 +676,72 @@ describe("validateWorkflowPure", () => {
     expect(result.valid).toBe(true);
   });
 });
+
+/**
+ * A local processor used to answer `outputImage || sourceImage`, handing its own
+ * INPUT downstream whenever outputImage was null — the state lazy loading leaves
+ * every processor in on every open.
+ *
+ * This was not theoretical. On a real project `reformat-4` (8187x4605 -> 3840x2160)
+ * gave the comp chain below it the 8187 SOURCE; the comp rendered at that size and
+ * committed it, doubling four crops and every comp downstream. Silent: no error,
+ * just wrong pixels at a wrong resolution, saved as though correct.
+ */
+describe("getSourceOutput — a processor must never pass its input off as its output", () => {
+  const PROCESSORS = [
+    "imageCrop", "mirror", "reformat", "cubemapEquirect",
+    "colorGrade", "hsvCorrect", "contrastAdjust", "blur", "panoShift",
+  ];
+
+  for (const type of PROCESSORS) {
+    describe(type, () => {
+      it("returns the computed output when it is loaded", () => {
+        const nodes = [
+          makeNode("p", type, {
+            sourceImage: "data:image/png;base64,SRC",
+            outputImage: "data:image/png;base64,OUT",
+            outputImageRef: "img-out",
+          }),
+          makeNode("t", "output", {}),
+        ];
+        const r = getConnectedInputsPure("t", nodes, [makeEdge("p", "t")]);
+        expect(r.images).toEqual(["data:image/png;base64,OUT"]);
+      });
+
+      it("returns NULL (not the source) when the output is on disk but not yet loaded", () => {
+        const nodes = [
+          makeNode("p", type, {
+            sourceImage: "data:image/png;base64,SRC",
+            outputImage: null,
+            outputImageRef: "img-out",
+          }),
+          makeNode("t", "output", {}),
+        ];
+        const r = getConnectedInputsPure("t", nodes, [makeEdge("p", "t")]);
+        // The consumer must wait and hydrate img-out. Handing over SRC here is
+        // what committed an 8187-wide image as a 3840-wide node's output.
+        expect(r.images).not.toContain("data:image/png;base64,SRC");
+        expect(r.images).toEqual([]);
+      });
+
+      it("still falls back to the source when the node has never produced an output", () => {
+        const nodes = [
+          makeNode("p", type, {
+            sourceImage: "data:image/png;base64,SRC",
+            outputImage: null,
+            // no outputImageRef: nothing has ever been computed or saved
+          }),
+          makeNode("t", "output", {}),
+        ];
+        const r = getConnectedInputsPure("t", nodes, [makeEdge("p", "t")]);
+        expect(r.images).toEqual(["data:image/png;base64,SRC"]);
+      });
+
+      it("yields nothing when there is neither an output nor a source", () => {
+        const nodes = [makeNode("p", type, {}), makeNode("t", "output", {})];
+        const r = getConnectedInputsPure("t", nodes, [makeEdge("p", "t")]);
+        expect(r.images).toEqual([]);
+      });
+    });
+  }
+});
