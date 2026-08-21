@@ -9,7 +9,6 @@ import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { ModelParameters } from "./ModelParameters";
 import { PromptSkillPicker } from "./PromptSkillPicker";
-import { LOOPBACK_SKILL, LOOPBACK_SKILL_NAME } from "@/store/execution/loopbackSkill";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
 import { CubicBezierEditor } from "@/components/CubicBezierEditor";
@@ -1328,31 +1327,11 @@ function LLMControls({ node }: { node: Node }) {
 
   // ─── Conversation handlers (mirror LLMGenerateNode's inline panel) ──
   const conversation = nodeData.conversation ?? [];
-  const conversationMode = nodeData.conversationMode === true;
-  const loopbackMode = nodeData.loopbackMode === true;
-  const chatMode: "off" | "conversation" | "loopback" =
-    loopbackMode ? "loopback" : conversationMode ? "conversation" : "off";
+  const rememberTurns = nodeData.rememberTurns === true;
 
-  const handleSetMode = useCallback(
-    (mode: "off" | "conversation" | "loopback") => {
-      if (mode === "loopback") {
-        updateNodeData(node.id, {
-          conversationMode: true,
-          loopbackMode: true,
-          systemPrompt: LOOPBACK_SKILL,
-          promptSkillName: LOOPBACK_SKILL_NAME,
-          // Ensure a generous output cap so the assessment + <image_prompt>
-          // block doesn't truncate (maxTokens is a ceiling, not a cost). Never
-          // lowers a higher value.
-          maxTokens: Math.max(nodeData.maxTokens ?? 0, 16384),
-        });
-      } else if (mode === "conversation") {
-        updateNodeData(node.id, { conversationMode: true, loopbackMode: false });
-      } else {
-        updateNodeData(node.id, { conversationMode: false, loopbackMode: false });
-      }
-    },
-    [node.id, updateNodeData, nodeData.maxTokens]
+  const handleToggleRemember = useCallback(
+    (next: boolean) => updateNodeData(node.id, { rememberTurns: next }),
+    [node.id, updateNodeData]
   );
 
   const handleSystemPromptChange = useCallback(
@@ -1532,26 +1511,22 @@ function LLMControls({ node }: { node: Node }) {
       {/* ─── Conversation mode ─────────────────────────────── */}
       <div className="border-t border-neutral-700 pt-3">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-neutral-300 shrink-0">Mode</span>
-          <div className="nodrag flex rounded-md overflow-hidden border border-neutral-600">
-            {([["off", "One-shot"], ["conversation", "Chat"], ["loopback", "Loopback"]] as const).map(([m, label]) => (
-              <button
-                key={m}
-                onClick={() => handleSetMode(m)}
-                title={m === "loopback" ? "Conversation + image feedback loop (2 outputs: chat + clean prompt)" : undefined}
-                className={`text-[11px] px-2 py-0.5 transition-colors ${chatMode === m ? "bg-indigo-600 text-white" : "bg-neutral-700 text-neutral-400 hover:text-white"}`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          {conversationMode && conversation.length > 0 && (
+          <label className="nodrag flex items-center gap-1.5 text-xs font-medium text-neutral-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={rememberTurns}
+              onChange={(e) => handleToggleRemember(e.target.checked)}
+              className="nodrag accent-indigo-600"
+            />
+            Remember previous turns
+          </label>
+          {conversation.length > 0 && (
             <span className="text-[10px] text-neutral-500 ml-auto">
               {conversation.filter(t => t.role === "user").length} turn{conversation.filter(t => t.role === "user").length === 1 ? "" : "s"}
             </span>
           )}
         </div>
-        {conversationMode && (
+        {(
           <div className="mt-2 space-y-2">
             <div className="flex items-center gap-2">
               <label className="text-[10px] text-neutral-500 shrink-0">Max turns</label>
@@ -1576,39 +1551,27 @@ function LLMControls({ node }: { node: Node }) {
         )}
       </div>
 
-      {loopbackMode && (
+      {(
         <div className="mb-1.5">
           <textarea
             value={nodeData.composeInput ?? ""}
             onChange={(e) => updateNodeData(node.id, { composeInput: e.target.value })}
-            placeholder="Type a direction for the next Assess / Converse… (clears after sending)"
+            placeholder="Type a message… (clears after sending)"
             rows={2}
             className="nodrag nopan w-full resize-y text-xs py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-600 text-white placeholder:text-neutral-600"
           />
         </div>
       )}
       <div className="flex justify-end gap-1.5">
-        {loopbackMode ? (
-          <button
-            onClick={() => regenerateNode(node.id)}
-            disabled={!canRun}
-            title={blockedReason || "Send — assess the latest generated image (if any) against the goal + references, fold in your direction, and refine the prompt. Does not generate — run the generator node yourself."}
-            className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 border border-emerald-800 rounded text-white font-medium disabled:opacity-40 disabled:pointer-events-none transition-colors"
-          >
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z" /></svg>
-            {isExecuting ? "Running..." : "Send"}
-          </button>
-        ) : (
-          <button
-            onClick={() => regenerateNode(node.id)}
-            disabled={!canRun}
-            title={blockedReason || undefined}
-            className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-700 hover:bg-neutral-600 border border-neutral-600 rounded text-neutral-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
-          >
-            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-            {isExecuting ? "Running..." : "Run"}
-          </button>
-        )}
+        <button
+          onClick={() => regenerateNode(node.id)}
+          disabled={!canRun}
+          title={blockedReason || "Send"}
+          className="nodrag nopan inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-700 hover:bg-emerald-600 border border-emerald-800 rounded text-white font-medium disabled:opacity-40 disabled:pointer-events-none transition-colors"
+        >
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z" /></svg>
+          {isExecuting ? "Running..." : "Send"}
+        </button>
       </div>
     </div>
   );

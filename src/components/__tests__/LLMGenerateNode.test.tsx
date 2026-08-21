@@ -107,28 +107,38 @@ describe("LLMGenerateNode", () => {
     });
   });
 
-  describe("Idle State", () => {
-    it("should show 'Run to generate' message when idle and no output", () => {
+  describe("Empty State", () => {
+    it("invites the user to type, now that every node has a compose box", () => {
       render(
         <TestWrapper>
           <LLMGenerateNode {...createNodeProps({ status: "idle", outputText: null })} />
         </TestWrapper>
       );
 
-      expect(screen.getByText("Run to generate")).toBeInTheDocument();
+      expect(screen.getByText("No messages yet")).toBeInTheDocument();
+    });
+
+    it("offers a compose box and a Send button on every node", () => {
+      render(
+        <TestWrapper>
+          <LLMGenerateNode {...createNodeProps({ status: "idle" })} />
+        </TestWrapper>
+      );
+
+      expect(screen.getByPlaceholderText(/Type a message/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Send/ })).toBeInTheDocument();
     });
   });
 
   describe("Loading State", () => {
-    it("should show loading spinner when status is loading", () => {
+    it("shows a thinking indicator in the transcript", () => {
       const { container } = render(
         <TestWrapper>
           <LLMGenerateNode {...createNodeProps({ status: "loading" })} />
         </TestWrapper>
       );
 
-      const spinner = container.querySelector(".animate-spin");
-      expect(spinner).toBeInTheDocument();
+      expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
     });
   });
 
@@ -136,14 +146,16 @@ describe("LLMGenerateNode", () => {
     it("should show error message when status is error", () => {
       render(
         <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ status: "error", error: "API rate limit exceeded" })} />
+          <LLMGenerateNode {...createNodeProps({ status: "error", error: "API key missing" })} />
         </TestWrapper>
       );
 
-      expect(screen.getByText("API rate limit exceeded")).toBeInTheDocument();
+      expect(screen.getByText("API key missing")).toBeInTheDocument();
     });
 
-    it("should show 'Generation failed' when error message is null", () => {
+    it("still says it failed when the error message is null", () => {
+      // A silent failure is worse than a vague one: the old single-output panel
+      // always said this, and the transcript has to keep saying it.
       render(
         <TestWrapper>
           <LLMGenerateNode {...createNodeProps({ status: "error", error: null })} />
@@ -154,42 +166,41 @@ describe("LLMGenerateNode", () => {
     });
   });
 
-  describe("Output Text Display", () => {
-    it("should display output text when data.outputText exists", () => {
+  describe("Transcript", () => {
+    it("renders the assistant's reply from the conversation", () => {
+      // outputText is no longer painted directly — the transcript is the view.
       render(
         <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ outputText: "Generated response text" })} />
+          <LLMGenerateNode
+            {...createNodeProps({
+              outputText: "Generated response text",
+              conversation: [
+                { role: "user", text: "hello", timestamp: 1 },
+                { role: "assistant", text: "Generated response text", timestamp: 2 },
+              ],
+            })}
+          />
         </TestWrapper>
       );
 
       expect(screen.getByText("Generated response text")).toBeInTheDocument();
     });
+  });
 
-    it("should render regenerate button when output exists", () => {
+  describe("Send", () => {
+    it("calls regenerateNode when Send is clicked", () => {
       render(
         <TestWrapper>
           <LLMGenerateNode {...createNodeProps({ outputText: "Some output" })} />
         </TestWrapper>
       );
 
-      const regenerateButton = screen.getByTitle("Regenerate");
-      expect(regenerateButton).toBeInTheDocument();
-    });
-
-    it("should call regenerateNode when regenerate button is clicked", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ outputText: "Some output" })} />
-        </TestWrapper>
-      );
-
-      const regenerateButton = screen.getByTitle("Regenerate");
-      fireEvent.click(regenerateButton);
+      fireEvent.click(screen.getByRole("button", { name: /Send/ }));
 
       expect(mockRegenerateNode).toHaveBeenCalledWith("test-llm-1");
     });
 
-    it("should disable regenerate button when this node is executing", () => {
+    it("disables Send while this node is executing", () => {
       // Per-node run gating (useCanRun): the button is blocked when this
       // node's id is in currentNodeIds, not by the global isRunning flag.
       mockUseWorkflowStore.mockImplementation((selector) => {
@@ -217,11 +228,10 @@ describe("LLMGenerateNode", () => {
       );
 
       // When blocked, the button's title carries the blocked reason.
-      const regenerateButton = screen.getByTitle("Already running");
-      expect(regenerateButton).toBeDisabled();
+      expect(screen.getByTitle("Already running")).toBeDisabled();
     });
 
-    it("should keep regenerate button enabled when an unrelated node is executing", () => {
+    it("keeps Send enabled when an unrelated node is executing", () => {
       // The point of per-node gating: in-flight work elsewhere in the
       // graph must not block this node (no upstream dependency on it).
       mockUseWorkflowStore.mockImplementation((selector) => {
@@ -248,38 +258,7 @@ describe("LLMGenerateNode", () => {
         </TestWrapper>
       );
 
-      const regenerateButton = screen.getByTitle("Regenerate");
-      expect(regenerateButton).not.toBeDisabled();
-    });
-  });
-
-  describe("Clear Output Button", () => {
-    it("should render clear output button when output exists", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ outputText: "Some output" })} />
-        </TestWrapper>
-      );
-
-      const clearButton = screen.getByTitle("Clear output");
-      expect(clearButton).toBeInTheDocument();
-    });
-
-    it("should call updateNodeData to clear output when clear button is clicked", () => {
-      render(
-        <TestWrapper>
-          <LLMGenerateNode {...createNodeProps({ outputText: "Some output" })} />
-        </TestWrapper>
-      );
-
-      const clearButton = screen.getByTitle("Clear output");
-      fireEvent.click(clearButton);
-
-      expect(mockUpdateNodeData).toHaveBeenCalledWith("test-llm-1", {
-        outputText: null,
-        status: "idle",
-        error: null,
-      });
+      expect(screen.getByRole("button", { name: /Send/ })).not.toBeDisabled();
     });
   });
 

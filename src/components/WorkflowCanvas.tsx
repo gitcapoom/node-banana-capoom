@@ -221,11 +221,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "generateAudio":
       return { inputs: ["text"], outputs: ["audio"] };
     case "llmGenerate":
-      // `image-feedback` (loopback feedback image) input + `prompt` (clean
-      // prompt) and `images` (references passthrough: the ordered list the LLM
-      // saw) outputs are only rendered in loopback mode, but listing them here
-      // lets batch-connect validation accept edges to/from them.
-      return { inputs: ["text", "image", "image-feedback", "video"], outputs: ["text", "prompt", "images"] };
+      return { inputs: ["text", "image", "video"], outputs: ["text"] };
     case "splitGrid":
       return { inputs: ["image"], outputs: ["reference"] };
     case "output":
@@ -2699,7 +2695,6 @@ export function WorkflowCanvas() {
                 onCustomTitleChange={handleCustomTitleChange}
                 onCommentChange={handleCommentChange}
                 onRunNode={handleRunNode}
-                hideRunButton={node.type === "llmGenerate" && (node.data as any)?.loopbackMode === true}
                 onExpandNode={handleExpandNode}
               />
             );

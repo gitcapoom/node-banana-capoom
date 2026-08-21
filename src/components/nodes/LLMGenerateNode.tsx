@@ -11,7 +11,6 @@ import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
 import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { DynamicInputHandles } from "./DynamicInputHandles";
-import { LOOPBACK_SKILL, LOOPBACK_SKILL_NAME } from "@/store/execution/loopbackSkill";
 import { PromptSkillPicker } from "./PromptSkillPicker";
 
 // LLM providers — the model list for each is fetched live via the
@@ -43,39 +42,10 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
     regenerateNode(id);
   }, [id, regenerateNode]);
 
-  // Loopback: a single "Send" action (= handleRegenerate). It shows the model
+  // A single "Send" action (= handleRegenerate). It shows the model
   // the latest render (if any) + references, folds in the compose-box direction,
   // assesses the render when there is one, and returns a refined prompt. It does
   // NOT generate — the user runs the generator node directly.
-
-  // Loopback wiring status — the assess step only works when the image
-  // generator's output is fed back into the fuchsia feedback input, and the
-  // Loop's auto-regenerate only works when the emerald prompt output drives an
-  // image node. Surface a hint when either is missing (explains "no assess loop").
-  const feedbackConnected = useWorkflowStore((state) =>
-    state.edges.some((e) => e.target === id && e.targetHandle === "image-feedback")
-  );
-  const promptConnected = useWorkflowStore((state) =>
-    state.edges.some((e) => e.source === id && e.sourceHandle === "prompt")
-  );
-
-  const handleClearOutput = useCallback(() => {
-    updateNodeData(id, { outputText: null, status: "idle", error: null });
-  }, [id, updateNodeData]);
-
-  const [copied, setCopied] = useState(false);
-
-  const handleCopyOutput = useCallback(async () => {
-    if (nodeData.outputText) {
-      try {
-        await navigator.clipboard.writeText(nodeData.outputText);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      } catch (err) {
-        console.error("Failed to copy text:", err);
-      }
-    }
-  }, [nodeData.outputText]);
 
   // Inline parameters: compute collapse state and toggle handler
   const isParamsExpanded = nodeData.parametersExpanded ?? true; // default expanded
@@ -127,47 +97,8 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
 
   // ─── Conversation mode handlers ───────────────────────────────
   const conversation = nodeData.conversation ?? [];
-  const conversationMode = nodeData.conversationMode === true;
-  const loopbackMode = nodeData.loopbackMode === true;
-  // 3-way mode derived from the two booleans (loopback implies conversation).
-  const chatMode: "off" | "conversation" | "loopback" =
-    loopbackMode ? "loopback" : conversationMode ? "conversation" : "off";
+  const rememberTurns = nodeData.rememberTurns === true;
 
-  const handleSetMode = useCallback(
-    (mode: "off" | "conversation" | "loopback") => {
-      if (mode === "loopback") {
-        // Loopback relies on the built-in skill's two-output protocol, so
-        // auto-apply it as the (editable) system prompt. Also ensure a generous
-        // output cap — the assessment + <image_prompt> block truncates at low
-        // limits (and maxTokens is a ceiling, not a cost, so raising it is free
-        // for normal replies). Never lowers a higher value the user chose.
-        updateNodeData(id, {
-          conversationMode: true,
-          loopbackMode: true,
-          systemPrompt: LOOPBACK_SKILL,
-          promptSkillName: LOOPBACK_SKILL_NAME,
-          maxTokens: Math.max(nodeData.maxTokens ?? 0, 16384),
-        });
-      } else if (mode === "conversation") {
-        updateNodeData(id, { conversationMode: true, loopbackMode: false });
-      } else {
-        updateNodeData(id, { conversationMode: false, loopbackMode: false });
-      }
-    },
-    [id, updateNodeData, nodeData.maxTokens]
-  );
-
-  const [copiedPrompt, setCopiedPrompt] = useState(false);
-  const handleCopyPrompt = useCallback(async () => {
-    if (!nodeData.outputPrompt) return;
-    try {
-      await navigator.clipboard.writeText(nodeData.outputPrompt);
-      setCopiedPrompt(true);
-      setTimeout(() => setCopiedPrompt(false), 1500);
-    } catch (err) {
-      console.error("Failed to copy prompt:", err);
-    }
-  }, [nodeData.outputPrompt]);
 
   const handleSystemPromptChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -390,26 +321,22 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
             {/* ─── Conversation mode ───────────────────────── */}
             <div className="border-t border-neutral-800 pt-1.5 mt-1">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-neutral-300 shrink-0">Mode</span>
-                <div className="nodrag nopan flex rounded-md overflow-hidden border border-neutral-700">
-                  {([["off", "One-shot"], ["conversation", "Chat"], ["loopback", "Loopback"]] as const).map(([m, label]) => (
-                    <button
-                      key={m}
-                      onClick={() => handleSetMode(m)}
-                      title={m === "loopback" ? "Conversation + image feedback loop (2 outputs: chat + clean prompt)" : undefined}
-                      className={`text-[10px] px-2 py-0.5 transition-colors ${chatMode === m ? "bg-indigo-600 text-white" : "bg-neutral-800 text-neutral-400 hover:text-white"}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {conversationMode && conversation.length > 0 && (
+                <label className="nodrag nopan flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={rememberTurns}
+                    onChange={(e) => updateNodeData(id, { rememberTurns: e.target.checked })}
+                    className="nodrag accent-indigo-600"
+                  />
+                  Remember previous turns
+                </label>
+                {conversation.length > 0 && (
                   <span className="text-[10px] text-neutral-500 ml-auto">
                     {conversation.filter(t => t.role === "user").length} turn{conversation.filter(t => t.role === "user").length === 1 ? "" : "s"}
                   </span>
                 )}
               </div>
-              {conversationMode && (
+              {(
                 <div className="mt-1.5 space-y-1.5">
                   {/* Max history + clear */}
                   <div className="flex items-center gap-2">
@@ -472,154 +399,17 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
         className="!bg-violet-500 !border-violet-700"
         title="Video input — analyzed by Gemini models (not supported by OpenAI/Claude)"
       />
-      {/* Feedback image input (loopback only) — the previous generation = Image 1 */}
-      {loopbackMode && (
-        <Handle
-          type="target"
-          position={Position.Left}
-          id="image-feedback"
-          style={{ top: "15%" }}
-          data-handletype="image"
-          className="!bg-fuchsia-500 !border-fuchsia-700"
-          title="Feedback image — the previous generation (Image 1)"
-        />
-      )}
       {/* Conversation / text output */}
       <Handle
         type="source"
         position={Position.Right}
         id="text"
         data-handletype="text"
-        style={loopbackMode ? { top: "35%" } : undefined}
-        title={loopbackMode ? "Conversation text" : undefined}
       />
-      {/* Clean image-prompt output (loopback only) → image node */}
-      {loopbackMode && (
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="prompt"
-          data-handletype="text"
-          style={{ top: "65%" }}
-          className="!bg-emerald-500 !border-emerald-700"
-          title="Clean image prompt → image generator"
-        />
-      )}
-      {/* References passthrough output (loopback only): the ordered image list
-          the LLM saw (feedback first, then references) → the image generator,
-          in ONE edge. Keeps the prompt's "Image 1 / Image 2 / …" aligned with
-          what the generator actually receives. */}
-      {loopbackMode && (
-        <Handle
-          type="source"
-          position={Position.Right}
-          id="images"
-          data-handletype="image"
-          style={{ top: "15%" }}
-          className="!bg-blue-500 !border-blue-700"
-          title="References passthrough — the same ordered images the LLM saw (feedback first, then references) → wire to the image generator's image input"
-        />
-      )}
-      {/* Loopback handle labels — make the loop wiring obvious at a glance.
-          (Dynamic pins render their own input labels, so only add the
-          input labels here in the static case to avoid duplicates.) */}
-      {loopbackMode && (
-        <>
-          <div className="absolute text-[9px] font-semibold whitespace-nowrap pointer-events-none text-fuchsia-400" style={{ right: "calc(100% + 9px)", top: "15%", transform: "translateY(-50%)" }}>
-            ⟳ Feedback
-          </div>
-          {!dynamicPinsOn && (
-            <>
-              <div className="absolute text-[9px] font-medium whitespace-nowrap pointer-events-none text-blue-400" style={{ right: "calc(100% + 9px)", top: "35%", transform: "translateY(-50%)" }}>
-                References
-              </div>
-              <div className="absolute text-[9px] font-medium whitespace-nowrap pointer-events-none text-amber-400" style={{ right: "calc(100% + 9px)", top: "65%", transform: "translateY(-50%)" }}>
-                Goal
-              </div>
-            </>
-          )}
-          <div className="absolute text-[9px] font-medium whitespace-nowrap pointer-events-none text-amber-400" style={{ left: "calc(100% + 9px)", top: "35%", transform: "translateY(-50%)" }}>
-            Chat
-          </div>
-          <div className="absolute text-[9px] font-semibold whitespace-nowrap pointer-events-none text-emerald-400" style={{ left: "calc(100% + 9px)", top: "65%", transform: "translateY(-50%)" }}>
-            Image prompt →
-          </div>
-          <div className="absolute text-[9px] font-medium whitespace-nowrap pointer-events-none text-blue-400" style={{ left: "calc(100% + 9px)", top: "15%", transform: "translateY(-50%)" }}>
-            Images →
-          </div>
-        </>
-      )}
 
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
-        {conversationMode ? (
-          // ─── Conversation transcript (loopback adds a standalone prompt panel) ───
-          loopbackMode ? (
-            <div className="w-full h-full flex flex-col min-h-0">
-              {(!feedbackConnected || !promptConnected) && (
-                <div className="shrink-0 px-2 py-1 bg-amber-900/40 border-b border-amber-800/50 text-[9px] text-amber-300/90 leading-tight">
-                  {!feedbackConnected
-                    ? "⟳ Wire the generator's output back into the fuchsia Feedback input (top-left) so Assess can see the latest image."
-                    : "Wire the emerald Image prompt output into the generator so it uses the refined prompt (you run the generator yourself)."}
-                </div>
-              )}
-              <div className="flex-1 min-h-0">
-                <ConversationTranscript
-                  conversation={conversation}
-                  status={nodeData.status}
-                  error={nodeData.error}
-                  onRemoveTurn={handleRemoveTurn}
-                  transcriptRef={transcriptRef}
-                />
-              </div>
-              {/* Standalone image-prompt panel — editable; feeds the `prompt`
-                  output to the generator. Edits persist until the next Assess /
-                  Converse run overwrites the prompt. */}
-              <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/60 flex flex-col">
-                <div className="flex items-center justify-between px-2 pt-1">
-                  <span className="text-[9px] uppercase tracking-wide text-emerald-400/80">Image prompt (editable)</span>
-                  <button
-                    onClick={handleCopyPrompt}
-                    disabled={!nodeData.outputPrompt}
-                    className="nodrag nopan text-[9px] px-1.5 py-0.5 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white disabled:opacity-40 transition-colors"
-                    title="Copy prompt"
-                  >
-                    {copiedPrompt ? "Copied" : "Copy"}
-                  </button>
-                </div>
-                <div className="px-2 pb-1.5">
-                  <textarea
-                    value={nodeData.outputPrompt ?? ""}
-                    onChange={(e) => updateNodeData(id, { outputPrompt: e.target.value })}
-                    placeholder="Send to generate the image prompt — or type / edit it here…"
-                    rows={3}
-                    className="nodrag nopan nowheel select-text cursor-text w-full resize-y min-h-[44px] max-h-[70vh] text-[10px] text-neutral-200 bg-neutral-950/50 rounded px-1.5 py-1 whitespace-pre-wrap break-words focus:outline-none focus:ring-1 focus:ring-emerald-700/60"
-                  />
-                </div>
-              </div>
-              {/* Chatbot compose box + a single Send action (handleRegenerate).
-                  The box clears after each successful send so the previous
-                  direction can't be silently re-sent. Send does NOT generate —
-                  the user runs the generator node directly. */}
-              <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/70 px-2 py-1.5 space-y-1.5">
-                <textarea
-                  value={nodeData.composeInput ?? ""}
-                  onChange={(e) => updateNodeData(id, { composeInput: e.target.value })}
-                  placeholder="Type a direction for the next Assess / Converse… (clears after sending)"
-                  rows={2}
-                  className="nodrag nopan nowheel select-text cursor-text w-full resize-none text-[10px] text-neutral-200 bg-neutral-950/50 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-600/60 placeholder:text-neutral-600"
-                />
-                <button
-                  onClick={handleRegenerate}
-                  disabled={!canRun}
-                  title={blockedReason || "Send — assess the latest generated image (if any) against the goal + references, fold in your direction, and refine the prompt. Does not generate — run the generator node yourself."}
-                  className="nodrag nopan w-full text-[10px] py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-1"
-                >
-                  <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z" /></svg>
-                  {isExecuting ? "Running…" : "Send"}
-                </button>
-              </div>
-            </div>
-          ) : (
+        <div className="w-full h-full flex flex-col min-h-0">
+          <div className="flex-1 min-h-0">
             <ConversationTranscript
               conversation={conversation}
               status={nodeData.status}
@@ -627,94 +417,30 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
               onRemoveTurn={handleRemoveTurn}
               transcriptRef={transcriptRef}
             />
-          )
-        ) : nodeData.status === "loading" ? (
-          <div className="w-full h-full bg-neutral-900/40 flex items-center justify-center">
-            <svg
-              className="w-4 h-4 animate-spin text-neutral-400"
-              fill="none"
-              viewBox="0 0 24 24"
+          </div>
+          {/* Compose + Send. Every node is driven from here now; the connected
+              text input stays a fallback for when this box is empty, so wired
+              workflows keep running untouched. Clears on a successful send so
+              the same message can't be silently re-sent. */}
+          <div className="shrink-0 border-t border-neutral-800 bg-neutral-900/70 px-2 py-1.5 space-y-1.5">
+            <textarea
+              value={nodeData.composeInput ?? ""}
+              onChange={(e) => updateNodeData(id, { composeInput: e.target.value })}
+              placeholder="Type a message… (clears after sending)"
+              rows={2}
+              className="nodrag nopan nowheel select-text cursor-text w-full resize-none text-[10px] text-neutral-200 bg-neutral-950/50 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-600/60 placeholder:text-neutral-600"
+            />
+            <button
+              onClick={handleRegenerate}
+              disabled={!canRun}
+              title={blockedReason || "Send"}
+              className="nodrag nopan w-full text-[10px] py-1 rounded bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-1"
             >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="3"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              />
-            </svg>
+              <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z" /></svg>
+              {isExecuting ? "Running…" : "Send"}
+            </button>
           </div>
-        ) : nodeData.status === "error" ? (
-          <div className="w-full h-full bg-red-900/40 flex flex-col items-center justify-center gap-1">
-            <svg
-              className="w-6 h-6 text-white"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="text-white text-xs font-medium">Generation failed</span>
-            {nodeData.error && (
-              <span className="text-red-200 text-[10px] text-center px-3 mt-1 line-clamp-3">{nodeData.error}</span>
-            )}
-          </div>
-        ) : nodeData.outputText ? (
-          <div className="group/text relative w-full h-full bg-neutral-900/40 p-2 overflow-auto nowheel nodrag nopan select-text cursor-text">
-            <p className="text-[10px] text-neutral-300 whitespace-pre-wrap break-words">
-              {nodeData.outputText}
-            </p>
-            <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover/text:opacity-100 transition-opacity">
-              <button
-                onClick={handleCopyOutput}
-                className={`nodrag nopan w-5 h-5 ${copied ? "bg-green-600/80" : "bg-neutral-900/80 hover:bg-neutral-700/80"} rounded flex items-center justify-center text-neutral-400 hover:text-white transition-colors`}
-                title={copied ? "Copied!" : "Copy to clipboard"}
-              >
-                {copied ? (
-                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                  </svg>
-                )}
-              </button>
-              <button
-                onClick={handleRegenerate}
-                disabled={!canRun}
-                className="nodrag nopan w-5 h-5 bg-neutral-900/80 hover:bg-blue-600/80 disabled:opacity-50 disabled:cursor-not-allowed rounded flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
-                title={blockedReason || "Regenerate"}
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              </button>
-              <button
-                onClick={handleClearOutput}
-                className="nodrag nopan w-5 h-5 bg-neutral-900/80 hover:bg-red-600/80 rounded flex items-center justify-center text-neutral-400 hover:text-white transition-colors"
-                title="Clear output"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="w-full h-full bg-neutral-900/40 flex items-center justify-center">
-            <span className="text-neutral-500 text-[10px]">
-              Run to generate
-            </span>
-          </div>
-        )}
+        </div>
       </div>
 
     </BaseNode>
@@ -747,9 +473,9 @@ function ConversationTranscript({
     <div className="relative w-full h-full bg-neutral-900/40">
       {conversation.length === 0 && !isLoading ? (
         <div className="w-full h-full flex flex-col items-center justify-center gap-1 px-3 text-center">
-          <span className="text-neutral-400 text-[11px]">Conversation mode</span>
+          <span className="text-neutral-400 text-[11px]">No messages yet</span>
           <span className="text-neutral-600 text-[10px]">
-            Connect text input and Run to start. Each Run sends the full transcript.
+            Type below and press Send — or wire a text input and Run.
           </span>
         </div>
       ) : (
@@ -777,9 +503,9 @@ function ConversationTranscript({
         </div>
       )}
 
-      {isError && error && (
+      {isError && (
         <div className="absolute bottom-1 left-1 right-1 bg-red-900/80 text-red-100 text-[10px] px-2 py-1 rounded shadow-lg">
-          {error}
+          {error || "Generation failed"}
         </div>
       )}
     </div>

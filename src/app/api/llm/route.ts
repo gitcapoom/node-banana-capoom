@@ -380,7 +380,7 @@ async function generateWithOpenAI(
           type: "image_url",
           // "high" makes OpenAI tile the image at full resolution instead of
           // the coarse "auto"/low pass — needed for judging fine texture,
-          // color, and micro-detail (loopback Assess relies on this).
+          // color, and micro-detail.
           image_url: { url: normalizeImageDataUrl(sized), detail: "high" },
         });
       }

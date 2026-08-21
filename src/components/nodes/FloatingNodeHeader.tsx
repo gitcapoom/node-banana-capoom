@@ -84,7 +84,7 @@ interface FloatingNodeHeaderProps {
   onExpandNode?: (nodeId: string, nodeType: string) => void;
   onRunNode?: (nodeId: string) => void;
   /** Hide the header's generic Run button when the node renders its own run
-   *  controls (e.g. loopback LLM nodes have explicit Converse / Loop buttons). */
+   *  controls of their own. */
   hideRunButton?: boolean;
   headerAction?: ReactNode;
   headerButtons?: ReactNode;
