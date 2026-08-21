@@ -95,11 +95,15 @@ export type CompResampleFilter =
   | "mitchell"
   | "parzen"
   | "lanczos4"
-  | "lanczos6";
+  | "lanczos6"
+  | "gaussian";
 
 /** Order matters: the index is what the shader receives as u_*_flt. */
 export const COMP_RESAMPLE_FILTERS: CompResampleFilter[] = [
-  "impulse", "bilinear", "keys", "mitchell", "parzen", "lanczos4", "lanczos6",
+  // APPEND ONLY. The index is the value handed to the shader as u_*_flt and it
+  // is what saved workflows resolve against — inserting in the middle would
+  // silently repoint every comp already on disk at a different filter.
+  "impulse", "bilinear", "keys", "mitchell", "parzen", "lanczos4", "lanczos6", "gaussian",
 ];
 
 export const COMP_RESAMPLE_LABELS: Record<CompResampleFilter, string> = {
@@ -110,6 +114,7 @@ export const COMP_RESAMPLE_LABELS: Record<CompResampleFilter, string> = {
   parzen: "Parzen",
   lanczos4: "Lanczos4",
   lanczos6: "Lanczos6",
+  gaussian: "Gaussian",
 };
 
 /** Bilinear: what every transform did before this was configurable, so
