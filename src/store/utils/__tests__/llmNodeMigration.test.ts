@@ -67,6 +67,24 @@ describe("migrateLlmNodes", () => {
     expect(out.edges).toEqual([]);
   });
 
+  it("drops edges into the removed text input, including dyn-pin slots", () => {
+    const edges = [
+      { id: "e1", source: "a", target: "llm-1", targetHandle: "text" },
+      { id: "e2", source: "b", target: "llm-1", targetHandle: "text-0" },
+    ] as unknown as WorkflowEdge[];
+    const out = migrateLlmNodes([llm({ conversationMode: true })], edges);
+    expect(out.edges).toEqual([]);
+  });
+
+  it("keeps image and video inputs, which the node still renders", () => {
+    const edges = [
+      { id: "e1", source: "a", target: "llm-1", targetHandle: "image" },
+      { id: "e2", source: "b", target: "llm-1", targetHandle: "video" },
+    ] as unknown as WorkflowEdge[];
+    const out = migrateLlmNodes([llm({ conversationMode: true })], edges);
+    expect(out.edges).toHaveLength(2);
+  });
+
   it("keeps the normal text output edge", () => {
     const edges = [{ id: "e1", source: "llm-1", sourceHandle: "text", target: "b" }] as unknown as WorkflowEdge[];
     const out = migrateLlmNodes([llm({ conversationMode: true })], edges);

@@ -59,13 +59,17 @@ export async function executeLlmGenerate(
   let images: string[];
   let text: string | null;
 
+  // The compose box is how the node is driven. It wins over everything else
+  // because it is the most recent deliberate act; `inputs.text` remains as a
+  // fallback for workflows still wired through the (now removed) text input,
+  // and the stored inputPrompt behind that for a re-run with no new message.
+  const composed = (nodeData.composeInput ?? "").trim();
   if (useStoredFallback) {
     images = inputs.images.length > 0 ? inputs.images : nodeData.inputImages;
-    text = inputs.text ?? nodeData.inputPrompt;
   } else {
     images = inputs.images;
-    text = inputs.text ?? nodeData.inputPrompt;
   }
+  text = composed || inputs.text || nodeData.inputPrompt;
 
   // Defensive validation — the image-handle on this node accepts any edge
   // (React Flow doesn't strictly type-check connections), so a text-typed
@@ -113,7 +117,7 @@ export async function executeLlmGenerate(
       status: "error",
       error: droppedCount > 0
         ? `Image input is wired to a non-image source (${droppedCount} dropped). Connect an image-typed output (Image Input, Generate Image, Crop, etc.) to the image handle, or remove the bad edge.`
-        : "Missing text input - connect a prompt node or set internal prompt",
+        : "Nothing to send — type a message in the box below and press Send.",
     });
     throw new Error("Missing text input");
   }
@@ -240,6 +244,9 @@ export async function executeLlmGenerate(
         ...(useConversation
           ? { conversation: [...persistedConversation, assistantTurn] }
           : {}),
+        // Chat-style: clear the compose box after a successful send so the same
+        // message is not silently re-sent by the next Run.
+        composeInput: "",
         status: "complete",
         error: null,
       });

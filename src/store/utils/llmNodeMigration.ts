@@ -23,8 +23,18 @@ const DEAD_FIELDS = [
  * untouched". An edge left pointing at a handle that no longer renders is
  * invisible on the canvas yet still resolves into request bodies.
  */
-const DEAD_TARGET_HANDLE = "image-feedback";
 const DEAD_SOURCE_HANDLE = "prompt";
+
+/**
+ * Target handles the LLM node no longer renders.
+ *
+ * `image-feedback` went with loopback. The text input went with the compose
+ * box: the node is driven inline now, so a prompt node wired into it would be
+ * an input the UI gives no way to see or clear. Dynamic-pin text slots are
+ * `text-<n>`, so match the prefix as well as the bare id.
+ */
+const isDeadTargetHandle = (h: string | null | undefined): boolean =>
+  h === "image-feedback" || h === "text" || (typeof h === "string" && h.startsWith("text-"));
 
 /**
  * Collapse the LLM node's old three modes onto a single `rememberTurns` flag,
@@ -68,7 +78,7 @@ export function migrateLlmNodes(
   });
 
   const outEdges = edges.filter((e) => {
-    if (e.target && llmIds.has(e.target) && e.targetHandle === DEAD_TARGET_HANDLE) return false;
+    if (e.target && llmIds.has(e.target) && isDeadTargetHandle(e.targetHandle)) return false;
     if (e.source && llmIds.has(e.source) && e.sourceHandle === DEAD_SOURCE_HANDLE) return false;
     return true;
   });

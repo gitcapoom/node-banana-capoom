@@ -378,14 +378,6 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
             style={{ top: "35%" }}
             data-handletype="image"
           />
-          {/* Text input */}
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="text"
-            style={{ top: "65%" }}
-            data-handletype="text"
-          />
         </>
       )}
       {/* Video input — Gemini models only (the route rejects other providers

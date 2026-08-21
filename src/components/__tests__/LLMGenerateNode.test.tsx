@@ -73,15 +73,14 @@ describe("LLMGenerateNode", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render text input handle on left", () => {
+    it("no longer renders a text INPUT handle — the compose box replaced it", () => {
       const { container } = render(
         <TestWrapper>
           <LLMGenerateNode {...createNodeProps()} />
         </TestWrapper>
       );
 
-      const textHandle = container.querySelector('[data-handletype="text"][class*="target"]');
-      expect(textHandle).toBeInTheDocument();
+      expect(container.querySelector('[data-handletype="text"][class*="target"]')).toBeNull();
     });
 
     it("should render image input handle on left", () => {

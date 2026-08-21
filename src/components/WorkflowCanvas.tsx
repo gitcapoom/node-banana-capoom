@@ -222,7 +222,7 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "generateAudio":
       return { inputs: ["text"], outputs: ["audio"] };
     case "llmGenerate":
-      return { inputs: ["text", "image", "video"], outputs: ["text"] };
+      return { inputs: ["image", "video"], outputs: ["text"] };
     case "splitGrid":
       return { inputs: ["image"], outputs: ["reference"] };
     case "output":

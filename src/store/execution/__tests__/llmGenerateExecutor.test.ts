@@ -88,9 +88,10 @@ describe("executeLlmGenerate", () => {
 
     await expect(executeLlmGenerate(ctx)).rejects.toThrow("Missing text input");
 
+    // The message now points at the compose box, which is how the node is driven.
     expect(ctx.updateNodeData).toHaveBeenCalledWith("llm-1", expect.objectContaining({
       status: "error",
-      error: expect.stringContaining("Missing text input"),
+      error: expect.stringContaining("type a message"),
     }));
   });
 
@@ -186,8 +187,10 @@ describe("executeLlmGenerate", () => {
     const ctx = makeCtx(node);
     await executeLlmGenerate(ctx);
 
+    // composeInput is cleared on success so the same message is not re-sent.
     expect(ctx.updateNodeData).toHaveBeenCalledWith("llm-1", {
       outputText: "generated output",
+      composeInput: "",
       status: "complete",
       error: null,
     });
