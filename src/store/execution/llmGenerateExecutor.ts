@@ -9,6 +9,7 @@ import type { LLMGenerateNodeData, ConversationTurn } from "@/types";
 import { buildLlmHeaders } from "@/store/utils/buildApiHeaders";
 import type { NodeExecutionContext } from "./types";
 import { loadMediaById } from "@/utils/mediaStorage";
+import { derivePrompt, tagInstruction, retryInstruction } from "./derivePrompt";
 
 export interface LlmGenerateOptions {
   /** When true, falls back to stored inputImages/inputPrompt if no connections provide them. */
@@ -168,12 +169,47 @@ export async function executeLlmGenerate(
     loadingStartedAt: Date.now(),
     loadingPhase: "Submitting…",
     error: null,
+    // A warning from the previous Send must not look like it describes this one.
+    derivedWarning: null,
     lastGenerationCost: null,
   });
 
   const headers = buildLlmHeaders(nodeData.provider, providerSettings);
 
-  const effectiveSystem = nodeData.systemPrompt;
+  const generatorFriendly = nodeData.generatorFriendly === true;
+  // A negative prompt is a generator artifact, so it only means anything
+  // alongside a generator prompt.
+  const wantNegative = generatorFriendly && nodeData.generateNegativePrompt === true;
+
+  // The tag instruction rides along with the user's own system prompt rather
+  // than replacing it — their instructions still govern the reply; this only
+  // says what to append to it.
+  const effectiveSystem = generatorFriendly
+    ? `${nodeData.systemPrompt ?? ""}${tagInstruction(wantNegative)}`
+    : nodeData.systemPrompt;
+
+  /** One request to the model, returning its text. Used for the derivation's
+   *  retry and shrink passes, which are extra round trips on the same node. */
+  const askModel = async (messages: ConversationTurn[], system?: string): Promise<string> => {
+    const res = await fetch("/api/llm", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        messages,
+        ...(system ? { system } : {}),
+        provider: nodeData.provider,
+        model: nodeData.model,
+        temperature: nodeData.temperature,
+        maxTokens: nodeData.maxTokens,
+        ...(nodeData.reasoning && nodeData.reasoning !== "off" ? { reasoning: nodeData.reasoning } : {}),
+      }),
+      ...(signal ? { signal } : {}),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const j = await res.json();
+    if (!j.success || !j.text) throw new Error(j.error || "LLM call failed");
+    return j.text as string;
+  };
 
   try {
     const response = await fetch("/api/llm", {
@@ -218,7 +254,57 @@ export async function executeLlmGenerate(
         text: result.text,
         timestamp: Date.now(),
       };
+
+      // Derive the generator-ready prompt, if asked for. Nothing here can fail
+      // the run: the worst case is an unstripped prompt with a warning badge.
+      let derived: {
+        derivedPrompt?: string | null;
+        derivedNegativePrompt?: string | null;
+        derivedWarning?: string | null;
+      } = {};
+      if (generatorFriendly) {
+        const r = await derivePrompt(
+          result.text,
+          { wantNegative, maxChars: nodeData.maxPromptChars ?? null },
+          {
+            // Hand the model its OWN answer back and ask for the block alone —
+            // cheaper than re-running the request, and it does not have to redo
+            // the thinking.
+            retry: (failedReply) =>
+              askModel(
+                [
+                  ...outboundMessages,
+                  { role: "assistant", text: failedReply, timestamp: Date.now() },
+                  { role: "user", text: retryInstruction(wantNegative), timestamp: Date.now() },
+                ],
+                effectiveSystem,
+              ),
+            // No system prompt here: this is a pure text operation and the
+            // node's own instructions would only pull the answer off task.
+            shrink: (text, limit) =>
+              askModel([
+                {
+                  role: "user",
+                  text:
+                    `Shorten this image prompt to under ${limit} characters. It is currently ` +
+                    `${text.length}. Keep the meaning and the most important visual detail; ` +
+                    `drop the least important. Return ONLY the shortened prompt.
+
+${text}`,
+                  timestamp: Date.now(),
+                },
+              ]),
+          },
+        );
+        derived = {
+          derivedPrompt: r.prompt,
+          derivedNegativePrompt: r.negativePrompt,
+          derivedWarning: r.warning,
+        };
+      }
+
       updateNodeData(node.id, {
+        ...derived,
         outputText: result.text,
         ...(useConversation
           ? { conversation: [...persistedConversation, assistantTurn] }

@@ -359,6 +359,52 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                       Clear history
                     </button>
                   </div>
+
+                  {/* ─── Generator-ready output ───────────────── */}
+                  <div className="border-t border-neutral-800 pt-1.5 space-y-1.5">
+                    <label className="nodrag nopan flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={nodeData.generatorFriendly === true}
+                        onChange={(e) => updateNodeData(id, { generatorFriendly: e.target.checked })}
+                        className="nodrag accent-emerald-600"
+                      />
+                      Generator friendly
+                    </label>
+                    {nodeData.generatorFriendly === true && (
+                      <>
+                        <label className="nodrag nopan flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer pl-4">
+                          <input
+                            type="checkbox"
+                            checked={nodeData.generateNegativePrompt === true}
+                            onChange={(e) => updateNodeData(id, { generateNegativePrompt: e.target.checked })}
+                            className="nodrag accent-emerald-600"
+                          />
+                          Generate negative prompt
+                        </label>
+                        <div className="flex items-center gap-2 pl-4">
+                          <label className="text-[10px] text-neutral-500 shrink-0">Max characters</label>
+                          <input
+                            type="number"
+                            min={0}
+                            step={50}
+                            value={nodeData.maxPromptChars ?? 0}
+                            onChange={(e) => {
+                              const n = parseInt(e.target.value, 10);
+                              updateNodeData(id, { maxPromptChars: isNaN(n) || n <= 0 ? null : n });
+                            }}
+                            title="Shrink the generated prompt to fit. 0 = no limit."
+                            className="nodrag nopan w-16 text-[11px] py-0.5 px-1 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white tabular-nums"
+                          />
+                        </div>
+                      </>
+                    )}
+                    {nodeData.derivedWarning && (
+                      <div className="text-[10px] text-amber-400/90 bg-amber-900/25 border border-amber-800/40 rounded px-1.5 py-1 leading-tight">
+                        ⚠ {nodeData.derivedWarning}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
