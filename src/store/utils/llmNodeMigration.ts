@@ -23,7 +23,21 @@ const DEAD_FIELDS = [
  * untouched". An edge left pointing at a handle that no longer renders is
  * invisible on the canvas yet still resolves into request bodies.
  */
-const DEAD_SOURCE_HANDLE = "prompt";
+/**
+ * Source handles the LLM node no longer renders.
+ *
+ * `prompt` went with loopback. `text` went with the prompt-node buttons: the
+ * node puts its reply on the canvas as a real prompt node now, which can be
+ * wired, edited and re-used, rather than emitting straight into an edge.
+ *
+ * Dropping these loses real wiring — 9 edges across 4 saved projects fed
+ * downstream from `text`. There is no honest way to keep them: the handle they
+ * attach to does not exist, and an edge to a handle that never renders is
+ * invisible on the canvas while still resolving into request bodies. Re-wire
+ * with "Send to prompt node".
+ */
+const isDeadSourceHandle = (h: string | null | undefined): boolean =>
+  h === "prompt" || h === "text";
 
 /**
  * Target handles the LLM node no longer renders.
@@ -79,7 +93,7 @@ export function migrateLlmNodes(
 
   const outEdges = edges.filter((e) => {
     if (e.target && llmIds.has(e.target) && isDeadTargetHandle(e.targetHandle)) return false;
-    if (e.source && llmIds.has(e.source) && e.sourceHandle === DEAD_SOURCE_HANDLE) return false;
+    if (e.source && llmIds.has(e.source) && isDeadSourceHandle(e.sourceHandle)) return false;
     return true;
   });
 

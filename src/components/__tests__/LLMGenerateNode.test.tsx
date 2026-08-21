@@ -94,15 +94,16 @@ describe("LLMGenerateNode", () => {
       expect(imageHandle).toBeInTheDocument();
     });
 
-    it("should render text output handle on right", () => {
+    it("no longer renders a text OUTPUT handle — prompt nodes replaced it", () => {
+      // The reply reaches the canvas as a real prompt node now, via the
+      // Send/Update buttons, rather than being emitted straight into an edge.
       const { container } = render(
         <TestWrapper>
           <LLMGenerateNode {...createNodeProps()} />
         </TestWrapper>
       );
 
-      const outputHandle = container.querySelector('[data-handletype="text"][class*="source"]');
-      expect(outputHandle).toBeInTheDocument();
+      expect(container.querySelector('[data-handletype="text"][class*="source"]')).toBeNull();
     });
   });
 

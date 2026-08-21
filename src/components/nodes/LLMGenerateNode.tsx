@@ -51,6 +51,65 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
   // Inline parameters: compute collapse state and toggle handler
   const isParamsExpanded = nodeData.parametersExpanded ?? true; // default expanded
 
+  // ─── Prompt nodes ────────────────────────────────────────────
+  const addNode = useWorkflowStore((state) => state.addNode);
+  const getNodeById = useWorkflowStore((state) => state.getNodeById);
+
+  // What the buttons write. With generator-friendly off there is no derived
+  // prompt, so the raw reply is the only sensible payload.
+  const promptText = nodeData.generatorFriendly
+    ? nodeData.derivedPrompt ?? ""
+    : nodeData.outputText ?? "";
+  const negativeText = nodeData.derivedNegativePrompt ?? "";
+  const wantNegativeNode =
+    nodeData.generatorFriendly === true && nodeData.generateNegativePrompt === true;
+
+  /** A tracked id is only usable while it still points at a live prompt node —
+   *  the user can delete it, or the id can outlive a workflow swap. */
+  const liveTarget = useCallback(
+    (targetId: string | null | undefined): boolean => {
+      if (!targetId) return false;
+      const n = getNodeById(targetId);
+      return !!n && n.type === "prompt";
+    },
+    [getNodeById],
+  );
+
+  const canUpdatePromptNode =
+    liveTarget(nodeData.promptNodeId) ||
+    (wantNegativeNode && liveTarget(nodeData.negativePromptNodeId));
+
+  const handleSendToPromptNode = useCallback(() => {
+    const self = getNodeById(id);
+    if (!self) return;
+    const width = self.width ?? 320;
+    const x = self.position.x + width + 40;
+    // Repeated sends fan downward instead of stacking exactly on each other.
+    const prev = nodeData.promptNodeId ? getNodeById(nodeData.promptNodeId) : undefined;
+    const y = prev ? prev.position.y + 30 : self.position.y;
+
+    const updates: Partial<LLMGenerateNodeData> = {};
+    updates.promptNodeId = addNode("prompt", { x, y }, { prompt: promptText });
+    if (wantNegativeNode) {
+      updates.negativePromptNodeId = addNode(
+        "prompt",
+        { x, y: y + 180 },
+        { prompt: negativeText },
+      );
+    }
+    updateNodeData(id, updates);
+  }, [id, addNode, getNodeById, nodeData.promptNodeId, promptText, negativeText, wantNegativeNode, updateNodeData]);
+
+  const handleUpdatePromptNode = useCallback(() => {
+    if (liveTarget(nodeData.promptNodeId)) {
+      updateNodeData(nodeData.promptNodeId!, { prompt: promptText });
+    }
+    // A missing negative must never blank a node the user has already wired.
+    if (wantNegativeNode && liveTarget(nodeData.negativePromptNodeId) && negativeText) {
+      updateNodeData(nodeData.negativePromptNodeId!, { prompt: negativeText });
+    }
+  }, [liveTarget, nodeData.promptNodeId, nodeData.negativePromptNodeId, promptText, negativeText, wantNegativeNode, updateNodeData]);
+
   const handleToggleParams = useCallback(() => {
     updateNodeData(id, { parametersExpanded: !isParamsExpanded });
   }, [id, isParamsExpanded, updateNodeData]);
@@ -399,6 +458,28 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
                         </div>
                       </>
                     )}
+                    <div className="flex gap-1.5 pt-0.5">
+                      <button
+                        onClick={handleSendToPromptNode}
+                        disabled={!promptText}
+                        title={promptText ? "Create a new prompt node holding this reply" : "Nothing to send yet — run the node first"}
+                        className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-neutral-800 hover:bg-emerald-800 text-neutral-300 hover:text-white disabled:opacity-40 disabled:hover:bg-neutral-800 transition-colors"
+                      >
+                        Send to prompt node
+                      </button>
+                      <button
+                        onClick={handleUpdatePromptNode}
+                        disabled={!promptText || !canUpdatePromptNode}
+                        title={
+                          !canUpdatePromptNode
+                            ? "No prompt node yet — press Send to prompt node first"
+                            : "Overwrite the prompt node this one created"
+                        }
+                        className="nodrag nopan flex-1 text-[10px] py-1 rounded bg-neutral-800 hover:bg-emerald-800 text-neutral-300 hover:text-white disabled:opacity-40 disabled:hover:bg-neutral-800 transition-colors"
+                      >
+                        Update prompt node
+                      </button>
+                    </div>
                     {nodeData.derivedWarning && (
                       <div className="text-[10px] text-amber-400/90 bg-amber-900/25 border border-amber-800/40 rounded px-1.5 py-1 leading-tight">
                         ⚠ {nodeData.derivedWarning}
@@ -438,14 +519,6 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
         className="!bg-violet-500 !border-violet-700"
         title="Video input — analyzed by Gemini models (not supported by OpenAI/Claude)"
       />
-      {/* Conversation / text output */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        id="text"
-        data-handletype="text"
-      />
-
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
         <LLMChatPanel
           conversation={conversation}

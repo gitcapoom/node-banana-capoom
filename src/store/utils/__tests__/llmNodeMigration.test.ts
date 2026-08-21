@@ -85,10 +85,13 @@ describe("migrateLlmNodes", () => {
     expect(out.edges).toHaveLength(2);
   });
 
-  it("keeps the normal text output edge", () => {
+  it("drops edges out of the removed text output", () => {
+    // Real wiring is lost here — 9 edges across 4 saved projects used it. The
+    // handle no longer exists, so keeping them would leave invisible edges that
+    // still resolve into request bodies. Re-wire with "Send to prompt node".
     const edges = [{ id: "e1", source: "llm-1", sourceHandle: "text", target: "b" }] as unknown as WorkflowEdge[];
     const out = migrateLlmNodes([llm({ conversationMode: true })], edges);
-    expect(out.edges).toHaveLength(1);
+    expect(out.edges).toEqual([]);
   });
 
   it("leaves non-LLM nodes and their edges alone", () => {

@@ -222,7 +222,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "generateAudio":
       return { inputs: ["text"], outputs: ["audio"] };
     case "llmGenerate":
-      return { inputs: ["image", "video"], outputs: ["text"] };
+      // No outputs: replies reach the canvas as prompt nodes, not edges.
+      return { inputs: ["image", "video"], outputs: [] };
     case "splitGrid":
       return { inputs: ["image"], outputs: ["reference"] };
     case "output":
