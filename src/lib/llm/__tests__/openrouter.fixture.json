@@ -1,0 +1,78 @@
+{
+  "data": [
+    {
+      "id": "anthropic/claude-opus-5-fast",
+      "context_length": 1000000,
+      "top_provider": {
+        "max_completion_tokens": 128000
+      },
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "reasoning_effort",
+        "response_format",
+        "stop",
+        "structured_outputs",
+        "tool_choice",
+        "tools",
+        "verbosity"
+      ]
+    },
+    {
+      "id": "google/gemini-2.5-flash",
+      "context_length": 1048576,
+      "top_provider": {
+        "max_completion_tokens": 65535
+      },
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "response_format",
+        "seed",
+        "stop",
+        "structured_outputs",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ]
+    },
+    {
+      "id": "openai/o3",
+      "context_length": 200000,
+      "top_provider": {
+        "max_completion_tokens": 100000
+      },
+      "supported_parameters": [
+        "include_reasoning",
+        "max_tokens",
+        "reasoning",
+        "response_format",
+        "seed",
+        "structured_outputs",
+        "tool_choice",
+        "tools"
+      ]
+    },
+    {
+      "id": "openai/gpt-4.1",
+      "context_length": 1047576,
+      "top_provider": {
+        "max_completion_tokens": 32768
+      },
+      "supported_parameters": [
+        "max_completion_tokens",
+        "max_tokens",
+        "response_format",
+        "seed",
+        "structured_outputs",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ]
+    }
+  ]
+}
