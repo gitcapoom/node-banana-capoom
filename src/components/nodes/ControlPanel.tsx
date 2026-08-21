@@ -9,6 +9,7 @@ import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { ModelParameters } from "./ModelParameters";
 import { PromptSkillPicker } from "./PromptSkillPicker";
+import { LLMGeneratorControls } from "./LLMGeneratorControls";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
 import { CubicBezierEditor } from "@/components/CubicBezierEditor";
@@ -1562,6 +1563,12 @@ function LLMControls({ node }: { node: Node }) {
           />
         </div>
       )}
+      {/* Generator-ready output — the same component the node renders, so the
+          two cannot drift. */}
+      <div className="border-t border-neutral-700 pt-3 mb-2">
+        <LLMGeneratorControls nodeId={node.id} />
+      </div>
+
       <div className="flex justify-end gap-1.5">
         <button
           onClick={() => regenerateNode(node.id)}
