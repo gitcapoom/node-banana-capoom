@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { LLMGenerateRequest, LLMGenerateResponse, LLMModelType, ConversationTurn } from "@/types";
 import { logger } from "@/utils/logger";
+import { asLlmProvider, allowedParameterNames } from "@/app/api/models/llmSchema";
 import { compressImage } from "@/app/api/generate/utils/imageCompression";
 
 export const maxDuration = 60; // 1 minute timeout
@@ -618,10 +619,31 @@ export async function POST(request: NextRequest) {
       system,
       provider,
       model,
-      temperature = 0.7,
-      maxTokens = 4096,
-      reasoning = "off",
     } = body;
+
+    // Parameters arrive as a generic bag keyed by our canonical names, and are
+    // filtered HERE against the model's own schema. Doing it server-side means
+    // the client needs no extra request, and there is exactly one place that
+    // decides what a model is sent.
+    const rawParams = (body as { parameters?: Record<string, unknown> }).parameters ?? {};
+    const allowed = allowedParameterNames(asLlmProvider(provider) ?? "openai", model);
+    // Top-level temperature/maxTokens/reasoning remain supported. The node now
+    // sends the bag, but the route is a general endpoint and breaking its older
+    // shape would buy nothing.
+    const legacy = body as { temperature?: number; maxTokens?: number; reasoning?: ReasoningLevel };
+    const num = (k: string, legacyValue: number | undefined, fallback: number): number => {
+      const v = allowed.has(k) ? rawParams[k] : undefined;
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      return typeof legacyValue === "number" && Number.isFinite(legacyValue) ? legacyValue : fallback;
+    };
+    const temperature = num("temperature", legacy.temperature, 0.7);
+    const maxTokens = num("maxTokens", legacy.maxTokens, 4096);
+    const reasoning = ((allowed.has("reasoning") ? rawParams.reasoning : undefined) as
+      | ReasoningLevel
+      | undefined) ?? legacy.reasoning ?? "off";
+    const topP = allowed.has("topP") && typeof rawParams.topP === "number" ? rawParams.topP : undefined;
+    const topK = allowed.has("topK") && typeof rawParams.topK === "number" ? rawParams.topK : undefined;
+    void topP; void topK;
 
     // Normalise to a single internal shape (`messages[]`). New multi-turn
     // callers populate `messages` directly; legacy one-shot callers pass

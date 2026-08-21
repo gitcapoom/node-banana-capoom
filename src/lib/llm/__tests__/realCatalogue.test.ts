@@ -21,9 +21,9 @@ const entries = new Map<string, OpenRouterEntry>(
 const namesFor = (id: string) => toModelParameters(entries.get(id)!).map((p) => p.name);
 
 describe("real OpenRouter entries", () => {
-  it("gpt-4.1 gets temperature, topP, maxTokens and seed", () => {
+  it("gpt-4.1 gets temperature, topP and maxTokens", () => {
     expect(namesFor("openai/gpt-4.1")).toEqual(
-      expect.arrayContaining(["temperature", "topP", "maxTokens", "seed"]));
+      expect.arrayContaining(["temperature", "topP", "maxTokens"]));
   });
 
   it("o3 gets NO temperature — the bug this feature exists to fix", () => {
@@ -32,15 +32,15 @@ describe("real OpenRouter entries", () => {
     expect(n).toContain("reasoning");
   });
 
-  it("claude-opus-5-fast gets no temperature but does get reasoning and verbosity", () => {
+  it("claude-opus-5-fast gets no temperature, but does get reasoning", () => {
     const n = namesFor("anthropic/claude-opus-5-fast");
     expect(n).not.toContain("temperature");
-    expect(n).toEqual(expect.arrayContaining(["reasoning", "verbosity", "stopSequences"]));
+    expect(n).toContain("reasoning");
   });
 
-  it("gemini-2.5-flash gets temperature, topP, seed and stop", () => {
+  it("gemini-2.5-flash gets temperature and topP", () => {
     expect(namesFor("google/gemini-2.5-flash")).toEqual(
-      expect.arrayContaining(["temperature", "topP", "seed", "stopSequences"]));
+      expect.arrayContaining(["temperature", "topP"]));
   });
 
   it("no model surfaces a tools control", () => {

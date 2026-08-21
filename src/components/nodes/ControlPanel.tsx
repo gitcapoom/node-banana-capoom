@@ -1297,9 +1297,7 @@ function LLMControls({ node }: { node: Node }) {
         provider: newProvider,
         model: firstModelForProvider,
       };
-      if (newProvider === "anthropic" && nodeData.temperature > 1) {
-        updates.temperature = 1;
-      }
+      // No clamp here any more: the model's own declared maximum governs.
       updateNodeData(node.id, updates);
     },
     [node.id, updateNodeData, nodeData.temperature, modelLists]
@@ -1445,52 +1443,15 @@ function LLMControls({ node }: { node: Node }) {
         </div>
       </div>
 
-      <div>
-        <label className="block text-xs font-medium text-neutral-300 mb-1">
-          Temperature: {(nodeData.temperature ?? 0.7).toFixed(2)}
-        </label>
-        <input
-          type="range"
-          min="0"
-          max={provider === "anthropic" ? "1" : "2"}
-          step="0.01"
-          value={nodeData.temperature ?? 0.7}
-          onChange={handleTemperatureChange}
-          className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-xs font-medium text-neutral-300 mb-1">
-          Max Tokens: {(nodeData.maxTokens || 8192).toLocaleString()}
-        </label>
-        <input
-          type="range"
-          min="256"
-          max="32768"
-          step="256"
-          value={nodeData.maxTokens || 8192}
-          onChange={handleMaxTokensChange}
-          className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-        />
-      </div>
-
-      {supportsReasoning && (
-        <div>
-          <label className="block text-xs font-medium text-neutral-300 mb-1">Reasoning</label>
-          <select
-            value={reasoningLevel}
-            onChange={handleReasoningChange}
-            title="Higher = more thinking before reply. Costs more output tokens."
-            className="nodrag nopan w-full px-2 py-1 text-xs bg-neutral-700 border border-neutral-600 rounded text-neutral-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            <option value="off">Off (provider default)</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </div>
-      )}
+      {/* Parameters follow the selected model — same component and same schema
+          the node itself renders, so the two panels cannot disagree. */}
+      <ModelParameters
+        modelId={nodeData.model}
+        provider={nodeData.provider === "google" ? "gemini" : nodeData.provider}
+        kind="llm"
+        parameters={nodeData.parameters ?? {}}
+        onParametersChange={(parameters) => updateNodeData(node.id, { parameters })}
+      />
 
       {/* ─── System prompt + prompt skill (applies in both modes) ─── */}
       <div className="border-t border-neutral-700 pt-3 space-y-2">

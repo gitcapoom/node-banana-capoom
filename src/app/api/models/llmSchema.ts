@@ -4,6 +4,7 @@ import {
   getOpenRouterCatalogue,
   clearOpenRouterCache,
   catalogueAgeMs,
+  peekOpenRouterCatalogue,
 } from "@/lib/llm/openrouterCatalogue";
 import { resolveOpenRouterEntry } from "@/lib/llm/resolveModelId";
 import { toModelParameters, familyFallback } from "@/lib/llm/llmParameterSchema";
@@ -63,4 +64,21 @@ export async function llmModelParameters(
   const parameters = toModelParameters(entry, googleMeta);
   if (parameters.length > 0) return { parameters, resolved: true };
   return { parameters: familyFallback(provider, modelId), resolved: false };
+}
+
+
+/**
+ * Which parameter names a model accepts, WITHOUT ever hitting the network.
+ *
+ * Used on the generation path. Filtering must not put a third party between the
+ * user and their own provider: if OpenRouter were slow, every reply would wait
+ * on it. The catalogue is normally warm already — the UI fetched it to render
+ * the controls — and when it is not, the model's family rules give a sound
+ * allow-list with no request at all.
+ */
+export function allowedParameterNames(provider: LlmProvider, modelId: string): Set<string> {
+  const catalogue = peekOpenRouterCatalogue();
+  const entry = catalogue ? resolveOpenRouterEntry(provider, modelId, catalogue) : null;
+  const params = entry ? toModelParameters(entry, null) : familyFallback(provider, modelId);
+  return new Set((params.length ? params : familyFallback(provider, modelId)).map((p) => p.name));
 }

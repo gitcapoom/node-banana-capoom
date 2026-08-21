@@ -199,9 +199,10 @@ export async function executeLlmGenerate(
         ...(system ? { system } : {}),
         provider: nodeData.provider,
         model: nodeData.model,
-        temperature: nodeData.temperature,
-        maxTokens: nodeData.maxTokens,
-        ...(nodeData.reasoning && nodeData.reasoning !== "off" ? { reasoning: nodeData.reasoning } : {}),
+        // The whole bag. The route filters it against the model's own schema,
+        // so an unsupported value stays in node data (switch models and back
+        // and it is still there) without ever reaching the provider.
+        parameters: nodeData.parameters,
       }),
       ...(signal ? { signal } : {}),
     });
@@ -220,9 +221,7 @@ export async function executeLlmGenerate(
         ...(effectiveSystem ? { system: effectiveSystem } : {}),
         provider: nodeData.provider,
         model: nodeData.model,
-        temperature: nodeData.temperature,
-        maxTokens: nodeData.maxTokens,
-        ...(nodeData.reasoning && nodeData.reasoning !== "off" ? { reasoning: nodeData.reasoning } : {}),
+        parameters: nodeData.parameters,
       }),
       ...(signal ? { signal } : {}),
     });

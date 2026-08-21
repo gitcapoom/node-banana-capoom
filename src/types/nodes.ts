@@ -798,8 +798,17 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   outputPrompt?: string | null;
   provider: LLMProvider;
   model: LLMModelType;
-  temperature: number;
-  maxTokens: number;
+  /** Model-specific parameters, keyed by our canonical names (temperature,
+   *  topP, topK, maxTokens, reasoning). Which ones exist is decided by the
+   *  selected model's schema, exactly as for image and video nodes.
+   *
+   *  A value is KEPT when the selected model does not support it, so switching
+   *  models and back restores what you had; only sending is filtered. */
+  parameters?: Record<string, unknown>;
+  /** @deprecated Migrated into `parameters` on load by migrateLlmNodes. */
+  temperature?: number;
+  /** @deprecated Migrated into `parameters` on load by migrateLlmNodes. */
+  maxTokens?: number;
   /** Provider-agnostic reasoning / thinking effort.
    *    off    = no reasoning override (provider default; reasoning-era
    *             models still reason internally)

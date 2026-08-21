@@ -136,8 +136,10 @@ describe("executeLlmGenerate", () => {
     expect(body.messages[0].text).toBe("test llm prompt");
     expect(body.provider).toBe("google");
     expect(body.model).toBe("gemini-2.5-flash");
-    expect(body.temperature).toBe(0.7);
-    expect(body.maxTokens).toBe(1024);
+    // Parameters travel as a bag now, not as top-level fields: which ones a
+    // model accepts is decided by its schema, and the route filters the bag
+    // against it. The node no longer decides the shape of the request.
+    expect(body.parameters).toEqual(node.data.parameters);
   });
 
   it("should include images in request when connected", async () => {

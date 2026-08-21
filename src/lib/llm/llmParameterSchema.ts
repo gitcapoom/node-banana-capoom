@@ -64,6 +64,17 @@ const ORDER = [
   "seed", "stopSequences", "reasoning", "responseFormat", "verbosity",
 ];
 
+/**
+ * Parameters /api/llm can actually forward to a provider today.
+ *
+ * A control that is shown but not sent is worse than no control: it looks like
+ * it works. So the emitted set is intersected with this, and it grows only when
+ * the route learns to forward another one. seed, stopSequences, responseFormat
+ * and verbosity are translated and tested but deliberately not surfaced yet —
+ * each needs a per-provider mapping in the three request builders.
+ */
+const FORWARDABLE = new Set(["temperature", "topP", "topK", "maxTokens", "reasoning"]);
+
 export function toModelParameters(
   entry: OpenRouterEntry | null,
   google?: GoogleModelMeta | null,
@@ -82,7 +93,7 @@ export function toModelParameters(
 
   const params: ModelParameter[] = [];
   for (const name of ORDER) {
-    if (!wanted.has(name)) continue;
+    if (!wanted.has(name) || !FORWARDABLE.has(name)) continue;
     const p = BUILD[name]();
 
     if (name === "maxTokens") {
@@ -117,7 +128,7 @@ export function familyFallback(
   provider: "google" | "openai" | "anthropic",
   modelId: string,
 ): ModelParameter[] {
-  const pick = (names: string[]) => names.map((n) => BUILD[n]());
+  const pick = (names: string[]) => names.filter((n) => FORWARDABLE.has(n)).map((n) => BUILD[n]());
 
   if (provider === "openai") {
     // o-series reject temperature outright.

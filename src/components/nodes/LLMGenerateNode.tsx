@@ -14,6 +14,7 @@ import { DynamicInputHandles } from "./DynamicInputHandles";
 import { PromptSkillPicker } from "./PromptSkillPicker";
 import { LLMChatPanel } from "./LLMChatPanel";
 import { LLMGeneratorControls } from "./LLMGeneratorControls";
+import { ModelParameters } from "./ModelParameters";
 
 // LLM providers — the model list for each is fetched live via the
 // `useLlmModelLists` hook (shared with ControlPanel).
@@ -253,55 +254,16 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
               </button>
             </div>
 
-            {/* Temperature */}
-            <div className="flex flex-col gap-0.5">
-              <label className="text-[11px] text-neutral-400">
-                Temperature: {(nodeData.temperature ?? 0.7).toFixed(2)}
-              </label>
-              <input
-                type="range"
-                min="0"
-                max={provider === "anthropic" ? "1" : "2"}
-                step="0.01"
-                value={nodeData.temperature ?? 0.7}
-                onChange={handleTemperatureChange}
-                className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-              />
-            </div>
-
-            {/* Max Tokens */}
-            <div className="flex flex-col gap-0.5">
-              <label className="text-[11px] text-neutral-400">
-                Max Tokens: {(nodeData.maxTokens || 8192).toLocaleString()}
-              </label>
-              <input
-                type="range"
-                min="256"
-                max="32768"
-                step="256"
-                value={nodeData.maxTokens || 8192}
-                onChange={handleMaxTokensChange}
-                className="nodrag nopan w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-              />
-            </div>
-
-            {/* Reasoning (only when the selected model supports it) */}
-            {supportsReasoning && (
-              <div className="flex items-center gap-2">
-                <label className="text-[11px] text-neutral-400 shrink-0">Reasoning</label>
-                <select
-                  value={reasoningLevel}
-                  onChange={handleReasoningChange}
-                  className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 bg-[#1a1a1a] rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
-                  title="Higher = more thinking before reply. Costs more output tokens."
-                >
-                  <option value="off">Off (provider default)</option>
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                </select>
-              </div>
-            )}
+            {/* Parameters follow the selected model — which controls exist,
+                their ranges and their defaults all come from that model's
+                schema, exactly as they do for image and video nodes. */}
+            <ModelParameters
+              modelId={nodeData.model}
+              provider={provider === "google" ? "gemini" : provider}
+              kind="llm"
+              parameters={nodeData.parameters ?? {}}
+              onParametersChange={(parameters) => updateNodeData(id, { parameters })}
+            />
 
             {/* ─── System prompt + prompt skill (applies in both modes) ─── */}
             <div className="border-t border-neutral-800 pt-1.5 mt-1 flex flex-col gap-1">

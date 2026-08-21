@@ -75,11 +75,25 @@ export function migrateLlmNodes(
     llmIds.add(n.id);
 
     const d = n.data as Record<string, unknown>;
-    const hasDead = DEAD_FIELDS.some((k) => k in d);
+    const hasLegacyParams = ["temperature", "maxTokens", "reasoning"].some((k) => k in d);
+    const hasDead = DEAD_FIELDS.some((k) => k in d) || hasLegacyParams;
     // Already migrated and clean — leave the node object untouched.
     if (!hasDead && "rememberTurns" in d) return n;
 
     const next: Record<string, unknown> = { ...d };
+
+    // The three fixed controls become entries in the generic bag every other
+    // generator node already uses. Guarded on `parameters` being absent, which
+    // is what keeps this idempotent: a node migrated on a previous open keeps
+    // whatever the user has since chosen rather than having it overwritten.
+    if (!("parameters" in d)) {
+      const bag: Record<string, unknown> = {};
+      for (const k of ["temperature", "maxTokens", "reasoning"] as const) {
+        if (d[k] !== undefined) bag[k] = d[k];
+      }
+      if (Object.keys(bag).length > 0) next.parameters = bag;
+    }
+    for (const k of ["temperature", "maxTokens", "reasoning"]) delete next[k];
     // Either old flag means "send the transcript"; loopback implied conversation.
     const remember = d.loopbackMode === true || d.conversationMode === true;
     for (const k of DEAD_FIELDS) delete next[k];

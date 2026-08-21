@@ -80,6 +80,9 @@ interface ModelParametersProps {
   onParametersChange: (parameters: Record<string, unknown>) => void;
   onExpandChange?: (expanded: boolean, parameterCount: number) => void;
   onInputsLoaded?: (inputs: ModelInputDef[]) => void;
+  /** "llm" selects the CHAT schema. Needed because provider alone cannot say:
+   *  "gemini" already means this app's Google IMAGE provider. */
+  kind?: "llm";
 }
 
 /**
@@ -94,6 +97,7 @@ function ModelParametersInner({
   onParametersChange,
   onExpandChange,
   onInputsLoaded,
+  kind,
 }: ModelParametersProps) {
   const [schema, setSchema] = useState<ModelParameter[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -142,7 +146,7 @@ function ModelParametersInner({
 
         const encodedModelId = encodeURIComponent(modelId);
         const response = await deduplicatedFetch(
-          `/api/models/${encodedModelId}?provider=${provider}`,
+          `/api/models/${encodedModelId}?provider=${provider}${kind ? `&kind=${kind}` : ""}`,
           { headers }
         );
 
@@ -173,7 +177,7 @@ function ModelParametersInner({
     };
 
     fetchSchema();
-  }, [modelId, provider, replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, onInputsLoaded]);
+  }, [modelId, provider, kind, replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, onInputsLoaded]);
 
   // Notify parent to resize node when schema loads
   useEffect(() => {

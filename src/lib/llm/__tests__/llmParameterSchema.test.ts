@@ -10,7 +10,14 @@ const names = (ps: ReturnType<typeof toModelParameters>) => ps.map((p) => p.name
 describe("toModelParameters", () => {
   it("translates OpenRouter names to the node's, in a stable order", () => {
     const ps = toModelParameters(entry(["stop", "seed", "top_k", "top_p", "temperature"]));
-    expect(names(ps)).toEqual(["temperature", "topP", "topK", "seed", "stopSequences"]);
+    // seed and stopSequences translate but are not surfaced: /api/llm cannot
+    // forward them yet, and a control that is shown but not sent is worse than
+    // no control at all.
+    expect(names(ps)).toEqual(["temperature", "topP", "topK"]);
+  });
+
+  it("does not surface a parameter the route cannot forward", () => {
+    expect(names(toModelParameters(entry(["seed", "stop", "response_format", "verbosity"])))).toEqual([]);
   });
 
   it("maps both max-token spellings onto maxTokens, once", () => {
@@ -89,8 +96,8 @@ describe("familyFallback", () => {
     expect(n("openai", "gpt-5-turbo")).toEqual(expect.arrayContaining(["temperature", "maxTokens"]));
   });
 
-  it("gives claude-* stop sequences and reasoning", () => {
-    expect(n("anthropic", "claude-9-opus")).toEqual(expect.arrayContaining(["stopSequences", "reasoning"]));
+  it("gives claude-* reasoning", () => {
+    expect(n("anthropic", "claude-9-opus")).toEqual(expect.arrayContaining(["temperature", "reasoning"]));
   });
 
   it("gives gemini-* topK, which the others do not have", () => {

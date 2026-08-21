@@ -11,6 +11,11 @@ export interface OpenRouterEntry {
 let cache: { at: number; entries: Map<string, OpenRouterEntry> } | null = null;
 let inFlight: Promise<Map<string, OpenRouterEntry>> | null = null;
 
+/** The catalogue already in memory, or null. Never fetches. */
+export function peekOpenRouterCatalogue(): Map<string, OpenRouterEntry> | null {
+  return cache?.entries ?? null;
+}
+
 /** Age of the cached catalogue in ms, or null when nothing is cached. */
 export function catalogueAgeMs(): number | null {
   return cache ? Date.now() - cache.at : null;

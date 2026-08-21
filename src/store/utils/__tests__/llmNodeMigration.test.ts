@@ -108,3 +108,46 @@ describe("migrateLlmNodes", () => {
     expect(out.nodes).toBe(nodes);
   });
 });
+
+/**
+ * The three fixed controls become entries in the generic `parameters` bag, the
+ * same shape every image and video node already uses. 23 LLM nodes across 11
+ * saved workflows go through this.
+ */
+describe("migrateLlmNodes — parameters bag", () => {
+  it("moves temperature, maxTokens and reasoning into parameters", () => {
+    const { nodes } = migrateLlmNodes(
+      [llm({ temperature: 0.7, maxTokens: 8192, reasoning: "low" })], []);
+    expect(dataOf(nodes[0]).parameters).toEqual({ temperature: 0.7, maxTokens: 8192, reasoning: "low" });
+  });
+
+  it("removes the originals so nothing reads a stale copy", () => {
+    const { nodes } = migrateLlmNodes([llm({ temperature: 0.7, maxTokens: 8192 })], []);
+    const d = dataOf(nodes[0]);
+    expect(d.temperature).toBeUndefined();
+    expect(d.maxTokens).toBeUndefined();
+  });
+
+  it("is idempotent", () => {
+    const once = migrateLlmNodes([llm({ temperature: 0.5, maxTokens: 100 })], []);
+    const twice = migrateLlmNodes(once.nodes, once.edges);
+    expect(twice.nodes[0].data).toEqual(once.nodes[0].data);
+  });
+
+  it("does not invent a parameters bag for a node that had none", () => {
+    const { nodes } = migrateLlmNodes([llm({ rememberTurns: true })], []);
+    expect(dataOf(nodes[0]).parameters).toBeUndefined();
+  });
+
+  it("never overwrites an existing parameters bag", () => {
+    // A node migrated on a previous open keeps what the user has since chosen.
+    const { nodes } = migrateLlmNodes(
+      [llm({ temperature: 0.7, parameters: { topP: 0.9 } })], []);
+    expect(dataOf(nodes[0]).parameters).toEqual({ topP: 0.9 });
+  });
+
+  it("carries partial settings across — only what the node actually had", () => {
+    const { nodes } = migrateLlmNodes([llm({ maxTokens: 4096 })], []);
+    expect(dataOf(nodes[0]).parameters).toEqual({ maxTokens: 4096 });
+  });
+});
