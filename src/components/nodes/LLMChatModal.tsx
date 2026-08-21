@@ -5,7 +5,10 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
 import type { LLMGenerateNodeData } from "@/types";
 import { LLMChatPanel } from "./LLMChatPanel";
-import { useEditorFontSize, EDITOR_FONT_SIZES } from "@/hooks/useEditorFontSize";
+import {
+  useEditorFontSize, EDITOR_FONT_SIZES,
+  useEditorThumbSize, EDITOR_THUMB_SIZES, EDITOR_THUMB_PX, EDITOR_THUMB_LABELS,
+} from "@/hooks/useEditorFontSize";
 
 interface LLMChatModalProps {
   nodeId: string;
@@ -30,6 +33,7 @@ export function LLMChatModal({ nodeId, onClose }: LLMChatModalProps) {
   const regenerateNode = useWorkflowStore((s) => s.regenerateNode);
   const { canRun, blockedReason, isExecuting } = useCanRun(nodeId);
   const [fontSize, setFontSize] = useEditorFontSize("llm-chat-font-size");
+  const [thumbSize, setThumbSize] = useEditorThumbSize("llm-chat-thumb-size");
 
   // Escape closes, matching every other modal on the canvas.
   useEffect(() => {
@@ -82,6 +86,25 @@ export function LLMChatModal({ nodeId, onClose }: LLMChatModalProps) {
                 ))}
               </select>
             </label>
+            <div className="flex items-center gap-1 text-[11px] text-neutral-400">
+              Images
+              <div className="flex rounded overflow-hidden border border-neutral-700">
+                {EDITOR_THUMB_SIZES.map((sz) => (
+                  <button
+                    key={sz}
+                    onClick={() => setThumbSize(sz)}
+                    title={`${EDITOR_THUMB_PX[sz]}px previews`}
+                    className={`px-1.5 py-0.5 text-[10px] transition-colors ${
+                      thumbSize === sz
+                        ? "bg-indigo-600 text-white"
+                        : "bg-neutral-800 text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    {EDITOR_THUMB_LABELS[sz]}
+                  </button>
+                ))}
+              </div>
+            </div>
             <label className="flex items-center gap-1.5 text-[11px] text-neutral-400 cursor-pointer">
               <input
                 type="checkbox"
@@ -117,6 +140,7 @@ export function LLMChatModal({ nodeId, onClose }: LLMChatModalProps) {
             isExecuting={isExecuting}
             size="modal"
             fontSize={fontSize}
+            thumbPx={EDITOR_THUMB_PX[thumbSize]}
           />
         </div>
       </div>

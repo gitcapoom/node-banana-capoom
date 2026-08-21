@@ -41,3 +41,55 @@ export function useEditorFontSize(storageKey: string): [number, (size: number) =
 
   return [fontSize, setFontSize];
 }
+
+export type EditorThumbSize = "small" | "medium" | "large" | "xl";
+
+/** px edge for each step. "small" is what the transcript always used. */
+export const EDITOR_THUMB_PX: Record<EditorThumbSize, number> = {
+  small: 32,
+  medium: 64,
+  large: 112,
+  xl: 192,
+};
+
+export const EDITOR_THUMB_LABELS: Record<EditorThumbSize, string> = {
+  small: "S",
+  medium: "M",
+  large: "L",
+  xl: "XL",
+};
+
+const THUMB_ORDER: EditorThumbSize[] = ["small", "medium", "large", "xl"];
+export const EDITOR_THUMB_SIZES = THUMB_ORDER;
+
+/**
+ * A persisted image-thumbnail size for a full-screen editor.
+ *
+ * Same shape as useEditorFontSize and for the same reason: a reading
+ * preference belongs to the person, not the document, so it lives in
+ * localStorage rather than node data and never travels with a saved workflow.
+ */
+export function useEditorThumbSize(
+  storageKey: string,
+): [EditorThumbSize, (size: EditorThumbSize) => void] {
+  const [size, setSize] = useState<EditorThumbSize>(() => {
+    if (typeof window === "undefined") return "small";
+    try {
+      const saved = localStorage.getItem(storageKey) as EditorThumbSize | null;
+      if (saved && THUMB_ORDER.includes(saved)) return saved;
+    } catch {
+      /* localStorage unavailable — use the default */
+    }
+    return "small";
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, size);
+    } catch {
+      /* not persisting is not worth failing the render for */
+    }
+  }, [storageKey, size]);
+
+  return [size, setSize];
+}

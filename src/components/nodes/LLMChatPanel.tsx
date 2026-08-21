@@ -15,6 +15,8 @@ interface ConversationTranscriptProps {
   transcriptRef: React.RefObject<HTMLDivElement | null>;
   /** px override for the turn text; unset keeps the node's compact type. */
   fontSize?: number;
+  /** px edge for image previews; unset keeps the compact 32px. */
+  thumbPx?: number;
 }
 
 export function ConversationTranscript({
@@ -24,6 +26,7 @@ export function ConversationTranscript({
   onRemoveTurn,
   transcriptRef,
   fontSize,
+  thumbPx,
 }: ConversationTranscriptProps) {
   const isLoading = status === "loading";
   const isError = status === "error";
@@ -49,6 +52,7 @@ export function ConversationTranscript({
               turn={turn}
               onRemove={() => onRemoveTurn(i)}
               fontSize={fontSize}
+              thumbPx={thumbPx}
             />
           ))}
           {isLoading && (
@@ -83,9 +87,12 @@ interface ConversationRowProps {
    *  the turn text beats anything inherited from a parent, which is why setting
    *  the size on the scroll container alone changed nothing but the compose box. */
   fontSize?: number;
+  /** px edge for the turn's image previews. Same inline rule as fontSize —
+   *  the w-8/h-8 classes would otherwise win. */
+  thumbPx?: number;
 }
 
-function ConversationRow({ turn, onRemove, fontSize }: ConversationRowProps) {
+function ConversationRow({ turn, onRemove, fontSize, thumbPx }: ConversationRowProps) {
   // After a save the transcript keeps refs + thumbs instead of inline full-res
   // images (see imageStorage), so prefer whichever is present.
   const turnPreviews = (turn.images?.length ? turn.images : turn.imageThumbs ?? []).filter(Boolean);
@@ -103,13 +110,15 @@ function ConversationRow({ turn, onRemove, fontSize }: ConversationRowProps) {
       </span>
       <div className="flex-1 min-w-0">
         {turnPreviews.length > 0 && (
-          <div className="flex gap-1 mb-0.5">
+          // flex-wrap, not nowrap: at XL three previews are wider than the row.
+          <div className="flex flex-wrap gap-1 mb-0.5">
             {turnPreviews.slice(0, 3).map((img, i) => (
               <img
                 key={i}
                 src={img}
                 alt=""
-                className="w-8 h-8 object-cover rounded border border-neutral-700"
+                style={thumbPx ? { width: `${thumbPx}px`, height: `${thumbPx}px` } : undefined}
+                className={`object-cover rounded border border-neutral-700 ${thumbPx ? "" : "w-8 h-8"}`}
               />
             ))}
             {turnPreviews.length > 3 && (
@@ -166,6 +175,8 @@ export interface LLMChatPanelProps {
   /** px. Set by the expanded modal's font-size picker; the node keeps its own
    *  small fixed type so a reading preference cannot distort the canvas. */
   fontSize?: number;
+  /** px edge for image previews, from the modal's S/M/L/XL switch. */
+  thumbPx?: number;
 }
 
 export function LLMChatPanel({
@@ -181,6 +192,7 @@ export function LLMChatPanel({
   isExecuting,
   size = "node",
   fontSize,
+  thumbPx,
 }: LLMChatPanelProps) {
   const transcriptRef = React.useRef<HTMLDivElement>(null);
   const big = size === "modal";
@@ -201,6 +213,7 @@ export function LLMChatPanel({
           onRemoveTurn={onRemoveTurn}
           transcriptRef={transcriptRef}
           fontSize={fontSize}
+          thumbPx={thumbPx}
         />
       </div>
       <div className={`shrink-0 border-t border-neutral-800 bg-neutral-900/70 ${big ? "px-4 py-3 space-y-2" : "px-2 py-1.5 space-y-1.5"}`}>
