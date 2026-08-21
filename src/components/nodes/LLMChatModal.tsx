@@ -5,6 +5,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
 import type { LLMGenerateNodeData } from "@/types";
 import { LLMChatPanel } from "./LLMChatPanel";
+import { useEditorFontSize, EDITOR_FONT_SIZES } from "@/hooks/useEditorFontSize";
 
 interface LLMChatModalProps {
   nodeId: string;
@@ -28,6 +29,7 @@ export function LLMChatModal({ nodeId, onClose }: LLMChatModalProps) {
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const regenerateNode = useWorkflowStore((s) => s.regenerateNode);
   const { canRun, blockedReason, isExecuting } = useCanRun(nodeId);
+  const [fontSize, setFontSize] = useEditorFontSize("llm-chat-font-size");
 
   // Escape closes, matching every other modal on the canvas.
   useEffect(() => {
@@ -67,6 +69,19 @@ export function LLMChatModal({ nodeId, onClose }: LLMChatModalProps) {
             {data.customTitle || "LLM Generate"}
           </span>
           <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-[11px] text-neutral-400">
+              Size
+              <select
+                value={fontSize}
+                onChange={(e) => setFontSize(Number(e.target.value))}
+                title="Text size in this window"
+                className="bg-neutral-800 border border-neutral-700 rounded px-1 py-0.5 text-neutral-200 text-[11px] focus:outline-none focus:ring-1 focus:ring-indigo-600"
+              >
+                {EDITOR_FONT_SIZES.map((s) => (
+                  <option key={s} value={s}>{s}px</option>
+                ))}
+              </select>
+            </label>
             <label className="flex items-center gap-1.5 text-[11px] text-neutral-400 cursor-pointer">
               <input
                 type="checkbox"
@@ -101,6 +116,7 @@ export function LLMChatModal({ nodeId, onClose }: LLMChatModalProps) {
             blockedReason={blockedReason}
             isExecuting={isExecuting}
             size="modal"
+            fontSize={fontSize}
           />
         </div>
       </div>

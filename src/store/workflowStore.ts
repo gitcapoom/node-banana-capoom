@@ -183,9 +183,13 @@ function stripGenerationOutputs(nodeType: string, data: Record<string, unknown>)
       return {
         ...data,
         // A generous default output cap — maxTokens is a ceiling, not a fixed
-        // cost, so this only prevents truncation (e.g. loopback assessment +
-        // <image_prompt> block) without adding cost for normal replies.
+        // cost, so this only prevents truncation without adding cost for
+        // normal replies.
         maxTokens: (data as { maxTokens?: number }).maxTokens ?? 8192,
+        // Chat is the point of the node, so remembering the conversation is the
+        // useful default. Existing nodes are unaffected: the migration writes
+        // this field explicitly for every one of them.
+        rememberTurns: (data as { rememberTurns?: boolean }).rememberTurns ?? true,
         inputPrompt: null,
         inputImages: [],
         inputImageRefs: undefined,

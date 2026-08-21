@@ -13,6 +13,8 @@ interface ConversationTranscriptProps {
   error: string | null;
   onRemoveTurn: (index: number) => void;
   transcriptRef: React.RefObject<HTMLDivElement | null>;
+  /** px override for the turn text; unset keeps the node's compact type. */
+  fontSize?: number;
 }
 
 export function ConversationTranscript({
@@ -21,6 +23,7 @@ export function ConversationTranscript({
   error,
   onRemoveTurn,
   transcriptRef,
+  fontSize,
 }: ConversationTranscriptProps) {
   const isLoading = status === "loading";
   const isError = status === "error";
@@ -38,6 +41,7 @@ export function ConversationTranscript({
         <div
           ref={transcriptRef}
           className="w-full h-full overflow-auto nowheel nodrag nopan select-text cursor-text py-1 px-1.5 space-y-1"
+          style={fontSize ? { fontSize: `${fontSize}px` } : undefined}
         >
           {conversation.map((turn, i) => (
             <ConversationRow
@@ -147,6 +151,9 @@ export interface LLMChatPanelProps {
   isExecuting: boolean;
   /** Bigger type and a roomier compose box in the expanded modal. */
   size?: "node" | "modal";
+  /** px. Set by the expanded modal's font-size picker; the node keeps its own
+   *  small fixed type so a reading preference cannot distort the canvas. */
+  fontSize?: number;
 }
 
 export function LLMChatPanel({
@@ -161,6 +168,7 @@ export function LLMChatPanel({
   blockedReason,
   isExecuting,
   size = "node",
+  fontSize,
 }: LLMChatPanelProps) {
   const transcriptRef = React.useRef<HTMLDivElement>(null);
   const big = size === "modal";
@@ -180,6 +188,7 @@ export function LLMChatPanel({
           error={error}
           onRemoveTurn={onRemoveTurn}
           transcriptRef={transcriptRef}
+          fontSize={fontSize}
         />
       </div>
       <div className={`shrink-0 border-t border-neutral-800 bg-neutral-900/70 ${big ? "px-4 py-3 space-y-2" : "px-2 py-1.5 space-y-1.5"}`}>
@@ -188,6 +197,7 @@ export function LLMChatPanel({
           onChange={(e) => onComposeChange(e.target.value)}
           placeholder="Type a message… (clears after sending)"
           rows={big ? 4 : 2}
+          style={fontSize ? { fontSize: `${fontSize}px` } : undefined}
           className={`nodrag nopan nowheel select-text cursor-text w-full resize-none text-neutral-200 bg-neutral-950/50 rounded focus:outline-none focus:ring-1 focus:ring-indigo-600/60 placeholder:text-neutral-600 ${big ? "text-sm px-3 py-2" : "text-[10px] px-1.5 py-1"}`}
         />
         <button
