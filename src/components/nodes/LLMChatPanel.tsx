@@ -48,6 +48,7 @@ export function ConversationTranscript({
               key={`${turn.timestamp ?? i}-${i}`}
               turn={turn}
               onRemove={() => onRemoveTurn(i)}
+              fontSize={fontSize}
             />
           ))}
           {isLoading && (
@@ -55,7 +56,10 @@ export function ConversationTranscript({
             // turn is in flight.
             <div className="flex items-center gap-1 px-1 py-0.5">
               <span className="text-[9px] uppercase tracking-wide text-blue-400/80 w-3 shrink-0">A</span>
-              <span className="text-neutral-500 text-[10px] italic">
+              <span
+                className={`text-neutral-500 italic ${fontSize ? "" : "text-[10px]"}`}
+                style={fontSize ? { fontSize: `${fontSize}px` } : undefined}
+              >
                 <span className="inline-block animate-pulse">…thinking</span>
               </span>
             </div>
@@ -75,9 +79,13 @@ export function ConversationTranscript({
 interface ConversationRowProps {
   turn: ConversationTurn;
   onRemove: () => void;
+  /** px. When set it must be applied INLINE: the fixed Tailwind text-[10px] on
+   *  the turn text beats anything inherited from a parent, which is why setting
+   *  the size on the scroll container alone changed nothing but the compose box. */
+  fontSize?: number;
 }
 
-function ConversationRow({ turn, onRemove }: ConversationRowProps) {
+function ConversationRow({ turn, onRemove, fontSize }: ConversationRowProps) {
   // After a save the transcript keeps refs + thumbs instead of inline full-res
   // images (see imageStorage), so prefer whichever is present.
   const turnPreviews = (turn.images?.length ? turn.images : turn.imageThumbs ?? []).filter(Boolean);
@@ -85,7 +93,8 @@ function ConversationRow({ turn, onRemove }: ConversationRowProps) {
   return (
     <div className="group/row flex items-start gap-1 px-1 py-0.5 rounded hover:bg-neutral-800/40 transition-colors">
       <span
-        className={`text-[9px] uppercase tracking-wide w-3 shrink-0 mt-[1px] ${
+        style={fontSize ? { fontSize: `${Math.max(9, fontSize - 4)}px` } : undefined}
+        className={`uppercase tracking-wide w-3 shrink-0 mt-[1px] ${fontSize ? "" : "text-[9px]"} ${
           isUser ? "text-neutral-500" : "text-blue-400/80"
         }`}
         title={isUser ? "User" : "Assistant"}
@@ -110,7 +119,10 @@ function ConversationRow({ turn, onRemove }: ConversationRowProps) {
             )}
           </div>
         )}
-        <p className="text-[10px] text-neutral-300 whitespace-pre-wrap break-words leading-[1.35]">
+        <p
+          className={`text-neutral-300 whitespace-pre-wrap break-words leading-[1.35] ${fontSize ? "" : "text-[10px]"}`}
+          style={fontSize ? { fontSize: `${fontSize}px` } : undefined}
+        >
           {turn.text}
         </p>
       </div>

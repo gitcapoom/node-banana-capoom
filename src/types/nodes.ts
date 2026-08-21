@@ -827,20 +827,33 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   /** @deprecated Loopback mode is removed. Migrated to `rememberTurns: true`
    *  on load. Read only by migrateLlmNodes. */
   loopbackMode?: boolean;
-  /** Loopback: the connected text-input value at the last completed run, used
-   *  to detect NEW user steering vs. the unchanged goal between iterations. */
-  lastLoopbackInput?: string;
-  /** Loopback: the in-node chatbot compose box — the direction typed for the
-   *  next Assess / Converse. Cleared after each successful run so the previous
-   *  prompt can't be silently re-sent. Falls back to the connected text input
-   *  when empty. */
+  /** The in-node compose box — the message typed for the next Send. Cleared
+   *  after each successful run so the previous message cannot be silently
+   *  re-sent. Falls back to the connected text input when empty. */
   composeInput?: string;
-  /** Loopback: the FIRST image prompt produced in the current conversation —
-   *  the canonical full spec derived from the original request. Pinned into the
-   *  context every turn (alongside the original request) as a drift anchor. Set
-   *  on the conversation's first successful run; a fresh conversation replaces
-   *  it. */
-  initialPrompt?: string;
+
+  // ─── Generator-ready output ────────────────────────────────────
+  /** Ask for a clean, generator-ready prompt alongside the reply, delivered as
+   *  a <prompt> block in the SAME call. */
+  generatorFriendly?: boolean;
+  /** Also ask for a <negative_prompt> block. Only meaningful with
+   *  generatorFriendly — a negative prompt is a generator artifact. */
+  generateNegativePrompt?: boolean;
+  /** Character budget for the derived prompt. 0 / null / undefined = none. */
+  maxPromptChars?: number | null;
+  /** Parsed from <prompt>, after any shrink pass. What the prompt-node buttons
+   *  write when generatorFriendly is on. */
+  derivedPrompt?: string | null;
+  /** Parsed from <negative_prompt>. */
+  derivedNegativePrompt?: string | null;
+  /** Shown as a badge: the prompt could not be stripped, or the budget could
+   *  not be met. Cleared at the start of every Send. */
+  derivedWarning?: string | null;
+  /** Id of the prompt node this node last created, so Update can find it. */
+  promptNodeId?: string | null;
+  /** Same for the negative prompt node; tracked separately so deleting one
+   *  does not disable the other. */
+  negativePromptNodeId?: string | null;
   /** Optional system prompt prepended to every request as the provider's
    *  native system slot. Stored separately from `conversation` because
    *  all three providers carry it in a dedicated field. Sent in both one-shot
