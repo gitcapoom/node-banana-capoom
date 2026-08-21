@@ -70,7 +70,7 @@ export interface CommentNavigationProps {
 }
 
 const RUNNABLE_TYPES = new Set(['nanoBanana', 'generateVideo', 'generate3d', 'generateAudio', 'llmGenerate', 'worldLabsPano', 'worldLabsWorld', 'panoEditor', 'upscaleGrid', 'sphereLightRender']);
-const EXPANDABLE_TYPES = new Set(['prompt', 'promptConstructor', 'splitGrid', 'annotation']);
+const EXPANDABLE_TYPES = new Set(['prompt', 'promptConstructor', 'splitGrid', 'annotation', 'llmGenerate']);
 
 interface FloatingNodeHeaderProps {
   id: string;

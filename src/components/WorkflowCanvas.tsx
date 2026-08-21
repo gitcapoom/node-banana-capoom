@@ -105,6 +105,7 @@ import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { useThumbBackfill } from "@/hooks/useThumbBackfill";
 import { useThumbRegeneration } from "@/hooks/useThumbRegeneration";
 import { SplitGridSettingsModal } from "./SplitGridSettingsModal";
+import { LLMChatModal } from "./nodes/LLMChatModal";
 import { createPortal } from "react-dom";
 import { useAnnotationStore } from "@/store/annotationStore";
 
@@ -2797,6 +2798,13 @@ export function WorkflowCanvas() {
           />
         );
       })()}
+
+      {expandingNode && expandingNode.type === 'llmGenerate' && (
+        <LLMChatModal
+          nodeId={expandingNode.id}
+          onClose={() => setExpandingNode(null)}
+        />
+      )}
 
       {/* AnnotationModal is globally managed by annotationStore */}
       <AnnotationModal />
