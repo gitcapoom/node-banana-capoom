@@ -35,6 +35,21 @@ export interface ModelEntry {
   id: string;
   /** Human-readable label for the dropdown. */
   label: string;
+  /** Per-model facts the provider publishes about itself. Only Google does;
+   *  OpenAI and Anthropic return nothing of the sort. Used to give the node's
+   *  controls real ranges instead of guesses. */
+  meta?: GoogleModelMeta;
+}
+
+/** The per-model fields Google's models endpoint actually returns. */
+export interface GoogleModelMeta {
+  temperature?: number;
+  maxTemperature?: number;
+  topP?: number;
+  topK?: number;
+  inputTokenLimit?: number;
+  outputTokenLimit?: number;
+  thinking?: boolean;
 }
 
 export interface LlmModelsResponse {
@@ -64,7 +79,14 @@ async function fetchGoogle(apiKey: string): Promise<ModelEntry[]> {
     throw new Error(`Google models: ${res.status} ${body.slice(0, 200)}`);
   }
   const data = await res.json();
-  type GoogleModel = { name?: string; displayName?: string; supportedGenerationMethods?: string[] };
+  type GoogleModel = {
+    name?: string; displayName?: string; supportedGenerationMethods?: string[];
+    // Present on every chat model and previously discarded. `temperature` is the
+    // model's DEFAULT; `maxTemperature` its ceiling — for gemini-2.5-flash that
+    // is 1 and 2, against the node's hardcoded 0.7 and 2.
+    temperature?: number; maxTemperature?: number; topP?: number; topK?: number;
+    inputTokenLimit?: number; outputTokenLimit?: number; thinking?: boolean;
+  };
   const models: GoogleModel[] = Array.isArray(data?.models) ? data.models : [];
   return models
     .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes("generateContent"))
@@ -72,7 +94,19 @@ async function fetchGoogle(apiKey: string): Promise<ModelEntry[]> {
       // "models/gemini-2.5-flash" → "gemini-2.5-flash"
       const rawName = m.name || "";
       const id = rawName.startsWith("models/") ? rawName.slice("models/".length) : rawName;
-      return { id, label: m.displayName || prettyLabel(id) };
+      const meta: GoogleModelMeta = {};
+      if (typeof m.temperature === "number") meta.temperature = m.temperature;
+      if (typeof m.maxTemperature === "number") meta.maxTemperature = m.maxTemperature;
+      if (typeof m.topP === "number") meta.topP = m.topP;
+      if (typeof m.topK === "number") meta.topK = m.topK;
+      if (typeof m.inputTokenLimit === "number") meta.inputTokenLimit = m.inputTokenLimit;
+      if (typeof m.outputTokenLimit === "number") meta.outputTokenLimit = m.outputTokenLimit;
+      if (typeof m.thinking === "boolean") meta.thinking = m.thinking;
+      return {
+        id,
+        label: m.displayName || prettyLabel(id),
+        ...(Object.keys(meta).length > 0 ? { meta } : {}),
+      };
     })
     .filter((m) => m.id.length > 0);
 }
@@ -189,4 +223,26 @@ export async function GET(request: NextRequest): Promise<NextResponse<LlmModelsR
       "Cache-Control": "private, max-age=30",
     },
   });
+}
+
+
+/**
+ * Per-model metadata for ONE Google model, for the schema route.
+ *
+ * Google is the only one of the three that publishes this, and it is
+ * authoritative about its own ranges — so where it disagrees with a third-party
+ * catalogue, it wins. Returns null rather than throwing: a metadata lookup must
+ * never be the reason a node fails to render its controls.
+ */
+export async function getGoogleModelMeta(
+  modelId: string,
+  apiKey: string | undefined,
+): Promise<GoogleModelMeta | null> {
+  if (!apiKey || !modelId) return null;
+  try {
+    const entries = await fetchGoogle(apiKey);
+    return entries.find((e) => e.id === modelId)?.meta ?? null;
+  } catch {
+    return null;
+  }
 }

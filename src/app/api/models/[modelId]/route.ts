@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { ProviderType } from "@/types";
 import type { ModelParameter, ModelInput } from "@/lib/providers/types";
+import { asLlmProvider, llmModelParameters } from "../llmSchema";
 import {
   readCachedSchema,
   writeCachedSchema,
@@ -62,6 +63,29 @@ export async function GET(
   const { modelId } = await params;
   const decodedModelId = decodeURIComponent(modelId);
   const provider = request.nextUrl.searchParams.get("provider") as ProviderType | null;
+
+  // ?kind=llm selects the CHAT schema. It cannot be inferred from the provider
+  // alone: "gemini" already means this app's Google IMAGE provider, so
+  // overloading it would make one id mean two different schemas.
+  if (request.nextUrl.searchParams.get("kind") === "llm") {
+    const llmProvider = asLlmProvider(provider ?? "");
+    if (!llmProvider) {
+      return NextResponse.json<SchemaErrorResponse>(
+        { success: false, error: "Invalid LLM provider. Use google, openai or anthropic." },
+        { status: 400 },
+      );
+    }
+    const { parameters, resolved } = await llmModelParameters(llmProvider, decodedModelId, request);
+    return NextResponse.json<SchemaSuccessResponse>({
+      success: true,
+      parameters,
+      inputs: [],
+      cached: false,
+      // Surfaced so the UI can say the numbers are family defaults rather than
+      // this model's own, instead of quietly presenting a guess as fact.
+      ...(resolved ? {} : { warnings: [`No published parameter list for ${decodedModelId}; showing defaults for its model family.`] }),
+    });
+  }
 
   if (!provider || !VALID_PROVIDERS.includes(provider)) {
     return NextResponse.json<SchemaErrorResponse>(
