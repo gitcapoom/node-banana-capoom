@@ -4,6 +4,12 @@ import { useCallback } from "react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import type { LLMGenerateNodeData } from "@/types";
 
+/** Prompt nodes are created at this size (defaultNodeDimensions.prompt). */
+const PROMPT_W = 320;
+const PROMPT_H = 220;
+/** Breathing room so boxes are clear of each other, not merely not-overlapping. */
+const GAP = 24;
+
 /**
  * The generator-ready controls: the two checkboxes, the character budget, the
  * warning badge, and the two prompt-node buttons.
@@ -47,20 +53,68 @@ export function LLMGeneratorControls({ nodeId, compact = false }: { nodeId: stri
   const handleSend = useCallback(() => {
     const self = getNodeById(nodeId);
     if (!self) return;
-    const width = self.width ?? 320;
-    const x = self.position.x + width + 40;
-    // Repeated sends fan downward rather than stacking exactly on each other.
-    const prev = data?.promptNodeId ? getNodeById(data.promptNodeId) : undefined;
-    const y = prev ? prev.position.y + 30 : self.position.y;
 
-    const updates: Partial<LLMGenerateNodeData> = {
-      promptNodeId: addNode("prompt", { x, y }, { prompt: promptText }),
+    const all = useWorkflowStore.getState().nodes;
+    const x = self.position.x + (self.width ?? 320) + 40;
+
+    /**
+     * First vertical slot at `x` whose 320x220 box touches nothing.
+     *
+     * Offsetting each new node by a fixed amount was not enough: a prompt node
+     * is 220px tall, so a 30px step buried each one under the last, and the
+     * negative landed on the next positive. This walks down until the box is
+     * genuinely clear, so nothing ever covers anything — including nodes this
+     * LLM node did not create.
+     */
+    const freeSlot = (startY: number, taken: Array<{ x: number; y: number }>): number => {
+      let y = startY;
+      for (let guard = 0; guard < 200; guard++) {
+        const clash =
+          all.some((n) => {
+            const nw = n.width ?? 320;
+            const nh = n.height ?? 220;
+            return (
+              n.position.x < x + PROMPT_W + GAP &&
+              n.position.x + nw + GAP > x &&
+              n.position.y < y + PROMPT_H + GAP &&
+              n.position.y + nh + GAP > y
+            );
+          }) || taken.some((t) => Math.abs(t.x - x) < PROMPT_W + GAP && Math.abs(t.y - y) < PROMPT_H + GAP);
+        if (!clash) return y;
+        y += PROMPT_H + GAP;
+      }
+      return y;
     };
+
+    // Nodes created in this same press are not in the store yet, so they are
+    // tracked here to stop the negative landing on the positive.
+    const placed: Array<{ x: number; y: number }> = [];
+
+    const seq = (data?.promptNodeSeq ?? 0) + 1;
+    const kind = data?.generatorFriendly ? "positive prompt" : "positive raw prompt";
+
+    const py = freeSlot(self.position.y, placed);
+    placed.push({ x, y: py });
+    const updates: Partial<LLMGenerateNodeData> = {
+      promptNodeSeq: seq,
+      promptNodeId: addNode(
+        "prompt",
+        { x, y: py },
+        { prompt: promptText, customTitle: `${kind}_${seq}` } as Partial<LLMGenerateNodeData>,
+      ),
+    };
+
     if (wantNegativeNode) {
-      updates.negativePromptNodeId = addNode("prompt", { x, y: y + 180 }, { prompt: negativeText });
+      const ny = freeSlot(py + PROMPT_H + GAP, placed);
+      placed.push({ x, y: ny });
+      updates.negativePromptNodeId = addNode(
+        "prompt",
+        { x, y: ny },
+        { prompt: negativeText, customTitle: `negative prompt_${seq}` } as Partial<LLMGenerateNodeData>,
+      );
     }
     updateNodeData(nodeId, updates);
-  }, [nodeId, addNode, getNodeById, data?.promptNodeId, promptText, negativeText, wantNegativeNode, updateNodeData]);
+  }, [nodeId, addNode, getNodeById, data?.promptNodeSeq, data?.generatorFriendly, promptText, negativeText, wantNegativeNode, updateNodeData]);
 
   const handleUpdate = useCallback(() => {
     if (liveTarget(data?.promptNodeId)) {

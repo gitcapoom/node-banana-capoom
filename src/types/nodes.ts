@@ -854,6 +854,9 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   /** Same for the negative prompt node; tracked separately so deleting one
    *  does not disable the other. */
   negativePromptNodeId?: string | null;
+  /** How many prompt nodes this node has created. Names them, and never
+   *  decrements — deleting node 2 must not make the next one a second "2". */
+  promptNodeSeq?: number;
   /** Optional system prompt prepended to every request as the provider's
    *  native system slot. Stored separately from `conversation` because
    *  all three providers carry it in a dedicated field. Sent in both one-shot
