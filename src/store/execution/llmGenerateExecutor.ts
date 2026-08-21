@@ -15,27 +15,6 @@ export interface LlmGenerateOptions {
   useStoredFallback?: boolean;
 }
 
-/**
- * Loopback replies carry two things: the conversational text and a clean image
- * prompt wrapped in <image_prompt>…</image_prompt> (see loopbackSkill.ts). Split
- * them: `prompt` = the block's inner text (feeds the image node); `conversation`
- * = everything else (shown in the transcript). If the skill didn't emit a
- * block, fall back to using the whole reply as the prompt.
- */
-export function parseLoopbackReply(raw: string): { conversation: string; prompt: string | null } {
-  const m = raw.match(/<image_prompt>([\s\S]*?)<\/image_prompt>/i);
-  if (m && m.index !== undefined) {
-    const prompt = m[1].trim();
-    const conversation = (raw.slice(0, m.index) + raw.slice(m.index + m[0].length)).trim();
-    return { conversation: conversation || "(image prompt updated)", prompt: prompt || null };
-  }
-  // No block — the reply is assessment-only (usually cut off before the prompt,
-  // or the model skipped the tags). Do NOT use the assessment AS the prompt:
-  // that would feed the critique prose to the image generator. Signal null so
-  // the caller keeps the previous prompt instead of clobbering it.
-  console.warn("[llmGenerateExecutor] Loopback reply had no <image_prompt> block; keeping the previous prompt.");
-  return { conversation: raw.trim(), prompt: null };
-}
 
 export async function executeLlmGenerate(
   ctx: NodeExecutionContext,
