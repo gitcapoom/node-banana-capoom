@@ -65,6 +65,7 @@ import {
 } from "./utils/executionUtils";
 import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedInputs";
 import { migrateEdgeHandles, conformEdgesToRenderablePins, DYNAMIC_PIN_NODE_TYPES } from "./utils/pinMigration";
+import { migrateLlmNodes } from "./utils/llmNodeMigration";
 
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { isDynPin } from "@/lib/dynamicPinId";
@@ -2423,6 +2424,14 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     }
     resetCommitSignatureCaches();
     set({ nodes: [], edges: [], undoStack: [], redoStack: [], groups: {} });
+
+    // Collapse the LLM node's retired three-mode flags onto `rememberTurns`, and
+    // drop the edges that hung off loopback's now-absent handles. Runs before
+    // anything reads node data, so no consumer ever sees the old shape.
+    {
+      const migrated = migrateLlmNodes(workflow.nodes, workflow.edges ?? []);
+      workflow = { ...workflow, nodes: migrated.nodes, edges: migrated.edges };
+    }
 
     // Update nodeIdCounter to avoid ID collisions
     const maxNodeId = workflow.nodes.reduce((max, node) => {

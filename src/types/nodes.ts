@@ -815,14 +815,17 @@ export interface LLMGenerateNodeData extends BaseNodeData {
   error: string | null;
   lastGenerationCost?: number | null; // Cost of the last generation run
 
-  // ─── Conversation mode (multi-turn chat) ───────────────────────
-  /** When true, the node remembers turns and sends the full transcript
-   *  on every run. Default false → one-shot like before. */
+  // ─── Chat ──────────────────────────────────────────────────────
+  /** Send the whole transcript on each Send. False = only the newest message
+   *  is transmitted; the transcript is still kept and displayed, it is just not
+   *  sent. Replaces the old conversationMode / loopbackMode pair — see
+   *  migrateLlmNodes, which maps both onto this on load. */
+  rememberTurns?: boolean;
+  /** @deprecated Migrated to `rememberTurns` on load. Read only by
+   *  migrateLlmNodes; nothing else should branch on it. */
   conversationMode?: boolean;
-  /** Loopback conversation mode (implies conversationMode): adds a feedback
-   *  image input (the last image-gen output, always Image 1), a second `prompt`
-   *  output, and the two-output <image_prompt> protocol. Running the node also
-   *  auto-triggers the connected image node (one-click auto-step). */
+  /** @deprecated Loopback mode is removed. Migrated to `rememberTurns: true`
+   *  on load. Read only by migrateLlmNodes. */
   loopbackMode?: boolean;
   /** Loopback: the connected text-input value at the last completed run, used
    *  to detect NEW user steering vs. the unchanged goal between iterations. */

@@ -1,0 +1,80 @@
+import type { WorkflowNode, WorkflowEdge } from "@/types";
+
+/**
+ * Fields that existed only to serve loopback mode and carry no meaning now.
+ * `composeInput` is deliberately NOT here — it was a loopback field and is now
+ * the compose box on every node, so its value is worth keeping.
+ */
+const DEAD_FIELDS = [
+  "conversationMode",
+  "loopbackMode",
+  "outputPrompt",
+  "lastLoopbackInput",
+  "firstImagePrompt",
+] as const;
+
+/**
+ * Handles that disappear with loopback.
+ *
+ * These have to be cleaned up here because the existing conformance pass covers
+ * NEITHER of them: `conformEdgesToRenderablePins` only inspects TARGET handles,
+ * so an edge whose source is the removed `prompt` output is outside its remit
+ * entirely, and its own rules state that `image-feedback` handles "are
+ * untouched". An edge left pointing at a handle that no longer renders is
+ * invisible on the canvas yet still resolves into request bodies.
+ */
+const DEAD_TARGET_HANDLE = "image-feedback";
+const DEAD_SOURCE_HANDLE = "prompt";
+
+/**
+ * Collapse the LLM node's old three modes onto a single `rememberTurns` flag,
+ * and drop the edges that belonged to loopback's handles.
+ *
+ *   conversationMode: false / absent  ->  rememberTurns: false
+ *   conversationMode: true            ->  rememberTurns: true
+ *   loopbackMode: true                ->  rememberTurns: true   (it implied conversation)
+ *
+ * Idempotent, because workflows are loaded, saved and reloaded repeatedly: a
+ * node that has already been migrated has no dead fields and keeps whatever
+ * `rememberTurns` the user has since chosen. Array identity is preserved when
+ * nothing changed so callers can skip a state update entirely.
+ */
+export function migrateLlmNodes(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+): { nodes: WorkflowNode[]; edges: WorkflowEdge[] } {
+  const llmIds = new Set<string>();
+  let nodesChanged = false;
+
+  const outNodes = nodes.map((n) => {
+    if (n.type !== "llmGenerate") return n;
+    llmIds.add(n.id);
+
+    const d = n.data as Record<string, unknown>;
+    const hasDead = DEAD_FIELDS.some((k) => k in d);
+    // Already migrated and clean — leave the node object untouched.
+    if (!hasDead && "rememberTurns" in d) return n;
+
+    const next: Record<string, unknown> = { ...d };
+    // Either old flag means "send the transcript"; loopback implied conversation.
+    const remember = d.loopbackMode === true || d.conversationMode === true;
+    for (const k of DEAD_FIELDS) delete next[k];
+    // An explicit rememberTurns already on the node wins over the derived value,
+    // so a re-run cannot overwrite a choice made after the first migration.
+    next.rememberTurns = "rememberTurns" in d ? d.rememberTurns : remember;
+
+    nodesChanged = true;
+    return { ...n, data: next } as WorkflowNode;
+  });
+
+  const outEdges = edges.filter((e) => {
+    if (e.target && llmIds.has(e.target) && e.targetHandle === DEAD_TARGET_HANDLE) return false;
+    if (e.source && llmIds.has(e.source) && e.sourceHandle === DEAD_SOURCE_HANDLE) return false;
+    return true;
+  });
+
+  return {
+    nodes: nodesChanged ? outNodes : nodes,
+    edges: outEdges.length === edges.length ? edges : outEdges,
+  };
+}
