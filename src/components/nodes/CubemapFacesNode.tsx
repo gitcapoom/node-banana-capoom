@@ -6,6 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { combineCubemap, splitCubemap, CUBE_FACES, type CubeFace } from "@/utils/cubemapEquirect";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import type { CubemapFacesMode, CubemapFacesNodeData } from "@/types";
 
 type CubemapFacesNodeType = Node<CubemapFacesNodeData, "cubemapFaces">;
@@ -22,6 +23,16 @@ const HANDLE_ORDER: readonly CubeFace[] = [
   "right",
   "down",
 ] as const;
+
+/** Where each face's committed output lives on the node data. */
+const FACE_OUTPUT_FIELD: Record<CubeFace, keyof CubemapFacesNodeData> = {
+  up: "outputUp",
+  down: "outputDown",
+  left: "outputLeft",
+  right: "outputRight",
+  front: "outputFront",
+  back: "outputBack",
+};
 
 const FACE_LABEL: Record<CubeFace, string> = {
   up: "Up",
@@ -43,20 +54,30 @@ function handleTop(index: number, total: number, baseTop = 56, spacing = 24): nu
 export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const loadNodeFullResInputs = useWorkflowStore((state) => state.loadNodeFullResInputs);
   const updateNodeInternals = useUpdateNodeInternals();
 
   // ─── Mode toggle ─────────────────────────────────────
+  // Both of these ask for a NEW conversion, which needs real upstream pixels —
+  // and on a reopened workflow the upstream is still lazily unloaded (see
+  // `inputsResolved` below for why nothing else asks for it).
   const setMode = useCallback(
     (mode: CubemapFacesMode) => {
-      if (mode !== nodeData.mode) updateNodeData(id, { mode });
+      if (mode !== nodeData.mode) {
+        updateNodeData(id, { mode });
+        void loadNodeFullResInputs(id);
+      }
     },
-    [id, nodeData.mode, updateNodeData]
+    [id, nodeData.mode, updateNodeData, loadNodeFullResInputs]
   );
   const setSize = useCallback(
     (size: number) => {
-      if (size !== nodeData.outputSize) updateNodeData(id, { outputSize: size });
+      if (size !== nodeData.outputSize) {
+        updateNodeData(id, { outputSize: size });
+        void loadNodeFullResInputs(id);
+      }
     },
-    [id, nodeData.outputSize, updateNodeData]
+    [id, nodeData.outputSize, updateNodeData, loadNodeFullResInputs]
   );
 
   // Tell React Flow handle positions changed when the layout flips.
@@ -111,6 +132,27 @@ export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesN
     return result;
   }, [edges, nodes, id, nodeData.mode]);
 
+  // ─── Connected-vs-resolved ──────────────────────────────────────────
+  //
+  // This node is the worst case of the lazy-hydration ambiguity, because its
+  // OUTPUTS are hydrated eagerly (imageStorage's `cubemapFaces` case loads all
+  // eight refs on open) while its upstream's are not. So on every open the six
+  // face outputs were present and correct, `incomingCross` was null purely
+  // because `imageInput.image` had not loaded, and the effects below wiped all
+  // six — taking six downstream chains dark at once.
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+  // "Resolved" here is "I have what I need", not "my input arrived". A saved
+  // split already has its six faces loaded from disk, so pulling the upstream
+  // full-res back would buy nothing and cost a redundant six-face re-split of an
+  // image up to 4096². The size/mode buttons — the actions that genuinely need
+  // new pixels — request hydration explicitly instead.
+  const inputsResolved =
+    nodeData.mode === "split"
+      ? !!incomingCross || CUBE_FACES.some((f) => !!nodeData[FACE_OUTPUT_FIELD[f]])
+      : CUBE_FACES.some((f) => !!incomingFaces?.[f]) || !!nodeData.outputCross;
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, inputsResolved);
+  const connected = !!incomingEdgeKey;
+
   // ─── SPLIT effect: re-derive 6 face outputs whenever input/size changes ─
   const lastSplitFp = useRef<string>("");
   const [splitBusy, setSplitBusy] = useState(false);
@@ -120,11 +162,18 @@ export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesN
       lastSplitFp.current = "";
       return;
     }
-    // Mirror upstream into sourceImage so save/load round-trips properly.
-    if (incomingCross !== nodeData.sourceImage) {
+    // Mirror upstream into sourceImage so save/load round-trips properly — but
+    // never mirror a NULL over a stored source while an edge exists, because
+    // that null is "not hydrated yet", not "disconnected".
+    if (incomingCross ? incomingCross !== nodeData.sourceImage : !connected && nodeData.sourceImage) {
       updateNodeData(id, { sourceImage: incomingCross });
     }
     if (!incomingCross) {
+      if (connected) {
+        // Wired, just not loaded back yet (hydration requested above). Keep the
+        // committed faces: they are the real, saved result.
+        return;
+      }
       // Clear all face outputs.
       const cleared: Partial<CubemapFacesNodeData> = {
         outputUp: null, outputDown: null, outputLeft: null,
@@ -162,7 +211,7 @@ export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesN
         setSplitBusy(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, nodeData.mode, incomingCross, nodeData.outputSize, updateNodeData]);
+  }, [id, nodeData.mode, incomingCross, connected, nodeData.outputSize, updateNodeData]);
 
   // ─── COMBINE effect: re-assemble cross whenever inputs/size change ──
   const lastCombineFp = useRef<string>("");
@@ -185,7 +234,9 @@ export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesN
 
     const anyFace = CUBE_FACES.some((f) => !!incomingFaces[f]);
     if (!anyFace) {
-      if (nodeData.outputCross) updateNodeData(id, { outputCross: null });
+      // Six face edges whose sources are all still lazily unloaded look exactly
+      // like six empty pins. Only the genuinely unwired case may clear.
+      if (!connected && nodeData.outputCross) updateNodeData(id, { outputCross: null });
       return;
     }
 
@@ -202,7 +253,7 @@ export function CubemapFacesNode({ id, data, selected }: NodeProps<CubemapFacesN
         setCombineBusy(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, nodeData.mode, combineFingerprint, updateNodeData]);
+  }, [id, nodeData.mode, combineFingerprint, connected, updateNodeData]);
 
   // ─── Body preview ───────────────────────────────────
   const previewImage =

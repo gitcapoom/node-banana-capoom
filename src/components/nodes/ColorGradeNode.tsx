@@ -26,6 +26,7 @@ import {
   type WheelPoint,
 } from "@/utils/gradeWheel";
 import { useColorNode } from "@/hooks/useGpuPreview";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import { GRADE_SHADER } from "@/utils/imageShaders";
 import type { UniformValue } from "@/utils/webglProcess";
 import { ClampToggles, COLOR_NODE_TYPES } from "./colorNodeShared";
@@ -423,11 +424,21 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
     return null;
   });
 
+  // Wired vs resolved — see useUpstreamHydration. This node keeps its bespoke
+  // selectors above (it needs `upstreamColorNodeId` for the float chain, which
+  // no shared hook provides); only the connected/unresolved question is shared.
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, !!incomingImage);
+  const connected = !!incomingEdgeKey;
+
   useEffect(() => {
-    if (incomingImage !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: incomingImage });
+    if (incomingImage) {
+      if (incomingImage !== nodeData.sourceImage) updateNodeData(id, { sourceImage: incomingImage });
+    } else if (!connected && nodeData.sourceImage) {
+      // Only a REAL disconnect clears; a lazily-unloaded upstream is not one.
+      updateNodeData(id, { sourceImage: null });
     }
-  }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
+  }, [id, incomingImage, connected, nodeData.sourceImage, updateNodeData]);
 
   // Coerce stored params (handles legacy single-number values from before
   // per-channel was added) into a stable GradeParams object.
@@ -500,6 +511,7 @@ export function ColorGradeNode({ id, data, selected }: NodeProps<ColorGradeNodeT
   const { liveActive } = useColorNode({
     id,
     sourceImage: nodeData.sourceImage,
+    sourceConnected: connected,
     upstreamColorNodeId,
     shaderSource: GRADE_SHADER,
     uniforms,

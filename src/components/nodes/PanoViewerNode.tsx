@@ -5,6 +5,7 @@ import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import { PanoViewerNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 
@@ -60,6 +61,13 @@ export function PanoViewerNode({ id, data, selected }: NodeProps<PanoViewerNodeT
 
   // The image to display: prefer stored panoUrl (set after execution), fall back to live upstream
   const displayImage: string | null = nodeData.panoUrl || incomingImage;
+
+  // Wired vs resolved — see useUpstreamHydration. Opening the standalone viewer
+  // needs a real URL, and with the upstream lazily unloaded there was none: the
+  // node showed its empty state and the Open Viewer button did nothing on a
+  // graph that is visibly connected.
+  const incomingEdgeKey = useIncomingEdgeKey(id, "image");
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, !!displayImage);
 
   // ─── Viewer window postMessage listener ─────────────────────
   useEffect(() => {

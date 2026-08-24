@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
+import { useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import { VideoFrameGrabNodeData } from "@/types";
 
 type VideoFrameGrabNodeType = Node<VideoFrameGrabNodeData, "videoFrameGrab">;
@@ -14,22 +15,17 @@ export function VideoFrameGrabNode({ id, data, selected }: NodeProps<VideoFrameG
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const { canRun, isExecuting } = useCanRun(id);
-  const edges = useWorkflowStore((state) => state.edges);
-  const nodes = useWorkflowStore((state) => state.nodes);
 
-  // Find connected source video from incoming edges
-  const sourceVideoUrl = useMemo(() => {
-    const incomingEdge = edges.find((e) => e.target === id && e.targetHandle === "video");
-    if (!incomingEdge) return null;
+  // Is a video WIRED here? Deliberately not "has the video resolved": both
+  // `generateVideo.outputVideo` and `videoInput.videoFile` are nulled on open
+  // with only a ref left behind, so the resolved value is null on every
+  // reopened workflow. Gating the Extract button on the value left it
+  // permanently disabled on a graph that is visibly connected — and unlike the
+  // image nodes, no amount of Running repaired it, because no run pre-pass ever
+  // hydrated video. The executor now pulls the clip back itself
+  // (`ensureVideoInputs`), so the button only has to know an edge exists.
+  const hasSourceVideo = Boolean(useIncomingEdgeKey(id));
 
-    const sourceNode = nodes.find((n) => n.id === incomingEdge.source);
-    if (!sourceNode) return null;
-
-    const d = sourceNode.data as Record<string, unknown>;
-    return (d.outputVideo as string | null) ?? null;
-  }, [edges, nodes, id]);
-
-  const hasSourceVideo = Boolean(sourceVideoUrl);
   const canExtract = hasSourceVideo && nodeData.status !== "loading" && canRun;
 
   const handleExtract = () => {

@@ -7,6 +7,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { reformatImage } from "@/utils/reformatImage";
 import { RESAMPLE_FILTER_LABELS, type ResampleFilter } from "@/utils/resampleFilters";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import type { ReformatNodeData } from "@/types";
 import { previewSrc } from "@/utils/nodePreview";
 
@@ -29,10 +30,19 @@ export function ReformatNode({ id, data, selected }: NodeProps<ReformatNodeType>
 
   const fpRef = useRef<string>("");
 
+  // Wired vs resolved — see useUpstreamHydration.
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, !!incomingImage);
+  const connected = !!incomingEdgeKey;
+
   // Mirror the upstream image into sourceImage.
   useEffect(() => {
-    if (incomingImage !== nodeData.sourceImage) updateNodeData(id, { sourceImage: incomingImage });
-  }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
+    if (incomingImage) {
+      if (incomingImage !== nodeData.sourceImage) updateNodeData(id, { sourceImage: incomingImage });
+    } else if (!connected && nodeData.sourceImage) {
+      updateNodeData(id, { sourceImage: null });
+    }
+  }, [id, incomingImage, connected, nodeData.sourceImage, updateNodeData]);
 
   // Reformat whenever source / resolution / mode change (debounced).
   useEffect(() => {
@@ -42,6 +52,8 @@ export function ReformatNode({ id, data, selected }: NodeProps<ReformatNodeType>
     const mode = nodeData.mode ?? "fill";
     const filter = nodeData.filter ?? "cubic";
     if (!src) {
+      // Connected but not hydrated yet — keep the committed reformat.
+      if (connected) return;
       if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null });
       fpRef.current = "";
       return;
@@ -56,7 +68,7 @@ export function ReformatNode({ id, data, selected }: NodeProps<ReformatNodeType>
     }, 120);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, nodeData.sourceImage, nodeData.width, nodeData.height, nodeData.mode, nodeData.filter, updateNodeData]);
+  }, [id, nodeData.sourceImage, connected, nodeData.width, nodeData.height, nodeData.mode, nodeData.filter, updateNodeData]);
 
   const setNum = useCallback(
     (key: "width" | "height", v: number) => updateNodeData(id, { [key]: Math.max(1, Math.round(v || 0)) }),

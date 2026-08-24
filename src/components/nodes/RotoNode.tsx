@@ -7,6 +7,7 @@ import { useRotoStore } from "@/store/rotoStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useFullResField } from "@/hooks/useFullResField";
 import { ensureFullResForNodes } from "@/store/execution/hydrateForRun";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import { rasterizeRoto } from "@/utils/rasterizeRoto";
 import { RotoNodeData } from "@/types";
 import { previewSrc } from "@/utils/nodePreview";
@@ -22,6 +23,17 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
   const nodes = useWorkflowStore((state) => state.nodes);
   const saveDirectoryPath = useWorkflowStore((state) => state.saveDirectoryPath);
   const { ensure } = useFullResField();
+
+  // Wired vs resolved — the same dead end MaskPainterNode had, for the same
+  // reason. `sourceImage` is ref-backed and lazy (imageStorage's `roto` case),
+  // so a roto with no shapes yet has neither a matte thumb nor a source on
+  // open: it fell through to the bare "Connect an image" placeholder, which has
+  // no way to open the editor, and nothing here ever asked for the pixels. The
+  // request restores this node's OWN sourceImage from its ref as well as the
+  // upstream's output (roto is a root in `ensureFullResForNodes`).
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, !!nodeData.sourceImage);
+  const connected = !!incomingEdgeKey;
 
   // Reactively mirror the upstream image into sourceImage.
   useEffect(() => {
@@ -132,11 +144,26 @@ export function RotoNode({ id, data, selected }: NodeProps<RotoNodeType>) {
           </div>
         </div>
       ) : (
-        <div className="w-full flex-1 min-h-[112px] rounded flex flex-col items-center justify-center bg-neutral-900/40">
+        <div
+          className="w-full flex-1 min-h-[112px] rounded flex flex-col items-center justify-center bg-neutral-900/40"
+          onDoubleClick={connected ? handleEdit : undefined}
+          title={connected ? "Double-click to open the roto editor" : "Connect an image"}
+        >
           <svg className="w-6 h-6 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245 4.5 4.5 0 008.4-2.245c0-.399-.078-.78-.22-1.128Zm0 0a15.998 15.998 0 003.388-1.62m-5.043-.025a15.994 15.994 0 011.622-3.395m3.42 3.42a15.995 15.995 0 004.764-4.648l3.876-5.814a1.151 1.151 0 00-1.597-1.597L14.146 6.32a15.996 15.996 0 00-4.649 4.763m3.42 3.42a6.776 6.776 0 00-3.42-3.42" />
           </svg>
-          <span className="text-[10px] text-neutral-500 mt-1">Connect an image</span>
+          {connected ? (
+            // The editor is the only way to author shapes, so this branch must
+            // never be a dead end just because the source is still on disk.
+            <button
+              onClick={handleEdit}
+              className="nodrag nopan text-[10px] text-neutral-400 mt-1 hover:text-white transition-colors cursor-pointer"
+            >
+              Draw roto
+            </button>
+          ) : (
+            <span className="text-[10px] text-neutral-500 mt-1">Connect an image</span>
+          )}
         </div>
       )}
     </BaseNode>

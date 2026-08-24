@@ -6,6 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { shiftImageX } from "@/utils/panoShift";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import type { PanoShiftNodeData } from "@/types";
 import { previewSrc } from "@/utils/nodePreview";
 
@@ -35,11 +36,20 @@ export function PanoShiftNode({ id, data, selected }: NodeProps<PanoShiftNodeTyp
     return null;
   }, [edges, nodes, id]);
 
+  // The edge was already in hand here (the loop above walks `edges`) and its
+  // existence was simply ignored — see useUpstreamHydration for why the two
+  // states are not the same.
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, !!incomingImage);
+  const connected = !!incomingEdgeKey;
+
   useEffect(() => {
-    if (incomingImage !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: incomingImage });
+    if (incomingImage) {
+      if (incomingImage !== nodeData.sourceImage) updateNodeData(id, { sourceImage: incomingImage });
+    } else if (!connected && nodeData.sourceImage) {
+      updateNodeData(id, { sourceImage: null });
     }
-  }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
+  }, [id, incomingImage, connected, nodeData.sourceImage, updateNodeData]);
 
   const shiftX = nodeData.shiftX ?? 0;
 
@@ -69,6 +79,8 @@ export function PanoShiftNode({ id, data, selected }: NodeProps<PanoShiftNodeTyp
   useEffect(() => {
     const src = nodeData.sourceImage;
     if (!src) {
+      // Connected but not hydrated yet — keep the committed shift.
+      if (connected) return;
       if (nodeData.outputImage) updateNodeData(id, { outputImage: null });
       lastFingerprintRef.current = "";
       setBusy(false);
@@ -99,7 +111,7 @@ export function PanoShiftNode({ id, data, selected }: NodeProps<PanoShiftNodeTyp
         setBusy(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, fingerprint, updateNodeData]);
+  }, [id, fingerprint, connected, updateNodeData]);
 
   const displayImage =
     previewSrc(nodeData.outputImage, nodeData.outputImageThumb, nodeData.outputImageRef) ||

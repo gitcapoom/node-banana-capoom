@@ -34,15 +34,26 @@ export function ViewerNode({ id, data, selected }: NodeProps<ViewerNodeType>) {
   // Resolve the upstream image reactively — this is what makes the node live.
   // Read through React Flow's indexes; a store selector scanning edges+nodes
   // would re-run for every node on every write (see useUpstreamImage).
-  const incoming = useUpstreamImage("image").image;
+  const upstream = useUpstreamImage("image");
+  const incoming = upstream.image;
 
   // Mirror into node data so the shared full-screen viewer (which reads a node
   // field, not a URL) shows this — and keeps showing it live while open.
+  //
+  // Deliberately NOT requesting hydration here: a viewer keeps its own
+  // `imageThumb` (THUMB_DISPLAY_FIELDS) and is display-only, so pulling the
+  // full-res chain back for every viewer on the canvas at open would be pure
+  // cost. What it must not do is CLEAR — `connected` was already on the hook's
+  // return value and discarded, so a remount while the upstream was still lazy
+  // nulled `image` *and* `imageRef`, destroying the only route back to the
+  // full-res the full-screen view needs.
   useEffect(() => {
-    if (incoming !== nodeData.image) {
-      updateNodeData(id, { image: incoming, imageRef: undefined });
+    if (incoming) {
+      if (incoming !== nodeData.image) updateNodeData(id, { image: incoming, imageRef: undefined });
+    } else if (!upstream.connected && nodeData.image) {
+      updateNodeData(id, { image: null, imageRef: undefined });
     }
-  }, [id, incoming, nodeData.image, updateNodeData]);
+  }, [id, incoming, upstream.connected, nodeData.image, updateNodeData]);
 
   const toggleChecker = useCallback(
     () => updateNodeData(id, { checkerboard: !nodeData.checkerboard }),

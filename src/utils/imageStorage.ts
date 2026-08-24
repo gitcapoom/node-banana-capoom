@@ -924,6 +924,28 @@ async function externalizeNodeImages(
       break;
     }
 
+    // Same shape as comp, and it was missing entirely: with no case here the
+    // default branch kept `outputImage` INLINE, writing a full-res PNG data URL
+    // straight into the workflow JSON. Worse, it also left `outputImageRef`
+    // unset — which OUTPUT_REF_FIELD (compSignature) says blur has — so every
+    // downstream comp pin degraded to a `u:` URL token and re-composited on
+    // open, and the run pre-pass could never stop at a blur.
+    case "blur": {
+      const d = data as import("@/types").BlurNodeData;
+      const next: Record<string, unknown> = { ...d };
+      // The two input mirrors are re-derived from the connected upstream on
+      // open / run, and BlurNode clears their refs every time it re-mirrors —
+      // so externalizing them would re-save a fresh copy on every save. Drop
+      // them; the node rebuilds them from the edges.
+      next.sourceImage = null; next.sourceImageRef = undefined;
+      next.matteImage = null; next.matteImageRef = undefined;
+      // The blurred output IS displayed → keep it (ref + inline PNG thumb; the
+      // float chain carries alpha).
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs", "png");
+      newData = next as import("@/types").BlurNodeData;
+      break;
+    }
+
     case "panoShift": {
       const d = data as import("@/types").PanoShiftNodeData;
       const next: Record<string, unknown> = { ...d };
@@ -1354,13 +1376,15 @@ async function hydrateNodeImages(
       break;
     }
 
-    // Lazy: color nodes show outputImageThumb; comp shows outputImageThumb and
-    // re-derives its inputs from upstream. Full-res loads on edit / run.
+    // Lazy: color nodes show outputImageThumb; comp and blur show
+    // outputImageThumb and re-derive their inputs from upstream. Full-res loads
+    // on edit / run.
     case "colorGrade":
     case "hsvCorrect":
     case "contrastAdjust":
     case "reformat":
     case "comp":
+    case "blur":
     case "panoShift": {
       newData = data;
       break;

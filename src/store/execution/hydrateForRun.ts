@@ -12,7 +12,7 @@
  */
 
 import type { WorkflowNode, WorkflowNodeData, NodeType } from "@/types";
-import { RUN_FULLRES_FIELDS } from "@/utils/imageFieldMap";
+import { RUN_FULLRES_FIELDS, type RunImageField } from "@/utils/imageFieldMap";
 import { loadMediaById } from "@/utils/mediaStorage";
 import { __OUTPUT_REF_FIELD } from "@/utils/compSignature";
 
@@ -38,6 +38,88 @@ const RUN_FULLRES_ARRAY_FIELDS: Partial<
   llmGenerate: [{ raw: "inputImages", refs: "inputImageRefs", folder: "inputs" }],
   generateVideo: [{ raw: "inputImages", refs: "inputImageRefs", folder: "inputs" }],
 };
+
+/**
+ * Ref-backed VIDEO outputs, by producer type.
+ *
+ * Deliberately NOT folded into RUN_FULLRES_FIELDS. Those fields are loaded for
+ * the whole transitive upstream of every run; a video is one to two orders of
+ * magnitude larger than an image, and hydrating every clip in a graph on every
+ * run is exactly what `hydrateNodeImages` avoids when it writes
+ * `outputVideo: null` on open ("loaded on-demand in overlay"). So videos are
+ * pulled back only by the ONE consumer that cannot work without them, and only
+ * for the producers actually feeding it — see `ensureVideoInputs`.
+ *
+ * Only these two types persist a video: `videoStitch` / `easeCurve` /
+ * `videoTrim` publish blob URLs and carry no ref, so a run recomputes them.
+ */
+const VIDEO_OUTPUT_FIELDS: Partial<Record<NodeType, RunImageField>> = {
+  generateVideo: { raw: "outputVideo", ref: "outputVideoRef", folder: "generations" },
+  videoInput: { raw: "videoFile", ref: "videoFileRef", folder: "inputs" },
+};
+
+/**
+ * Node types that carry a video THROUGH rather than producing one.
+ *
+ * `getConnectedInputsPure` resolves straight past these to whatever feeds them,
+ * so a frame grab behind a Dot reads the clip fine once it is loaded — but the
+ * Dot itself has no video field, so a direct-sources-only walk stopped there and
+ * loaded nothing. Dots are inserted by ctrl+clicking any edge, so this is the
+ * ordinary case, not an exotic one. Kept to a fixed list rather than a general
+ * upstream walk: tracing every branch would drag whole video chains back in,
+ * which is what confining this to one consumer is meant to avoid.
+ */
+const VIDEO_REROUTE_TYPES = new Set<string>(["dot", "router", "switch", "conditionalSwitch"]);
+
+/**
+ * Load the full video for every producer feeding `nodeId`, through reroutes.
+ *
+ * `videoInput.videoFile` and `generateVideo.outputVideo` are both nulled on open
+ * with only a ref left behind, and NO run pre-pass loads them back. A frame grab
+ * on a reopened workflow therefore read `inputs.videos` as empty and failed with
+ * "Connect a video input to extract a frame" on a graph that is visibly wired —
+ * a Run repaired nothing, because the run pre-pass never touched video at all.
+ */
+export async function ensureVideoInputs(
+  nodeId: string,
+  nodes: WorkflowNode[],
+  edges: MinimalEdge[],
+  updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void,
+  saveDirectoryPath: string | null,
+): Promise<void> {
+  if (!saveDirectoryPath) return;
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  // Direct sources, plus anything behind a chain of pure reroutes.
+  const producerIds = new Set<string>();
+  const seen = new Set<string>([nodeId]);
+  const queue = [nodeId];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    for (const e of edges) {
+      if (e.target !== cur || seen.has(e.source)) continue;
+      seen.add(e.source);
+      const src = byId.get(e.source);
+      if (src && VIDEO_REROUTE_TYPES.has(src.type as string)) queue.push(e.source);
+      else producerIds.add(e.source);
+    }
+  }
+
+  await Promise.all(
+    [...producerIds].map(async (srcId) => {
+      const src = byId.get(srcId);
+      if (!src) return;
+      const field = VIDEO_OUTPUT_FIELDS[src.type as NodeType];
+      if (!field) return;
+      const data = src.data as Record<string, unknown>;
+      const raw = data[field.raw] as string | null | undefined;
+      const ref = data[field.ref] as string | undefined;
+      if (raw || !ref) return; // already loaded, or nothing to load from
+      const url = await loadMediaById(ref, saveDirectoryPath, field.folder);
+      if (url) updateNodeData(srcId, { [field.raw]: url } as Partial<WorkflowNodeData>);
+    }),
+  );
+}
 
 /**
  * The ref FIELD NAME holding this node's output, or null if it has no known

@@ -13,6 +13,7 @@ import { FileSaveDialog } from "../FileSaveDialog";
 import { ZoomPanView } from "../ZoomPanView";
 import { extractUpstreamWorkflow } from "@/utils/upstreamExtractor";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import { createImageThumbnail } from "@/utils/createImageThumbnail";
 import { cheapUrlKey } from "@/utils/renderSignature";
 
@@ -74,6 +75,15 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
       return null;
     }, [id])
   );
+
+  // An Output node persists no content of its own ("Output content is not
+  // persisted" — imageStorage), so on open it has only what its upstream
+  // publishes. With that upstream lazily unloaded, `upstreamKey` is null and
+  // this node sat blank on a fully wired graph until the user hit Run.
+  // `connectedEdgeCount` above already knew an edge existed and was used only to
+  // auto-run on connect.
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, !!upstreamKey);
 
   // Sync pulled upstream content to this node's display data
   // Re-reads full values from the store (the key only has fingerprints).

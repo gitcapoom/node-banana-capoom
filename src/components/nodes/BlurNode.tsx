@@ -10,6 +10,7 @@ import { releaseColorNode, renderBlurNodeToCanvas, commitBlurNode, floatNodeToTh
 import { createImageThumbnailWithMeta, thumbMaxDim } from "@/utils/createImageThumbnail";
 import { resolveInputRef } from "@/utils/compComposite";
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import type { BlurNodeData, BlurFilterType } from "@/types";
 
 type BlurNodeType = Node<BlurNodeData, "blur">;
@@ -38,7 +39,6 @@ function paramsOf(d: BlurNodeData): BlurNodeParams {
 export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
-  const loadNodeFullResInputs = useWorkflowStore((s) => s.loadNodeFullResInputs);
 
   // Resolve the two inputs (url + producing node id) by targetHandle.
   const incoming = useWorkflowStore(
@@ -70,6 +70,20 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
   // unloaded matte would silently render as "no matte" (blur everywhere).
   const allInputsResolved =
     (!incoming.srcConn || !!incoming.src) && (!incoming.matteConn || !!incoming.matte);
+
+  /** Identifies this node's incoming wiring — see useUpstreamHydration for why
+   *  "an edge exists" and "its value arrived" have to be asked separately. */
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+
+  // CONNECTED-BUT-UNHYDRATED is not DISCONNECTED. This used to be gated on
+  // `incoming.src` — the very value that is missing when the primary input is a
+  // lazily-unloaded field (THUMB_DISPLAY_FIELDS in imageFieldMap): on open the
+  // upstream's image is null behind a ref, it paints its thumb so it looks
+  // loaded, and getSourceOutput returns null for it exactly as it does for "no
+  // edge". So a blur wired to a saved image asked for nothing and sat empty
+  // until something else happened to hydrate it. `srcConn`/`matteConn` already
+  // carry "an edge exists"; use them.
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, allInputsResolved);
 
   // Mirror resolved inputs into node data (guarded against loops).
   useEffect(() => {
@@ -104,10 +118,6 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
   }, [sig]);
 
   useEffect(() => {
-    if (!allInputsResolved && latest.current.incoming.src) void loadNodeFullResInputs(id);
-  }, [allInputsResolved, id, loadNodeFullResInputs]);
-
-  useEffect(() => {
     if (!live || !allInputsResolved) return;
     let cancelled = false;
     const run = async () => {
@@ -128,6 +138,13 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
   useEffect(() => {
     const { incoming: inc } = latest.current;
     if (!inc.src) {
+      // An edge whose source has not been hydrated yet is NOT a missing input.
+      // Clearing here threw away a good committed output on every open of a
+      // saved workflow — and blur was the one node where that actually fired,
+      // because its `outputImage` was saved inline (see imageStorage's missing
+      // `case "blur"`) and so was non-null on open, unlike its siblings.
+      // Hydration is requested by the effect above; keep what is committed.
+      if (inc.srcConn) return;
       if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null, outputImageRef: undefined });
       committedBlurs.forget(id);
       return;
@@ -143,7 +160,6 @@ export function BlurNode({ id, data, selected }: NodeProps<BlurNodeType>) {
       const out = await commitBlurNode(
         resolveInputRef(cur.src, cur.srcId), resolveInputRef(cur.matte, cur.matteId), p, id, cur.src,
       );
-      committedBlurs.set(id, sig);
       committedBlurs.set(id, sig);
       updateNodeData(id, { outputImage: out, outputImageRef: undefined });
     }, 300);

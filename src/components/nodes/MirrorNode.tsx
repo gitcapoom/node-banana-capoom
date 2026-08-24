@@ -6,6 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { mirrorImage } from "@/utils/mirrorImage";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import type { MirrorNodeData } from "@/types";
 import { previewSrc } from "@/utils/nodePreview";
 
@@ -27,12 +28,20 @@ export function MirrorNode({ id, data, selected }: NodeProps<MirrorNodeType>) {
   // outputImage doesn't cancel ourselves through dep changes.
   const lastFingerprintRef = useRef<string>("");
 
+  // Wired vs resolved — see useUpstreamHydration. Without this the node looked
+  // empty until a Run, and could clobber an output a consumer had just hydrated.
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, !!incomingImage);
+  const connected = !!incomingEdgeKey;
+
   // 1) Mirror upstream image into sourceImage.
   useEffect(() => {
-    if (incomingImage !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: incomingImage });
+    if (incomingImage) {
+      if (incomingImage !== nodeData.sourceImage) updateNodeData(id, { sourceImage: incomingImage });
+    } else if (!connected && nodeData.sourceImage) {
+      updateNodeData(id, { sourceImage: null });
     }
-  }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
+  }, [id, incomingImage, connected, nodeData.sourceImage, updateNodeData]);
 
   // 2) Auto-apply whenever source or flip toggles change.
   // Deliberately does NOT depend on nodeData.outputImage — writing back
@@ -43,6 +52,9 @@ export function MirrorNode({ id, data, selected }: NodeProps<MirrorNodeType>) {
     const v = !!nodeData.flipVertical;
 
     if (!src) {
+      // Connected but not hydrated yet: keep the committed flip. Clearing threw
+      // away a good saved output on every open.
+      if (connected) return;
       if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null });
       lastFingerprintRef.current = "";
       return;
@@ -69,7 +81,7 @@ export function MirrorNode({ id, data, selected }: NodeProps<MirrorNodeType>) {
         updateNodeData(id, { outputImage: src });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, nodeData.sourceImage, nodeData.flipHorizontal, nodeData.flipVertical, updateNodeData]);
+  }, [id, nodeData.sourceImage, connected, nodeData.flipHorizontal, nodeData.flipVertical, updateNodeData]);
 
   const toggleH = useCallback(() => {
     updateNodeData(id, { flipHorizontal: !nodeData.flipHorizontal });

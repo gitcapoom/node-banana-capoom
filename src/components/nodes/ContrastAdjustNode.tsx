@@ -7,6 +7,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { useColorNode } from "@/hooks/useGpuPreview";
 import { useUpstreamImage } from "@/hooks/useUpstreamImage";
+import { useHydrateUnresolvedInputs } from "@/hooks/useUpstreamHydration";
 import { CONTRAST_SHADER } from "@/utils/imageShaders";
 import type { UniformValue } from "@/utils/webglProcess";
 import { GpuEditorOverlay } from "./GpuEditorOverlay";
@@ -52,11 +53,23 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
   const upstreamColorNodeId =
     upstream.sourceId && COLOR_NODE_TYPES.has(upstream.sourceType ?? "") ? upstream.sourceId : null;
 
+  // `connected` is the whole point of the hook's return shape and was being
+  // discarded here: an edge whose upstream is still lazily unloaded reports
+  // `image: null`, which is indistinguishable from no edge at all.
+  useHydrateUnresolvedInputs(id, upstream.sourceId ?? "", !!incomingImage);
+
   useEffect(() => {
-    if (incomingImage !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: incomingImage, sourceImageRef: undefined });
+    if (incomingImage) {
+      if (incomingImage !== nodeData.sourceImage) {
+        updateNodeData(id, { sourceImage: incomingImage, sourceImageRef: undefined });
+      }
+    } else if (!upstream.connected && nodeData.sourceImage) {
+      // Only a REAL disconnect clears. Mirroring the lazy null also cleared
+      // `sourceImageRef`, which is what the run pre-pass loads from — so the
+      // stored source became unrecoverable on open.
+      updateNodeData(id, { sourceImage: null, sourceImageRef: undefined });
     }
-  }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
+  }, [id, incomingImage, upstream.connected, nodeData.sourceImage, updateNodeData]);
 
   const uniforms: Record<string, UniformValue> = useMemo(
     () => ({ u_contrast: nodeData.contrast, u_rolloff: nodeData.rolloff, u_pivot: nodeData.pivot }),
@@ -66,6 +79,7 @@ export function ContrastAdjustNode({ id, data, selected }: NodeProps<ContrastAdj
   const { liveActive } = useColorNode({
     id,
     sourceImage: nodeData.sourceImage,
+    sourceConnected: upstream.connected,
     upstreamColorNodeId,
     shaderSource: CONTRAST_SHADER,
     uniforms,

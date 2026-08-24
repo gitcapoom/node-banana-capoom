@@ -7,6 +7,7 @@
 
 import type { VideoStitchNodeData, EaseCurveNodeData, VideoTrimNodeData, VideoFrameGrabNodeData } from "@/types";
 import { revokeBlobUrl } from "@/store/utils/executionUtils";
+import { ensureVideoInputs } from "./hydrateForRun";
 import type { NodeExecutionContext } from "./types";
 
 /**
@@ -350,13 +351,21 @@ export async function executeEaseCurve(ctx: NodeExecutionContext): Promise<void>
  * VideoFrameGrab: extracts the first or last frame from a video as a full-resolution PNG image.
  */
 export async function executeVideoFrameGrab(ctx: NodeExecutionContext): Promise<void> {
-  const { node, getConnectedInputs, updateNodeData } = ctx;
+  const { node, getConnectedInputs, updateNodeData, getNodes, getEdges, saveDirectoryPath } = ctx;
   const nodeData = node.data as VideoFrameGrabNodeData;
 
   updateNodeData(node.id, { status: "loading", error: null });
 
   try {
-    const inputs = getConnectedInputs(node.id);
+    let inputs = getConnectedInputs(node.id);
+
+    if (inputs.videos.length === 0) {
+      // Empty may mean "not wired" or "the upstream video is still on disk" —
+      // no run pre-pass hydrates video. Pull the direct producer back and
+      // re-read before deciding this is a wiring error.
+      await ensureVideoInputs(node.id, getNodes(), getEdges(), updateNodeData, saveDirectoryPath);
+      inputs = getConnectedInputs(node.id);
+    }
 
     if (inputs.videos.length === 0) {
       updateNodeData(node.id, {

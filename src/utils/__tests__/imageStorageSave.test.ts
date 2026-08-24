@@ -14,6 +14,7 @@ vi.mock("../createImageThumbnail", () => ({
 }));
 
 import { externalizeWorkflowImages } from "../imageStorage";
+import { THUMB_DISPLAY_FIELDS } from "../imageFieldMap";
 import type { WorkflowFile } from "@/store/workflowStore";
 
 const PAYLOAD = "x".repeat(4096);
@@ -109,5 +110,90 @@ describe("externalizeWorkflowImages — redundant upload skipping", () => {
     const refA = (a.nodes[0].data as Record<string, unknown>).imageRef;
     const refB = (b.nodes[0].data as Record<string, unknown>).imageRef;
     expect(refA).toBe(refB);
+  });
+});
+
+describe("externalizeWorkflowImages — blur", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  const blurWorkflow = (): WorkflowFile =>
+    ({
+      nodes: [
+        {
+          id: "b1",
+          type: "blur",
+          position: { x: 0, y: 0 },
+          data: {
+            filter: "gaussian", radius: 10, angle: 0, invertMatte: false, mixAmount: 1,
+            sourceImage: DATA_URL,
+            matteImage: DATA_URL,
+            outputImage: DATA_URL,
+          },
+        },
+      ],
+      edges: [],
+    } as unknown as WorkflowFile);
+
+  it("externalizes outputImage to a ref instead of leaving it inline in the JSON", async () => {
+    stubFetch({ exists: true, size: EXPECTED_BYTES });
+
+    const out = await externalizeWorkflowImages(blurWorkflow(), "/proj");
+    const d = out.nodes[0].data as Record<string, unknown>;
+
+    expect(d.outputImageRef).toMatch(/^img-[0-9a-f]{32}$/);
+    expect(d.outputImage).toBeNull();
+  });
+
+  it("drops the input mirrors rather than persisting them, as comp does", async () => {
+    stubFetch({ exists: true, size: EXPECTED_BYTES });
+
+    const out = await externalizeWorkflowImages(blurWorkflow(), "/proj");
+    const d = out.nodes[0].data as Record<string, unknown>;
+
+    // BlurNode re-derives these from the edges on open, and clears their refs
+    // on every re-mirror — persisting them piles up orphaned duplicates.
+    expect(d.sourceImage).toBeNull();
+    expect(d.sourceImageRef).toBeUndefined();
+    expect(d.matteImage).toBeNull();
+    expect(d.matteImageRef).toBeUndefined();
+  });
+});
+
+/**
+ * The maps in imageFieldMap declare which fields load LAZILY — i.e. which the
+ * save path is expected to have moved out to a file. A node type listed there
+ * but absent from externalizeNodeImages' switch falls through to the default
+ * branch, which keeps the full-res data URL inline: the workflow JSON grows by
+ * the whole image and the promised ref never exists. `blur` sat in both maps
+ * with no case for exactly this reason.
+ */
+describe("drift guard: field maps vs. the save path", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it("leaves no THUMB_DISPLAY_FIELDS raw field inline after a save", async () => {
+    stubFetch({ exists: true, size: EXPECTED_BYTES });
+
+    const nodes = Object.entries(THUMB_DISPLAY_FIELDS).map(([type, fields]) => ({
+      id: `n-${type}`,
+      type,
+      position: { x: 0, y: 0 },
+      data: Object.fromEntries((fields ?? []).map((f) => [f.raw, DATA_URL])),
+    }));
+    const out = await externalizeWorkflowImages({ nodes, edges: [] } as unknown as WorkflowFile, "/proj");
+
+    const survivors: string[] = [];
+    for (const node of out.nodes) {
+      const d = node.data as Record<string, unknown>;
+      for (const f of THUMB_DISPLAY_FIELDS[node.type as keyof typeof THUMB_DISPLAY_FIELDS] ?? []) {
+        if (typeof d[f.raw] === "string") survivors.push(`${node.type}.${f.raw}`);
+      }
+    }
+    expect(survivors).toEqual([]);
   });
 });

@@ -6,6 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { useMaskPainterStore } from "@/store/maskPainterStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useFullResField } from "@/hooks/useFullResField";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import { MaskPainterNodeData } from "@/types";
 import { previewSrc } from "@/utils/nodePreview";
 
@@ -16,8 +17,18 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
   const openModal = useMaskPainterStore((state) => state.openModal);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
+  const loadNodeFullResInputs = useWorkflowStore((state) => state.loadNodeFullResInputs);
   const edges = useWorkflowStore((state) => state.edges);
   const { ensure } = useFullResField();
+
+  // Wired vs resolved. With no strokes yet AND an unhydrated source this node
+  // rendered the bare placeholder — no button, no double-click handler — and
+  // there is no `maskPainter` case in the canvas expand modals either, so the
+  // mask could not be authored at all. Asking for the source up front is what
+  // gets it out of that state on its own.
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, !!nodeData.sourceImage);
+  const connected = !!incomingEdgeKey;
 
   // Reactively update sourceImage when an edge is connected
   useEffect(() => {
@@ -29,13 +40,20 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
 
   const handleEdit = useCallback(async () => {
     // Load full-res source on demand — it's lazily null after reopening.
-    const imageToEdit = await ensure({ id, field: "sourceImage", ref: nodeData.sourceImageRef, current: nodeData.sourceImage, folder: "inputs" });
+    let imageToEdit = await ensure({ id, field: "sourceImage", ref: nodeData.sourceImageRef, current: nodeData.sourceImage, folder: "inputs" });
+    if (!imageToEdit) {
+      // No own ref either — the mirror effect only ever wrote `sourceImage`, so
+      // a mask painter that has never been opened has nothing on disk of its
+      // own. Pull the UPSTREAM back instead and read what it publishes.
+      await loadNodeFullResInputs(id);
+      imageToEdit = getConnectedInputs(id).images[0] ?? null;
+    }
     if (!imageToEdit) {
       alert("No image available. Connect an image input.");
       return;
     }
     openModal(id, imageToEdit, nodeData.strokes);
-  }, [id, ensure, nodeData.sourceImage, nodeData.sourceImageRef, nodeData.strokes, openModal]);
+  }, [id, ensure, loadNodeFullResInputs, getConnectedInputs, nodeData.sourceImage, nodeData.sourceImageRef, nodeData.strokes, openModal]);
 
   const handleRemove = useCallback(() => {
     updateNodeData(id, {
@@ -115,13 +133,28 @@ export function MaskPainterNode({ id, data, selected }: NodeProps<MaskPainterNod
           </div>
         </div>
       ) : (
-        <div className="w-full flex-1 min-h-[112px] rounded flex flex-col items-center justify-center bg-neutral-900/40">
+        <div
+          className="w-full flex-1 min-h-[112px] rounded flex flex-col items-center justify-center bg-neutral-900/40"
+          onDoubleClick={connected ? handleEdit : undefined}
+          title={connected ? "Double-click to open the mask editor" : "Connect an image"}
+        >
           <svg className="w-6 h-6 text-neutral-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
           </svg>
-          <span className="text-[10px] text-neutral-500 mt-1">
-            Connect an image
-          </span>
+          {connected ? (
+            // The editor is the ONLY way to author a mask, so this branch must
+            // never be a dead end just because the source is still on disk.
+            <button
+              onClick={handleEdit}
+              className="nodrag nopan text-[10px] text-neutral-400 mt-1 hover:text-white transition-colors cursor-pointer"
+            >
+              Paint mask
+            </button>
+          ) : (
+            <span className="text-[10px] text-neutral-500 mt-1">
+              Connect an image
+            </span>
+          )}
         </div>
       )}
 

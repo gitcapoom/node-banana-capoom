@@ -117,6 +117,15 @@ export interface UseColorNodeArgs {
   /** 8-bit display URL of the upstream output (fallback input + the
    *  change-signal that re-fires effects when upstream recomputes). */
   sourceImage: string | null;
+  /**
+   * True when an EDGE feeds this node, regardless of whether its value has
+   * loaded. `sourceImage` alone cannot express that: displayed image fields are
+   * lazily hydrated, so on open a fully wired chain reports null everywhere and
+   * the commit below read it as "disconnected" and cleared a good committed
+   * output. Defaults to false so an omitted flag keeps the old behaviour for a
+   * node that genuinely has no upstream.
+   */
+  sourceConnected?: boolean;
   /** Upstream node id IF it is another color node (so we can read its
    *  float texture as input); null otherwise. */
   upstreamColorNodeId: string | null;
@@ -146,7 +155,7 @@ export interface UseColorNodeArgs {
  */
 export function useColorNode(args: UseColorNodeArgs): { liveActive: boolean } {
   const {
-    id, sourceImage, upstreamColorNodeId, shaderSource, uniforms,
+    id, sourceImage, sourceConnected = false, upstreamColorNodeId, shaderSource, uniforms,
     clampBlacks, clampWhites, isIdentity,
     nodeCanvasRef, overlayCanvasRef, overlayOpen, commitDelay = 220,
   } = args;
@@ -225,6 +234,14 @@ export function useColorNode(args: UseColorNodeArgs): { liveActive: boolean } {
   // ── Debounced commit (float texture + display URL) ──
   useEffect(() => {
     if (!sourceImage) {
+      if (sourceConnected) {
+        // Wired, but the upstream's output has not been loaded back from disk
+        // yet. Clearing here destroyed a committed grade the moment the node
+        // remounted (React Flow unmounts nodes scrolled out of view) with an
+        // input a consumer had already hydrated — the graded frame vanished and
+        // every downstream consumer went with it.
+        return;
+      }
       // Only write when there's something to clear — an unconditional write
       // re-renders the whole node tree every time an unconnected node mounts.
       const cur = useWorkflowStore.getState().nodes.find((n) => n.id === id);
@@ -267,7 +284,7 @@ export function useColorNode(args: UseColorNodeArgs): { liveActive: boolean } {
     }, commitDelay);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, sourceImage, upstreamColorNodeId, shaderSource, uniformsKey, isIdentity, commitDelay]);
+  }, [id, sourceImage, sourceConnected, upstreamColorNodeId, shaderSource, uniformsKey, isIdentity, commitDelay]);
 
   // ── Display thumbnail, well after the dust settles ──
   //

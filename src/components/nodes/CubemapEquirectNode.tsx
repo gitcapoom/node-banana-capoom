@@ -6,6 +6,7 @@ import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { applyCubemapEquirect } from "@/utils/cubemapEquirect";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import type { CubemapEquirectMode, CubemapEquirectNodeData } from "@/types";
 import { previewSrc } from "@/utils/nodePreview";
 
@@ -33,12 +34,19 @@ export function CubemapEquirectNode({ id, data, selected }: NodeProps<CubemapEqu
   // skip redundant work AND to know when a settled promise is still relevant.
   const lastFingerprintRef = useRef<string>("");
 
+  // Wired vs resolved — see useUpstreamHydration.
+  const incomingEdgeKey = useIncomingEdgeKey(id);
+  useHydrateUnresolvedInputs(id, incomingEdgeKey, !!incomingImage);
+  const connected = !!incomingEdgeKey;
+
   // 1) Mirror the upstream image into sourceImage.
   useEffect(() => {
-    if (incomingImage !== nodeData.sourceImage) {
-      updateNodeData(id, { sourceImage: incomingImage });
+    if (incomingImage) {
+      if (incomingImage !== nodeData.sourceImage) updateNodeData(id, { sourceImage: incomingImage });
+    } else if (!connected && nodeData.sourceImage) {
+      updateNodeData(id, { sourceImage: null });
     }
-  }, [id, incomingImage, nodeData.sourceImage, updateNodeData]);
+  }, [id, incomingImage, connected, nodeData.sourceImage, updateNodeData]);
 
   // 2) Re-run the conversion whenever source / mode / outputSize change.
   // NOTE: deliberately NOT including nodeData.outputImage in deps — writing
@@ -49,6 +57,8 @@ export function CubemapEquirectNode({ id, data, selected }: NodeProps<CubemapEqu
     const size = nodeData.outputSize;
 
     if (!src) {
+      // Connected but not hydrated yet — keep the committed conversion.
+      if (connected) return;
       if (nodeData.outputImage) updateNodeData(id, { outputImage: null });
       lastFingerprintRef.current = "";
       setError(null);
@@ -78,7 +88,7 @@ export function CubemapEquirectNode({ id, data, selected }: NodeProps<CubemapEqu
         setBusy(false);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, nodeData.sourceImage, nodeData.mode, nodeData.outputSize, updateNodeData]);
+  }, [id, nodeData.sourceImage, connected, nodeData.mode, nodeData.outputSize, updateNodeData]);
 
   const setMode = useCallback(
     (mode: CubemapEquirectMode) => {

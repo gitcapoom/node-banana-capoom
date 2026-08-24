@@ -24,6 +24,7 @@ import { ThreeModelViewer } from "@/components/ThreeModelViewer";
 import { saveMediaImmediately } from "@/utils/mediaStorage";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
+import { useHydrateUnresolvedInputs, useIncomingEdgeKey } from "@/hooks/useUpstreamHydration";
 import { ASPECT_RATIO_PRESETS } from "@/utils/cinemaCameraPresets";
 
 // 3D generation capabilities
@@ -62,6 +63,15 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
     const output = getSourceOutput(srcNode, bgEdge.sourceHandle);
     return output?.type === "image" ? output.value : null;
   }, [id, edges, nodes]);
+
+  // Wired vs resolved — see useUpstreamHydration. The TRIGGER is scoped to the
+  // bg handle (the load itself is per-node and cannot be narrower): only an
+  // unresolved backdrop is worth a request, because that is the one input this
+  // node has to display before a run. Keyed on the whole input set instead,
+  // every generate3d node on the canvas would hydrate its prompts and control
+  // images at open too — which is the run pre-pass's job, not the node's.
+  const bgEdgeKey = useIncomingEdgeKey(id, "image-bg");
+  useHydrateUnresolvedInputs(id, bgEdgeKey, !!backgroundImage);
 
   // Compute aspect ratio from background image
   const [bgAspectRatio, setBgAspectRatio] = useState<number | null>(null);
