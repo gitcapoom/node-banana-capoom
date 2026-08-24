@@ -7,7 +7,7 @@ import Konva from "konva";
 import { useCompStore, type CompActiveInput } from "@/store/compStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
-import { renderCompPreviewToCanvas, floatNodeToDataUrl, renderComp, type CompRoi } from "@/utils/colorChain";
+import { renderCompPreviewToCanvas, floatNodeToDataUrl, renderComp, releaseColorNode, type CompRoi } from "@/utils/colorChain";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPieces } from "@/utils/compTransform";
 import {
@@ -54,7 +54,7 @@ function loadSize(src: string): Promise<{ w: number; h: number } | null> {
 }
 
 export function CompModal() {
-  const { isModalOpen, sourceNodeId, activeInput, closeModal, setActiveInput } = useCompStore();
+  const { isModalOpen, sourceNodeId, activeInput, closeModal, setActiveInput, draft, patchDraft, baseline, setBaseline } = useCompStore();
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const propagateFromNode = useWorkflowStore((s) => s.propagateFromNode);
   const node = useWorkflowStore((s) => s.nodes.find((n) => n.id === sourceNodeId));
@@ -93,7 +93,37 @@ export function CompModal() {
   const [sizes, setSizes] = useState<{ bg?: { w: number; h: number }; bgAlpha?: { w: number; h: number }; fg?: { w: number; h: number }; fgAlpha?: { w: number; h: number }; matte?: { w: number; h: number } }>({});
   const [busy, setBusy] = useState(false);
 
-  const data = node?.data as CompNodeData | undefined;
+  // Node data with the editor's UNAPPLIED changes layered on top.
+  //
+  // The draft carries parameters only. The five image mirrors stay live from
+  // node data, because CompNode keeps writing them from its edges while this
+  // editor is open — drafting them too would freeze the editor on whatever
+  // happened to be upstream at the moment it opened.
+  const nodeData = node?.data as CompNodeData | undefined;
+  const data = useMemo<CompNodeData | undefined>(
+    () => (nodeData ? { ...nodeData, ...draft } : undefined),
+    [nodeData, draft],
+  );
+
+  /** Every parameter edit goes to the draft — never straight to node data. */
+  const patch = useCallback((p: Partial<CompNodeData>) => patchDraft(p), [patchDraft]);
+
+  // Snapshot the output fields on the rising edge. The settle-commit below
+  // publishes a real composite while you work so a Viewer keeps moving, and
+  // that write lands in node data outside the draft — so Cancel has to put
+  // these back explicitly. Guarded on `baseline` so it captures once.
+  useEffect(() => {
+    if (!isModalOpen || !nodeData || baseline) return;
+    setBaseline({
+      outputImage: nodeData.outputImage,
+      outputImageRef: nodeData.outputImageRef,
+      outputWidth: nodeData.outputWidth,
+      outputHeight: nodeData.outputHeight,
+      outputImageDims: nodeData.outputImageDims,
+      compCommitSig: nodeData.compCommitSig,
+    });
+  }, [isModalOpen, nodeData, baseline, setBaseline]);
+
   const resSrc = data?.outputResolution === "fg" && sizes.fg ? sizes.fg : sizes.bg;
   const outW = resSrc?.w ?? 0;
   const outH = resSrc?.h ?? 0;
@@ -297,35 +327,35 @@ export function CompModal() {
   const followsLabel = activeInput === "bgAlpha" ? "BG" : activeInput === "fgAlpha" ? "FG" : null;
 
   const patchTransform = useCallback(
-    (patch: Partial<CompTransform>) => {
+    (p: Partial<CompTransform>) => {
       if (!sourceNodeId || !data) return;
       const cur = { ...defaultCompTransform(), ...((data[activeKey] as Partial<CompTransform> | undefined) ?? {}) };
-      const next = { ...cur, ...patch };
+      const next = { ...cur, ...p };
       // Scale lock: Scale Y follows Scale X (a Y-only edit drives X, then Y mirrors X).
       if (next.scaleLock) {
-        if ("scaleY" in patch && !("scaleX" in patch)) next.scaleX = next.scaleY;
+        if ("scaleY" in p && !("scaleX" in p)) next.scaleX = next.scaleY;
         next.scaleY = next.scaleX;
       }
-      updateNodeData(sourceNodeId, { [activeKey]: next } as Partial<CompNodeData>);
+      patch({ [activeKey]: next } as Partial<CompNodeData>);
     },
-    [sourceNodeId, data, activeKey, updateNodeData],
+    [sourceNodeId, data, activeKey, patch],
   );
 
   const patchResample = useCallback(
     (v: CompResampleFilter) => {
       if (!sourceNodeId || !data) return;
-      updateNodeData(sourceNodeId, { [activeResampleKey]: v } as Partial<CompNodeData>);
+      patch({ [activeResampleKey]: v } as Partial<CompNodeData>);
     },
-    [sourceNodeId, data, activeResampleKey, updateNodeData],
+    [sourceNodeId, data, activeResampleKey, patch],
   );
 
   const patchFilter = useCallback(
-    (patch: Partial<CompInputFilter>) => {
+    (p: Partial<CompInputFilter>) => {
       if (!sourceNodeId || !data) return;
       const cur = { ...defaultCompFilter(), ...((data[activeFilterKey] as Partial<CompInputFilter> | undefined) ?? {}) };
-      updateNodeData(sourceNodeId, { [activeFilterKey]: { ...cur, ...patch } } as Partial<CompNodeData>);
+      patch({ [activeFilterKey]: { ...cur, ...p } } as Partial<CompNodeData>);
     },
-    [sourceNodeId, data, activeFilterKey, updateNodeData],
+    [sourceNodeId, data, activeFilterKey, patch],
   );
 
   // Latest nudge closure (arrow keys move the active transform by whole pixels).
@@ -406,6 +436,11 @@ export function CompModal() {
 
   const hpx = (v: number) => v / scale;
 
+  /**
+   * Apply: the draft's parameters and the freshly rendered output land in ONE
+   * write, so an editing session costs a single undo step rather than one per
+   * slider.
+   */
   const handleDone = useCallback(async () => {
     if (!sourceNodeId || !data || !data.bgImage) { closeModal(); return; }
     setBusy(true);
@@ -414,18 +449,42 @@ export function CompModal() {
       const res = await renderComp(buildCompInputs(urls, srcs), buildCompParams(data), sourceNodeId);
       if (res) {
         const url = (await floatNodeToDataUrl(sourceNodeId)) ?? data.bgImage;
-        updateNodeData(sourceNodeId, { outputImage: url, outputImageRef: undefined, outputWidth: res.w, outputHeight: res.h });
+        updateNodeData(sourceNodeId, { ...draft, outputImage: url, outputImageRef: undefined, outputWidth: res.w, outputHeight: res.h });
       } else {
         const { dataUrl, outW: w, outH: h } = await compositeCompForExecutor(urls, srcs, data, sourceNodeId);
-        if (dataUrl) updateNodeData(sourceNodeId, { outputImage: dataUrl, outputImageRef: undefined, outputWidth: w, outputHeight: h });
+        if (dataUrl) updateNodeData(sourceNodeId, { ...draft, outputImage: dataUrl, outputImageRef: undefined, outputWidth: w, outputHeight: h });
+        else updateNodeData(sourceNodeId, draft);
       }
     } finally { setBusy(false); closeModal(); }
-  }, [sourceNodeId, data, srcs, updateNodeData, closeModal]);
+  }, [sourceNodeId, data, draft, srcs, updateNodeData, closeModal]);
+
+  /**
+   * Cancel: drop the draft, and undo what the settle-commit published.
+   *
+   * Discarding the draft is not enough on its own. While you edit, the commit
+   * effect above writes a real composite into `outputImage` and propagates it,
+   * so the edited picture is already downstream. Restoring the baseline puts the
+   * committed output and its signature back; `releaseColorNode` drops the edited
+   * float texture, without which CompNode's republish-only guard
+   * (`republishOnly && hasFloat(id)`) would go on serving the edited composite
+   * from GPU memory. With the texture gone that guard falls through to a real
+   * render from the restored parameters, and still skips the full-res PNG encode
+   * because the restored signature matches.
+   */
+  const handleCancel = useCallback(() => {
+    const dirty = Object.keys(draft).length > 0;
+    if (sourceNodeId && baseline && dirty) {
+      updateNodeData(sourceNodeId, { ...baseline } as Partial<CompNodeData>);
+      releaseColorNode(sourceNodeId);
+      void propagateFromNode(sourceNodeId);
+    }
+    closeModal();
+  }, [sourceNodeId, draft, baseline, updateNodeData, propagateFromNode, closeModal]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isModalOpen) return;
-      if (e.key === "Escape") { closeModal(); return; }
+      if (e.key === "Escape") { handleCancel(); return; }
       // Arrow keys nudge the active transform — ignore while typing in a field.
       const tgt = e.target as HTMLElement | null;
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.tagName === "SELECT")) return;
@@ -439,7 +498,7 @@ export function CompModal() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isModalOpen, closeModal]);
+  }, [isModalOpen, handleCancel]);
 
   if (!isModalOpen || !data) return null;
 
@@ -487,39 +546,39 @@ export function CompModal() {
           <span className="text-sm font-medium text-white mr-3">Composite</span>
           <label className="flex items-center gap-1.5 text-[11px] text-neutral-400">
             Op
-            <select value={data.mergeOp} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { mergeOp: e.target.value as CompMergeOp })} className="bg-neutral-800 text-white text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700">
+            <select value={data.mergeOp} onChange={(e) => patch({ mergeOp: e.target.value as CompMergeOp })} className="bg-neutral-800 text-white text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700">
               {COMP_OP_LABELS.map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}
             </select>
           </label>
           <div className="w-px h-6 bg-neutral-700 mx-2" />
           <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer" title="Multiply the FG's RGB by its alpha before compositing">
-            <input type="checkbox" checked={data.premultiplyFg ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { premultiplyFg: e.target.checked })} className="accent-teal-500" />
+            <input type="checkbox" checked={data.premultiplyFg ?? false} onChange={(e) => patch({ premultiplyFg: e.target.checked })} className="accent-teal-500" />
             Premultiply FG
           </label>
           <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer ml-2" title="Multiply the BG's RGB by its alpha before compositing">
-            <input type="checkbox" checked={data.premultiplyBg ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { premultiplyBg: e.target.checked })} className="accent-teal-500" />
+            <input type="checkbox" checked={data.premultiplyBg ?? false} onChange={(e) => patch({ premultiplyBg: e.target.checked })} className="accent-teal-500" />
             Premultiply BG
           </label>
           <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer ml-2" title="Swap the BG and FG layers (and their alphas) in the merge">
-            <input type="checkbox" checked={data.swapBgFg ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { swapBgFg: e.target.checked })} className="accent-teal-500" />
+            <input type="checkbox" checked={data.swapBgFg ?? false} onChange={(e) => patch({ swapBgFg: e.target.checked })} className="accent-teal-500" />
             Swap BG/FG
           </label>
           <div className="w-px h-6 bg-neutral-700 mx-2" />
           <label className="flex items-center gap-1.5 text-[11px] text-neutral-400" title="Which input's resolution defines the output">
             Output res
-            <select value={data.outputResolution ?? "bg"} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { outputResolution: e.target.value as "bg" | "fg" })} className="bg-neutral-800 text-white text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700">
+            <select value={data.outputResolution ?? "bg"} onChange={(e) => patch({ outputResolution: e.target.value as "bg" | "fg" })} className="bg-neutral-800 text-white text-[11px] rounded px-1.5 py-1 outline-none border border-neutral-700">
               <option value="bg">BG</option>
               <option value="fg">FG</option>
             </select>
           </label>
           <div className="w-px h-6 bg-neutral-700 mx-2" />
           <label className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer" title="Show transparent pixels as a checkerboard instead of black">
-            <input type="checkbox" checked={data.checkerboard ?? false} onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, { checkerboard: e.target.checked })} className="accent-teal-500" />
+            <input type="checkbox" checked={data.checkerboard ?? false} onChange={(e) => patch({ checkerboard: e.target.checked })} className="accent-teal-500" />
             Checkerboard
           </label>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={closeModal} className="px-4 py-1.5 text-xs font-medium text-neutral-400 hover:text-white">Cancel</button>
+          <button onClick={handleCancel} className="px-4 py-1.5 text-xs font-medium text-neutral-400 hover:text-white">Cancel</button>
           <button onClick={handleDone} disabled={busy} className="px-4 py-1.5 text-xs font-medium bg-white text-neutral-900 rounded hover:bg-neutral-200 disabled:opacity-60">{busy ? "…" : "Done"}</button>
         </div>
       </div>
@@ -603,7 +662,7 @@ export function CompModal() {
                 <input
                   type="checkbox"
                   checked={(activeInput === "bg" ? data.bgBlackOutside : data.fgBlackOutside) ?? true}
-                  onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, activeInput === "bg" ? { bgBlackOutside: e.target.checked } : { fgBlackOutside: e.target.checked })}
+                  onChange={(e) => patch(activeInput === "bg" ? { bgBlackOutside: e.target.checked } : { fgBlackOutside: e.target.checked })}
                   className="accent-teal-500"
                 />
                 Black outside
@@ -620,7 +679,7 @@ export function CompModal() {
                   max={1}
                   step={0.01}
                   value={(activeInput === "bg" ? data.bgOpacity : data.fgOpacity) ?? 1}
-                  onChange={(e) => sourceNodeId && updateNodeData(sourceNodeId, activeInput === "bg" ? { bgOpacity: parseFloat(e.target.value) } : { fgOpacity: parseFloat(e.target.value) })}
+                  onChange={(e) => patch(activeInput === "bg" ? { bgOpacity: parseFloat(e.target.value) } : { fgOpacity: parseFloat(e.target.value) })}
                   className="nodrag flex-1 accent-teal-500"
                 />
                 <span className="text-[10px] text-neutral-400 w-9 text-right tabular-nums">
@@ -687,7 +746,7 @@ export function CompModal() {
                   onChange={(e) => {
                     if (!sourceNodeId) return;
                     const v = e.target.value as CompReformat;
-                    updateNodeData(sourceNodeId, activeInput === "bgAlpha" ? { bgAlphaReformat: v } : activeInput === "fgAlpha" ? { fgAlphaReformat: v } : { matteReformat: v });
+                    patch(activeInput === "bgAlpha" ? { bgAlphaReformat: v } : activeInput === "fgAlpha" ? { fgAlphaReformat: v } : { matteReformat: v });
                   }}
                   className="nodrag flex-1 min-w-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700"
                 >
