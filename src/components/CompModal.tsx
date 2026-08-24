@@ -17,8 +17,10 @@ import { normalizeAlignMeta } from "@/utils/compSignature";
 import {
   COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, defaultCompResample,
   COMP_RESAMPLE_FILTERS, COMP_RESAMPLE_LABELS,
-  type CompInputFilter, type BlurFilterType, type CompResampleFilter,
+  defaultCompLayerColor, normalizeCompLayerColor, normalizeCompGrade,
+  type CompInputFilter, type BlurFilterType, type CompResampleFilter, type CompLayerColor,
 } from "@/types/comp";
+import type { GradeParams } from "@/utils/colorGrade";
 import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/types";
 import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
 import { cheapUrlKey } from "@/utils/renderSignature";
@@ -55,6 +57,55 @@ const FILTERS: Array<{ v: CompInputFilter["filter"]; label: string }> = [
   { v: "zoom", label: "Zoom" },
   { v: "spin", label: "Spin" },
 ];
+
+// ── In-comp colour correction rows ────────────────────────────────────────
+//
+// Ranges copied from the standalone ColorGradeNode / HsvCorrectNode so the same
+// knob behaves the same wherever a user meets it.
+type GradeKey = keyof GradeParams;
+interface ColorRowDef { label: string; min: number; max: number; step: number }
+const GRADE_ROWS: Array<ColorRowDef & { key: GradeKey }> = [
+  { key: "blackpoint", label: "Blackpoint", min: -0.5, max: 0.5, step: 0.005 },
+  { key: "whitepoint", label: "Whitepoint", min: 0.1, max: 2.0, step: 0.005 },
+  { key: "lift", label: "Lift", min: -0.5, max: 0.5, step: 0.005 },
+  { key: "gain", label: "Gain", min: 0.0, max: 3.0, step: 0.005 },
+  { key: "multiply", label: "Multiply", min: 0.0, max: 3.0, step: 0.005 },
+  { key: "offset", label: "Offset", min: -0.5, max: 0.5, step: 0.005 },
+  { key: "gamma", label: "Gamma", min: 0.1, max: 4.0, step: 0.01 },
+];
+type HsvKey = "hueShift" | "saturation" | "value";
+const HSV_ROWS: Array<ColorRowDef & { key: HsvKey }> = [
+  { key: "hueShift", label: "Hue", min: -180, max: 180, step: 1 },
+  { key: "saturation", label: "Saturation", min: 0, max: 2, step: 0.01 },
+  { key: "value", label: "Value", min: 0, max: 2, step: 0.01 },
+];
+
+/**
+ * Slider + numeric, the row shape the rest of this panel already uses.
+ *
+ * The slider is clamped to [min,max] by the browser; the numeric field is NOT
+ * (only floored/ceiled to the same range on commit) — same bargain the transform
+ * fields strike, where the useful values run past where a 200px slider can go.
+ * Module scope so it is one component identity, not a new one per render.
+ */
+function ColorRow({ def, value, onChange }: { def: ColorRowDef; value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">{def.label}</label>
+      <input
+        type="range" min={def.min} max={def.max} step={def.step}
+        value={Math.max(def.min, Math.min(def.max, value))}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="nodrag flex-1 min-w-0 accent-teal-500"
+      />
+      <input
+        type="number" step={def.step} value={Number(value.toFixed(4))}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        className="nodrag w-14 shrink-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700"
+      />
+    </div>
+  );
+}
 
 /** Signed whole px, so the readout reads as an offset rather than a coordinate. */
 function fmtSigned(n: number): string {
@@ -230,11 +281,13 @@ export function CompModal() {
   //
   // `fgAm` (the align metadata) goes in RAW on purpose — it is a ~200-byte JSON
   // string, not an image, and the align fields must be here or the new controls
-  // would appear to do nothing until the editor was closed and reopened.
+  // would appear to do nothing until the editor was closed and reopened. Same
+  // for `bgC`/`fgC`: ~15 numbers each, and the colour sliders are dead in this
+  // editor until they are listed here.
   const previewSig = useMemo(
     () =>
       data
-        ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bgF: data.bgFilter, baF: data.bgAlphaFilter, fgF: data.fgFilter, faF: data.fgAlphaFilter, mtF: data.matteFilter, bgR: data.bgResample, baR: data.bgAlphaResample, fgR: data.fgResample, faR: data.fgAlphaResample, mtR: data.matteResample, fgAl: data.fgAlign, fgAf: data.fgAlignFit, fgAm: data.fgAlignMeta, bg: cheapUrlKey(data.bgImage), baU: cheapUrlKey(data.bgAlphaImage), fgU: cheapUrlKey(data.fgImage), faU: cheapUrlKey(data.fgAlphaImage), mtU: cheapUrlKey(data.matteImage) })
+        ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bgF: data.bgFilter, baF: data.bgAlphaFilter, fgF: data.fgFilter, faF: data.fgAlphaFilter, mtF: data.matteFilter, bgR: data.bgResample, baR: data.bgAlphaResample, fgR: data.fgResample, faR: data.fgAlphaResample, mtR: data.matteResample, fgS: data.fgSoftness, bgC: data.bgColor, fgC: data.fgColor, fgAl: data.fgAlign, fgAf: data.fgAlignFit, fgAm: data.fgAlignMeta, bg: cheapUrlKey(data.bgImage), baU: cheapUrlKey(data.bgAlphaImage), fgU: cheapUrlKey(data.fgImage), faU: cheapUrlKey(data.fgAlphaImage), mtU: cheapUrlKey(data.matteImage) })
         : "",
     [data],
   );
@@ -392,6 +445,42 @@ export function CompModal() {
       patch({ [activeFilterKey]: { ...cur, ...p } } as Partial<CompNodeData>);
     },
     [sourceNodeId, data, activeFilterKey, patch],
+  );
+
+  // ── In-comp colour, BG / FG only ──────────────────────────────────────────
+  //
+  // Same shape as FKEY/patchFilter above: the panel is already scoped to one
+  // activeInput, so the colour block is just another per-input key. The alpha
+  // and matte tabs have no colour key at all — they are masks.
+  const CKEY = { bg: "bgColor", fg: "fgColor" } as const;
+  const activeColorKey: "bgColor" | "fgColor" | null =
+    activeInput === "bg" || activeInput === "fg" ? CKEY[activeInput] : null;
+  // Falls back to the default block for DISPLAY only — reading a default never
+  // writes one, so a comp that has no colour block still has none until the user
+  // moves something (see normalizeCompLayerColor).
+  const activeColor: CompLayerColor = useMemo(
+    () => (activeColorKey && data ? normalizeCompLayerColor(data[activeColorKey]) : undefined) ?? defaultCompLayerColor(),
+    [activeColorKey, data],
+  );
+
+  const patchColor = useCallback(
+    (p: Partial<CompLayerColor>) => {
+      if (!activeColorKey || !data) return;
+      const cur = normalizeCompLayerColor(data[activeColorKey]) ?? defaultCompLayerColor();
+      patch({ [activeColorKey]: { ...cur, ...p } } as Partial<CompNodeData>);
+    },
+    [activeColorKey, data, patch],
+  );
+
+  /** One grade row. The editor drives r/g/b together; the stored shape stays
+   *  per-channel so unlinked rows can arrive later without a migration. */
+  const patchGrade = useCallback(
+    (key: GradeKey, v: number) => {
+      if (!activeColorKey || !data) return;
+      const cur = normalizeCompLayerColor(data[activeColorKey]) ?? defaultCompLayerColor();
+      patch({ [activeColorKey]: { ...cur, grade: { ...cur.grade, [key]: { r: v, g: v, b: v } } } } as Partial<CompNodeData>);
+    },
+    [activeColorKey, data, patch],
   );
 
   // Latest nudge closure (arrow keys move the active transform by whole pixels).
@@ -755,6 +844,48 @@ export function CompModal() {
               </div>
             )}
 
+            {/* FG edge softness — feathers the FG's COVERAGE (the footprint
+                rectangle), which is the seam a composited-back patch shows.
+                Nothing to do with the Blur below: that one blurs the FG's
+                CONTENT in source space and leaves the edge exactly as hard. */}
+            {activeInput === "fg" && (() => {
+              // Both gates the shader/compUniforms apply, mirrored so a knob that
+              // cannot do anything says why instead of just sitting there.
+              const noEdge = !(data.fgBlackOutside ?? true);
+              const alphaPinned = !!srcs.faSrc || !!data.fgAlphaImage;
+              const inert = noEdge || alphaPinned;
+              const soft = data.fgSoftness ?? 0;
+              return (
+                <div className="flex flex-col gap-1.5">
+                  <div
+                    className={`flex items-center gap-2 ${inert ? "opacity-50" : ""}`}
+                    title="Feather the FG's coverage inward from its footprint edge, in OUTPUT pixels — the fix for a composited-back patch landing as a hard rectangle. A Matte does NOT disable this: the matte limits the finished merge, it is not the FG's coverage."
+                  >
+                    <label className="text-[11px] text-neutral-400 w-[64px] shrink-0">Softness</label>
+                    <input
+                      type="range" min={0} max={200} step={1} disabled={inert}
+                      value={Math.min(200, soft)}
+                      onChange={(e) => patch({ fgSoftness: parseFloat(e.target.value) })}
+                      className="nodrag flex-1 min-w-0 accent-teal-500"
+                    />
+                    <input
+                      type="number" min={0} step={1} disabled={inert}
+                      value={Number(soft.toFixed(2))}
+                      onChange={(e) => patch({ fgSoftness: Math.max(0, parseFloat(e.target.value) || 0) })}
+                      className="nodrag w-14 shrink-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700"
+                    />
+                  </div>
+                  {inert && (
+                    <div className="text-[10px] text-neutral-500 leading-snug">
+                      {noEdge
+                        ? "Needs Black outside — with it off the FG covers the whole frame, so there is no footprint edge to feather."
+                        : "An FG α input is connected, and it replaces the FG's coverage entirely — feather that matte instead."}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* FG auto-align — crop → generate → composite back. Sits above the
                 transform block because it composes UNDERNEATH it: the fields
                 below stay the user's own offsets on top of this placement. */}
@@ -958,6 +1089,81 @@ export function CompModal() {
                 </>
               )}
             </div>
+
+            {/* ── Colour correction, this layer only (BG / FG) ──────────────
+                Runs on the plate's OWN pixels, before the Blur above and before
+                the transform samples it — a grade contains a pow and a hue shift
+                wraps, and neither commutes with a resample. Enable-checkbox
+                reveals its rows; there is no accordion primitive in this app and
+                this panel is not the place to invent one. */}
+            {activeColorKey && (
+              <>
+                <div className="flex flex-col gap-1.5 mt-1 pt-2 border-t border-neutral-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <label
+                      className="flex items-center gap-2 text-[11px] text-neutral-300 cursor-pointer"
+                      title="Nuke-style Grade on this layer alone, applied to the source pixels BEFORE the Blur and the transform. Same shader as the Color Grade node, so it matches one wired upstream."
+                    >
+                      <input type="checkbox" checked={activeColor.gradeEnabled} onChange={(e) => patchColor({ gradeEnabled: e.target.checked })} className="accent-teal-500" />
+                      Grade {activeInput === "bg" ? "BG" : "FG"}
+                    </label>
+                    {activeColor.gradeEnabled && (
+                      <button
+                        onClick={() => patchColor({ grade: normalizeCompGrade(undefined) })}
+                        className="text-[10px] text-neutral-500 hover:text-white shrink-0"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  {activeColor.gradeEnabled && GRADE_ROWS.map((r) => (
+                    <ColorRow key={r.key} def={r} value={activeColor.grade[r.key].r} onChange={(v) => patchGrade(r.key, v)} />
+                  ))}
+                </div>
+
+                <div className="flex flex-col gap-1.5 mt-1 pt-2 border-t border-neutral-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <label
+                      className="flex items-center gap-2 text-[11px] text-neutral-300 cursor-pointer"
+                      title="Hue / saturation / value on this layer alone, applied AFTER the Grade above and still before the Blur and the transform. Same shader as the HSV Correct node."
+                    >
+                      <input type="checkbox" checked={activeColor.hsvEnabled} onChange={(e) => patchColor({ hsvEnabled: e.target.checked })} className="accent-teal-500" />
+                      HSV {activeInput === "bg" ? "BG" : "FG"}
+                    </label>
+                    {activeColor.hsvEnabled && (
+                      <button
+                        onClick={() => patchColor({ hueShift: 0, saturation: 1, value: 1 })}
+                        className="text-[10px] text-neutral-500 hover:text-white shrink-0"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                  {activeColor.hsvEnabled && HSV_ROWS.map((r) => (
+                    <ColorRow key={r.key} def={r} value={activeColor[r.key]} onChange={(v) => patchColor({ [r.key]: v } as Partial<CompLayerColor>)} />
+                  ))}
+                </div>
+
+                {/* Clamps ride on whichever pass runs, so they are only offered
+                    once one does — with both blocks off there is no pass to
+                    clamp in, and colorIntoUnlocked allocates nothing. */}
+                {(activeColor.gradeEnabled || activeColor.hsvEnabled) && (
+                  <div
+                    className="flex items-center gap-3 flex-wrap"
+                    title="Off by default: the Comp is a float node, so its output stays unclamped for the rest of the colour chain. Turn these on only to deliberately crush sub-blacks / super-whites in this layer."
+                  >
+                    <label className="flex items-center gap-1.5 text-[10px] text-neutral-400 cursor-pointer">
+                      <input type="checkbox" checked={activeColor.clampLow} onChange={(e) => patchColor({ clampLow: e.target.checked })} className="accent-teal-500" />
+                      Clamp blacks
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[10px] text-neutral-400 cursor-pointer">
+                      <input type="checkbox" checked={activeColor.clampHigh} onChange={(e) => patchColor({ clampHigh: e.target.checked })} className="accent-teal-500" />
+                      Clamp whites
+                    </label>
+                  </div>
+                )}
+              </>
+            )}
 
             <div className="text-[10px] text-neutral-600 leading-snug mt-1">
               Drag the box to move · corner = scale both · edge dots = scale X/Y · amber = rotate · center dot = pivot (double-click = auto). (0,0) = bottom-left.

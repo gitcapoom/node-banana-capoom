@@ -21,6 +21,10 @@ import type { BaseNodeData } from "./annotation";
 // Type-only, so it is erased at compile time and no import cycle exists at
 // runtime even though compTransform.ts imports the transform types from here.
 import type { CompAlignFit } from "@/utils/compTransform";
+// Type-only for the same reason. The in-comp grade reuses the SHIPPED Grade
+// parameter shape rather than declaring a parallel one — the maths that consumes
+// it (GRADE_SHADER) is the standalone node's, so the parameters must be too.
+import type { GradeParams, GradeChannelValue } from "@/utils/colorGrade";
 
 /** Merge operations. Order is mirrored by COMP_OP_INDEX (the shader selector). */
 export type CompMergeOp =
@@ -71,6 +75,110 @@ export interface CompInputFilter {
 
 export function defaultCompFilter(): CompInputFilter {
   return { filter: "none", radius: 10, angle: 0 };
+}
+
+/**
+ * Per-layer colour correction applied INSIDE the comp, to the BG or the FG
+ * alone — the "fix this plate's look before it merges" block.
+ *
+ * BG and FG only, deliberately. The alpha and matte pins are masks; grading a
+ * mask means shifting a matte's density through a hue wheel, which is a bug
+ * generator with no use case behind it.
+ *
+ * Runs as a GPU PRE-PASS on that input's texture, BEFORE its blur filter and
+ * before the transform samples it (see colorIntoUnlocked in colorChain.ts), and
+ * it runs the standalone colorGrade / hsvCorrect shaders verbatim.
+ *
+ * `clampLow` / `clampHigh` default FALSE: `comp` is in COLOR_NODE_TYPES, so its
+ * inputs and its output are unclamped floats. Clamping here would silently crush
+ * the super-whites the rest of the chain is built to preserve. They apply to
+ * whichever passes actually run — with both blocks off there is no pass, and
+ * nothing to clamp.
+ */
+export interface CompLayerColor {
+  /** Master switch for the Grade block. The parameters survive it being off, so
+   *  a user can A/B a grade without losing it. */
+  gradeEnabled: boolean;
+  /**
+   * Strictly GradeChannelValue — NOT ColorGradeNodeData's
+   * `GradeChannelValue | number` union. That union exists only to carry
+   * workflows saved before per-channel grading existed (`coerceChannel`); this
+   * field has no such legacy and must not acquire one.
+   *
+   * The comp editor drives r/g/b together (one master slider per row) and reads
+   * `.r` back, but the stored shape is per-channel so unlinked rows can be added
+   * later without touching a single saved file.
+   */
+  grade: GradeParams;
+  hsvEnabled: boolean;
+  hueShift: number;    // degrees
+  saturation: number;  // multiplier; 1 = unchanged
+  value: number;       // multiplier; 1 = unchanged
+  clampLow: boolean;
+  clampHigh: boolean;
+}
+
+/** One grade channel, defaulted per-component so a partial/garbage value out of
+ *  a hand-edited file cannot reach the shader as NaN. */
+function gradeChannel(v: Partial<GradeChannelValue> | undefined, fallback: number): GradeChannelValue {
+  return {
+    r: typeof v?.r === "number" && Number.isFinite(v.r) ? v.r : fallback,
+    g: typeof v?.g === "number" && Number.isFinite(v.g) ? v.g : fallback,
+    b: typeof v?.b === "number" && Number.isFinite(v.b) ? v.b : fallback,
+  };
+}
+
+/** Complete a (possibly partial) grade. The identity values live here ONCE. */
+export function normalizeCompGrade(g: Partial<GradeParams> | undefined | null): GradeParams {
+  return {
+    blackpoint: gradeChannel(g?.blackpoint, 0),
+    whitepoint: gradeChannel(g?.whitepoint, 1),
+    lift: gradeChannel(g?.lift, 0),
+    gain: gradeChannel(g?.gain, 1),
+    multiply: gradeChannel(g?.multiply, 1),
+    offset: gradeChannel(g?.offset, 0),
+    gamma: gradeChannel(g?.gamma, 1),
+  };
+}
+
+export function defaultCompLayerColor(): CompLayerColor {
+  return {
+    gradeEnabled: false,
+    grade: normalizeCompGrade(undefined),
+    hsvEnabled: false,
+    hueShift: 0,
+    saturation: 1,
+    value: 1,
+    clampLow: false,
+    clampHigh: false,
+  };
+}
+
+/**
+ * Complete a stored colour block, or return undefined for one that isn't there.
+ *
+ * ABSENT MUST STAY ABSENT. Returning a default object for `undefined` would let
+ * a caller write one into a comp that never had one, which changes that comp's
+ * commit signature and buys a full recomposite on next open for no visible
+ * difference (see compSignature.ts). Everything that reads these fields goes
+ * through here, so "no block" is one value, not several.
+ */
+export function normalizeCompLayerColor(
+  c: Partial<CompLayerColor> | undefined | null,
+): CompLayerColor | undefined {
+  if (!c) return undefined;
+  const num = (v: unknown, fallback: number) =>
+    typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  return {
+    gradeEnabled: c.gradeEnabled === true,
+    grade: normalizeCompGrade(c.grade),
+    hsvEnabled: c.hsvEnabled === true,
+    hueShift: num(c.hueShift, 0),
+    saturation: num(c.saturation, 1),
+    value: num(c.value, 1),
+    clampLow: c.clampLow === true,
+    clampHigh: c.clampHigh === true,
+  };
 }
 
 /**
@@ -225,6 +333,52 @@ export interface CompNodeData extends BaseNodeData {
    *  "fit" (uniform, centred, BG showing through the slack) is the default. */
   fgAlignFit?: CompAlignFit;
 
+  /**
+   * Feather the FG's COVERAGE inward from its footprint edge, in OUTPUT px.
+   *
+   * This is the seam knob for the crop → generate → composite-back workflow: a
+   * generated patch is opaque everywhere, so the FG's alpha IS the hard-edged
+   * rectangle its transform covers, and that rectangle is the visible join.
+   * Softness ramps that coverage 0→1 over the first `fgSoftness` output pixels.
+   *
+   * OUTPUT px, not source px, deliberately: align routinely scales a 4096px
+   * generated patch into a 1024px hole, and a knob measured in source px would
+   * mean a different amount of feather at every scale. compUniforms converts to
+   * source px with the per-axis scale, so a non-uniformly scaled FG still
+   * feathers the same number of output px on all four edges.
+   *
+   * Distinct from `fgFilter`, which blurs the FG's CONTENT in source space
+   * before the transform and does nothing to the footprint edge.
+   *
+   * Inert when `fgBlackOutside` is false (there is no footprint edge then) and
+   * when an FG_Alpha pin is connected (that pin REPLACES the FG's own alpha —
+   * see the u_fg_soft gate in compUniforms). A Matte does NOT disable it: the
+   * matte lerps the finished merge back to BG, it is not an FG coverage input.
+   *
+   * Optional and ABSENT on every comp saved before this existed — 0 and absent
+   * are the same thing to every consumer, and absent is what keeps those comps'
+   * signatures byte-identical (see compSignature.ts).
+   */
+  fgSoftness?: number;
+
+  /**
+   * Per-layer colour correction for the BG / FG plates (grade → HSV), applied
+   * before their blur filter and before their transform.
+   *
+   * Optional and ABSENT on every comp saved before this existed, for the same
+   * reason `fgSoftness` is: an absent block and an all-identity one are the same
+   * thing to every consumer, and only the absent form keeps those comps'
+   * signatures byte-identical. `normalizeCompLayerColor` is the single reader
+   * and it preserves the distinction — it never manufactures a block.
+   *
+   * (`bgFilter` and friends ARE seeded in defaultCompData; these are not. That
+   * is a deliberate divergence: the filter fields predate the signature work,
+   * and seeding a ~15-number identity object into every new comp would put a
+   * block on disk that means exactly nothing.)
+   */
+  bgColor?: CompLayerColor;
+  fgColor?: CompLayerColor;
+
   /** Multiply the FG's / BG's RGB by its (effective) alpha before compositing. */
   premultiplyFg: boolean;
   premultiplyBg: boolean;
@@ -315,6 +469,11 @@ export function defaultCompData(): CompNodeData {
     fgAlignMeta: null,
     fgAlign: "auto",
     fgAlignFit: "fit",
+    // fgSoftness is deliberately NOT listed. Absent and 0 mean the same thing to
+    // buildCompParams, compUniforms and the shader, so writing 0 here would only
+    // add a key — and it would make a comp built from these defaults serialize
+    // differently from every comp already on disk for no behavioural difference.
+    // bgColor / fgColor are absent for the same reason — see their declaration.
     premultiplyFg: false,
     premultiplyBg: false,
     bgOpacity: 1,

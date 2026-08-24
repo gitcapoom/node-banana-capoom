@@ -26,9 +26,10 @@
  * shared context is never raced (same black-frame fix as webglProcess).
  */
 
-import { DISPLAY_CLAMP_SHADER } from "./imageShaders";
+import { DISPLAY_CLAMP_SHADER, GRADE_SHADER, HSV_SHADER } from "./imageShaders";
 import { processImageWithShader, type UniformValue } from "./webglProcess";
-import type { CompTransform, CompReformat, CompInputFilter, CompResampleFilter } from "@/types/comp";
+import { isIdentityGrade } from "./colorGrade";
+import type { CompTransform, CompReformat, CompInputFilter, CompResampleFilter, CompLayerColor } from "@/types/comp";
 import { compResampleIndex } from "@/types/comp";
 import { TexCache } from "@/utils/texCache";
 import { computePieces, computeAlignedPieces, computeFollowPieces, deriveAlignBase, piecesToUniforms, type CompAlignSpec } from "./compTransform";
@@ -626,6 +627,17 @@ export interface CompRenderParams {
   fgAlign?: CompAlignSpec;
   bgOpacity: number;       // 0..1, scales BG alpha before the merge
   fgOpacity: number;       // 0..1, scales FG alpha before the merge
+  /** Feather the FG's coverage inward from its footprint edge, in OUTPUT px.
+   *  0 / absent ⇒ the hard-edged rectangle this has always produced. The
+   *  FG_Alpha-connected gate lives in compUniforms, which is the only place that
+   *  knows whether that pin actually RESOLVED to a texture. */
+  fgSoftness?: number;
+  /** Per-layer colour correction (Grade → HSV) for the BG / FG plates, run as a
+   *  pre-pass BEFORE the blur filter and before the transform samples the
+   *  input. Absent/identity ⇒ no pass and no texture. BG and FG only: the alpha
+   *  and matte pins are masks, and grading a mask is a bug generator. */
+  bgColor?: CompLayerColor;
+  fgColor?: CompLayerColor;
   /** Per-input blur/defocus filters, applied to each input's texture before
    *  the merge shader samples it. Absent/identity ⇒ no pre-pass. */
   filters?: {
@@ -670,6 +682,8 @@ uniform sampler2D u_fg;
 uniform sampler2D u_fa;
 uniform sampler2D u_mt;
 uniform float u_ba_has, u_fg_has, u_fa_has, u_mt_has, u_op, u_premultFg, u_premultBg, u_bg_bo, u_fg_bo, u_swap, u_bgOpacity, u_fgOpacity;
+// FG edge softness, in OUTPUT px. 0 disables the ramp entirely.
+uniform float u_fg_soft;
 uniform vec2 u_bg_rot, u_bg_c, u_bg_t, u_bg_invs, u_bg_size;
 uniform vec2 u_ba_rot, u_ba_c, u_ba_t, u_ba_invs, u_ba_size;
 uniform vec2 u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size;
@@ -822,13 +836,43 @@ void main() {
   vec3 A = vec3(0.0);
   float fgInside = 0.0;
   float fgAlphaOwn = 1.0;
+  float fgSoft = 1.0;
   if (u_fg_has > 0.5) {
     vec3 r = invSample(O, u_fg_rot, u_fg_c, u_fg_t, u_fg_invs, u_fg_size);
     fgInside = r.z;
     vec4 fgTex = sampleFiltered(u_fg, r.xy, u_fg_size, u_fg_flt, u_fg_xf, u_fg_invs);
     A = fgTex.rgb; fgAlphaOwn = fgTex.a;
+
+    // Edge softness: ramp the coverage in over the first u_fg_soft OUTPUT px of
+    // the FG's footprint. Measured in output px on purpose — align scales a
+    // generated patch by whatever the generator returned, so a ramp measured in
+    // source px would silently mean a different width at every scale.
+    //
+    // invSample hands back normalised uv, so recover the SOURCE px it came from
+    // rather than widening its signature (all five inputs share it): .x is
+    // s.x/size.x and .y is 1 - s.y/size.y, comp source y being bottom-up.
+    // (min(s, size - s) is symmetric about the centre, so the flip cancels — but
+    // it is written out rather than dropped, because the next person to reuse
+    // this recovery for something asymmetric needs the convention stated.)
+    // D output px is D * |1/scale| source px, and u_fg_invs is exactly 1/scale
+    // per axis — which is what makes a non-uniformly scaled FG feather the same
+    // number of OUTPUT px on all four edges.
+    if (u_fg_soft > 0.0 && u_fg_bo > 0.5) {
+      vec2 s = vec2(r.x * u_fg_size.x, (1.0 - r.y) * u_fg_size.y);
+      vec2 softSrc = max(abs(u_fg_invs) * u_fg_soft, vec2(1e-6));
+      vec2 e = min(s, u_fg_size - s) / softSrc;
+      fgSoft = clamp(min(e.x, e.y), 0.0, 1.0);
+    }
   }
-  float fgCov = (u_fg_has > 0.5) ? ((u_fg_bo > 0.5) ? fgInside : 1.0) : 0.0;
+  // Two coverages, deliberately. fgHard is the binary in/out flag and answers
+  // only "may this pixel show FG colour at all"; fgCov carries the ramp and
+  // belongs to the ALPHA. Applying the ramp to both (which is what "A *= fgCov"
+  // below used to do, on top of the alpha already carrying it) squares it on the
+  // premultiplied path and drags the straight path's feathered edge toward BLACK
+  // instead of toward the BG — a dark halo exactly where softness is meant to
+  // remove one. Harmless while coverage was only ever 0 or 1; not once it ramps.
+  float fgHard = (u_fg_has > 0.5) ? ((u_fg_bo > 0.5) ? fgInside : 1.0) : 0.0;
+  float fgCov = fgHard * fgSoft;
   float a;
   if (u_fa_has > 0.5) {
     vec3 rfa = invSample(O, u_fa_rot, u_fa_c, u_fa_t, u_fa_invs, u_fa_size);
@@ -838,7 +882,7 @@ void main() {
   }
   a *= u_fgOpacity;                  // per-layer FG opacity
   if (u_premultFg > 0.5) A = A * a; // premultiply FG by its alpha
-  A *= fgCov;                        // black-outside / no-coverage ⇒ no FG color
+  A *= fgHard;                       // black-outside / no-coverage ⇒ no FG color
 
   // Swap BG/FG roles (and their alphas) for the merge.
   if (u_swap > 0.5) { vec3 tc = A; A = Brgb; Brgb = tc; float ta = a; a = b; b = ta; }
@@ -989,6 +1033,16 @@ function compUniforms(
     u_swap: params.swapBgFg ? 1 : 0,
     u_bgOpacity: params.bgOpacity,
     u_fgOpacity: params.fgOpacity,
+    // FG edge softness (output px), silenced when an FG_Alpha pin is in play —
+    // that pin REPLACES the FG's own alpha, so feathering a coverage it has
+    // already overridden would only fight the matte the user connected.
+    //
+    // Gated HERE rather than in buildCompParams because `fa` is the resolved
+    // TEXTURE, which is the same signal the shader's u_fa_has comes from.
+    // buildCompParams would have to read data.fgAlphaImage, and that mirror is
+    // lazily null for the first render after a workflow opens even though the
+    // edge exists — softness would flicker on for one frame on every load.
+    u_fg_soft: fa ? 0 : Math.max(0, params.fgSoftness ?? 0),
     u_ba_has: ba ? 1 : 0,
     u_fg_has: fg ? 1 : 0,
     u_fa_has: fa ? 1 : 0,
@@ -1121,6 +1175,19 @@ async function renderCompUnlocked(
   let fg = await resolveComp(gl, inputs.fg, decoded);
   let fa = await resolveComp(gl, inputs.fgAlpha, decoded);
   let mt = await resolveComp(gl, inputs.matte, decoded);
+
+  // Per-layer colour pre-pass (BG / FG only), BEFORE the blur and before the
+  // transform resamples anything.
+  //
+  // A nonlinear point op does NOT commute with a linear resample: Grade carries
+  // a pow and HSV a hue wrap, so grading after a 0.25x minification grades the
+  // AVERAGED pixels, while grading first grades the originals and then averages
+  // them. An in-comp grade means "fix this plate's look" — a property of the
+  // plate's own pixels — so it belongs on the source, ahead of the sampling.
+  // Grade → HSV → blur is also the physical order: you defocus a graded image,
+  // you do not grade a defocus.
+  bg = colorIntoUnlocked(c, bg, params.bgColor, `${destNodeId}:c_bg`);
+  if (fg) fg = colorIntoUnlocked(c, fg, params.fgColor, `${destNodeId}:c_fg`);
 
   // Per-input filter pre-passes (no-ops for identity params). Dims unchanged,
   // so the transform math downstream is unaffected.
@@ -1553,6 +1620,118 @@ function blurIntoUnlocked(c: Ctx, src: FloatTex, f: CompInputFilter, poolKey: st
     return drawPassInto(c, prog, b);
   });
   return ok ? b : src;
+}
+
+// ─── Comp per-layer colour (Grade → HSV) pre-pass ─────────────────────────
+
+/** True when the HSV block would change nothing even if it is switched on.
+ *  Exported so the Canvas2D fallback can gate on exactly the same predicate the
+ *  GPU path does, rather than on the enable flag alone. */
+export function isIdentityHsv(c: CompLayerColor): boolean {
+  return c.hueShift === 0 && c.saturation === 1 && c.value === 1;
+}
+
+/**
+ * True when this layer's colour block would change nothing — no pass runs, no
+ * texture is allocated, the source texture is handed on untouched.
+ *
+ * The clamp flags are deliberately NOT part of this test. They ride on whichever
+ * pass runs; with both blocks off there is no pass for them to ride on, and
+ * allocating a full-resolution float texture purely to clamp a plate would be a
+ * surprising 193 MB for a checkbox. The editor only offers the clamps once a
+ * block is enabled, so the two agree.
+ */
+export function isCompColorIdentity(c: CompLayerColor | undefined | null): boolean {
+  if (!c) return true;
+  const gradeOn = c.gradeEnabled && !isIdentityGrade(c.grade);
+  const hsvOn = c.hsvEnabled && !isIdentityHsv(c);
+  return !gradeOn && !hsvOn;
+}
+
+/**
+ * Colour-correct `src` into pooled textures under `poolKey`: Grade, then HSV.
+ * Returns `src` unchanged for identity params or on pass failure. NOT locked —
+ * internal use only, exactly like blurIntoUnlocked.
+ *
+ * ## Why a pre-pass rather than uniforms folded into COMP_FRAG
+ * GRADE_SHADER and HSV_SHADER are complete `void main()` programs over
+ * `texture2D(u_tex, v_uv)`, and they are ALSO compiled under WebGL1 by
+ * webglProcess.ts for the standalone colorGrade / hsvCorrect nodes. Inlining
+ * them here would mean extracting the maths into GLSL functions and keeping two
+ * call sites in step forever — a second copy of a shipped colour transform, which
+ * is the failure mode that already bit compCommitSignature. Running the shader
+ * STRINGS verbatim makes the in-comp grade bit-identical to the node's by
+ * construction. It also keeps ~28 vec3 uniforms out of COMP_FRAG, whose
+ * setUniforms re-resolves every location on every draw, at rAF cadence.
+ *
+ * ## Why the source's own GL filter is left alone (unlike blurIntoUnlocked)
+ * The target is the source's size and the quad covers all of it, so every
+ * fragment samples exactly one texel centre — no interpolation is ever
+ * requested, and forcing LINEAR would only risk a different answer.
+ *
+ * ## Why the RESULT carries the source's filter forward
+ * ensureBlurTex mints LINEAR textures, because blur passes sample at fractional
+ * steps and need it. Registry float textures are NEAREST, comp URL uploads are
+ * LINEAR — and sampleFiltered has two fast paths (`xf < 0.5`, and bilinear while
+ * magnifying) that return a bare `texture2D` and therefore read whatever filter
+ * the texture carries. Handing the merge a LINEAR texture where it used to get a
+ * NEAREST one would change how an input is RESAMPLED as a side effect of
+ * enabling a colour block — a pixel change with no colour in it. So the result
+ * is stamped with the source's filter instead. A blur running after this is
+ * unaffected: blurIntoUnlocked forces LINEAR on whatever it is handed for the
+ * duration of its own passes and restores it afterwards.
+ *
+ * Both shaders write `src.a` through untouched, so the FG's coverage — and
+ * everything the merge, the softness ramp and the matte derive from it — is
+ * exactly what it would have been.
+ */
+function colorIntoUnlocked(c: Ctx, src: FloatTex, col: CompLayerColor | undefined, poolKey: string): FloatTex {
+  if (isCompColorIdentity(col) || !col) return src;
+  const { gl } = c;
+  const { w, h } = src;
+  // Read before anything else binds — see "Why the RESULT carries the source's
+  // filter forward" above.
+  gl.bindTexture(gl.TEXTURE_2D, src.tex);
+  const srcMin = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER) as number;
+  const srcMag = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER) as number;
+  const clamps = { u_clampLow: col.clampLow ? 1 : 0, u_clampHigh: col.clampHigh ? 1 : 0 };
+  let cur = src;
+  let slot = 0;
+  const pass = (fragBody: string, uniforms: Record<string, UniformValue>) => {
+    const prog = getProgram(gl, fragBody);
+    // Ping-pong `:a` → `:b`. `:b` is only ever created when a SECOND pass runs,
+    // so grade-only or HSV-only costs one pooled texture rather than two.
+    const out = ensureBlurTex(c, `${poolKey}:${slot === 0 ? "a" : "b"}`, w, h);
+    slot ^= 1;
+    gl.useProgram(prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, cur.tex);
+    gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
+    setUniforms(gl, prog, { ...uniforms, ...clamps });
+    if (drawPassInto(c, prog, out)) cur = out;
+  };
+
+  if (col.gradeEnabled && !isIdentityGrade(col.grade)) {
+    const g = col.grade;
+    pass(GRADE_SHADER, {
+      u_blackpoint: [g.blackpoint.r, g.blackpoint.g, g.blackpoint.b],
+      u_whitepoint: [g.whitepoint.r, g.whitepoint.g, g.whitepoint.b],
+      u_lift: [g.lift.r, g.lift.g, g.lift.b],
+      u_gain: [g.gain.r, g.gain.g, g.gain.b],
+      u_multiply: [g.multiply.r, g.multiply.g, g.multiply.b],
+      u_offset: [g.offset.r, g.offset.g, g.offset.b],
+      u_gamma: [g.gamma.r, g.gamma.g, g.gamma.b],
+    });
+  }
+  if (col.hsvEnabled && !isIdentityHsv(col)) {
+    pass(HSV_SHADER, { u_hueShift: col.hueShift, u_saturation: col.saturation, u_value: col.value });
+  }
+  if (cur !== src) {
+    gl.bindTexture(gl.TEXTURE_2D, cur.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, srcMin);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, srcMag);
+  }
+  return cur;
 }
 
 // ─── Blur node (chainable, matte-gated) ───────────────────────────────────

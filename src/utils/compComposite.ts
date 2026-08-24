@@ -9,12 +9,20 @@
  */
 
 import type { CompNodeData } from "@/types";
-import { COMP_OP_INDEX, defaultCompTransform, defaultCompFilter, defaultCompResample, type CompInputFilter } from "@/types/comp";
+import {
+  COMP_OP_INDEX, defaultCompTransform, defaultCompFilter, defaultCompResample,
+  normalizeCompLayerColor, type CompInputFilter, type CompLayerColor,
+} from "@/types/comp";
+import { GRADE_SHADER, HSV_SHADER } from "./imageShaders";
+import { processImageWithShader } from "./webglProcess";
+import { isIdentityGrade } from "./colorGrade";
 import {
   renderComp,
   floatNodeToDataUrl,
   floatSupported,
   hasFloat,
+  isCompColorIdentity,
+  isIdentityHsv,
   type CompRenderInputs,
   type CompRenderParams,
   type CompResolvable,
@@ -119,6 +127,16 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
     ...(fgAlign ? { fgAlign } : {}),
     bgOpacity: data.bgOpacity ?? 1,
     fgOpacity: data.fgOpacity ?? 1,
+    // Passed through unconditionally. The "an FG_Alpha pin makes this inert"
+    // gate is compUniforms' job — it holds the resolved textures; this function
+    // only has the lazily-null image mirrors. See the u_fg_soft comment there.
+    fgSoftness: Math.max(0, data.fgSoftness ?? 0),
+    // Per-layer colour. Completed here (so a partial block out of a hand-edited
+    // file cannot reach the shader as NaN) but never MANUFACTURED: a comp with no
+    // block keeps `undefined`, and colorIntoUnlocked's identity check then costs
+    // nothing at all — no pass, no texture.
+    bgColor: normalizeCompLayerColor(data.bgColor),
+    fgColor: normalizeCompLayerColor(data.fgColor),
     filters: {
       bg: Fm(data.bgFilter),
       bgAlpha: Fm(data.bgAlphaFilter),
@@ -194,6 +212,101 @@ function loadImg(src: string): Promise<HTMLImageElement> {
 }
 
 /**
+ * Ramp a canvas's ALPHA in from its own edges, over `softX` / `softY` SOURCE px.
+ *
+ * The same ramp the shader's u_fg_soft branch computes — `min(s, size - s)`
+ * divided by the per-axis softness, floored at the two nearest edges — so the
+ * fallback feathers the same footprint the GPU path does. The caller converts
+ * the knob (output px) into source px with the per-axis scale, which is what
+ * makes both axes come out the same width in the OUTPUT.
+ *
+ * `min(s, size - s)` is symmetric about the centre, so the source's bottom-up y
+ * convention makes no difference here and no flip is needed.
+ *
+ * Whole-canvas getImageData rather than gradient fills: destination-in with four
+ * gradients MULTIPLIES the ramps where they overlap, which would darken every
+ * corner relative to the shader's min().
+ */
+function featherCanvasAlpha(canvas: HTMLCanvasElement, softX: number, softY: number): void {
+  const cx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!cx) return;
+  const w = canvas.width, h = canvas.height;
+  if (!w || !h) return;
+  const sx = Math.max(softX, 1e-6), sy = Math.max(softY, 1e-6);
+  // getImageData allocates w*h*4 bytes in one go — 96 MB on a 24MP plate — and
+  // the caller's catch would drop the WHOLE FG layer if it threw. Losing the
+  // feather is a far better failure than losing the plate, so it is caught here.
+  let id: ImageData;
+  try {
+    id = cx.getImageData(0, 0, w, h);
+  } catch {
+    return;
+  }
+  const d = id.data;
+  for (let y = 0; y < h; y++) {
+    const ey = Math.min(y + 0.5, h - y - 0.5) / sy;
+    for (let x = 0; x < w; x++) {
+      const ex = Math.min(x + 0.5, w - x - 0.5) / sx;
+      const f = Math.min(ex, ey);
+      if (f >= 1) continue;
+      const i = (y * w + x) * 4 + 3;
+      d[i] = Math.round(d[i] * Math.max(0, f));
+    }
+  }
+  cx.putImageData(id, 0, 0);
+}
+
+/**
+ * Apply a layer's colour block on the 8-BIT fallback path, by running the very
+ * same shader strings the GPU pre-pass runs.
+ *
+ * webglProcess is WebGL1 and is available even when this fallback is in play:
+ * `floatSupported()` reports on WebGL2 + EXT_color_buffer_float specifically, not
+ * on WebGL at all. So the fallback can reuse the shipped shaders rather than
+ * grow a hand-written CPU grade that would drift from them — one copy of the
+ * maths here too.
+ *
+ * What DOES differ is precision: each pass round-trips through an 8-bit PNG, so
+ * negatives and super-whites are clamped between Grade and HSV and again before
+ * the merge. That is already true of everything this fallback draws.
+ *
+ * Never throws: a colour block failing to apply must not be the reason a comp
+ * loses its BG entirely.
+ */
+async function applyLayerColorUrl(url: string, col: CompLayerColor | undefined): Promise<string> {
+  // The SAME predicates the GPU pre-pass gates on, not the enable flags alone.
+  // Gating on `gradeEnabled` here would round-trip a full-size PNG for a block
+  // that is switched on at identity values — and, worse, would apply that
+  // block's clamps, which the GPU path skips because it runs no pass at all.
+  if (!col || isCompColorIdentity(col)) return url;
+  const clamps = { u_clampLow: col.clampLow ? 1 : 0, u_clampHigh: col.clampHigh ? 1 : 0 };
+  let out = url;
+  try {
+    if (col.gradeEnabled && !isIdentityGrade(col.grade)) {
+      const g = col.grade;
+      out = await processImageWithShader(out, GRADE_SHADER, {
+        u_blackpoint: [g.blackpoint.r, g.blackpoint.g, g.blackpoint.b],
+        u_whitepoint: [g.whitepoint.r, g.whitepoint.g, g.whitepoint.b],
+        u_lift: [g.lift.r, g.lift.g, g.lift.b],
+        u_gain: [g.gain.r, g.gain.g, g.gain.b],
+        u_multiply: [g.multiply.r, g.multiply.g, g.multiply.b],
+        u_offset: [g.offset.r, g.offset.g, g.offset.b],
+        u_gamma: [g.gamma.r, g.gamma.g, g.gamma.b],
+        ...clamps,
+      });
+    }
+    if (col.hsvEnabled && !isIdentityHsv(col)) {
+      out = await processImageWithShader(out, HSV_SHADER, {
+        u_hueShift: col.hueShift, u_saturation: col.saturation, u_value: col.value, ...clamps,
+      });
+    }
+  } catch {
+    return url;
+  }
+  return out;
+}
+
+/**
  * Build a canvas whose ALPHA equals the luminance of `url` (rgb set to white),
  * sized W×H (stretched to fit). Used to apply an external alpha (Matte /
  * BG_Alpha / FG_Alpha pin) to a layer via "destination-in".
@@ -239,7 +352,8 @@ async function compositeFallback(urls: CompInputUrls, data: CompNodeData): Promi
   if (!ctx) return { dataUrl: urls.bg!, outW: W, outH: H };
 
   // BG (faded by BG opacity), then its external alpha pin (BG_Alpha) if present.
-  const bg = await loadImg(urls.bg!);
+  // Colour first, on the plate's own pixels, exactly as the GPU path orders it.
+  const bg = await loadImg(await applyLayerColorUrl(urls.bg!, normalizeCompLayerColor(data.bgColor)));
   ctx.globalAlpha = data.bgOpacity ?? 1;
   ctx.drawImage(bg, 0, 0, W, H);
   ctx.globalAlpha = 1;
@@ -248,7 +362,7 @@ async function compositeFallback(urls: CompInputUrls, data: CompNodeData): Promi
   // FG composited at its own size (with FG_Alpha applied), then drawn transformed.
   if (urls.fg) {
     try {
-      const fg = await loadImg(urls.fg);
+      const fg = await loadImg(await applyLayerColorUrl(urls.fg, normalizeCompLayerColor(data.fgColor)));
       const iw = fg.naturalWidth, ih = fg.naturalHeight;
       const fgCanvas = document.createElement("canvas");
       fgCanvas.width = iw; fgCanvas.height = ih;
@@ -264,6 +378,16 @@ async function compositeFallback(urls: CompInputUrls, data: CompNodeData): Promi
         const p = alignBase
           ? computeAlignedPieces(data.fgTransform, alignBase, iw, ih)
           : computePieces(data.fgTransform, "none", iw, ih, iw, ih);
+        // FG edge softness. Gated exactly as the GPU path is: no footprint edge
+        // without black-outside, and an FG_Alpha pin replaces the coverage this
+        // would feather. `urls.fgAlpha` is this path's honest signal — it is the
+        // URL the render is actually using, not a lazily-null mirror.
+        const soft = Math.max(0, data.fgSoftness ?? 0);
+        if (soft > 0 && (data.fgBlackOutside ?? true) && !urls.fgAlpha) {
+          // Output px → source px, per axis, so a stretched FG still feathers
+          // the same width on all four edges of the OUTPUT.
+          featherCanvasAlpha(fgCanvas, soft / Math.abs(p.sX || 1), soft / Math.abs(p.sY || 1));
+        }
         // Forward corners (output bottom-left) → canvas top-left (y = H - y).
         const c = forwardCorners(p).map((o) => ({ x: o.x, y: H - o.y }));
         const srcTL = [{ x: 0, y: ih }, { x: iw, y: ih }, { x: iw, y: 0 }];

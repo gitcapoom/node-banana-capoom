@@ -154,6 +154,18 @@ export function compCommitSignature(data: Record<string, unknown>, pins: CompPin
     // to what those comps were saved with. A sixth pin would append `"fa6":"-"`
     // to every signature instead and invalidate the lot on next open.
     fgA: data.fgAlignMeta, fgAo: data.fgAlign, fgAf: data.fgAlignFit,
+    // FG edge softness. Same reasoning as the align fields above and the same
+    // requirement: it is undefined on every comp already on disk, JSON.stringify
+    // omits it, and those comps keep signing byte-identically. Nothing may
+    // default it to 0 on the way in here — that would emit `"fgS":0` and
+    // invalidate the lot.
+    fgS: data.fgSoftness,
+    // Per-layer colour (Grade → HSV) on the BG / FG plates. Same reasoning again:
+    // undefined on every comp already on disk, omitted by JSON.stringify, so
+    // those comps keep signing byte-identically. Nothing may default these to a
+    // fresh defaultCompLayerColor() on the way in — that would emit a ~15-number
+    // identity object into every signature and invalidate the lot.
+    bgC: data.bgColor, fgC: data.fgColor,
   });
 }
 
