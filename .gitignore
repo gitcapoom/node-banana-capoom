@@ -59,3 +59,6 @@ generations/
 .superset/
 # local splat-viewer build (npm run viewer:install) — a dependency, never embedded
 /public/_viewer/
+
+# Scratch evidence for prompt-skill research (raw pages, extracted facts)
+.research/
