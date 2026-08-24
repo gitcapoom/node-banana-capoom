@@ -53,6 +53,19 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
   // cross-remount dedup lives in `committedCrops` above.
   const inFlightRef = useRef<string>("");
 
+  /** One hydration request per edge configuration, so a load that fails does not
+   *  become a request loop across re-renders. */
+  const hydrateReqRef = useRef<string>("");
+
+  /** Identifies this node's incoming wiring. Lets the effect below tell "no edge"
+   *  from "edge whose source has not been hydrated yet" — two states that look
+   *  identical through `getSourceOutput`, which returns null for both. */
+  const incomingEdgeKey = useWorkflowStore((s) =>
+    s.edges
+      .filter((e) => e.target === id)
+      .map((e) => `${e.source}|${e.sourceHandle}`)
+      .join(","));
+
   // 1) Mirror upstream image into sourceImage.
   useEffect(() => {
     if (incomingImage !== nodeData.sourceImage) {
@@ -68,6 +81,31 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     const region = nodeData.cropRegion;
 
     if (!src) {
+      // CONNECTED-BUT-UNHYDRATED is not DISCONNECTED, and this branch used to
+      // conflate them.
+      //
+      // `imageInput.image` is a lazily-hydrated field (THUMB_DISPLAY_FIELDS in
+      // imageFieldMap): on open it is null, the node paints its thumb — so it
+      // looks perfectly loaded — and the full-res lives on disk behind
+      // `imageRef`. `getSourceOutput` returns that null, so a crop wired to such
+      // a node saw nothing and simply sat empty. The only thing that hydrated it
+      // was this node's own Edit button, so the input never arrived until you
+      // opened the editor. CompNode has always requested hydration from its
+      // render effect for exactly this case; this makes the crop node agree.
+      //
+      // Reads as size-dependent from the outside, but is not: an image dragged in
+      // during this session is still inline and works, while the same picture
+      // reopened from the saved workflow is lazy and does not.
+      if (incomingEdgeKey) {
+        if (hydrateReqRef.current !== incomingEdgeKey) {
+          hydrateReqRef.current = incomingEdgeKey;
+          void loadNodeFullResInputs(id);
+        }
+        // Keep whatever is committed. Clearing here would throw away a good
+        // saved output every time the workflow opened.
+        return;
+      }
+      hydrateReqRef.current = "";
       // Guarded on `outputImage` ALONE, deliberately. "No source" here means two
       // different things: genuinely disconnected, or a saved workflow whose
       // images are still lazily unloaded — and this branch cannot tell them
@@ -158,7 +196,7 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
         updateNodeData(id, { outputImage: src, cropMetadata: null });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, nodeData.sourceImage, nodeData.cropRegion, updateNodeData]);
+  }, [id, nodeData.sourceImage, nodeData.cropRegion, updateNodeData, incomingEdgeKey, loadNodeFullResInputs]);
 
   const handleEdit = useCallback(async () => {
     // The source mirrors upstream; on reopen it's lazily null. Load the
