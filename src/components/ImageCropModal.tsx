@@ -261,7 +261,7 @@ export function ImageCropModal() {
     let outputImage: string | null = sourceImage;
     if (sourceImage && cropRegion) {
       try {
-        outputImage = await cropImageToDataUrl(sourceImage, cropRegion);
+        outputImage = (await cropImageToDataUrl(sourceImage, cropRegion)).dataUrl;
       } catch (err) {
         console.error("ImageCropModal: crop failed, falling back to source", err);
         outputImage = sourceImage;

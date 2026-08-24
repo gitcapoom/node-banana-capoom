@@ -717,7 +717,7 @@ export async function executeImageCrop(ctx: NodeExecutionContext): Promise<void>
     // Apply the crop
     try {
       const cropped = await cropImageToDataUrl(incoming, nodeData.cropRegion);
-      await commitProcessorOutput(updateNodeData, node.id, cropped);
+      await commitProcessorOutput(updateNodeData, node.id, cropped.dataUrl);
     } catch (err) {
       console.error(`[Workflow] Image Crop failed:`, err);
       await commitProcessorOutput(updateNodeData, node.id, incoming);

@@ -95,7 +95,7 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     inFlightRef.current = fingerprint;
 
     cropImageToDataUrl(src, region)
-      .then((cropped) => {
+      .then(({ dataUrl: cropped }) => {
         if (inFlightRef.current !== fingerprint) return;
         committedCrops.set(id, fingerprint);
         // commitProcessorOutput writes the display thumb beside the output.
