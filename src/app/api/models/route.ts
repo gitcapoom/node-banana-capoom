@@ -32,6 +32,7 @@ import { ProviderType } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers";
 import { MUAPI_MODELS } from "@/lib/providers/muapi";
 import { getMuapiModels } from "@/lib/providers/muapiModelFetcher";
+import { createPageBudget } from "@/lib/providers/pageBudget";
 import {
   getCachedModels,
   setCachedModels,
@@ -642,10 +643,9 @@ async function fetchReplicateModels(apiKey: string): Promise<ProviderModel[]> {
   let url: string | null = `${REPLICATE_API_BASE}/models`;
 
   // Paginate through results (limit to 15 pages to avoid timeout)
-  let pageCount = 0;
-  const maxPages = 15;
+  const budget = createPageBudget();
 
-  while (url && pageCount < maxPages) {
+  while (url && budget.canContinue()) {
     const response = await fetch(url, {
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -662,9 +662,16 @@ async function fetchReplicateModels(apiKey: string): Promise<ProviderModel[]> {
       allModels.push(...data.results.map(mapReplicateModel));
     }
     url = data.next;
-    pageCount++;
+    budget.countPage();
   }
 
+  if (url && budget.exhausted()) {
+    // Say so. The old 15-page cap hid the fact that this list was showing 375
+    // of 1500+ models.
+    console.warn(
+      `[models] Replicate list truncated after ${budget.pagesFetched()} pages — more models exist.`,
+    );
+  }
   return allModels;
 }
 
@@ -932,11 +939,9 @@ async function fetchFalModels(
     headers["Authorization"] = `Key ${apiKey}`;
   }
 
-  // Paginate through results (limit to 15 pages to avoid timeout)
-  let pageCount = 0;
-  const maxPages = 15;
+  const budget = createPageBudget();
 
-  while (hasMore && pageCount < maxPages) {
+  while (hasMore && budget.canContinue()) {
     const params = new URLSearchParams();
     if (searchQuery) params.set("q", searchQuery);
     if (cursor) params.set("cursor", cursor);
@@ -954,7 +959,7 @@ async function fetchFalModels(
 
     cursor = data.next_cursor;
     hasMore = data.has_more;
-    pageCount++;
+    budget.countPage();
   }
 
   return allModels;

@@ -26,6 +26,12 @@ const CATEGORY_MAP: Record<string, ModelCapability> = {
   "Video to Video": "video-to-video",
   "Text to Audio": "text-to-audio",
   "Audio to Video": "image-to-video", // audio-input models render as image-to-video
+  // Present in the payload and previously dropped on the floor: the anchor
+  // scrape never surfaced them, so nobody noticed muapi has 3D models too.
+  "Image to 3D": "image-to-3d",
+  "Text to 3D": "text-to-3d",
+  // Deliberately unmapped: "Text to Text" (LLM), "Training", "Lora Support",
+  // "other" — none is a generation capability this app renders a node for.
 };
 
 /** In-memory cache */
@@ -50,14 +56,56 @@ function slugToName(slug: string): string {
 }
 
 /**
- * Parse muapi.ai playground HTML to extract models with categories.
+ * Extract models from the JSON payload embedded in the playground page.
  *
- * Each model card is an <a> like:
- *   <a ... href="/playground/model-slug">
- *     <h3>model-slug</h3>
- *     <span ...>Category Label</span>
- *     <p>Description</p>
- *   </a>
+ * The page renders only a slice of the catalogue as <a href="/playground/…">
+ * cards and carries the whole thing as escaped JSON in the streamed payload.
+ * Measured 2026-08-21: 616 model records in the JSON, 115 reachable as anchors.
+ * Reading anchors therefore missed 502 models — including every recent
+ * seedance-2.5 variant — and the app was serving 284 from a cache built when
+ * the page happened to render more of them. The next cache refresh would have
+ * SHRUNK the list to ~115 with nothing to explain why.
+ *
+ * Records look like (unescaped):
+ *   {"id":593,"name":"seedance-2.5-intl-first-last-frame-1080p",
+ *    "description":"…","category":"Image to Video","hidden":false}
+ *
+ * Still a scrape of an undocumented shape — muapi publishes no models API — so
+ * the anchor parser is kept as a fallback for the day this format changes.
+ */
+function parsePayloadJson(html: string): ProviderModel[] {
+  const models: ProviderModel[] = [];
+  const seen = new Set<string>();
+
+  // Fields appear in a stable order within each record. Matching them together
+  // rather than separately keeps a name bound to ITS OWN category — scanning
+  // for fields independently would pair the wrong ones.
+  const recordRe =
+    /\\"name\\":\\"([a-z0-9][a-z0-9._-]*)\\"[\s\S]{0,4000}?\\"category\\":\\"([^\\"]+)\\"/g;
+
+  let m: RegExpExecArray | null;
+  while ((m = recordRe.exec(html)) !== null) {
+    const slug = m[1];
+    const capability = CATEGORY_MAP[m[2]];
+    if (!capability || seen.has(slug)) continue;
+    seen.add(slug);
+    models.push({
+      id: slug,
+      name: slugToName(slug),
+      provider: "muapi",
+      capabilities: [capability],
+      description: null,
+    });
+  }
+
+  return models;
+}
+
+/**
+ * Fallback: the original anchor scrape.
+ *
+ * Kept because the JSON payload's shape is undocumented and can change without
+ * notice. If it ever yields nothing, a partial list beats an empty one.
  */
 function parsePlaygroundHtml(html: string): ProviderModel[] {
   const models: ProviderModel[] = [];
@@ -121,7 +169,7 @@ async function fetchModelsFromPlayground(): Promise<ProviderModel[] | null> {
     }
 
     const html = await response.text();
-    const models = parsePlaygroundHtml(html);
+    const models = parseModels(html);
 
     if (models.length < 50) {
       // Sanity check — if we got very few models, something went wrong
@@ -167,4 +215,15 @@ export async function getMuapiModels(fallbackModels: ProviderModel[]): Promise<P
   }
 
   return fetchPromise;
+}
+
+
+/**
+ * Prefer the full JSON catalogue; fall back to the anchor scrape.
+ */
+export function parseModels(html: string): ProviderModel[] {
+  const fromJson = parsePayloadJson(html);
+  if (fromJson.length > 0) return fromJson;
+  console.warn("[muapi] JSON payload yielded no models — falling back to anchor scrape.");
+  return parsePlaygroundHtml(html);
 }
