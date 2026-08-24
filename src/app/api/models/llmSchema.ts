@@ -8,7 +8,7 @@ import {
 } from "@/lib/llm/openrouterCatalogue";
 import { resolveOpenRouterEntry } from "@/lib/llm/resolveModelId";
 import { toModelParameters, familyFallback } from "@/lib/llm/llmParameterSchema";
-import { getGoogleModelMeta } from "@/app/api/llm/models/route";
+import { getGoogleModelMeta } from "@/lib/llm/googleModels";
 
 /** A model absent from the catalogue is re-checked after an hour, not 48. */
 const MISS_RECHECK_MS = 60 * 60 * 1000;

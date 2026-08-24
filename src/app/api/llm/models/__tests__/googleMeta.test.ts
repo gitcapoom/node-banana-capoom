@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getGoogleModelMeta } from "../route";
+import { getGoogleModelMeta } from "@/lib/llm/googleModels";
 
 /** Shape captured from generativelanguage.googleapis.com on 2026-08-21. */
 const googleResponse = {
