@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, act } from "@testing-library/react";
 import { GradeRow, GRADE_SLIDERS } from "@/components/controls/GradeRow";
 import { channelToHex, hexToChannel, IDENTITY_GRADE, type GradeParams } from "@/utils/colorGrade";
 import { normalizeCompGrade } from "@/types/comp";
@@ -91,6 +91,71 @@ describe("GradeRow", () => {
     // conversion would mean opening the picker quietly nudged the grade.
     for (const hex of ["#000000", "#ffffff", "#3b82f6", "#ef4444", "#123456", "#ff8000"]) {
       expect(channelToHex(hexToChannel(hex))).toBe(hex);
+    }
+  });
+});
+
+describe("GradeRow — screen eyedropper", () => {
+  /** Open the wheel popover, which is where the picking controls live.
+   *  It portals to document.body, so it is NOT inside the render container —
+   *  querying the container instead would make every assertion below pass
+   *  vacuously. */
+  function openPopover(container: HTMLElement) {
+    const swatch = container.querySelector("button");
+    if (swatch) fireEvent.click(swatch);
+  }
+  const screenBtn = () =>
+    [...document.body.querySelectorAll("button")].find((b) => /Screen|Picking/.test(b.textContent ?? ""));
+
+  function renderRow(onChange: () => void) {
+    return render(
+      <GradeRow def={defFor("gain")} value={{ r: 1, g: 1, b: 1 }} expanded={false} onChange={onChange} onToggleExpanded={() => {}} />,
+    );
+  }
+
+  it("offers no eyedropper where the browser has none", () => {
+    // jsdom has no EyeDropper, which is the non-Chromium case. Offering a
+    // control that cannot work is worse than not offering it.
+    expect("EyeDropper" in window).toBe(false);
+    const { container } = renderRow(vi.fn());
+    openPopover(container);
+    // Sanity-check the popover really opened, so this is not vacuous.
+    expect(document.getElementById("grade-wheel-pop")).not.toBeNull();
+    expect(screenBtn()).toBeUndefined();
+  });
+
+  it("assigns the sampled pixel, clamped into the row's range", async () => {
+    const open = vi.fn().mockResolvedValue({ sRGBHex: "#ff8000" });
+    vi.stubGlobal("EyeDropper", class { open = open; });
+    try {
+      const onChange = vi.fn();
+      const { container } = renderRow(onChange);
+      openPopover(container);
+      const btn = screenBtn();
+      expect(btn).toBeDefined();
+      await act(async () => { fireEvent.click(btn!); });
+      expect(open).toHaveBeenCalled();
+      // Same assignment path as the native picker: hex -> channels, clamped.
+      expect(onChange).toHaveBeenCalledWith(hexToChannel("#ff8000"));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("changes nothing when the pick is cancelled", async () => {
+    // The API rejects on Escape / right-click. That is a cancellation, not an
+    // error, and must not write a value or leave the button stuck.
+    const open = vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError"));
+    vi.stubGlobal("EyeDropper", class { open = open; });
+    try {
+      const onChange = vi.fn();
+      const { container } = renderRow(onChange);
+      openPopover(container);
+      await act(async () => { fireEvent.click(screenBtn()!); });
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screenBtn()?.hasAttribute("disabled")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

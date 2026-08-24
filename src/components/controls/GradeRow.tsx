@@ -195,22 +195,63 @@ export function GradeRow({ def, value, expanded, onChange, onToggleExpanded, lab
     dragRef.current = null;
     (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
   }, []);
+  /**
+   * Screen eyedropper.
+   *
+   * The native `<input type="color">` above can only sample inside its own OS
+   * dialog, so it cannot pick the thing you are actually grading. This samples
+   * any pixel on screen — the comp preview, the GPU editor overlay, a node
+   * thumbnail, another window — which is what picking "from the viewer" means.
+   *
+   * Chromium-only. The button is hidden where `EyeDropper` is absent rather
+   * than offered and then failing.
+   *
+   * What it returns is the DISPLAYED 8-bit sRGB pixel: after the float chain has
+   * been flattened for the screen, and after the viewer's zoom resample. That is
+   * the right source for matching what you see, but it cannot recover a
+   * super-white — the value is clamped into the row's range like any other pick.
+   */
+  const [dropping, setDropping] = useState(false);
+  const hasEyeDropper = typeof window !== "undefined" && "EyeDropper" in window;
+  const pickFromScreen = useCallback(async () => {
+    const Ctor = (window as unknown as {
+      EyeDropper?: new () => { open: () => Promise<{ sRGBHex: string }> };
+    }).EyeDropper;
+    if (!Ctor) return;
+    setDropping(true);
+    try {
+      const { sRGBHex } = await new Ctor().open();
+      onColorPicked(sRGBHex);
+    } catch {
+      // Cancelled with Escape or a right-click. Not an error, and deliberately
+      // silent — the browser's own overlay already gave the feedback.
+    } finally {
+      setDropping(false);
+    }
+  }, [onColorPicked]);
+
   useEffect(() => {
     if (!wheelOpen) return;
     const close = (e: MouseEvent) => {
+      // While the eyedropper owns the screen, the click that samples a pixel is
+      // outside the popover by definition. Closing on it would tear down the
+      // popover mid-pick and drop the value it is about to return.
+      if (dropping) return;
       const pop = document.getElementById(GRADE_WHEEL_POP_ID);
       if (pop && pop.contains(e.target as HTMLElement)) return;
       if (swatchRef.current?.contains(e.target as HTMLElement)) return;
       setWheelOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setWheelOpen(false); };
+    // Same reasoning for Escape: it cancels the eyedropper, and should not also
+    // collapse the popover the user is still working in.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !dropping) setWheelOpen(false); };
     window.addEventListener("mousedown", close);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("mousedown", close);
       window.removeEventListener("keydown", onKey);
     };
-  }, [wheelOpen]);
+  }, [wheelOpen, dropping]);
 
   const swatchHex = channelToHex(value);
 
@@ -352,6 +393,25 @@ export function GradeRow({ def, value, expanded, onChange, onToggleExpanded, lab
                   onChange={(e) => onColorPicked(e.target.value)}
                   className="sr-only"
                 />
+                {/* Sample from the image being graded, not from a dialog. */}
+                {hasEyeDropper && (
+                  <button
+                    onClick={pickFromScreen}
+                    disabled={dropping}
+                    className={`flex items-center gap-1 text-[9px] px-2 py-0.5 rounded ${
+                      dropping
+                        ? "bg-teal-700 text-white"
+                        : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                    }`}
+                    title="Eyedropper — sample any pixel on screen (the viewer, a node, another window)"
+                  >
+                    <svg viewBox="0 0 16 16" className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10.5 2.5a2 2 0 0 1 3 3L11 8l-3-3 2.5-2.5Z" />
+                      <path d="M8 5 3 10v3h3l5-5" />
+                    </svg>
+                    {dropping ? "Picking…" : "Screen"}
+                  </button>
+                )}
                 <button
                   onClick={reset}
                   className="text-[9px] px-2 py-0.5 rounded bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
