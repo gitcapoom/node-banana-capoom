@@ -105,9 +105,10 @@ export interface CompLayerColor {
    * workflows saved before per-channel grading existed (`coerceChannel`); this
    * field has no such legacy and must not acquire one.
    *
-   * The comp editor drives r/g/b together (one master slider per row) and reads
-   * `.r` back, but the stored shape is per-channel so unlinked rows can be added
-   * later without touching a single saved file.
+   * The comp editor drives these through the SAME control as the standalone
+   * node (components/controls/GradeRow.tsx) — a row is either linked (one master
+   * track) or unlinked into three — so a value here can be genuinely
+   * per-channel and always could be: the shape never changed, only the editor.
    */
   grade: GradeParams;
   hsvEnabled: boolean;

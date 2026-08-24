@@ -20,7 +20,8 @@ import {
   defaultCompLayerColor, normalizeCompLayerColor, normalizeCompGrade,
   type CompInputFilter, type BlurFilterType, type CompResampleFilter, type CompLayerColor,
 } from "@/types/comp";
-import type { GradeParams } from "@/utils/colorGrade";
+import { GradeRow, GRADE_SLIDERS, GRADE_WHEEL_POP_ID } from "@/components/controls/GradeRow";
+import { isMaster, type GradeChannelValue, type GradeParams } from "@/utils/colorGrade";
 import type { CompNodeData, CompMergeOp, CompReformat, CompTransform } from "@/types";
 import { zoomStageAtPointer } from "@/utils/konvaStageZoom";
 import { cheapUrlKey } from "@/utils/renderSignature";
@@ -60,19 +61,18 @@ const FILTERS: Array<{ v: CompInputFilter["filter"]; label: string }> = [
 
 // ── In-comp colour correction rows ────────────────────────────────────────
 //
-// Ranges copied from the standalone ColorGradeNode / HsvCorrectNode so the same
-// knob behaves the same wherever a user meets it.
+// The GRADE rows are not defined here: they render the SHARED GradeRow control
+// against the SHARED GRADE_SLIDERS table (components/controls/GradeRow.tsx), so
+// the comp's grade is the same control as the standalone Color Grade node —
+// per-channel tracks, colour swatch and wheel included. A local copy of the
+// ranges would be a second, silently different wheel, because the wheel derives
+// its strength from them.
+//
+// HSV keeps the local rows below: hue/saturation/value are genuinely scalars,
+// not per-channel values, so there is nothing to share. Ranges match
+// HsvCorrectNode.
 type GradeKey = keyof GradeParams;
 interface ColorRowDef { label: string; min: number; max: number; step: number }
-const GRADE_ROWS: Array<ColorRowDef & { key: GradeKey }> = [
-  { key: "blackpoint", label: "Blackpoint", min: -0.5, max: 0.5, step: 0.005 },
-  { key: "whitepoint", label: "Whitepoint", min: 0.1, max: 2.0, step: 0.005 },
-  { key: "lift", label: "Lift", min: -0.5, max: 0.5, step: 0.005 },
-  { key: "gain", label: "Gain", min: 0.0, max: 3.0, step: 0.005 },
-  { key: "multiply", label: "Multiply", min: 0.0, max: 3.0, step: 0.005 },
-  { key: "offset", label: "Offset", min: -0.5, max: 0.5, step: 0.005 },
-  { key: "gamma", label: "Gamma", min: 0.1, max: 4.0, step: 0.01 },
-];
 type HsvKey = "hueShift" | "saturation" | "value";
 const HSV_ROWS: Array<ColorRowDef & { key: HsvKey }> = [
   { key: "hueShift", label: "Hue", min: -180, max: 180, step: 1 },
@@ -472,15 +472,49 @@ export function CompModal() {
     [activeColorKey, data, patch],
   );
 
-  /** One grade row. The editor drives r/g/b together; the stored shape stays
-   *  per-channel so unlinked rows can arrive later without a migration. */
-  const patchGrade = useCallback(
-    (key: GradeKey, v: number) => {
-      if (!activeColorKey || !data) return;
-      const cur = normalizeCompLayerColor(data[activeColorKey]) ?? defaultCompLayerColor();
-      patch({ [activeColorKey]: { ...cur, grade: { ...cur.grade, [key]: { r: v, g: v, b: v } } } } as Partial<CompNodeData>);
+  /**
+   * Which grade rows are showing their three R/G/B tracks.
+   *
+   * UI state, so it stays here: it describes how the panel is drawn, not what
+   * the comp renders, and putting it in CompNodeData would change every comp's
+   * commit signature for a disclosure triangle. Keyed by LAYER because this one
+   * panel serves both tabs — BG's split rows must not follow you over to FG.
+   *
+   * A row also splits on its own whenever its stored value is genuinely
+   * per-channel (see the render below), which is what makes arriving at a tab
+   * show that layer's real state rather than this map's.
+   */
+  const [gradeSplit, setGradeSplit] = useState<Record<"bg" | "fg", Partial<Record<GradeKey, boolean>>>>({ bg: {}, fg: {} });
+  // ...and it must not outlive the comp it describes. This component is mounted
+  // for the app's lifetime (page.tsx) and merely returns null while closed, so
+  // without this the flags survive every close: split a row on comp A, open
+  // comp B, and B shows three identity tracks nobody asked for. Resetting on
+  // `sourceNodeId` covers reopening the same node too (close nulls it), which is
+  // what makes a reopened panel show the stored value's real state rather than
+  // the state of the last session.
+  useEffect(() => { setGradeSplit({ bg: {}, fg: {} }); }, [sourceNodeId]);
+  const colorLayer: "bg" | "fg" | null = activeInput === "bg" || activeInput === "fg" ? activeInput : null;
+
+  const toggleGradeSplit = useCallback(
+    (key: GradeKey) => {
+      if (!colorLayer) return;
+      setGradeSplit((s) => ({ ...s, [colorLayer]: { ...s[colorLayer], [key]: !s[colorLayer][key] } }));
     },
-    [activeColorKey, data, patch],
+    [colorLayer],
+  );
+
+  /** One grade row, per channel — the shared control writes a whole
+   *  GradeChannelValue, which is the shape that was always stored. */
+  const patchGrade = useCallback(
+    (key: GradeKey, next: GradeChannelValue) => {
+      if (!activeColorKey || !colorLayer || !data) return;
+      const cur = normalizeCompLayerColor(data[activeColorKey]) ?? defaultCompLayerColor();
+      patch({ [activeColorKey]: { ...cur, grade: { ...cur.grade, [key]: next } } } as Partial<CompNodeData>);
+      // Unlinking a row keeps it unlinked even if the three values are dragged
+      // back level — otherwise the tracks would vanish mid-edit.
+      if (!isMaster(next)) setGradeSplit((s) => ({ ...s, [colorLayer]: { ...s[colorLayer], [key]: true } }));
+    },
+    [activeColorKey, colorLayer, data, patch],
   );
 
   // Latest nudge closure (arrow keys move the active transform by whole pixels).
@@ -640,7 +674,18 @@ export function CompModal() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isModalOpen) return;
-      if (e.key === "Escape") { handleCancel(); return; }
+      if (e.key === "Escape") {
+        // The grade wheel popover is portaled to document.body — outside this
+        // modal's React tree — and binds Escape on `window` to close itself.
+        // Both listeners are on window and neither can reliably silence the
+        // other, so without this guard one Escape would close the wheel AND
+        // cancel the editor, discarding the whole draft. While the popover is
+        // up, Escape is its; the element is removed on the re-render that
+        // follows, so the next Escape reaches Cancel.
+        if (document.getElementById(GRADE_WHEEL_POP_ID)) return;
+        handleCancel();
+        return;
+      }
       // Arrow keys nudge the active transform — ignore while typing in a field.
       const tgt = e.target as HTMLElement | null;
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.tagName === "SELECT")) return;
@@ -1109,16 +1154,41 @@ export function CompModal() {
                     </label>
                     {activeColor.gradeEnabled && (
                       <button
-                        onClick={() => patchColor({ grade: normalizeCompGrade(undefined) })}
+                        onClick={() => {
+                          patchColor({ grade: normalizeCompGrade(undefined) });
+                          // The rows are back at identity, so the split tracks
+                          // have nothing left to show.
+                          if (colorLayer) setGradeSplit((s) => ({ ...s, [colorLayer]: {} }));
+                        }}
                         className="text-[10px] text-neutral-500 hover:text-white shrink-0"
                       >
                         Reset
                       </button>
                     )}
                   </div>
-                  {activeColor.gradeEnabled && GRADE_ROWS.map((r) => (
-                    <ColorRow key={r.key} def={r} value={activeColor.grade[r.key].r} onChange={(v) => patchGrade(r.key, v)} />
-                  ))}
+                  {/* The standalone Grade control, verbatim: master or split
+                      R/G/B tracks, swatch and colour wheel. `labelWidth` only
+                      lines its label column up with this panel's other rows, and
+                      the wrapper keeps the rows flush against their own dividers
+                      instead of inheriting this column's gap. */}
+                  {activeColor.gradeEnabled && colorLayer && (
+                    <div>
+                      {GRADE_SLIDERS.map((s) => {
+                        const v = activeColor.grade[s.key];
+                        return (
+                          <GradeRow
+                            key={s.key}
+                            def={s}
+                            value={v}
+                            expanded={!!gradeSplit[colorLayer][s.key] || !isMaster(v)}
+                            onChange={(next) => patchGrade(s.key, next)}
+                            onToggleExpanded={() => toggleGradeSplit(s.key)}
+                            labelWidth={64}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-1.5 mt-1 pt-2 border-t border-neutral-800">
