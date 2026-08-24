@@ -155,6 +155,41 @@ describe("executeAnnotation", () => {
     expect(outputCall).toBeUndefined();
   });
 
+  it("does not destroy an annotated output when handed a PRE-HYDRATION snapshot", async () => {
+    // The real hazard, and the one the two tests above cannot see because their
+    // makeCtx returns the same object from getFreshNode.
+    //
+    // `outputImage` is lazily hydrated: on workflow open it is null on disk-backed
+    // nodes. executeWorkflow captured its nodes array BEFORE the full-res pre-pass
+    // ran, so the executor received a snapshot still showing null while the store
+    // already held the loaded value. The pass-through guard read that null as
+    // "never annotated" and replaced the user's annotated raster with the raw
+    // upstream image — and commitProcessorOutput drops outputImageRef with it, so
+    // the file on disk is orphaned and the next autosave persists the wrong picture.
+    const stale = makeNode("ann", "annotation", { outputImage: null, sourceImage: null });
+    const hydrated = makeNode("ann", "annotation", {
+      outputImage: "the-annotated-render",
+      sourceImage: "old-source",
+    });
+    const ctx = makeCtx(stale, {
+      getFreshNode: vi.fn().mockReturnValue(hydrated),
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: ["data:image/png;base64,abc"],
+        videos: [],
+        audio: [],
+        text: null,
+        dynamicInputs: {},
+        easeCurve: null,
+      }),
+    });
+
+    await executeAnnotation(ctx);
+
+    const calls = (ctx.updateNodeData as ReturnType<typeof vi.fn>).mock.calls;
+    const wroteOutput = calls.find((c: unknown[]) => (c[1] as Record<string, unknown>).outputImage !== undefined);
+    expect(wroteOutput).toBeUndefined();
+  });
+
   it("should update pass-through outputImage when upstream changes", async () => {
     // When outputImage === sourceImage, it was a pass-through — should update with new image
     const node = makeNode("ann", "annotation", { outputImage: "old-image", sourceImage: "old-image" });

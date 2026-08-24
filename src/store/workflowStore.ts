@@ -1762,8 +1762,19 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         if (abortController.signal.aborted || !get().isRunning) break;
 
         const level = levels[levelIdx];
+        // Re-read from the store, NOT from the `nodes` captured at the top of
+        // this function. The lazy full-res pre-pass above calls updateNodeData,
+        // which replaces the nodes array — so the captured one is a PRE-HYDRATION
+        // snapshot in which every lazily-loaded field is still null. Executors
+        // that read `node.data` therefore saw nulls for images that had just been
+        // loaded, and `executeAnnotation`'s "has this been annotated?" guard
+        // (`!nodeData.outputImage`) read as false, overwriting a user's annotated
+        // output with the raw upstream image and dropping its file ref. Earlier
+        // levels also mutate nodes this loop is about to run, so a stale array is
+        // wrong for a second, independent reason.
+        const freshNodes = get().nodes;
         const levelNodes = level.nodeIds
-          .map((id) => nodes.find((n) => n.id === id))
+          .map((id) => freshNodes.find((n) => n.id === id))
           .filter((n): n is WorkflowNode => n !== undefined);
 
         if (levelNodes.length === 0) continue;
@@ -1868,8 +1879,9 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       return;
     }
 
-    const node = nodes.find((n) => n.id === nodeId);
-    if (!node) {
+    // Existence check only — re-read after the pre-passes below before executing.
+    const staleNode = nodes.find((n) => n.id === nodeId);
+    if (!staleNode) {
       logger.warn('node.error', 'Node not found for regeneration', { nodeId });
       return;
     }
@@ -1893,7 +1905,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     await logger.startSession();
     logger.info('node.execution', 'Regenerating node', {
       nodeId,
-      nodeType: node.type,
+      nodeType: staleNode.type,
     });
 
     try {
@@ -1925,6 +1937,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         logger.warn('node.execution', 'Upstream freshness pre-pass failed (continuing)', { nodeId, error: String(err) });
       }
 
+      // Re-read after the pre-passes. `node` was found before the full-res
+      // hydration and the upstream freshness pass, both of which write node data,
+      // so its lazily-loaded fields are still null — see the same correction in
+      // executeWorkflow's level loop.
+      const node = get().nodes.find((n) => n.id === nodeId) ?? staleNode;
       const executionCtx = get()._buildExecutionContext(node);
 
       const regenOptions = { useStoredFallback: true };
@@ -2089,10 +2106,22 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       return;
     }
 
-    // Filter to valid nodes
+    // Lazy full-res pre-pass. executeWorkflow and regenerateNode both run one;
+    // this path did not, so running a selection read lazily-unloaded fields as
+    // null — the same nulls that made executeAnnotation overwrite a user's
+    // annotated output with the raw upstream image. No-ops on loaded images.
+    try {
+      await ensureFullResForNodes(nodeIds, get().nodes, get().edges, get().updateNodeData, get().saveDirectoryPath);
+    } catch (err) {
+      logger.warn('node.execution', 'Full-res pre-pass failed (continuing)', { error: String(err) });
+    }
+
+    // Filter to valid nodes — from the store, AFTER the pre-pass above, since it
+    // replaces the nodes array and the one captured at the top is now stale.
     const selectedSet = new Set(nodeIds);
+    const freshSelected = get().nodes;
     const nodesToExecute = nodeIds
-      .map((id) => nodes.find((n) => n.id === id))
+      .map((id) => freshSelected.find((n) => n.id === id))
       .filter((n): n is WorkflowNode => n !== undefined);
 
     if (nodesToExecute.length === 0) {

@@ -48,12 +48,19 @@ import { commitProcessorOutput } from "@/store/execution/commitProcessorOutput";
  * Annotation node: receives upstream image as source, passes through if no annotations.
  */
 export async function executeAnnotation(ctx: NodeExecutionContext): Promise<void> {
-  const { node, getConnectedInputs, updateNodeData } = ctx;
+  const { node, getConnectedInputs, updateNodeData, getFreshNode } = ctx;
   try {
     const { images } = getConnectedInputs(node.id);
     const image = images[0] || null;
     if (image) {
-      const nodeData = node.data as AnnotationNodeData;
+      // Read the CURRENT node, not the snapshot handed in. `outputImage` is a
+      // lazily-hydrated field, so on a stale snapshot it is null even after the
+      // run's pre-pass loaded it — and the pass-through guard below treats null
+      // as "never annotated", overwriting the user's annotated raster with the
+      // raw upstream image and dropping its file ref. That is the only place in
+      // this codebase where work a human made by hand is destroyed, so it does
+      // not rely on callers alone getting the snapshot right.
+      const nodeData = ((getFreshNode?.(node.id) ?? node).data) as AnnotationNodeData;
       updateNodeData(node.id, { sourceImage: image, sourceImageRef: undefined });
       // Pass through the image if no annotations exist, or if the previous
       // output was itself a pass-through of the old source image
