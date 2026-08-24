@@ -31,7 +31,7 @@ import { processImageWithShader, type UniformValue } from "./webglProcess";
 import type { CompTransform, CompReformat, CompInputFilter, CompResampleFilter } from "@/types/comp";
 import { compResampleIndex } from "@/types/comp";
 import { TexCache } from "@/utils/texCache";
-import { computePieces, computeFollowPieces, piecesToUniforms } from "./compTransform";
+import { computePieces, computeAlignedPieces, computeFollowPieces, deriveAlignBase, piecesToUniforms, type CompAlignSpec } from "./compTransform";
 
 export type ShaderInput = { url: string } | { floatNodeId: string };
 
@@ -619,6 +619,11 @@ export interface CompRenderParams {
   fgBlackOutside: boolean;
   swapBgFg: boolean;       // swap BG/FG roles (+ their alphas) in the merge
   outputResolution: "bg" | "fg"; // which input's size defines the output
+  /** FG auto-align: drop the FG back onto the region its crop metadata came
+   *  from, at whatever resolution the generator returned. Present only when the
+   *  comp has usable metadata and align is on (see resolveFgAlign); the scale
+   *  itself is finished in compUniforms, which is what holds the decoded sizes. */
+  fgAlign?: CompAlignSpec;
   bgOpacity: number;       // 0..1, scales BG alpha before the merge
   fgOpacity: number;       // 0..1, scales FG alpha before the merge
   /** Per-input blur/defocus filters, applied to each input's texture before
@@ -1002,11 +1007,25 @@ function compUniforms(
       : computeFollowPieces(params.bgTransform, bg.w, bg.h, params.bgAlphaReformat, ba.w, ba.h);
     Object.assign(u, piecesToUniforms("u_ba", baPieces));
   }
-  if (fg) Object.assign(u, piecesToUniforms("u_fg", computePieces(params.fgTransform, "none", fg.w, fg.h, fg.w, fg.h)));
+  // FG auto-align. This is the only place that holds the params AND the decoded
+  // FG size, so it is where the description from buildCompParams becomes a
+  // placement. A null base means the BG is not this crop's source (different
+  // aspect) — fall back to the un-aligned path rather than inventing a rect.
+  const fgAlignBase = fg && params.fgAlign
+    ? deriveAlignBase({ ...params.fgAlign, fgW: fg.w, fgH: fg.h, outW, outH })
+    : null;
+  if (fg) {
+    const fgPieces = fgAlignBase
+      ? computeAlignedPieces(params.fgTransform, fgAlignBase, fg.w, fg.h)
+      : computePieces(params.fgTransform, "none", fg.w, fg.h, fg.w, fg.h);
+    Object.assign(u, piecesToUniforms("u_fg", fgPieces));
+  }
   if (fa) {
     const faPieces = params.fgAlphaTransform.enabled
       ? computePieces(params.fgAlphaTransform, params.fgAlphaReformat, fg?.w ?? fa.w, fg?.h ?? fa.h, fa.w, fa.h)
-      : computeFollowPieces(params.fgTransform, fg?.w ?? fa.w, fg?.h ?? fa.h, params.fgAlphaReformat, fa.w, fa.h);
+      // The base goes through too: a FOLLOWED FG_Alpha that ignored it would sit
+      // in the un-aligned position while the FG it mattes moves.
+      : computeFollowPieces(params.fgTransform, fg?.w ?? fa.w, fg?.h ?? fa.h, params.fgAlphaReformat, fa.w, fa.h, fgAlignBase ?? undefined);
     Object.assign(u, piecesToUniforms("u_fa", faPieces));
   }
   if (mt) Object.assign(u, piecesToUniforms("u_mt", computePieces(params.matteTransform, params.matteReformat, bg.w, bg.h, mt.w, mt.h)));

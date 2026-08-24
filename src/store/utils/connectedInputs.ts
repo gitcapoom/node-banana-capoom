@@ -216,6 +216,10 @@ export function getSourceOutput(
     return { type: "video", value: (sourceNode.data as VideoInputNodeData).videoFile };
   } else if (sourceNode.type === "imageCrop") {
     const icData = sourceNode.data as ImageCropNodeData;
+    if (sourceHandleId === "text") {
+      // Placement metadata for the crop, not an image — see utils/cropMetadata.ts.
+      return { type: "text", value: icData.cropMetadata || null };
+    }
     return { type: "image", value: processorOutput(icData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "sphereLightRender") {
     return { type: "image", value: (sourceNode.data as import("@/types").SphereLightRenderNodeData).outputImage || null };

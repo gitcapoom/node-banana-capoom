@@ -6,7 +6,12 @@ import { BaseNode } from "./BaseNode";
 import { useImageCropStore } from "@/store/imageCropStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
-import { cropImageToDataUrl } from "@/utils/cropImage";
+import { cropImageToDataUrl, type RelativeCropRegion } from "@/utils/cropImage";
+import {
+  buildCropMetadata,
+  identityCropMetadata,
+  serializeCropMetadata,
+} from "@/utils/cropMetadata";
 import type { ImageCropNodeData } from "@/types";
 import { previewSrc } from "@/utils/nodePreview";
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
@@ -25,6 +30,10 @@ type ImageCropNodeType = Node<ImageCropNodeData, "imageCrop">;
  * exactly this reason.
  */
 const committedCrops = new RenderSignatureCache();
+
+/** The whole frame, relative — reads a source's real size through the
+ *  full-frame short-circuit in `cropImageToDataUrl` (decode, no encode). */
+const FULL_FRAME: RelativeCropRegion = { x: 0, y: 0, width: 1, height: 1 };
 
 export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeType>) {
   const nodeData = data;
@@ -59,7 +68,21 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     const region = nodeData.cropRegion;
 
     if (!src) {
-      if (nodeData.outputImage !== null) updateNodeData(id, { outputImage: null });
+      // Guarded on `outputImage` ALONE, deliberately. "No source" here means two
+      // different things: genuinely disconnected, or a saved workflow whose
+      // images are still lazily unloaded — and this branch cannot tell them
+      // apart. On open both `sourceImage` and `outputImage` are null while
+      // `cropMetadata` (inline in the workflow JSON, never externalized) is
+      // present and CORRECT. Adding `|| cropMetadata !== null` therefore wiped
+      // the metadata on every open of every saved crop: the downstream Comp's
+      // align pin went null, its mirror no longer matched its stored
+      // `compCommitSig`, and every aligned comp re-composited (1.0-1.8s each)
+      // — with align blocked, so it published an un-aligned frame first.
+      // `outputImage !== null` is the state that only exists AFTER hydration,
+      // so it means "this node really has lost its input".
+      if (nodeData.outputImage !== null) {
+        updateNodeData(id, { outputImage: null, cropMetadata: null });
+      }
       inFlightRef.current = "";
       committedCrops.forget(id);
       return;
@@ -75,8 +98,11 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     // small to paint instead of the full-res source.
     if (!region) {
       const sig = `passthrough:${srcKey}`;
-      if (committedCrops.matches(id, sig) && nodeData.outputImage === src) return;
-      committedCrops.set(id, sig);
+      // The metadata is part of what this pass has to have produced. The cache
+      // is module-level and outlives the node's data, so an entry left by a
+      // pass that ran before the metadata existed (or before a Reset cleared
+      // it) would otherwise dedupe away the write that puts it back.
+      if (committedCrops.matches(id, sig) && nodeData.outputImage === src && nodeData.cropMetadata) return;
       if (nodeData.outputImage !== src) {
         updateNodeData(id, {
           outputImage: src,
@@ -85,28 +111,51 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
           outputImageThumbKey: nodeData.sourceImageThumb ? srcKey : null,
         });
       }
+      // Identity metadata needs the frame's real pixel size, which only a
+      // decode knows. The image is published above regardless, so this costs a
+      // decode (no encode) and never delays the pixels.
+      inFlightRef.current = sig;
+      cropImageToDataUrl(src, FULL_FRAME)
+        .then(({ srcW, srcH }) => {
+          if (inFlightRef.current !== sig) return;
+          if (srcW <= 0 || srcH <= 0) return;
+          committedCrops.set(id, sig);
+          updateNodeData(id, {
+            cropMetadata: serializeCropMetadata(identityCropMetadata(srcW, srcH)),
+          });
+        })
+        .catch((err) => {
+          // Not fatal: the passthrough image is already out. Leaving the sig
+          // uncached means the next dep change retries the measurement.
+          console.error("ImageCropNode: could not measure source", err);
+        });
       return;
     }
 
     const fingerprint = `${srcKey}|${region.x}|${region.y}|${region.width}|${region.height}`;
     // Already produced this exact crop — a remount is not a reason to redo a
-    // full-res decode and PNG encode.
-    if (committedCrops.matches(id, fingerprint) && nodeData.outputImage) return;
+    // full-res decode and PNG encode. `cropMetadata` is part of the product,
+    // for the same reason as in the passthrough branch above.
+    if (committedCrops.matches(id, fingerprint) && nodeData.outputImage && nodeData.cropMetadata) return;
     inFlightRef.current = fingerprint;
 
     cropImageToDataUrl(src, region)
-      .then(({ dataUrl: cropped }) => {
+      .then((result) => {
         if (inFlightRef.current !== fingerprint) return;
         committedCrops.set(id, fingerprint);
         // commitProcessorOutput writes the display thumb beside the output.
         // Writing the output raw is what left this node with nothing but a
         // full-res image to paint into a ~90px box.
-        void commitProcessorOutput(updateNodeData, id, cropped);
+        void commitProcessorOutput(updateNodeData, id, result.dataUrl, {
+          // From the CropResult, so the integers are the ones drawImage got.
+          cropMetadata: serializeCropMetadata(buildCropMetadata(result, region)),
+        } as Partial<ImageCropNodeData>);
       })
       .catch((err) => {
         console.error("ImageCropNode: crop failed", err);
         if (inFlightRef.current !== fingerprint) return;
-        updateNodeData(id, { outputImage: src });
+        // No honest geometry to publish for a frame that would not decode.
+        updateNodeData(id, { outputImage: src, cropMetadata: null });
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, nodeData.sourceImage, nodeData.cropRegion, updateNodeData]);
@@ -131,6 +180,9 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
     updateNodeData(id, {
       cropRegion: null,
       outputImage: nodeData.sourceImage,
+      // Describes the crop that just went away. The effect re-emits the
+      // identity payload once it has measured the source again.
+      cropMetadata: null,
     });
   }, [id, nodeData.sourceImage, updateNodeData]);
 
@@ -141,6 +193,7 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
       outputImage: null,
       outputImageRef: undefined,
       cropRegion: null,
+      cropMetadata: null,
     });
   }, [id, updateNodeData]);
 
@@ -175,6 +228,16 @@ export function ImageCropNode({ id, data, selected }: NodeProps<ImageCropNodeTyp
         position={Position.Right}
         id="image"
         data-handletype="image"
+        style={{ top: "35%" }}
+      />
+      {/* Placement metadata JSON — same image+text output pair as PanoCrop.
+          Off-centre so the two source pins stay separately clickable. */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="text"
+        data-handletype="text"
+        style={{ top: "65%" }}
       />
 
       {displayImage ? (

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { getConnectedInputsPure, validateWorkflowPure } from "../connectedInputs";
+import { getConnectedInputsPure, getSourceOutput, validateWorkflowPure } from "../connectedInputs";
 import type { WorkflowNode, WorkflowEdge } from "@/types";
 import { setDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { dynPinId } from "@/lib/dynamicPinId";
@@ -744,4 +744,65 @@ describe("getSourceOutput — a processor must never pass its input off as its o
       });
     });
   }
+});
+
+/**
+ * The Image Crop node publishes two things: the cropped pixels on `image`, and
+ * the placement metadata that says where they were cut from on `text`. The
+ * handle is what separates them — getting it wrong once meant a JSON payload
+ * arriving where an image was expected (or vice versa), which fails silently.
+ */
+describe("getSourceOutput — imageCrop metadata pin", () => {
+  const META = JSON.stringify({ v: 1, kind: "imageCrop", crop: { x: 10 } });
+
+  const cropNode = (data: Record<string, unknown> = {}) =>
+    makeNode("crop", "imageCrop", {
+      sourceImage: "data:image/png;base64,SRC",
+      outputImage: "data:image/png;base64,OUT",
+      cropMetadata: META,
+      ...data,
+    });
+
+  it("returns the metadata on the text handle", () => {
+    expect(getSourceOutput(cropNode(), "text")).toEqual({ type: "text", value: META });
+  });
+
+  it("returns null text — never the payload of some other crop — when none was emitted", () => {
+    expect(getSourceOutput(cropNode({ cropMetadata: null }), "text")).toEqual({
+      type: "text",
+      value: null,
+    });
+  });
+
+  it("still returns the processor output on the image handle and on no handle at all", () => {
+    for (const handle of ["image", null, undefined] as const) {
+      expect(getSourceOutput(cropNode(), handle)).toEqual({
+        type: "image",
+        value: "data:image/png;base64,OUT",
+      });
+    }
+  });
+
+  it("does not let the text branch bypass the processor rule for images", () => {
+    // Output committed to disk, not yet hydrated: the image pin must still say
+    // null rather than hand the SOURCE downstream, metadata pin or not.
+    const node = cropNode({ outputImage: null, outputImageRef: "img-out" });
+    expect(getSourceOutput(node, "image").value).toBeNull();
+    expect(getSourceOutput(node, "text").value).toBe(META);
+  });
+
+  it("routes the metadata into a downstream text input", () => {
+    const nodes = [cropNode(), makeNode("gen", "nanoBanana", {})];
+    const edge = {
+      id: "crop-gen-text",
+      source: "crop",
+      target: "gen",
+      sourceHandle: "text",
+      targetHandle: "text-0",
+    } as WorkflowEdge;
+    const r = getConnectedInputsPure("gen", nodes, [edge]);
+    expect(r.text).toBe(META);
+    // The pixels are NOT on this edge — nothing should have been read as an image.
+    expect(r.images).toEqual([]);
+  });
 });

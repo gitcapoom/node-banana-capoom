@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { compPinToken, compCommitSignature, outputRefField, __OUTPUT_REF_FIELD, type CompPins } from "../compSignature";
+import { compPinToken, compCommitSignature, normalizeAlignMeta, outputRefField, __OUTPUT_REF_FIELD, type CompPins } from "../compSignature";
 import { RUN_FULLRES_FIELDS } from "../imageFieldMap";
 import type { WorkflowNode } from "@/types";
 
@@ -87,6 +87,66 @@ describe("compCommitSignature", () => {
   it("differs when a resample filter changes", () => {
     expect(compCommitSignature({ ...DATA, fgResample: "keys" }, pins({ bg: bgUnloaded })))
       .not.toBe(compCommitSignature({ ...DATA, fgResample: "mitchell" }, pins({ bg: bgUnloaded })));
+  });
+});
+
+describe("FG align fields", () => {
+  const bg = { srcId: "comp-9", token: "r:img-bg" };
+  const META = '{"v":1,"crop":{"x":100,"y":50,"width":400,"height":300}}';
+
+  /**
+   * THE GUARD ON EVERY COMP ALREADY ON DISK.
+   *
+   * All three fgAlign* fields are undefined in a comp saved before the align pin
+   * existed, JSON.stringify omits undefined keys, and the string below is what
+   * such a comp was saved with. If this literal ever has to be updated, the edit
+   * that changed it also invalidated every comp in every saved workflow — each
+   * one silently recomposites (1.0-1.8s apiece) the next time the file is opened.
+   * Adding fields to compCommitSignature is fine; making them SERIALIZE for a
+   * comp that never had them is not.
+   */
+  it("a comp carrying none of the new fields signs byte-identically to the pinned literal", () => {
+    expect(compCommitSignature(DATA, pins({ bg }))).toBe(
+      '{"v":1,"bg":"comp-9#r:img-bg","ba":"-#-","fg":"-#-","fa":"-#-","mt":"-#-","op":"over","bo":[null,null],"bgo":1,"fgo":1}',
+    );
+  });
+
+  it("participates once the pin actually carries metadata", () => {
+    expect(compCommitSignature({ ...DATA, fgAlignMeta: META }, pins({ bg })))
+      .not.toBe(compCommitSignature(DATA, pins({ bg })));
+  });
+
+  it("distinguishes absent from null — they do not serialize the same", () => {
+    // Which is exactly why normalizeAlignMeta exists: nothing may write null
+    // over the absent field of an old comp.
+    expect(compCommitSignature({ ...DATA, fgAlignMeta: null }, pins({ bg })))
+      .not.toBe(compCommitSignature(DATA, pins({ bg })));
+  });
+
+  it("differs when align is switched off, or the fit mode changes", () => {
+    const on = compCommitSignature({ ...DATA, fgAlignMeta: META, fgAlign: "auto", fgAlignFit: "fit" }, pins({ bg }));
+    expect(on).not.toBe(compCommitSignature({ ...DATA, fgAlignMeta: META, fgAlign: "off", fgAlignFit: "fit" }, pins({ bg })));
+    expect(on).not.toBe(compCommitSignature({ ...DATA, fgAlignMeta: META, fgAlign: "auto", fgAlignFit: "fill" }, pins({ bg })));
+  });
+});
+
+describe("normalizeAlignMeta", () => {
+  it("leaves an absent field absent when the pin carries nothing", () => {
+    expect(normalizeAlignMeta(undefined, null)).toBeUndefined();
+  });
+
+  it("leaves an explicit null alone", () => {
+    expect(normalizeAlignMeta(null, null)).toBeNull();
+  });
+
+  it("returns the SAME value when nothing changed, so no store write is triggered", () => {
+    expect(normalizeAlignMeta('{"v":1}', '{"v":1}')).toBe('{"v":1}');
+  });
+
+  it("takes the incoming value whenever it genuinely differs", () => {
+    expect(normalizeAlignMeta(undefined, '{"v":1}')).toBe('{"v":1}');
+    expect(normalizeAlignMeta('{"v":1}', null)).toBeNull();
+    expect(normalizeAlignMeta('{"v":1}', '{"v":2}')).toBe('{"v":2}');
   });
 });
 

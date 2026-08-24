@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   deriveAlignBase,
+  alignRectInOutput,
   computeAlignedPieces,
   computeFollowPieces,
   forwardCorners,
@@ -177,6 +178,34 @@ describe("deriveAlignBase — BG identification", () => {
     })!;
     expect(b.hPos).toBe(121);
     expect(b.sX).toBe(1);
+  });
+});
+
+// --- alignRectInOutput: the rect the editor reads back -------------------
+describe("alignRectInOutput — the same rect the placement is built from", () => {
+  const SPEC = { crop: CROP, region: REGION, srcW: SRC_W, srcH: SRC_H, fit: "stretch" as CompAlignFit };
+
+  it("reports the crop rect in comp space (bottom-left origin)", () => {
+    expect(alignRectInOutput(SPEC, SRC_W, SRC_H)).toEqual({
+      x: RECT.left, y: RECT.bottom, w: RECT.right - RECT.left, h: RECT.top - RECT.bottom,
+    });
+  });
+
+  it("is the rect deriveAlignBase actually places into", () => {
+    // An FG that came back at exactly the rect's size must land ON the rect
+    // under stretch — which is only true if both read the same rect.
+    const r = alignRectInOutput(SPEC, SRC_W, SRC_H)!;
+    const b = base({ fgW: r.w, fgH: r.h })!;
+    expect(b.hPos).toBe(r.x);
+    expect(b.vPos).toBe(r.y);
+    expect(b.sX).toBeCloseTo(1, 9);
+    expect(b.sY).toBeCloseTo(1, 9);
+  });
+
+  it("returns null for the same BGs deriveAlignBase refuses", () => {
+    expect(alignRectInOutput(SPEC, 1000, 1000)).toBeNull();
+    expect(alignRectInOutput({ ...SPEC, srcH: 0 }, SRC_W, SRC_H)).toBeNull();
+    expect(alignRectInOutput(SPEC, 0, SRC_H)).toBeNull();
   });
 });
 

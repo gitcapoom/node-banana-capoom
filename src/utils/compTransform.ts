@@ -146,8 +146,24 @@ export type CompAlignFit = "stretch" | "fit" | "fill";
 const ALIGN_ASPECT_TOLERANCE = 0.005;
 
 /**
- * Derive the align base that drops a generated FG back onto the exact region it
- * was cropped from, whatever size the generator chose to return.
+ * Everything auto-align knows BEFORE anything is decoded: the crop's own
+ * geometry (straight off the metadata) plus the user's fit choice. Split out
+ * because `buildCompParams` has no image access — it can parse and forward this,
+ * and only `compUniforms`, which holds the decoded sizes, can finish the job.
+ */
+export interface CompAlignSpec {
+  crop: { x: number; y: number; width: number; height: number };   // source px (integers)
+  region: { x: number; y: number; width: number; height: number }; // relative 0-1, top-left
+  srcW: number; srcH: number;      // the crop's source image
+  fit: CompAlignFit;
+}
+
+/** The crop rect placed in output/BG px, BOTTOM-LEFT origin (comp space). */
+export interface CompAlignRect { x: number; y: number; w: number; h: number }
+
+/**
+ * Where the crop's region lands in the comp's output frame, or null when the BG
+ * cannot be that crop's source.
  *
  * `crop` is the INTEGER sample rect the cropper actually handed to drawImage —
  * not `region * srcW/H` recomputed here. `cropImageToDataUrl` rounds origin and
@@ -155,19 +171,14 @@ const ALIGN_ASPECT_TOLERANCE = 0.005;
  * rect can be a pixel off, or run past the source edge. Only the integers that
  * produced the pixels describe where they came from.
  *
- * Returns null when the BG cannot be the crop's source — the caller disables
- * align and says so rather than placing the patch somewhere invented.
+ * Separate from `deriveAlignBase` because the editor needs the rect itself, not
+ * a placement: the aspect warning compares the FG against the rect it is being
+ * dropped into, and recomputing that rect in the UI is exactly how the on-screen
+ * numbers drift away from the render.
  */
-export function deriveAlignBase(args: {
-  crop: { x: number; y: number; width: number; height: number };   // source px (integers)
-  region: { x: number; y: number; width: number; height: number }; // relative 0-1, top-left
-  srcW: number; srcH: number;      // the crop's source image
-  fgW: number; fgH: number;        // decoded FG texture size
-  outW: number; outH: number;      // comp output frame (BG space)
-  fit: CompAlignFit;
-}): CompAlignBase | null {
-  const { crop, region, srcW, srcH, fgW, fgH, outW, outH, fit } = args;
-  if (srcW <= 0 || srcH <= 0 || fgW <= 0 || fgH <= 0 || outW <= 0 || outH <= 0) return null;
+export function alignRectInOutput(spec: CompAlignSpec, outW: number, outH: number): CompAlignRect | null {
+  const { crop, region, srcW, srcH } = spec;
+  if (srcW <= 0 || srcH <= 0 || outW <= 0 || outH <= 0) return null;
   if (crop.width <= 0 || crop.height <= 0) return null;
 
   // The crop rect expressed in BG/output px, still top-left/y-down.
@@ -189,7 +200,25 @@ export function deriveAlignBase(args: {
   // The one Y flip in the feature: crop space is top-left/y-down, comp transform
   // space is bottom-left/y-up, so the rect's TOP edge measured down from the top
   // becomes its BOTTOM edge measured up from the bottom.
-  const bottom = outH - (ry + rh);
+  return { x: rx, y: outH - (ry + rh), w: rw, h: rh };
+}
+
+/**
+ * Derive the align base that drops a generated FG back onto the exact region it
+ * was cropped from, whatever size the generator chose to return.
+ *
+ * Returns null when the BG cannot be the crop's source — the caller disables
+ * align and says so rather than placing the patch somewhere invented.
+ */
+export function deriveAlignBase(args: CompAlignSpec & {
+  fgW: number; fgH: number;        // decoded FG texture size
+  outW: number; outH: number;      // comp output frame (BG space)
+}): CompAlignBase | null {
+  const { fgW, fgH, outW, outH, fit } = args;
+  if (fgW <= 0 || fgH <= 0) return null;
+  const rect = alignRectInOutput(args, outW, outH);
+  if (!rect) return null;
+  const { x: rx, y: bottom, w: rw, h: rh } = rect;
 
   const stretchX = rw / fgW;
   const stretchY = rh / fgH;

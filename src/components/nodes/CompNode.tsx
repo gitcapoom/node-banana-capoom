@@ -11,7 +11,7 @@ import { releaseColorNode, renderComp, floatNodeToDataUrl, floatNodeToThumbDataU
 import { createImageThumbnailWithMeta, thumbMaxDim } from "@/utils/createImageThumbnail";
 import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
 import { cheapUrlKey, RenderSignatureCache } from "@/utils/renderSignature";
-import { compPinToken, compCommitSignature } from "@/utils/compSignature";
+import { compPinToken, compCommitSignature, normalizeAlignMeta } from "@/utils/compSignature";
 import type { CompNodeData } from "@/types";
 
 type CompNodeType = Node<CompNodeData, "comp">;
@@ -27,11 +27,17 @@ const CHECKER_STYLE: CSSProperties = {
   backgroundPosition: "0 0, 8px 8px",
 };
 
-const INPUT_HANDLES: Array<{ id: string; label: string; top: string; color: string }> = [
-  { id: "image-comp_bg", label: "BG", top: "16%", color: "#2dd4bf" },
-  { id: "image-comp_bg_alpha", label: "BG α", top: "32%", color: "#a3a3a3" },
-  { id: "image-comp_fg", label: "FG", top: "50%", color: "#38bdf8" },
-  { id: "image-comp_fg_alpha", label: "FG α", top: "68%", color: "#a3a3a3" },
+const INPUT_HANDLES: Array<{ id: string; label: string; top: string; color: string; type?: "image" | "text" }> = [
+  { id: "image-comp_bg", label: "BG", top: "14%", color: "#2dd4bf" },
+  { id: "image-comp_bg_alpha", label: "BG α", top: "28%", color: "#a3a3a3" },
+  { id: "image-comp_fg", label: "FG", top: "42%", color: "#38bdf8" },
+  // The FG's crop placement metadata (utils/cropMetadata.ts), sitting directly
+  // under the FG it describes. The id MUST NOT contain the substring "image":
+  // getHandleType (WorkflowCanvas.tsx) tests `includes("image")` BEFORE
+  // `startsWith("text-")`, so "image" anywhere in the id types the pin as an
+  // image pin and it would then only accept image edges.
+  { id: "text-comp_fg_align", label: "Align", top: "56%", color: "#c084fc", type: "text" },
+  { id: "image-comp_fg_alpha", label: "FG α", top: "70%", color: "#a3a3a3" },
   { id: "image-comp_matte", label: "Matte", top: "84%", color: "#a3a3a3" },
 ];
 
@@ -48,6 +54,9 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       const r = {
         bg: null as string | null, bgAlpha: null as string | null, fg: null as string | null, fgAlpha: null as string | null, matte: null as string | null,
         bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null,
+        // Serialized CropMetadata for the FG. A short JSON string, never lazily
+        // unloaded, so it needs no ref token and no *Conn flag.
+        align: null as string | null,
         // Load-boundary-stable token per pin (ref when saved, url key otherwise).
         // Computed HERE so the shallow compare stays on strings — returning the
         // source node objects would re-render on any upstream data change.
@@ -66,6 +75,12 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         const src = state.nodes.find((n) => n.id === e.source);
         if (!src) continue;
         const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+        // The align pin carries TEXT, so it has to be read before the image
+        // guard below — which exists to drop everything that isn't an image.
+        if (e.targetHandle === "text-comp_fg_align") {
+          if (out.type === "text") r.align = out.value ?? null;
+          continue;
+        }
         if (out.type !== "image") continue;
         // The token must be recorded even when the VALUE is lazily null — that is
         // the whole point: on open the ref is present and the pixels are not, and
@@ -107,8 +122,13 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
     if (incoming.fg !== nodeData.fgImage) { patch.fgImage = incoming.fg; patch.fgImageRef = undefined; }
     if (incoming.fgAlpha !== nodeData.fgAlphaImage) { patch.fgAlphaImage = incoming.fgAlpha; patch.fgAlphaImageRef = undefined; }
     if (incoming.matte !== nodeData.matteImage) { patch.matteImage = incoming.matte; patch.matteImageRef = undefined; }
+    // Text mirror — no ref to clear (it isn't externalized). Goes through
+    // normalizeAlignMeta so an unconnected pin never writes null over the
+    // absent field of a comp saved before this pin existed.
+    const nextAlign = normalizeAlignMeta(nodeData.fgAlignMeta, incoming.align);
+    if (nextAlign !== nodeData.fgAlignMeta) patch.fgAlignMeta = nextAlign;
     if (Object.keys(patch).length) updateNodeData(id, patch);
-  }, [incoming, nodeData.bgImage, nodeData.bgAlphaImage, nodeData.fgImage, nodeData.fgAlphaImage, nodeData.matteImage, id, updateNodeData]);
+  }, [incoming, nodeData.bgImage, nodeData.bgAlphaImage, nodeData.fgImage, nodeData.fgAlphaImage, nodeData.matteImage, nodeData.fgAlignMeta, id, updateNodeData]);
 
   // Live preview + commit whenever inputs/params change. The input URLs are
   // full-res data URLs (tens of MB each), so they go in by CHEAP KEY — a raw
@@ -118,7 +138,18 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
   // made `nodeData.compCommitSig === sig` unmatchable: two different
   // serialisations of the same facts, so the persisted signature never hit and
   // every comp re-composited on every open.
-  const sig = compCommitSignature(nodeData as unknown as Record<string, unknown>, {
+  //
+  // The align mirror above lands in node data one render LATE, so the signature
+  // is fed the value the edges carry NOW. Reading the mirror instead would
+  // composite twice for every metadata change, and would disagree with the
+  // executor — which signs from its own freshly-read edges — in between.
+  const alignMeta = normalizeAlignMeta(nodeData.fgAlignMeta, incoming.align);
+  // The same value the signature is built from must be the value the composite
+  // is built from. The mirror lands a render late, and the render effect only
+  // re-runs when `sig` changes — so reading the mirror inside it would composite
+  // with the PREVIOUS metadata and then stamp the new signature on the result.
+  const alignedData = { ...nodeData, fgAlignMeta: alignMeta } as CompNodeData;
+  const sig = compCommitSignature(alignedData as unknown as Record<string, unknown>, {
     bg: { srcId: incoming.bgSrc, token: incoming.bgTok },
     bgAlpha: { srcId: incoming.baSrc, token: incoming.baTok },
     fg: { srcId: incoming.fgSrc, token: incoming.fgTok },
@@ -203,7 +234,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
       // Render OFFSCREEN into this node's float texture — the node body shows
       // the committed thumbnail, not a live canvas, so nothing has to be
       // blitted per mount as the node scrolls in and out of view.
-      const res = await renderComp(buildCompInputs(urls, srcs), buildCompParams(nodeData), id);
+      const res = await renderComp(buildCompInputs(urls, srcs), buildCompParams(alignedData), id);
       if (cancelled) return;
       if (res) {
         // Float texture republished — that's all a re-entry needs.
@@ -228,7 +259,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
         // non-float fallback path, so it ran whenever EXT_color_buffer_float was
         // unavailable, which is exactly when the machine can least afford it.
         if (republishOnly) return;
-        const { dataUrl, outW, outH } = await compositeCompForExecutor(urls, srcs, nodeData, id);
+        const { dataUrl, outW, outH } = await compositeCompForExecutor(urls, srcs, alignedData, id);
         if (cancelled || !dataUrl) return;
         if (dataUrl !== nodeData.outputImage) {
           committedComps.set(id, sig);
@@ -305,7 +336,7 @@ export function CompNode({ id, data, selected }: NodeProps<CompNodeType>) {
           type="target"
           position={Position.Left}
           id={h.id}
-          data-handletype="image"
+          data-handletype={h.type ?? "image"}
           style={{ top: h.top, width: 11, height: 11, background: h.color, border: "1px solid #0008" }}
         />
       ))}

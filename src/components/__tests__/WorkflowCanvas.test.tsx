@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { WorkflowCanvas } from "@/components/WorkflowCanvas";
+import { WorkflowCanvas, getHandleType } from "@/components/WorkflowCanvas";
 import { ReactFlowProvider } from "@xyflow/react";
 
 // Mock the workflow store
@@ -856,5 +856,29 @@ describe("WorkflowCanvas", () => {
       expect(mockUpdateNodeData).not.toHaveBeenCalled();
       expect(mockAddNode).not.toHaveBeenCalled();
     });
+  });
+});
+
+/**
+ * The comp's align pin is a TEXT pin whose id sits next to five image pins.
+ * getHandleType tests `includes("image")` BEFORE `startsWith("text-")`, so an id
+ * like "image-comp_fg_align" would type as an image pin and the metadata edge
+ * could never be made. Pin the id and the answer together.
+ */
+describe("getHandleType — comp align pin", () => {
+  it("types text-comp_fg_align as a text pin", () => {
+    expect(getHandleType("text-comp_fg_align")).toBe("text");
+  });
+
+  it("still types the five comp image pins as image pins", () => {
+    for (const id of [
+      "image-comp_bg",
+      "image-comp_bg_alpha",
+      "image-comp_fg",
+      "image-comp_fg_alpha",
+      "image-comp_matte",
+    ]) {
+      expect(getHandleType(id)).toBe("image");
+    }
   });
 });

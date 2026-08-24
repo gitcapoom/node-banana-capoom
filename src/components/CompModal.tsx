@@ -8,8 +8,12 @@ import { useCompStore, type CompActiveInput } from "@/store/compStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { renderCompPreviewToCanvas, floatNodeToDataUrl, renderComp, releaseColorNode, type CompRoi } from "@/utils/colorChain";
-import { buildCompInputs, buildCompParams, compositeCompForExecutor } from "@/utils/compComposite";
-import { computePieces, reformatScale, forwardPoint, forwardCorners, type CompPieces } from "@/utils/compTransform";
+import { buildCompInputs, buildCompParams, compositeCompForExecutor, resolveFgAlign } from "@/utils/compComposite";
+import {
+  computePieces, computeAlignedPieces, deriveAlignBase, alignRectInOutput, reformatScale,
+  forwardPoint, forwardCorners, type CompPieces, type CompAlignBase, type CompAlignFit,
+} from "@/utils/compTransform";
+import { normalizeAlignMeta } from "@/utils/compSignature";
 import {
   COMP_OP_LABELS, defaultCompTransform, defaultCompFilter, defaultCompResample,
   COMP_RESAMPLE_FILTERS, COMP_RESAMPLE_LABELS,
@@ -35,6 +39,14 @@ const REFORMATS: Array<{ v: CompReformat; label: string }> = [
   { v: "fitH", label: "Fit Horizontal" },
   { v: "fitV", label: "Fit Vertical" },
 ];
+/** How a generated FG whose aspect no longer matches the crop rect fills it. */
+const ALIGN_FITS: Array<{ v: CompAlignFit; label: string }> = [
+  { v: "fit", label: "Fit (inside, BG shows)" },
+  { v: "stretch", label: "Stretch (distorts)" },
+  { v: "fill", label: "Fill (overhangs)" },
+];
+/** Aspect mismatch beyond this is visible, so it is said out loud. */
+const ALIGN_ASPECT_WARN = 0.005;
 const FILTERS: Array<{ v: CompInputFilter["filter"]; label: string }> = [
   { v: "none", label: "None" },
   { v: "gaussian", label: "Gaussian" },
@@ -43,6 +55,12 @@ const FILTERS: Array<{ v: CompInputFilter["filter"]; label: string }> = [
   { v: "zoom", label: "Zoom" },
   { v: "spin", label: "Spin" },
 ];
+
+/** Signed whole px, so the readout reads as an offset rather than a coordinate. */
+function fmtSigned(n: number): string {
+  const r = Math.round(n);
+  return r >= 0 ? `+${r}` : `${r}`;
+}
 
 function loadSize(src: string): Promise<{ w: number; h: number } | null> {
   return new Promise((resolve) => {
@@ -93,16 +111,58 @@ export function CompModal() {
   const [sizes, setSizes] = useState<{ bg?: { w: number; h: number }; bgAlpha?: { w: number; h: number }; fg?: { w: number; h: number }; fgAlpha?: { w: number; h: number }; matte?: { w: number; h: number } }>({});
   const [busy, setBusy] = useState(false);
 
+  // Five source ids + the align pin, shallow-compared.
+  //
+  // This was a useMemo over [edges, nodes], and both arrays get a new identity
+  // on EVERY store write — so `srcs` was a fresh object every time, and it is a
+  // dependency of the preview effect below. A full 24MP composite therefore
+  // re-fired for every unrelated write anywhere in the graph, including the
+  // modal's own 350ms publish and every node propagateFromNode touched. With a
+  // shallow compare the object is stable until a connection genuinely changes.
+  //
+  // Declared above `data` because `data` folds `alignMeta` in — see there.
+  const srcs = useWorkflowStore(
+    useShallow((state) => {
+      const r = { bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null, alignMeta: null as string | null };
+      if (!sourceNodeId) return r;
+      for (const e of state.edges) {
+        if (e.target !== sourceNodeId) continue;
+        const src = state.nodes.find((n) => n.id === e.source);
+        if (!src) continue;
+        const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+        // The FG align pin carries TEXT (serialized CropMetadata), so it must be
+        // read before the image guard below, which drops every non-image output.
+        if (e.targetHandle === "text-comp_fg_align") {
+          if (out.type === "text") r.alignMeta = out.value ?? null;
+          continue;
+        }
+        if (out.type !== "image" || !out.value) continue;
+        if (e.targetHandle === "image-comp_bg") r.bgSrc = src.id;
+        else if (e.targetHandle === "image-comp_bg_alpha") r.baSrc = src.id;
+        else if (e.targetHandle === "image-comp_fg") r.fgSrc = src.id;
+        else if (e.targetHandle === "image-comp_fg_alpha") r.faSrc = src.id;
+        else if (e.targetHandle === "image-comp_matte") r.mtSrc = src.id;
+      }
+      return r;
+    }),
+  );
+
   // Node data with the editor's UNAPPLIED changes layered on top.
   //
   // The draft carries parameters only. The five image mirrors stay live from
   // node data, because CompNode keeps writing them from its edges while this
   // editor is open — drafting them too would freeze the editor on whatever
   // happened to be upstream at the moment it opened.
+  //
+  // The align pin is read STRAIGHT off the edges for the same reason it is in
+  // CompNode's signature: the mirror in node data lands a render late, so the
+  // derived-placement readout and the on-canvas handles would trail the render
+  // by a frame every time the crop moved. normalizeAlignMeta keeps "absent" from
+  // becoming "null" in the object handed to buildCompParams.
   const nodeData = node?.data as CompNodeData | undefined;
   const data = useMemo<CompNodeData | undefined>(
-    () => (nodeData ? { ...nodeData, ...draft } : undefined),
-    [nodeData, draft],
+    () => (nodeData ? { ...nodeData, ...draft, fgAlignMeta: normalizeAlignMeta(nodeData.fgAlignMeta, srcs.alignMeta) } : undefined),
+    [nodeData, draft, srcs.alignMeta],
   );
 
   /** Every parameter edit goes to the draft — never straight to node data. */
@@ -127,34 +187,6 @@ export function CompModal() {
   const resSrc = data?.outputResolution === "fg" && sizes.fg ? sizes.fg : sizes.bg;
   const outW = resSrc?.w ?? 0;
   const outH = resSrc?.h ?? 0;
-
-  // Five source ids, shallow-compared.
-  //
-  // This was a useMemo over [edges, nodes], and both arrays get a new identity
-  // on EVERY store write — so `srcs` was a fresh object every time, and it is a
-  // dependency of the preview effect below. A full 24MP composite therefore
-  // re-fired for every unrelated write anywhere in the graph, including the
-  // modal's own 350ms publish and every node propagateFromNode touched. With a
-  // shallow compare the object is stable until a connection genuinely changes.
-  const srcs = useWorkflowStore(
-    useShallow((state) => {
-      const r = { bgSrc: null as string | null, baSrc: null as string | null, fgSrc: null as string | null, faSrc: null as string | null, mtSrc: null as string | null };
-      if (!sourceNodeId) return r;
-      for (const e of state.edges) {
-        if (e.target !== sourceNodeId) continue;
-        const src = state.nodes.find((n) => n.id === e.source);
-        if (!src) continue;
-        const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
-        if (out.type !== "image" || !out.value) continue;
-        if (e.targetHandle === "image-comp_bg") r.bgSrc = src.id;
-        else if (e.targetHandle === "image-comp_bg_alpha") r.baSrc = src.id;
-        else if (e.targetHandle === "image-comp_fg") r.fgSrc = src.id;
-        else if (e.targetHandle === "image-comp_fg_alpha") r.faSrc = src.id;
-        else if (e.targetHandle === "image-comp_matte") r.mtSrc = src.id;
-      }
-      return r;
-    }),
-  );
 
   // Decode input sizes (for handle geometry + stage fit).
   useEffect(() => {
@@ -195,10 +227,14 @@ export function CompModal() {
   // CompNode already learned this (see renderSignature.ts and CompNode's own
   // sig); the modal never did. useMemo keeps it off renders that changed
   // nothing at all.
+  //
+  // `fgAm` (the align metadata) goes in RAW on purpose — it is a ~200-byte JSON
+  // string, not an image, and the align fields must be here or the new controls
+  // would appear to do nothing until the editor was closed and reopened.
   const previewSig = useMemo(
     () =>
       data
-        ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bgF: data.bgFilter, baF: data.bgAlphaFilter, fgF: data.fgFilter, faF: data.fgAlphaFilter, mtF: data.matteFilter, bgR: data.bgResample, baR: data.bgAlphaResample, fgR: data.fgResample, faR: data.fgAlphaResample, mtR: data.matteResample, bg: cheapUrlKey(data.bgImage), baU: cheapUrlKey(data.bgAlphaImage), fgU: cheapUrlKey(data.fgImage), faU: cheapUrlKey(data.fgAlphaImage), mtU: cheapUrlKey(data.matteImage) })
+        ? JSON.stringify({ op: data.mergeOp, pm: data.premultiplyFg, pmb: data.premultiplyBg, sw: data.swapBgFg, res: data.outputResolution, bo: [data.bgBlackOutside, data.fgBlackOutside], bgo: data.bgOpacity, fgo: data.fgOpacity, bgT: data.bgTransform, baT: data.bgAlphaTransform, fg: data.fgTransform, fa: data.fgAlphaTransform, mt: data.matteTransform, bar: data.bgAlphaReformat, far: data.fgAlphaReformat, mtr: data.matteReformat, bgF: data.bgFilter, baF: data.bgAlphaFilter, fgF: data.fgFilter, faF: data.fgAlphaFilter, mtF: data.matteFilter, bgR: data.bgResample, baR: data.bgAlphaResample, fgR: data.fgResample, faR: data.fgAlphaResample, mtR: data.matteResample, fgAl: data.fgAlign, fgAf: data.fgAlignFit, fgAm: data.fgAlignMeta, bg: cheapUrlKey(data.bgImage), baU: cheapUrlKey(data.bgAlphaImage), fgU: cheapUrlKey(data.fgImage), faU: cheapUrlKey(data.fgAlphaImage), mtU: cheapUrlKey(data.matteImage) })
         : "",
     [data],
   );
@@ -364,10 +400,37 @@ export function CompModal() {
     patchTransform({ hPos: activeTransform.hPos + dx, vPos: activeTransform.vPos + dy });
   };
 
+  // ── FG auto-align, resolved exactly as the renderer resolves it ───────────
+  //
+  // Same functions, same inputs: the on-canvas handles must describe where the
+  // FG actually lands, and the only way to guarantee that is to not compute it
+  // a second way. `base` is null when align is off/blocked OR when the BG turns
+  // out not to be this crop's source — the un-aligned path, in both cases.
+  const fgAlign = useMemo(() => (data ? resolveFgAlign(data) : null), [data]);
+  const fgAlignBase: CompAlignBase | null = useMemo(() => {
+    if (!fgAlign?.spec || !sizes.fg || !outW || !outH) return null;
+    return deriveAlignBase({ ...fgAlign.spec, fgW: sizes.fg.w, fgH: sizes.fg.h, outW, outH });
+  }, [fgAlign, sizes.fg, outW, outH]);
+
+  // Aspect mismatch between what came back and the hole it goes into. Silent
+  // distortion is the trap panoEditor fell into; this feature says it out loud.
+  // Measured against the RECT the renderer uses, not a recomputed one.
+  const fgAlignAspect = useMemo(() => {
+    if (!fgAlign?.spec || !sizes.fg || !outW || !outH || !sizes.fg.h) return null;
+    const rect = alignRectInOutput(fgAlign.spec, outW, outH);
+    if (!rect || rect.h <= 0) return null;
+    const rectA = rect.w / rect.h, fgA = sizes.fg.w / sizes.fg.h;
+    if (Math.abs(fgA / rectA - 1) <= ALIGN_ASPECT_WARN) return null;
+    return { fgA, rectA };
+  }, [fgAlign, sizes.fg, outW, outH]);
+
   // Active input placement pieces (for handles). Hidden unless enabled.
   const showHandles = !!(activeTransform?.enabled && activeSize && outW && outH);
   const pieces: CompPieces | null = useMemo(() => {
     if (!showHandles || !data || !activeTransform || !activeSize) return null;
+    // The FG's box sits on the aligned placement when align is running, so
+    // dragging it moves the patch from where it really is.
+    if (activeInput === "fg" && fgAlignBase) return computeAlignedPieces(activeTransform, fgAlignBase, activeSize.w, activeSize.h);
     if (activeInput === "bg" || activeInput === "fg") return computePieces(activeTransform, "none", activeSize.w, activeSize.h, activeSize.w, activeSize.h);
     if (activeInput === "fgAlpha") {
       const rw = sizes.fg?.w ?? activeSize.w, rh = sizes.fg?.h ?? activeSize.h;
@@ -379,15 +442,19 @@ export function CompModal() {
     }
     const mrw = sizes.bg?.w ?? outW, mrh = sizes.bg?.h ?? outH;
     return computePieces(activeTransform, data.matteReformat, mrw, mrh, activeSize.w, activeSize.h);
-  }, [showHandles, data, activeTransform, activeSize, activeInput, sizes.fg, sizes.bg, outW, outH]);
+  }, [showHandles, data, activeTransform, activeSize, activeInput, sizes.fg, sizes.bg, outW, outH, fgAlignBase]);
 
+  // The scale the user's scaleX/scaleY multiply. A corner drag solves for the
+  // TOTAL scale and divides by this to recover the user's delta — so with align
+  // running it has to be the align base, or the field would jump on every drag.
   const sx0sy0 = useMemo<[number, number]>(() => {
     if (!data || !activeSize) return [1, 1];
-    if (activeInput === "bg" || activeInput === "fg") return [1, 1];
+    if (activeInput === "fg") return fgAlignBase ? [fgAlignBase.sX, fgAlignBase.sY] : [1, 1];
+    if (activeInput === "bg") return [1, 1];
     if (activeInput === "fgAlpha") return reformatScale(data.fgAlphaReformat, sizes.fg?.w ?? activeSize.w, sizes.fg?.h ?? activeSize.h, activeSize.w, activeSize.h);
     if (activeInput === "bgAlpha") return reformatScale(data.bgAlphaReformat, sizes.bg?.w ?? activeSize.w, sizes.bg?.h ?? activeSize.h, activeSize.w, activeSize.h);
     return reformatScale(data.matteReformat, sizes.bg?.w ?? outW, sizes.bg?.h ?? outH, activeSize.w, activeSize.h);
-  }, [data, activeSize, activeInput, sizes.fg, sizes.bg, outW, outH]);
+  }, [data, activeSize, activeInput, sizes.fg, sizes.bg, outW, outH, fgAlignBase]);
 
   // konva (top-left) <-> output bottom-left
   const toKonva = (o: Pt): Pt => ({ x: o.x, y: outH - o.y });
@@ -688,12 +755,90 @@ export function CompModal() {
               </div>
             )}
 
+            {/* FG auto-align — crop → generate → composite back. Sits above the
+                transform block because it composes UNDERNEATH it: the fields
+                below stay the user's own offsets on top of this placement. */}
+            {activeInput === "fg" && (
+              <div className="flex flex-col gap-1.5 pb-2 border-b border-neutral-800">
+                <label
+                  className={`flex items-center gap-2 text-[11px] ${fgAlign?.blocked ? "text-neutral-500 cursor-not-allowed" : "text-neutral-300 cursor-pointer"}`}
+                  title="Drop the FG back onto the region its crop metadata came from, at whatever resolution the generator returned. Composes under the transform below — your H/V/Scale stay a delta on top of it."
+                >
+                  <input
+                    type="checkbox"
+                    disabled={!!fgAlign?.blocked}
+                    checked={(data.fgAlign ?? "auto") === "auto"}
+                    onChange={(e) => patch({ fgAlign: e.target.checked ? "auto" : "off" })}
+                    className="accent-teal-500"
+                  />
+                  Auto-align from crop
+                </label>
+                {/* A disabled control with no stated reason is the thing this
+                    feature is not allowed to ship — but "nothing on the pin" is
+                    the resting state of EVERY comp that has nothing to do with
+                    cropping, and the FG tab is the one the editor opens on. Amber
+                    there would put a warning in front of every comp on the canvas
+                    forever, which is how people learn to stop reading warnings.
+                    Neutral for the resting state, amber only for a setting of the
+                    user's that is actively fighting the feature. */}
+                {fgAlign?.blocked && (
+                  <div className={`text-[10px] leading-snug ${fgAlign.meta ? "text-amber-500/90" : "text-neutral-500"}`}>
+                    {fgAlign.blocked}
+                  </div>
+                )}
+                {!fgAlign?.blocked && (data.fgAlign ?? "auto") === "auto" && (
+                  <>
+                    <div className="flex items-center gap-1.5" title="How a generated FG whose aspect no longer matches the crop rect fills it">
+                      <label className="text-[10px] text-neutral-400 w-[64px] shrink-0">Fit</label>
+                      <select
+                        value={data.fgAlignFit ?? "fit"}
+                        onChange={(e) => patch({ fgAlignFit: e.target.value as CompAlignFit })}
+                        className="nodrag flex-1 min-w-0 text-[10px] py-1 px-1.5 bg-[#1a1a1a] rounded text-white outline-none border border-neutral-700"
+                      >
+                        {ALIGN_FITS.map((f) => <option key={f.v} value={f.v}>{f.label}</option>)}
+                      </select>
+                    </div>
+                    {sizes.fg && !fgAlignBase && (
+                      <div className="text-[10px] text-amber-500/90 leading-snug">
+                        The BG is not this crop&apos;s source (its aspect differs) — the FG is placed un-aligned.
+                      </div>
+                    )}
+                    {fgAlignAspect && (
+                      <div className="text-[10px] text-amber-400 leading-snug">
+                        FG aspect {fgAlignAspect.fgA.toFixed(3)} ≠ crop aspect {fgAlignAspect.rectA.toFixed(3)}.{" "}
+                        {(data.fgAlignFit ?? "fit") === "stretch"
+                          ? "Stretch distorts the patch."
+                          : (data.fgAlignFit ?? "fit") === "fill"
+                            ? "Fill overhangs the crop rect."
+                            : "Fit leaves the BG showing in the slack."}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             <label className="flex items-center gap-2 text-[11px] text-neutral-300 cursor-pointer">
               <input type="checkbox" checked={activeTransform?.enabled ?? false} onChange={(e) => patchTransform({ enabled: e.target.checked })} className="accent-teal-500" />
               {followsLabel ? (activeTransform?.enabled ? "Transform independently" : `Follow ${followsLabel}`) : "Enable transform"}
             </label>
             {followsLabel && !activeTransform?.enabled && (
               <div className="text-[10px] text-neutral-500 leading-snug">Following the {followsLabel} transform. Enable to move it independently.</div>
+            )}
+
+            {/* The placement auto-align derived, read-only. Align composes
+                underneath rather than writing into fgTransform, so the fields
+                below are the user's DELTA — the base has to be visible
+                somewhere or those numbers describe nothing they can see.
+                OUTSIDE the block below on purpose: that block dims on
+                `fgTransform.enabled`, which defaults to FALSE and only gates the
+                editor's own fields and handles — the shader applies fgTransform
+                (and this base) either way. Dimmed, it would read as "align is
+                off" at exactly the moment align is doing all the work. */}
+            {activeInput === "fg" && fgAlignBase && (
+              <div className="text-[10px] text-teal-400/90 tabular-nums leading-snug" title="Derived from the crop metadata. The transform fields below are your offsets on top of it.">
+                Auto: {fmtSigned(fgAlignBase.hPos)}, {fmtSigned(fgAlignBase.vPos)} · {fgAlignBase.sX.toFixed(3)}×{fgAlignBase.sY.toFixed(3)}
+              </div>
             )}
 
             <div className={`flex flex-col gap-1.5 ${activeTransform?.enabled ? "" : "opacity-50 pointer-events-none"}`}>

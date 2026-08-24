@@ -20,7 +20,8 @@ import {
   type CompResolvable,
 } from "./colorChain";
 import { getImageDimensions } from "./nodeDimensions";
-import { computePieces, forwardCorners } from "./compTransform";
+import { computePieces, computeAlignedPieces, deriveAlignBase, forwardCorners, type CompAlignSpec } from "./compTransform";
+import { parseCropMetadata, type CropMetadata } from "./cropMetadata";
 
 /** url + producing node id → float texture if available, else the url. */
 export function resolveInputRef(url: string | null, srcNodeId: string | null): CompResolvable | null {
@@ -42,6 +43,51 @@ export function buildCompInputs(urls: CompInputUrls, srcs: CompInputSrcs): CompR
   };
 }
 
+/**
+ * What the FG auto-align resolves to for this comp — the single answer every
+ * consumer asks for, so the render, the editor's handles and the Canvas2D
+ * fallback cannot disagree about where the patch goes.
+ *
+ * `spec` is what the compositor needs; `meta` and `blocked` exist for the
+ * editor, which has to explain itself: a disabled checkbox with no stated reason
+ * is the thing this feature is not allowed to ship.
+ */
+export interface FgAlignResolution {
+  /** Non-null only when align can actually run. */
+  spec: CompAlignSpec | null;
+  /** Parsed pin payload, whether or not align is on. */
+  meta: CropMetadata | null;
+  /** Why align CANNOT run, for the UI. Null when it can — including when the
+   *  user has simply switched it off, which is a choice, not a blockage. */
+  blocked: string | null;
+}
+
+export function resolveFgAlign(data: CompNodeData): FgAlignResolution {
+  const meta = parseCropMetadata(data.fgAlignMeta);
+  // Output-from-FG makes the output frame the FG's OWN size, so there is no
+  // BG-space rect to align into — the placement would be meaningless rather
+  // than merely wrong. Blocked, never silently coerced: the user's
+  // `outputResolution` is theirs to set.
+  const blocked =
+    (data.outputResolution ?? "bg") === "fg"
+      ? "Output res is FG — the frame is the FG's own size, so there is no BG region to align into."
+      : !meta
+        ? "No crop metadata on the Align pin — connect an Image Crop node's text output."
+        : null;
+  if (blocked || !meta || (data.fgAlign ?? "auto") === "off") return { spec: null, meta, blocked };
+  return {
+    spec: {
+      crop: meta.crop,
+      region: meta.region,
+      srcW: meta.sourceWidth,
+      srcH: meta.sourceHeight,
+      fit: data.fgAlignFit ?? "fit",
+    },
+    meta,
+    blocked: null,
+  };
+}
+
 export function buildCompParams(data: CompNodeData): CompRenderParams {
   const idt = defaultCompTransform();
   // Merge against defaults so a legacy/partial transform can't reach the shader
@@ -49,6 +95,7 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
   const T = (t?: Partial<import("@/types/comp").CompTransform>) => ({ ...idt, ...(t ?? {}) });
   const idf: CompInputFilter = { ...defaultCompFilter(), filter: "none" };
   const Fm = (f?: Partial<CompInputFilter>) => ({ ...idf, ...(f ?? {}) });
+  const { spec: fgAlign } = resolveFgAlign(data);
   return {
     op: COMP_OP_INDEX[data.mergeOp] ?? 0,
     bgTransform: T(data.bgTransform),
@@ -65,6 +112,11 @@ export function buildCompParams(data: CompNodeData): CompRenderParams {
     fgBlackOutside: data.fgBlackOutside ?? true,
     swapBgFg: data.swapBgFg ?? false,
     outputResolution: data.outputResolution ?? "bg",
+    // Description only — this function has no image access, so the scale cannot
+    // be computed here. compUniforms holds the decoded sizes and finishes it.
+    // Absent (not null) when align is off/blocked, so the field never reaches a
+    // consumer half-built.
+    ...(fgAlign ? { fgAlign } : {}),
     bgOpacity: data.bgOpacity ?? 1,
     fgOpacity: data.fgOpacity ?? 1,
     filters: {
@@ -204,7 +256,14 @@ async function compositeFallback(urls: CompInputUrls, data: CompNodeData): Promi
       if (fctx) {
         fctx.drawImage(fg, 0, 0);
         if (urls.fgAlpha) applyAlphaMask(fctx, await lumToAlphaCanvas(urls.fgAlpha, iw, ih));
-        const p = computePieces(data.fgTransform, "none", iw, ih, iw, ih);
+        // Same aligned placement the GPU path uses — this fallback has to agree
+        // with the render, or the patch lands somewhere else the moment float
+        // support drops out.
+        const spec = resolveFgAlign(data).spec;
+        const alignBase = spec ? deriveAlignBase({ ...spec, fgW: iw, fgH: ih, outW: W, outH: H }) : null;
+        const p = alignBase
+          ? computeAlignedPieces(data.fgTransform, alignBase, iw, ih)
+          : computePieces(data.fgTransform, "none", iw, ih, iw, ih);
         // Forward corners (output bottom-left) → canvas top-left (y = H - y).
         const c = forwardCorners(p).map((o) => ({ x: o.x, y: H - o.y }));
         const srcTL = [{ x: 0, y: ih }, { x: iw, y: ih }, { x: iw, y: 0 }];

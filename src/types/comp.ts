@@ -18,6 +18,9 @@
  */
 
 import type { BaseNodeData } from "./annotation";
+// Type-only, so it is erased at compile time and no import cycle exists at
+// runtime even though compTransform.ts imports the transform types from here.
+import type { CompAlignFit } from "@/utils/compTransform";
 
 /** Merge operations. Order is mirrored by COMP_OP_INDEX (the shader selector). */
 export type CompMergeOp =
@@ -193,6 +196,35 @@ export interface CompNodeData extends BaseNodeData {
   fgAlphaResample?: CompResampleFilter;
   matteResample?: CompResampleFilter;
 
+  // ---- FG auto-align (crop → generate → composite back) -------------------
+  //
+  // A crop carries a serialized CropMetadata (utils/cropMetadata.ts) describing
+  // the region it came from. Fed to the `text-comp_fg_align` pin, it lets the
+  // comp drop a re-generated patch back exactly where it was cut from, whatever
+  // resolution the generator chose to return.
+
+  /**
+   * Mirror of the `text-comp_fg_align` pin, written by the machinery (node
+   * component / executor) exactly like the five image mirrors — hence its entry
+   * in SKIP_UNDO_KEYS.
+   *
+   * `undefined` (a comp saved before this pin existed) and `null` (pin present,
+   * carrying nothing) mean the same thing to the composite, but they do NOT
+   * serialize the same: JSON.stringify omits the first and emits the second.
+   * Everything that writes or signs this field must go through
+   * `normalizeAlignMeta` (compSignature.ts) so the distinction is preserved.
+   */
+  fgAlignMeta?: string | null;
+
+  /** Auto-align the FG onto the region its metadata came from. Composes
+   *  UNDERNEATH `fgTransform` — align never writes into the user's transform,
+   *  so their offsets stay theirs and stay editable. */
+  fgAlign?: "auto" | "off";
+
+  /** How a generated FG whose aspect no longer matches the crop rect fills it.
+   *  "fit" (uniform, centred, BG showing through the slack) is the default. */
+  fgAlignFit?: CompAlignFit;
+
   /** Multiply the FG's / BG's RGB by its (effective) alpha before compositing. */
   premultiplyFg: boolean;
   premultiplyBg: boolean;
@@ -278,6 +310,11 @@ export function defaultCompData(): CompNodeData {
     fgResample: defaultCompResample(),
     fgAlphaResample: defaultCompResample(),
     matteResample: defaultCompResample(),
+    // Align is armed by default but inert until the pin carries metadata — a
+    // comp with nothing on `text-comp_fg_align` behaves exactly as before.
+    fgAlignMeta: null,
+    fgAlign: "auto",
+    fgAlignFit: "fit",
     premultiplyFg: false,
     premultiplyBg: false,
     bgOpacity: 1,

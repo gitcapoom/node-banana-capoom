@@ -35,6 +35,7 @@
  * crop node. It returns `null` on anything it does not fully recognise.
  */
 
+import { clampRelativeRegion } from "./cropImage";
 import type { CropResult, RelativeCropRegion } from "./cropImage";
 
 export interface CropMetadata {
@@ -70,12 +71,21 @@ const EDGE_SLACK_PX = 1;
  *
  * `emitted` defaults to the crop's own pixel size; pass it only when the image
  * placed on the handle is not the raw crop.
+ *
+ * `region` is CLAMPED here with the same function `cropImageToDataUrl` clamps
+ * with. The integers in `crop` were derived from the clamped region, so storing
+ * the raw one would put two disagreeing descriptions of the same rect in one
+ * payload — and since `parseCropMetadata` rejects a region that leaves the unit
+ * box, a crop box dragged to within the transformer's 5px minimum of an edge
+ * (ImageCropModal's `Math.max(5, w)` runs AFTER its edge clamp) would produce
+ * metadata that silently fails to parse, reported downstream as "no metadata".
  */
 export function buildCropMetadata(
   result: CropResult,
-  region: RelativeCropRegion,
+  rawRegion: RelativeCropRegion,
   emitted?: { width: number; height: number }
 ): CropMetadata {
+  const region = clampRelativeRegion(rawRegion);
   return {
     v: 1,
     kind: "imageCrop",

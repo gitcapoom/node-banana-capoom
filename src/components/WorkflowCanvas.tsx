@@ -172,7 +172,10 @@ const edgeTypes: EdgeTypes = {
 // - Video handles can only connect to generateVideo or output nodes
 // Helper to determine handle type from handle ID
 // For dynamic handles, we use naming convention: image inputs contain "image", text inputs are "prompt" or "negative_prompt"
-const getHandleType = (handleId: string | null | undefined): "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | "universal" | null => {
+// Exported for the handle-typing regression test: the image check below is a
+// substring test that runs BEFORE the text check, so a text pin whose id happens
+// to contain "image" silently becomes an image pin.
+export const getHandleType = (handleId: string | null | undefined): "image" | "text" | "video" | "audio" | "3d" | "easeCurve" | "universal" | null => {
   if (!handleId) return null;
   // Dynamic-pin slots (new pin model): dynpin__{type}__{field}__{slot}
   const dyn = parseDynPin(handleId);
@@ -270,14 +273,18 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "roto":
       return { inputs: ["image"], outputs: ["image"] };
     case "comp":
+      // `text-comp_fg_align` is the FG's crop placement metadata. Its id must
+      // stay free of the substring "image" — see getHandleType above.
       return {
-        inputs: ["image-comp_bg", "image-comp_bg_alpha", "image-comp_fg", "image-comp_fg_alpha", "image-comp_matte"],
+        inputs: ["image-comp_bg", "image-comp_bg_alpha", "image-comp_fg", "text-comp_fg_align", "image-comp_fg_alpha", "image-comp_matte"],
         outputs: ["image"],
       };
     case "videoInput":
       return { inputs: ["video"], outputs: ["video"] };
     case "imageCrop":
-      return { inputs: ["image"], outputs: ["image"] };
+      // `text` is the placement metadata pin (see utils/cropMetadata.ts), the
+      // same image+text output pair panoCrop publishes.
+      return { inputs: ["image"], outputs: ["image", "text"] };
     case "mirror":
       return { inputs: ["image"], outputs: ["image"] };
     case "sphereLightRender":

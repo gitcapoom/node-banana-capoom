@@ -680,10 +680,16 @@ const SKIP_UNDO_KEYS = new Set([
   "outputMaskThumb", "outputMaskDims", "imageThumb", "imageThumbKey", "imageDims",
   "thumbnailImage", "thumbnailImageRef", "thumbnailImageKey",
   "sourceImageThumb", "sourceImageDims",
+  // Derived from the crop geometry by ImageCropNode's effect / executeImageCrop,
+  // never by a user gesture — and the passthrough branch writes it ON ITS OWN,
+  // so without this every crop node pushed a full graph snapshot the moment its
+  // source hydrated. The user's actual edit (`cropRegion`) is not in this set,
+  // so Apply / Reset / Remove still push exactly one.
+  "cropMetadata",
   // mirrored inputs (a node copying upstream into its own data)
   "sourceImage", "sourceImageRef", "matteImage", "matteImageRef",
   "bgImage", "bgImageRef", "bgAlphaImage", "bgAlphaImageRef",
-  "fgImage", "fgImageRef", "fgAlphaImage", "fgAlphaImageRef",
+  "fgImage", "fgImageRef", "fgAlphaImage", "fgAlphaImageRef", "fgAlignMeta",
   "imageA", "imageARef", "imageAThumb", "imageB", "imageBRef", "imageBThumb",
 ]);
 

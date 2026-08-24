@@ -613,6 +613,7 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         cropRegion: null,
         aspectLock: "free",
         outputImage: null,
+        cropMetadata: null,
       };
     case "mirror":
       return {

@@ -497,6 +497,7 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         cropRegion: null,
         aspectLock: "free",
         outputImage: null,
+        cropMetadata: null,
       } as ImageCropNodeData;
     case "mirror":
       return {

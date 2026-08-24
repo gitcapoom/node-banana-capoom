@@ -28,13 +28,18 @@ import type {
 import type { NodeExecutionContext } from "./types";
 import { parseTextToArray } from "@/utils/arrayParser";
 import { parseVarTags } from "@/utils/parseVarTags";
-import { cropImageToDataUrl } from "@/utils/cropImage";
+import { cropImageToDataUrl, type RelativeCropRegion } from "@/utils/cropImage";
+import {
+  buildCropMetadata,
+  identityCropMetadata,
+  serializeCropMetadata,
+} from "@/utils/cropMetadata";
 import { mirrorImage } from "@/utils/mirrorImage";
 import { applyCubemapEquirect, splitCubemap, combineCubemap, CUBE_FACES, type CubeFace } from "@/utils/cubemapEquirect";
 import { coerceChannel } from "@/utils/colorGrade";
 import { shiftImageX } from "@/utils/panoShift";
 import { renderSphereLight } from "@/utils/renderSphereLight";
-import { compCommitSignature, compPinToken } from "@/utils/compSignature";
+import { compCommitSignature, compPinToken, normalizeAlignMeta } from "@/utils/compSignature";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { ensureFullResForNodes } from "@/store/execution/hydrateForRun";
 import { commitProcessorOutput } from "@/store/execution/commitProcessorOutput";
@@ -539,11 +544,19 @@ export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
     const nodes = getNodes();
     let bg: string | null = null, ba: string | null = null, fg: string | null = null, fa: string | null = null, mt: string | null = null;
     let bgSrc: string | null = null, baSrc: string | null = null, fgSrc: string | null = null, faSrc: string | null = null, mtSrc: string | null = null;
+    // Serialized CropMetadata for the FG (utils/cropMetadata.ts) — a text pin.
+    let align: string | null = null;
     for (const e of edges) {
       if (e.target !== node.id) continue;
       const src = nodes.find((n) => n.id === e.source);
       if (!src) continue;
       const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+      // Read the align pin BEFORE the image guard below — that guard exists to
+      // drop non-image outputs and would otherwise swallow this one.
+      if (e.targetHandle === "text-comp_fg_align") {
+        if (out.type === "text") align = out.value ?? null;
+        continue;
+      }
       if (out.type !== "image" || !out.value) continue;
       if (e.targetHandle === "image-comp_bg") { bg = out.value; bgSrc = src.id; }
       else if (e.targetHandle === "image-comp_bg_alpha") { ba = out.value; baSrc = src.id; }
@@ -551,10 +564,14 @@ export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
       else if (e.targetHandle === "image-comp_fg_alpha") { fa = out.value; faSrc = src.id; }
       else if (e.targetHandle === "image-comp_matte") { mt = out.value; mtSrc = src.id; }
     }
+    // Preserves "field absent" for every comp saved before the align pin
+    // existed — writing null over it would change its stored signature and cost
+    // a full recomposite for nothing. See normalizeAlignMeta.
+    const alignMeta = normalizeAlignMeta(data.fgAlignMeta, align);
     updateNodeData(node.id, {
       bgImage: bg, bgImageRef: undefined, bgAlphaImage: ba, bgAlphaImageRef: undefined,
       fgImage: fg, fgImageRef: undefined, fgAlphaImage: fa, fgAlphaImageRef: undefined,
-      matteImage: mt, matteImageRef: undefined,
+      matteImage: mt, matteImageRef: undefined, fgAlignMeta: alignMeta,
     });
     if (!bg) {
       if (data.outputImage !== null) await commitProcessorOutput(updateNodeData, node.id, null);
@@ -577,7 +594,15 @@ export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
     const pinOf = (srcId: string | null, value: string | null) => ({
       srcId, token: compPinToken(srcId ? byId.get(srcId) ?? null : null, value),
     });
-    const runSig = compCommitSignature(data as unknown as Record<string, unknown>, {
+    // Sign from the MIRRORED align value, not the pre-mirror `data`. `data` is
+    // the snapshot taken before the write above, so signing from it would produce
+    // a signature the node component (which signs from the edges) never agrees
+    // with — and the comp would recomposite on every single render.
+    // One object for both the signature and the composite: `data` is the
+    // pre-mirror snapshot, so compositing from it would place the FG with the
+    // PREVIOUS align metadata and then stamp the new signature on the result.
+    const alignedData = { ...data, fgAlignMeta: alignMeta };
+    const runSig = compCommitSignature(alignedData as unknown as Record<string, unknown>, {
       bg: pinOf(bgSrc, bg), bgAlpha: pinOf(baSrc, ba), fg: pinOf(fgSrc, fg),
       fgAlpha: pinOf(faSrc, fa), matte: pinOf(mtSrc, mt),
     });
@@ -590,7 +615,7 @@ export async function executeComp(ctx: NodeExecutionContext): Promise<void> {
     const { dataUrl, outW, outH } = await compositeCompForExecutor(
       { bg, bgAlpha: ba, fg, fgAlpha: fa, matte: mt },
       { bgSrc, baSrc, fgSrc, faSrc, mtSrc },
-      data,
+      alignedData,
       node.id,
     );
     updateNodeData(node.id, {
@@ -683,10 +708,19 @@ export async function executeViewer(ctx: NodeExecutionContext): Promise<void> {
   }
 }
 
+/** The whole frame, relative. Used to read a source's real size via the
+ *  full-frame short-circuit in `cropImageToDataUrl` — a decode, no encode. */
+const FULL_FRAME: RelativeCropRegion = { x: 0, y: 0, width: 1, height: 1 };
+
 /**
  * Image Crop node: receives upstream image and applies the persisted crop region.
  * If no region is defined, passes the image through unchanged.
  * Crop region uses relative (0-1) coordinates so it adapts to any input resolution.
+ *
+ * Also publishes the placement metadata on the node's `text` pin. `imageCrop` is
+ * a LOCAL_PROCESSOR_TYPE, so this executor force-reruns ahead of downstream
+ * nodes and overwrites whatever the modal committed — every field the modal
+ * writes has to be reproduced here or a run silently drops it.
  */
 export async function executeImageCrop(ctx: NodeExecutionContext): Promise<void> {
   const { node, getConnectedInputs, updateNodeData } = ctx;
@@ -696,9 +730,17 @@ export async function executeImageCrop(ctx: NodeExecutionContext): Promise<void>
     const nodeData = node.data as ImageCropNodeData;
 
     if (!incoming) {
-      // No input — clear output
+      // No input — clear output. The metadata goes with it: it describes a
+      // frame that is no longer here.
+      //
+      // Guarded on `outputImage` alone, matching ImageCropNode: "no incoming"
+      // also covers "the upstream is not hydrated yet" (a run started from a
+      // downstream node need not have loaded it), and `cropMetadata` lives
+      // inline in the workflow JSON, so it is present and correct in exactly
+      // that case. Clearing on its presence would throw away good metadata and
+      // force every downstream comp to recomposite un-aligned.
       if (nodeData.outputImage !== null) {
-        updateNodeData(node.id, { outputImage: null, sourceImage: null });
+        updateNodeData(node.id, { outputImage: null, sourceImage: null, cropMetadata: null });
       }
       return;
     }
@@ -708,19 +750,44 @@ export async function executeImageCrop(ctx: NodeExecutionContext): Promise<void>
       updateNodeData(node.id, { sourceImage: incoming, sourceImageRef: undefined });
     }
 
-    // No crop region → passthrough
+    // No crop region → passthrough. Still emits IDENTITY metadata rather than
+    // null: a consumer must be able to tell "the whole frame, in place" from
+    // "nothing loaded yet", and only a payload can say the former.
     if (!nodeData.cropRegion) {
-      await commitProcessorOutput(updateNodeData, node.id, incoming);
+      let identity: string | null = null;
+      try {
+        const full = await cropImageToDataUrl(incoming, FULL_FRAME);
+        if (full.srcW > 0 && full.srcH > 0) {
+          identity = serializeCropMetadata(identityCropMetadata(full.srcW, full.srcH));
+        }
+      } catch (err) {
+        // Measuring is best-effort: before the metadata existed this path could
+        // not fail, and downstream still needs the pixels. Pass them through
+        // with no payload rather than turning a passthrough into a node error.
+        console.error(`[Workflow] Image Crop: could not measure source:`, err);
+      }
+      await commitProcessorOutput(updateNodeData, node.id, incoming, {
+        cropMetadata: identity,
+      } as Partial<ImageCropNodeData>);
       return;
     }
 
     // Apply the crop
     try {
       const cropped = await cropImageToDataUrl(incoming, nodeData.cropRegion);
-      await commitProcessorOutput(updateNodeData, node.id, cropped.dataUrl);
+      await commitProcessorOutput(updateNodeData, node.id, cropped.dataUrl, {
+        // Built from the CropResult, so the integers are the ones drawImage was
+        // given — not a recomputation from the relative region.
+        cropMetadata: serializeCropMetadata(buildCropMetadata(cropped, nodeData.cropRegion)),
+      } as Partial<ImageCropNodeData>);
     } catch (err) {
       console.error(`[Workflow] Image Crop failed:`, err);
-      await commitProcessorOutput(updateNodeData, node.id, incoming);
+      // The image could not be read at all, so there is no honest geometry to
+      // publish — clearing beats leaving metadata that describes pixels this
+      // passthrough is not emitting.
+      await commitProcessorOutput(updateNodeData, node.id, incoming, {
+        cropMetadata: null,
+      } as Partial<ImageCropNodeData>);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

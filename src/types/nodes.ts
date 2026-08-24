@@ -152,6 +152,17 @@ export interface ImageCropNodeData extends BaseNodeData {
   /** cheapUrlKey of the outputImage this thumb was made from. Proves the thumb
    *  is current WITHOUT needing a file ref — see previewSrc. */
   outputImageThumbKey?: string | null;
+  /**
+   * Serialized `CropMetadata` (see utils/cropMetadata.ts), published on the
+   * node's `text` output so a downstream Comp can put a generated patch back
+   * exactly where the crop came from. Small enough to live inline in the
+   * workflow JSON — deliberately NOT in imageFieldMap.
+   *
+   * Never null once a source image has been read: the passthrough paths emit
+   * IDENTITY metadata, because a connected-but-null pin cannot be told apart
+   * from "not hydrated yet" by the consumer.
+   */
+  cropMetadata: string | null;
 }
 
 /**

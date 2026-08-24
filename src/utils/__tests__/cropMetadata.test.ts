@@ -63,6 +63,37 @@ describe("buildCropMetadata", () => {
     // The crop rect is untouched by that — it still describes the source pixels.
     expect(m.crop.width).toBe(400);
   });
+
+  /**
+   * The region and the integer rect must describe the SAME sample.
+   *
+   * `cropImageToDataUrl` clamps its region before rounding, so the integers are
+   * always in-frame; the raw region need not be. ImageCropModal's transform
+   * handler clamps the box to the image edge and THEN applies its 5px minimum
+   * (`Math.max(5, w)`), so dragging the crop against an edge can hand us
+   * `x + width > 1`. Stored raw, `parseCropMetadata` rejects the whole payload
+   * and the Comp reports "no crop metadata" — a silent loss of alignment with a
+   * misleading reason. Clamping here keeps the two halves in agreement.
+   */
+  it("clamps a region that overruns the unit box, so the payload still parses", () => {
+    const m = buildCropMetadata(
+      result({ srcW: 1000, srcH: 1000, sx: 990, sy: 0, sw: 10, sh: 10 }),
+      { x: 0.99, y: 0, width: 0.02, height: 0.01 },
+    );
+    expect(m.region.x).toBe(0.99);
+    // 1 - 0.99 exactly, so it lands ON the box edge rather than past it.
+    expect(m.region.x + m.region.width).toBeCloseTo(1, 12);
+    expect(parseCropMetadata(serializeCropMetadata(m))).toEqual(m);
+  });
+
+  it("clamps a negative origin rather than emitting an unparseable region", () => {
+    const m = buildCropMetadata(
+      result({ srcW: 1000, srcH: 1000, sx: 0, sy: 0, sw: 100, sh: 100 }),
+      { x: -0.05, y: -0.05, width: 0.1, height: 0.1 },
+    );
+    expect(m.region).toEqual({ x: 0, y: 0, width: 0.1, height: 0.1 });
+    expect(parseCropMetadata(serializeCropMetadata(m))).not.toBeNull();
+  });
 });
 
 describe("independent rounding", () => {

@@ -109,6 +109,24 @@ export interface CompPins {
 }
 
 /**
+ * Reconcile an incoming `text-comp_fg_align` value against what the comp already
+ * holds, WITHOUT turning "field absent" into "field present and null".
+ *
+ * Both mean the same thing to the composite, but they serialize differently:
+ * JSON.stringify omits an undefined key and emits `null` for a null one. Every
+ * comp saved before this pin existed has the field absent, so writing null over
+ * it — in the node's mirror, in the executor's mirror, or in the signature —
+ * would change EVERY stored `compCommitSig` and force a full recomposite (1.0-1.8s
+ * per comp) on the next open. Keep the existing value whenever it is equivalent.
+ */
+export function normalizeAlignMeta(
+  current: string | null | undefined,
+  incoming: string | null,
+): string | null | undefined {
+  return (current ?? null) === incoming ? current : incoming;
+}
+
+/**
  * Every input and parameter the composite depends on. Shared by the node
  * component, the executor and the save-time stamp — one definition, so they
  * cannot disagree about whether a comp is current.
@@ -130,6 +148,12 @@ export function compCommitSignature(data: Record<string, unknown>, pins: CompPin
     faF: data.fgAlphaFilter, mtF: data.matteFilter,
     bgR: data.bgResample, baR: data.bgAlphaResample, fgR: data.fgResample,
     faR: data.fgAlphaResample, mtR: data.matteResample,
+    // FG auto-align. PLAIN FIELDS, not a sixth CompPins entry, and deliberately
+    // so: every comp already on disk has all three undefined, JSON.stringify
+    // omits undefined keys, and the emitted string is therefore byte-identical
+    // to what those comps were saved with. A sixth pin would append `"fa6":"-"`
+    // to every signature instead and invalidate the lot on next open.
+    fgA: data.fgAlignMeta, fgAo: data.fgAlign, fgAf: data.fgAlignFit,
   });
 }
 

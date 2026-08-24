@@ -37,8 +37,14 @@ export interface CropResult {
 
 /**
  * Clamp a relative region to the [0,1] box so we never sample outside the image.
+ *
+ * Exported because `buildCropMetadata` has to record the SAME region this
+ * function produced: the integer rect in the metadata comes from the clamped
+ * region, so recording the raw one would describe a rect that was never
+ * sampled — and `parseCropMetadata` rejects an out-of-unit-box region outright,
+ * taking the whole payload with it.
  */
-function clampRelativeRegion(region: RelativeCropRegion): RelativeCropRegion {
+export function clampRelativeRegion(region: RelativeCropRegion): RelativeCropRegion {
   const x = Math.max(0, Math.min(1, region.x));
   const y = Math.max(0, Math.min(1, region.y));
   const maxW = Math.max(0, 1 - x);

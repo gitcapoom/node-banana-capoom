@@ -8,6 +8,11 @@ import Konva from "konva";
 import { useImageCropStore, type CropRegion } from "@/store/imageCropStore";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { cropImageToDataUrl } from "@/utils/cropImage";
+import {
+  buildCropMetadata,
+  identityCropMetadata,
+  serializeCropMetadata,
+} from "@/utils/cropMetadata";
 import type { ImageCropAspectLock } from "@/types";
 
 const ASPECT_PRESETS: { key: ImageCropAspectLock; label: string; ratio: number | null }[] = [
@@ -259,9 +264,19 @@ export function ImageCropModal() {
     // If there's no region, fall back to passthrough (source as output).
     // On crop failure, also fall back so we never block the modal.
     let outputImage: string | null = sourceImage;
+    // Placement metadata rides along in the same commit as the pixels — see
+    // utils/cropMetadata.ts. The identity payload (whole frame, in place) is
+    // what the passthrough and failure paths publish, because a null pin is
+    // indistinguishable downstream from "not loaded yet".
+    const loaded = image && image.width > 0 && image.height > 0 ? image : null;
+    let cropMetadata: string | null = loaded
+      ? serializeCropMetadata(identityCropMetadata(loaded.width, loaded.height))
+      : null;
     if (sourceImage && cropRegion) {
       try {
-        outputImage = (await cropImageToDataUrl(sourceImage, cropRegion)).dataUrl;
+        const result = await cropImageToDataUrl(sourceImage, cropRegion);
+        outputImage = result.dataUrl;
+        cropMetadata = serializeCropMetadata(buildCropMetadata(result, cropRegion));
       } catch (err) {
         console.error("ImageCropModal: crop failed, falling back to source", err);
         outputImage = sourceImage;
@@ -276,8 +291,9 @@ export function ImageCropModal() {
     void commitProcessorOutput(updateNodeData, sourceNodeId, outputImage, {
       cropRegion,
       aspectLock,
+      cropMetadata,
     });
-  }, [sourceNodeId, sourceImage, cropRegion, aspectLock, updateNodeData, closeModal]);
+  }, [sourceNodeId, sourceImage, image, cropRegion, aspectLock, updateNodeData, closeModal]);
 
   // Convert relative region to Konva pixel box (on the stage, not scaled)
   const regionToBox = (r: CropRegion | null) => {
