@@ -316,6 +316,65 @@ describe("/api/llm route", () => {
       global.fetch = mockFetch;
     });
 
+    it("omits temperature for a model that does not accept one", async () => {
+      // The reasoning models reject any explicit temperature but the default:
+      // "Unsupported value: 'temperature' does not support 0.7 with this model.
+      // Only the default (1) value is supported."
+      //
+      // The node already hides the control for these — allowedParameterNames'
+      // family rule for /^o\d/ excludes it — but the route used to substitute a
+      // 0.7 default anyway, so the request carried a value the user could not
+      // see or change, and every call failed.
+      process.env.OPENAI_API_KEY = "test-openai-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ choices: [{ message: { content: "ok" } }] }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Test prompt",
+        provider: "openai",
+        model: "o3",
+        // Explicitly supplied, and must STILL be dropped: the model's own
+        // schema is the authority, not the caller.
+        temperature: 0.7,
+        maxTokens: 1024,
+      });
+
+      const response = await POST(request);
+      expect(response.status).toBe(200);
+
+      const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
+      expect("temperature" in body).toBe(false);
+      // The rest of the request is unaffected.
+      expect(body.model).toBe("o3");
+      expect(body.max_completion_tokens).toBe(1024);
+    });
+
+    it("still sends temperature for a model that accepts one", async () => {
+      // The other half of the guard: the fix must not strip temperature from
+      // the models that were working.
+      process.env.OPENAI_API_KEY = "test-openai-key";
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ choices: [{ message: { content: "ok" } }] }),
+      });
+
+      const request = createMockPostRequest({
+        prompt: "Test prompt",
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        temperature: 0.3,
+        maxTokens: 1024,
+      });
+
+      await POST(request);
+      const body = JSON.parse((mockFetch.mock.calls[0][1] as { body: string }).body);
+      expect(body.temperature).toBe(0.3);
+    });
+
     it("should generate text successfully with OpenAI", async () => {
       process.env.OPENAI_API_KEY = "test-openai-key";
 

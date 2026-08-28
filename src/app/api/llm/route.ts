@@ -236,7 +236,7 @@ async function generateWithGoogle(
   messages: ConversationTurn[],
   system: string | undefined,
   model: LLMModelType,
-  temperature: number,
+  temperature: number | undefined,
   maxTokens: number,
   reasoning: ReasoningLevel,
   requestId?: string,
@@ -299,7 +299,8 @@ async function generateWithGoogle(
     model: modelId,
     contents,
     config: {
-      temperature,
+      // Omitted when the model does not declare it — see generateWithOpenAI.
+      ...(temperature !== undefined ? { temperature } : {}),
       maxOutputTokens: maxTokens,
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
       ...(thinkingBudget !== null ? { thinkingConfig: { thinkingBudget } } : {}),
@@ -335,7 +336,7 @@ async function generateWithOpenAI(
   messages: ConversationTurn[],
   system: string | undefined,
   model: LLMModelType,
-  temperature: number,
+  temperature: number | undefined,
   maxTokens: number,
   reasoning: ReasoningLevel,
   requestId?: string,
@@ -411,7 +412,11 @@ async function generateWithOpenAI(
     body: JSON.stringify({
       model: modelId,
       messages: apiMessages,
-      temperature,
+      // Omitted when the model does not declare it. The reasoning models reject
+      // any explicit value but the default — "Unsupported value: 'temperature'
+      // does not support 0.7 with this model" — and sending one is not
+      // recoverable, so the key has to be absent rather than defaulted.
+      ...(temperature !== undefined ? { temperature } : {}),
       // GPT-5+ and o1/o3/o4 reject `max_tokens` ("Use 'max_completion_tokens'
       // instead"). `max_completion_tokens` is supported across the entire
       // current chat-completions family, so we use it universally.
@@ -484,7 +489,7 @@ async function generateWithAnthropic(
   messages: ConversationTurn[],
   system: string | undefined,
   model: LLMModelType,
-  temperature: number,
+  temperature: number | undefined,
   maxTokens: number,
   reasoning: ReasoningLevel,
   requestId?: string,
@@ -543,9 +548,12 @@ async function generateWithAnthropic(
   const effectiveMaxTokens = useReasoning
     ? Math.max(maxTokens, anthropicThinkingBudget(reasoning) + 1024)
     : maxTokens;
+  // `?? null` rather than relying on JSON.stringify dropping an undefined
+  // value: `temperature` is now absent whenever the model does not declare one,
+  // and "omitted" should be stated here rather than emerge from serialisation.
   const tempForRequest = useReasoning
     ? null
-    : (anthropicAcceptsTemperature(modelId) ? temperature : null);
+    : (anthropicAcceptsTemperature(modelId) ? (temperature ?? null) : null);
 
   const startTime = Date.now();
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -636,7 +644,21 @@ export async function POST(request: NextRequest) {
       if (typeof v === "number" && Number.isFinite(v)) return v;
       return typeof legacyValue === "number" && Number.isFinite(legacyValue) ? legacyValue : fallback;
     };
-    const temperature = num("temperature", legacy.temperature, 0.7);
+    // A parameter the model does NOT declare is OMITTED, never defaulted.
+    //
+    // Defaulting here was a real bug: the node correctly hides the Temperature
+    // control for a model that does not accept one, and this line then put 0.7
+    // back into the request anyway — so OpenAI's reasoning models answered with
+    // "Unsupported value: 'temperature' does not support 0.7 with this model.
+    // Only the default (1) value is supported", for a knob the user could not
+    // see, let alone change. `allowed` is the authority; nothing after it may
+    // reintroduce what it excluded.
+    //
+    // When the model DOES accept one, the previous default stands, so nothing
+    // changes for the models that were working.
+    const temperature = allowed.has("temperature")
+      ? num("temperature", legacy.temperature, 0.7)
+      : undefined;
     const maxTokens = num("maxTokens", legacy.maxTokens, 4096);
     const reasoning = ((allowed.has("reasoning") ? rawParams.reasoning : undefined) as
       | ReasoningLevel
