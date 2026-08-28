@@ -2,9 +2,11 @@
 
 import React, { useCallback, useState, useEffect, useRef } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
+import { useShallow } from "zustand/react/shallow";
 import { BaseNode } from "./BaseNode";
 import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { useCanRun } from "@/hooks/useCanRun";
 import { SpzViewerNodeData } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
@@ -15,6 +17,21 @@ type SpzViewerNodeType = Node<SpzViewerNodeData, "spzViewer">;
 
 /** Accepted file extensions */
 const ACCEPTED_EXTENSIONS = [".spz", ".ply"];
+
+/**
+ * Pack the FG pins into the payload the viewer expects.
+ *
+ * A matte with no foreground is meaningless, so it is dropped rather than sent
+ * as a half-payload the viewer would have to defend against.
+ */
+export function buildOverlayHandoff(
+  fgImages: string[],
+  alphaImage: string | null,
+): { fg: string; alpha: string | null } | null {
+  const fg = fgImages[0];
+  if (!fg) return null;
+  return { fg, alpha: alphaImage ?? null };
+}
 
 /**
  * SPZ Viewer node.
@@ -38,6 +55,29 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   const edges = useWorkflowStore((state) => state.edges);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
   const { isExecuting } = useCanRun(id);
+
+  // Resolve the fg / fg_alpha pins by target handle — getConnectedInputs()
+  // aggregates every image pin into one array and can't tell them apart, so
+  // this goes straight to the lower-level resolver, same as CompNode.tsx.
+  // useShallow keeps the returned object referentially stable across
+  // unrelated store updates (e.g. dragging any node) as long as the resolved
+  // fg/alpha strings themselves don't change.
+  const overlayInputs = useWorkflowStore(
+    useShallow((s) => {
+      const fg: string[] = [];
+      let alpha: string | null = null;
+      for (const e of s.edges) {
+        if (e.target !== id) continue;
+        const src = s.nodes.find((n) => n.id === e.source);
+        if (!src) continue;
+        const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+        if (out.type !== "image" || !out.value) continue;
+        if (e.targetHandle === "image-fg") fg.push(out.value);
+        else if (e.targetHandle === "image-fg_alpha") alpha = out.value;
+      }
+      return buildOverlayHandoff(fg, alpha);
+    }),
+  );
 
   const viewerWindowRef = useRef<Window | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -284,11 +324,39 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
       } catch (_) { /* quota */ }
     }
 
+    // Hand the plate over the same way viewer state travels: sessionStorage, not
+    // the URL, because these are full-res data URLs. A write failure (quota)
+    // must not block the viewer from opening — log and continue.
+    try {
+      if (overlayInputs) {
+        sessionStorage.setItem(`splat-viewer-fg-${id}`, JSON.stringify(overlayInputs));
+      } else {
+        sessionStorage.removeItem(`splat-viewer-fg-${id}`);
+      }
+    } catch (err) {
+      console.warn("[spzViewer] could not write overlay handoff:", err);
+    }
+
     const viewerUrl = `/viewer?${params.toString()}`;
     const w = window.open(viewerUrl, `spz-viewer-${id}`, "width=1280,height=720,alwaysOnTop=yes");
     viewerWindowRef.current = w;
     updateNodeData(id, { viewerOpen: true });
-  }, [id, nodeData.spzUrl, nodeData.filename, nodeData.cameraJsonFocal, nodeData.cameraJsonAperture, nodeData.viewerState, saveDirectoryPath, updateNodeData]);
+  }, [id, nodeData.spzUrl, nodeData.filename, nodeData.cameraJsonFocal, nodeData.cameraJsonAperture, nodeData.viewerState, overlayInputs, saveDirectoryPath, updateNodeData]);
+
+  // Push plate changes into an already-open viewer rather than making the user
+  // reopen it. worldId is always sent — the receiver's filter only rejects a
+  // mismatch when BOTH sides carry a value, so omitting it would apply this
+  // unconditionally to whatever viewer window receives it. A falsy fg on a
+  // live message is the receiver's signal to clear the overlay, so this fires
+  // even when the pins are unwired rather than being skipped.
+  useEffect(() => {
+    const w = viewerWindowRef.current;
+    if (!w || w.closed) return;
+    w.postMessage(
+      { type: "splat-viewer-fg", worldId: id, fg: overlayInputs?.fg ?? null, alpha: overlayInputs?.alpha ?? null },
+      window.location.origin,
+    );
+  }, [overlayInputs, id]);
 
   const handleLoadCameraJson = useCallback(
     async (file: File) => {
