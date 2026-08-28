@@ -5,6 +5,7 @@ import { ProviderType, ModelInputDef } from "@/types";
 import { ModelParameter } from "@/lib/providers/types";
 import { useProviderApiKeys } from "@/store/workflowStore";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
+import { setDisposableCache } from "@/utils/localStorageQuota";
 
 // localStorage cache for model schemas (persists across dev server restarts)
 // Bump SCHEMA_CACHE_VERSION when schema extraction logic changes to auto-invalidate
@@ -53,9 +54,11 @@ function setCachedSchema(modelId: string, provider: string, parameters: ModelPar
   try {
     const cache = JSON.parse(localStorage.getItem(SCHEMA_CACHE_KEY) || "{}");
     cache[`${provider}:${modelId}`] = { parameters, inputs, timestamp: Date.now(), version: SCHEMA_CACHE_VERSION };
-    localStorage.setItem(SCHEMA_CACHE_KEY, JSON.stringify(cache));
-  } catch {
-    // Ignore cache errors
+    // Reports a full store instead of swallowing it. A silent quota failure here
+    // is how the origin filled up unnoticed and an unrelated write took the blame.
+    setDisposableCache(SCHEMA_CACHE_KEY, JSON.stringify(cache));
+  } catch (err) {
+    console.warn("[schema-cache] write failed:", err);
   }
 }
 

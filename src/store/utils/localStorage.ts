@@ -10,6 +10,7 @@ import {
   CanvasNavigationSettings,
   defaultCanvasNavigationSettings,
 } from "@/types";
+import { setItemReclaiming } from "@/utils/localStorageQuota";
 
 // Storage keys
 export const STORAGE_KEY = "node-banana-workflow-configs";
@@ -62,11 +63,19 @@ export const loadSaveConfigs = (): Record<string, WorkflowSaveConfig> => {
   return stored ? JSON.parse(stored) : {};
 };
 
+/**
+ * Project paths — a few hundred bytes, and the thing you cannot afford to lose.
+ *
+ * Written through `setItemReclaiming` because quota is per ORIGIN: this write
+ * used to fail with "exceeded the quota" while holding almost nothing, starved
+ * by a multi-megabyte model cache that swallowed its own failures. A disposable
+ * cache must never be the reason a project loses its save location.
+ */
 export const saveSaveConfig = (config: WorkflowSaveConfig): void => {
   if (typeof window === "undefined") return;
   const configs = loadSaveConfigs();
   configs[config.workflowId] = config;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
+  setItemReclaiming(STORAGE_KEY, JSON.stringify(configs));
 };
 
 // Cost data helpers

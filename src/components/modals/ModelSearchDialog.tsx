@@ -7,17 +7,55 @@ import { deduplicatedFetch, clearFetchCache } from "@/utils/deduplicatedFetch";
 import { useReactFlow } from "@xyflow/react";
 import { ProviderType, RecentModel } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
+import { setDisposableCache } from "@/utils/localStorageQuota";
 
 // localStorage cache for models (persists across dev server restarts)
 // Bump version when model data shape changes (e.g., adding pricing fields)
 const MODELS_CACHE_KEY = "node-banana-models-cache";
 const MODELS_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
+/**
+ * Entries above this many characters are not cached at all.
+ *
+ * The unfiltered catalogue is 2038 models / ~3.2M characters, and localStorage
+ * measures UTF-16 — so storing it needs ~6.5 MB of a typical 5 MB origin quota.
+ * It can never fit. Attempting it used to throw, get swallowed, and leave the
+ * store full enough that unrelated writes failed instead: the reported error was
+ * always about `node-banana-workflow-configs`, a few hundred bytes of project
+ * paths that had nothing to do with it.
+ *
+ * Filtered and searched results are small and cache perfectly well, so the cache
+ * keeps its value exactly where it can have any.
+ */
+const MODELS_CACHE_MAX_ENTRY_CHARS = 250_000; // ~0.5 MB stored
+
+/**
+ * The cache key includes the search string, so every term typed mints a new
+ * entry. Entries were only TTL-checked on READ and never pruned on write, which
+ * made growth unbounded across a session. Keep the most recent few.
+ */
+const MODELS_CACHE_MAX_ENTRIES = 8;
+
 interface ModelsCacheEntry {
   models: ProviderModel[];
   availableProviders?: string[];
   timestamp: number;
 }
+
+// One-time reclaim on load: an existing install is already carrying entries
+// written before the cap existed, and nothing else would ever remove them.
+try {
+  if (typeof window !== "undefined") {
+    const raw = localStorage.getItem(MODELS_CACHE_KEY);
+    if (raw && raw.length > MODELS_CACHE_MAX_ENTRY_CHARS * MODELS_CACHE_MAX_ENTRIES) {
+      localStorage.removeItem(MODELS_CACHE_KEY);
+      console.warn(
+        `[models-cache] dropped ${(raw.length * 2 / 1024 / 1024).toFixed(1)} MB of ` +
+        `pre-cap cache entries`,
+      );
+    }
+  }
+} catch { /* a store we cannot read is one we cannot fix here */ }
 
 function getCachedModels(cacheKey: string): ModelsCacheEntry | null {
   try {
@@ -34,11 +72,36 @@ function getCachedModels(cacheKey: string): ModelsCacheEntry | null {
 
 function setCachedModels(cacheKey: string, models: ProviderModel[], availableProviders?: string[]) {
   try {
-    const cache = JSON.parse(localStorage.getItem(MODELS_CACHE_KEY) || "{}");
-    cache[cacheKey] = { models, availableProviders, timestamp: Date.now() };
-    localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify(cache));
-  } catch {
-    // Ignore cache errors
+    const entry: ModelsCacheEntry = { models, availableProviders, timestamp: Date.now() };
+    const serialized = JSON.stringify(entry);
+
+    // Too big to ever store — skip rather than throw-and-swallow. The unfiltered
+    // catalogue lands here every time.
+    if (serialized.length > MODELS_CACHE_MAX_ENTRY_CHARS) {
+      console.info(
+        `[models-cache] not caching "${cacheKey}": ${models.length} models, ` +
+        `~${(serialized.length * 2 / 1024 / 1024).toFixed(1)} MB stored, over the cap`,
+      );
+      return;
+    }
+
+    const cache: Record<string, ModelsCacheEntry> =
+      JSON.parse(localStorage.getItem(MODELS_CACHE_KEY) || "{}");
+    cache[cacheKey] = entry;
+
+    // LRU by write time, so a long session of searches cannot accumulate.
+    const keys = Object.keys(cache);
+    if (keys.length > MODELS_CACHE_MAX_ENTRIES) {
+      keys
+        .sort((a, b) => (cache[a]?.timestamp ?? 0) - (cache[b]?.timestamp ?? 0))
+        .slice(0, keys.length - MODELS_CACHE_MAX_ENTRIES)
+        .forEach((k) => delete cache[k]);
+    }
+
+    setDisposableCache(MODELS_CACHE_KEY, JSON.stringify(cache));
+  } catch (err) {
+    // Parse/serialise failures only — quota is handled inside setDisposableCache.
+    console.warn("[models-cache] write failed:", err);
   }
 }
 
