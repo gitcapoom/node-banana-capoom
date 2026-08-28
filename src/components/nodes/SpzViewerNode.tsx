@@ -437,8 +437,28 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
         type="target"
         position={Position.Left}
         id="3d"
-        style={{ top: "50%" }}
+        style={{ top: "25%" }}
         className="!w-3 !h-3 !bg-emerald-500 !border-emerald-700"
+      />
+
+      {/* Input Handle — foreground plate, composited over the splat in the
+          viewer for framing and burned into captures. Optional: with neither
+          this nor the alpha handle wired, the viewer behaves exactly as before. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="image-fg"
+        style={{ top: "45%" }}
+        className="!w-3 !h-3 !bg-sky-500 !border-sky-700"
+      />
+
+      {/* Input Handle — foreground plate's alpha/matte. Optional, same as above. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="image-fg_alpha"
+        style={{ top: "65%" }}
+        className="!w-3 !h-3 !bg-neutral-400 !border-neutral-600"
       />
 
       {/* Output Handle — captured image */}
@@ -586,8 +606,14 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
         </div>
 
         {/* Handle labels */}
-        <div className="absolute left-5 text-[9px] text-neutral-600" style={{ top: "50%", transform: "translateY(-50%)" }}>
+        <div className="absolute left-5 text-[9px] text-neutral-600" style={{ top: "25%", transform: "translateY(-50%)" }}>
           3d
+        </div>
+        <div className="absolute left-5 text-[9px] text-neutral-600" style={{ top: "45%", transform: "translateY(-50%)" }}>
+          fg
+        </div>
+        <div className="absolute left-5 text-[9px] text-neutral-600" style={{ top: "65%", transform: "translateY(-50%)" }}>
+          fg α
         </div>
         <div className="absolute right-5 text-[9px] text-neutral-600" style={{ top: "50%", transform: "translateY(-50%)" }}>
           image

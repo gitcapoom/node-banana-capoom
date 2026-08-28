@@ -257,7 +257,10 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
     case "glbViewer":
       return { inputs: ["image"], outputs: [] };
     case "spzViewer":
-      return { inputs: ["3d"], outputs: ["image"] };
+      // image-fg / image-fg_alpha: optional foreground plate + matte, handed to
+      // the viewer for framing and burned into captures. Both ids contain
+      // "image" and so classify as image pins per getHandleType above.
+      return { inputs: ["3d", "image-fg", "image-fg_alpha"], outputs: ["image"] };
     case "worldLabsPano":
       return { inputs: ["image", "text"], outputs: ["image"] };
     case "worldLabsWorld":
