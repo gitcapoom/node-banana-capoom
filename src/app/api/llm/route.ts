@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { LLMGenerateRequest, LLMGenerateResponse, LLMModelType, ConversationTurn } from "@/types";
 import { logger } from "@/utils/logger";
 import { asLlmProvider, allowedParameterNames } from "@/app/api/models/llmSchema";
-import { compressImage } from "@/app/api/generate/utils/imageCompression";
+import { compressImage, capLongEdge } from "@/app/api/generate/utils/imageCompression";
 
 export const maxDuration = 60; // 1 minute timeout
 
@@ -473,8 +473,30 @@ function anthropicAcceptsTemperature(model: string): boolean {
 }
 
 /** Convert a (possibly oversized) data URL into Anthropic's image block. */
-async function anthropicImageBlock(imgArg: string): Promise<AnthropicContentBlock> {
-  const img = await enforceImageSize(imgArg, PROVIDER_IMAGE_LIMITS.anthropic, "anthropic");
+/**
+ * Anthropic's "many-image request" rule.
+ *
+ * Past this many image blocks in ONE request, a stricter per-image dimension
+ * limit applies to EVERY image in it — 2000px per side. The count is per
+ * request, not per turn, and explicitly includes images from earlier turns that
+ * are resent.
+ *
+ * That last part is why this surfaced only after a few exchanges with the same
+ * inputs: the conversation is stateless, so every turn resends the whole
+ * transcript, the image count grows with it, and crossing the threshold
+ * retroactively invalidates pictures that were fine on turn one. The failure
+ * looks like the images changed; what changed is how many accompany them.
+ *
+ * https://platform.claude.com/docs/en/build-with-claude/vision — Request limits
+ */
+const ANTHROPIC_MANY_IMAGE_THRESHOLD = 20;
+const ANTHROPIC_MANY_IMAGE_MAX_EDGE = 2000;
+
+async function anthropicImageBlock(imgArg: string, maxEdge?: number): Promise<AnthropicContentBlock> {
+  // Byte limit first, then the dimension cap: compressImage may re-encode and
+  // change the pixel count, and it is the FINAL dimensions the API judges.
+  const sized = await enforceImageSize(imgArg, PROVIDER_IMAGE_LIMITS.anthropic, "anthropic");
+  const img = maxEdge ? await capLongEdge(sized, maxEdge) : sized;
   const matches = img.match(/^data:(.+?);base64,(.+)$/);
   const base64Data = matches ? matches[2] : img;
   const declared = matches ? matches[1] : "image/png";
@@ -520,12 +542,25 @@ async function generateWithAnthropic(
   // `system` field, not in the messages array. Images attach to user
   // turns only and come BEFORE the text in the block list (Anthropic's
   // recommended ordering for vision).
+  // `totalImages` above already counts the WHOLE request, which is the right
+  // scope: the threshold is per request, so a turn carrying a single image
+  // still needs capping when the transcript around it pushes the total over.
+  const capEdge = totalImages > ANTHROPIC_MANY_IMAGE_THRESHOLD ? ANTHROPIC_MANY_IMAGE_MAX_EDGE : undefined;
+  if (capEdge) {
+    logger.info('api.llm', 'Many-image request: capping every image', {
+      requestId,
+      totalImages,
+      threshold: ANTHROPIC_MANY_IMAGE_THRESHOLD,
+      maxEdge: capEdge,
+    });
+  }
+
   const apiMessages: AnthropicMessage[] = [];
   for (const m of messages) {
     if (m.role === "user" && m.images && m.images.length > 0) {
       const blocks: AnthropicContentBlock[] = [];
       for (const img of m.images) {
-        blocks.push(await anthropicImageBlock(img));
+        blocks.push(await anthropicImageBlock(img, capEdge));
       }
       blocks.push({ type: "text", text: m.text });
       apiMessages.push({ role: "user", content: blocks });

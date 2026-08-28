@@ -35,6 +35,15 @@ vi.mock("@google/genai", () => ({
   GoogleGenAI: MockGoogleGenAI,
 }));
 
+// Image helpers are mocked so the many-image DECISION can be observed without
+// running sharp on real pixels. compressImage passes through; capLongEdge
+// records the max edge it was asked for.
+const { mockCapLongEdge } = vi.hoisted(() => ({ mockCapLongEdge: vi.fn() }));
+vi.mock("@/app/api/generate/utils/imageCompression", () => ({
+  compressImage: vi.fn(async (s: string) => s),
+  capLongEdge: mockCapLongEdge.mockImplementation(async (s: string) => s),
+}));
+
 // Mock logger to avoid console noise during tests
 vi.mock("@/utils/logger", () => ({
   logger: {
@@ -1091,5 +1100,67 @@ describe("/api/llm route", () => {
       const callArg = mockGenerateContent.mock.calls[0][0];
       expect(callArg.contents[0].parts).toEqual([{ text: "Hello" }]);
     });
+  });
+});
+
+describe("Anthropic many-image requests", () => {
+  // Anthropic caps EVERY image in a request at 2000px per side once the request
+  // carries more than 20 image blocks — and the count explicitly includes images
+  // from earlier turns that get resent. Because the API is stateless, a chat
+  // that resends its transcript crosses that line on its own after a few turns,
+  // and images that worked on turn one start being rejected.
+  // https://platform.claude.com/docs/en/build-with-claude/vision — Request limits
+  const img = "data:image/png;base64,iVBORw0KGgo=";
+
+  function turnsWith(count: number) {
+    // Spread across turns, the way a real conversation accumulates them.
+    return Array.from({ length: count }, (_, i) => ({
+      role: "user" as const,
+      text: `turn ${i}`,
+      images: [img],
+    }));
+  }
+
+  beforeEach(() => {
+    mockCapLongEdge.mockClear();
+    global.fetch = mockFetch;
+    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ content: [{ type: "text", text: "ok" }] }),
+    });
+  });
+
+  it("caps every image once the request exceeds 20 of them", async () => {
+    const request = createMockPostRequest({
+      messages: turnsWith(21),
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250929",
+      maxTokens: 1024,
+    });
+
+    await POST(request);
+
+    expect(mockCapLongEdge).toHaveBeenCalledTimes(21);
+    // Every call, not just the ones past the threshold — the limit applies to
+    // the whole request retroactively.
+    for (const call of mockCapLongEdge.mock.calls) {
+      expect(call[1]).toBe(2000);
+    }
+  });
+
+  it("leaves images alone at or below the threshold", async () => {
+    const request = createMockPostRequest({
+      messages: turnsWith(20),
+      provider: "anthropic",
+      model: "claude-sonnet-4-5-20250929",
+      maxTokens: 1024,
+    });
+
+    await POST(request);
+
+    // Resizing 20 images that the API would have accepted costs quality and
+    // time for nothing.
+    expect(mockCapLongEdge).not.toHaveBeenCalled();
   });
 });

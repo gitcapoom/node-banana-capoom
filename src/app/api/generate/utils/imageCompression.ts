@@ -161,3 +161,46 @@ export async function compressLargeImages(
 
   return { images: outImages, dynamicInputs: outDynamic, compressedCount };
 }
+
+/**
+ * Scale an image down so neither edge exceeds `maxEdge`, preserving aspect.
+ *
+ * Distinct from `compressImage`, which is driven by BYTES: an image can sit
+ * comfortably under a size limit and still be far too many pixels. Anthropic
+ * enforces exactly that second limit — a request carrying more than 20 images
+ * caps every one of them at 2000px per side, whatever they weigh.
+ *
+ * Returns the input unchanged when it is already small enough, is not a base64
+ * image data URL, or cannot be decoded — the caller is better off sending the
+ * original and surfacing the provider's own error than dropping the image.
+ */
+export async function capLongEdge(dataUrl: string, maxEdge: number): Promise<string> {
+  if (!dataUrl.startsWith("data:image/")) return dataUrl;
+  // String ops, not a regex: a greedy capture over a multi-MB data URL
+  // overflows V8's regex stack (see compressImage above).
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return dataUrl;
+  const header = dataUrl.slice(0, comma);
+  if (!/;base64$/i.test(header)) return dataUrl;
+
+  try {
+    const buffer = Buffer.from(dataUrl.slice(comma + 1), "base64");
+    const { width, height } = await sharp(buffer).metadata();
+    if (!width || !height || (width <= maxEdge && height <= maxEdge)) return dataUrl;
+
+    // `fit: "inside"` scales so BOTH edges land within the box, which is what
+    // the limit is stated against — it is a per-dimension cap, not an area one.
+    const out = await sharp(buffer)
+      .resize({ width: maxEdge, height: maxEdge, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    console.log(
+      `[capLongEdge] ${width}x${height} -> within ${maxEdge}px, ` +
+      `${(buffer.length / 1024 / 1024).toFixed(1)}MB -> ${(out.length / 1024 / 1024).toFixed(1)}MB`,
+    );
+    return `data:image/jpeg;base64,${out.toString("base64")}`;
+  } catch (err) {
+    console.warn("[capLongEdge] could not resize, sending original:", err);
+    return dataUrl;
+  }
+}
