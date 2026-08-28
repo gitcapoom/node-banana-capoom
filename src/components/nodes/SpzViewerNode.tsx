@@ -34,6 +34,21 @@ export function buildOverlayHandoff(
 }
 
 /**
+ * How many imageInput nodes one capture produces.
+ *
+ * The vertical offset between successive captures is derived from this, so it
+ * has to agree with what the handler actually spawns.
+ */
+export function capturedImageCount(payload: {
+  image: string | null;
+  depthImage: string | null;
+  compositeImage: string | null;
+}): number {
+  if (!payload.image) return 0;
+  return 1 + (payload.depthImage ? 1 : 0) + (payload.compositeImage ? 1 : 0);
+}
+
+/**
  * SPZ Viewer node.
  *
  * Lightweight node that opens the external standalone 3D viewer window.
@@ -101,7 +116,7 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
       // Use node ID as worldId for routing
       if (event.data.worldId !== id) return;
 
-      const { image, depthImage, filename, width, height } = event.data;
+      const { image, depthImage, compositeImage, filename, width, height } = event.data;
 
       // Create ImageInput nodes to the right with the capture
       const currentNode = nodes.find((n) => n.id === id);
@@ -111,21 +126,33 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
       const imgNodeHeight = defaultNodeDimensions.imageInput.height;
 
       const offsetX = nodeDims.width + 40;
-      // Each capture creates 1 or 2 nodes (RGB + optional depth)
-      const nodesPerCapture = depthImage ? 2 : 1;
+      // Each capture creates 1-3 nodes (RGB + optional depth + optional
+      // composite). capturedImageCount is the single source of truth for
+      // this count -- it also drives the spawn decisions below, so the two
+      // can never disagree about how many nodes a capture produces.
+      const nodesPerCapture = capturedImageCount({ image, depthImage, compositeImage });
       const baseOffsetY = captureCount * nodesPerCapture * (imgNodeHeight + 20);
 
       // RGB image node
-      addNode("imageInput", {
+      const rgbNodeId = addNode("imageInput", {
         x: nodeX + offsetX,
         y: nodeY + baseOffsetY,
       });
 
-      // Save captures to inputs folder and update the new nodes
+      // Save captures to inputs folder and update the new nodes.
+      //
+      // Each spawned node's ID is captured directly from addNode's return
+      // value and used to target its own updateNodeData call below. This
+      // deliberately does NOT go back to `nodes[nodes.length - 1]` to "find"
+      // the node afterwards: with up to three nodes spawned per capture,
+      // whichever addNode call runs most recently always owns the array's
+      // tail, so a lookup that fires later (e.g. depth's, previously
+      // delayed 50ms to dodge a race with the RGB node's own lookup) can
+      // resolve to a sibling spawned after it (composite) instead of
+      // itself -- silently orphaning the earlier node while corrupting the
+      // later one until its own update overwrites it. Addressing by ID
+      // sidesteps the ordering question entirely, for any number of spawns.
       const saveAndUpdate = async () => {
-        const latestNodes = useWorkflowStore.getState().nodes;
-        const newNode = latestNodes[latestNodes.length - 1];
-
         // Save RGB image to inputs folder
         let imageRef: string | undefined;
         if (saveDirectoryPath && image) {
@@ -133,41 +160,53 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
           if (refId) imageRef = refId;
         }
 
-        if (newNode && newNode.type === "imageInput") {
-          updateNodeData(newNode.id, {
-            image,
-            imageRef,
-            filename: `${filename}.png`,
-            dimensions: width && height ? { width, height } : null,
-          });
-        }
+        updateNodeData(rgbNodeId, {
+          image,
+          imageRef,
+          filename: `${filename}.png`,
+          dimensions: width && height ? { width, height } : null,
+        });
 
         // Depth image node (if depth was captured)
         if (depthImage) {
-          addNode("imageInput", {
+          const depthNodeId = addNode("imageInput", {
             x: nodeX + offsetX,
             y: nodeY + baseOffsetY + imgNodeHeight + 20,
           });
 
-          setTimeout(async () => {
-            const depthNodes = useWorkflowStore.getState().nodes;
-            const depthNode = depthNodes[depthNodes.length - 1];
+          let depthRef: string | undefined;
+          if (saveDirectoryPath) {
+            const refId = await saveMediaImmediately(depthImage, saveDirectoryPath, "inputs");
+            if (refId) depthRef = refId;
+          }
 
-            let depthRef: string | undefined;
-            if (saveDirectoryPath && depthImage) {
-              const refId = await saveMediaImmediately(depthImage, saveDirectoryPath, "inputs");
-              if (refId) depthRef = refId;
-            }
+          updateNodeData(depthNodeId, {
+            image: depthImage,
+            imageRef: depthRef,
+            filename: `${filename}_depth.png`,
+            dimensions: width && height ? { width, height } : null,
+          });
+        }
 
-            if (depthNode && depthNode.type === "imageInput") {
-              updateNodeData(depthNode.id, {
-                image: depthImage,
-                imageRef: depthRef,
-                filename: `${filename}_depth.png`,
-                dimensions: width && height ? { width, height } : null,
-              });
-            }
-          }, 50);
+        // Composite (splat render with the foreground plate burned in)
+        if (compositeImage) {
+          const compNodeId = addNode("imageInput", {
+            x: nodeX + offsetX,
+            y: nodeY + baseOffsetY + (depthImage ? 2 : 1) * (imgNodeHeight + 20),
+          });
+
+          let compRef: string | undefined;
+          if (saveDirectoryPath) {
+            const refId = await saveMediaImmediately(compositeImage, saveDirectoryPath, "inputs");
+            if (refId) compRef = refId;
+          }
+
+          updateNodeData(compNodeId, {
+            image: compositeImage,
+            imageRef: compRef,
+            filename: `${filename}_comp.png`,
+            dimensions: width && height ? { width, height } : null,
+          });
         }
       };
 
