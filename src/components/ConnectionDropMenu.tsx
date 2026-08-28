@@ -109,6 +109,20 @@ const IMAGE_TARGET_OPTIONS: MenuOption[] = [
     ),
   },
   {
+    // spzViewer gained two optional image pins (fg / fg_alpha, a foreground
+    // plate composited over the splat) — it's an image consumer now, same as
+    // imageCompare above, so per CLAUDE.md step 11 it belongs in this list too.
+    // Same icon as its own IMAGE_SOURCE_OPTIONS entry below.
+    type: "spzViewer",
+    label: "Gaussian Splat Viewer",
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    ),
+  },
+  {
     type: "worldLabsPano",
     label: "Generate Panorama",
     icon: (

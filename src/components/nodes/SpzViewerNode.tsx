@@ -8,7 +8,7 @@ import { useCommentNavigation } from "@/hooks/useCommentNavigation";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { getSourceOutput } from "@/store/utils/connectedInputs";
 import { useCanRun } from "@/hooks/useCanRun";
-import { SpzViewerNodeData } from "@/types";
+import { SpzViewerNodeData, WorkflowNode, WorkflowEdge } from "@/types";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
 import { saveMediaImmediately } from "@/utils/mediaStorage";
 import { readCameraJsonFile } from "@/utils/cameraJson";
@@ -49,6 +49,46 @@ export function capturedImageCount(payload: {
 }
 
 /**
+ * Resolve the fg / fg_alpha pins by target handle, straight off the node/edge
+ * graph rather than the aggregated `getConnectedInputs()` (which can't tell
+ * apart two image pins on the same node). Same lower-level resolver CompNode
+ * uses for its own dynamic image pins.
+ *
+ * Both pins take the FIRST matching edge. Kept consistent deliberately — the
+ * fg pin already took the first push by construction (buildOverlayHandoff
+ * reads fgImages[0]), but alpha used to overwrite on every matching edge and
+ * so silently took the LAST one, which made wiring two edges to the same pin
+ * behave differently depending on which pin you did it to.
+ *
+ * Exported standalone (not inlined in the component) so it can be called
+ * twice with different node/edge snapshots: once reactively via the store
+ * selector for live updates, and once against a FRESH `getState()` read after
+ * an explicit hydration, for callers that cannot trust the snapshot closed
+ * over at render time.
+ */
+export function resolveOverlayInputs(
+  nodeId: string,
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+): { fg: string; alpha: string | null } | null {
+  const fg: string[] = [];
+  let alpha: string | null = null;
+  for (const e of edges) {
+    if (e.target !== nodeId) continue;
+    const src = nodes.find((n) => n.id === e.source);
+    if (!src) continue;
+    const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+    if (out.type !== "image" || !out.value) continue;
+    if (e.targetHandle === "image-fg") {
+      fg.push(out.value);
+    } else if (e.targetHandle === "image-fg_alpha" && alpha === null) {
+      alpha = out.value;
+    }
+  }
+  return buildOverlayHandoff(fg, alpha);
+}
+
+/**
  * SPZ Viewer node.
  *
  * Lightweight node that opens the external standalone 3D viewer window.
@@ -69,29 +109,14 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const edges = useWorkflowStore((state) => state.edges);
   const getConnectedInputs = useWorkflowStore((state) => state.getConnectedInputs);
+  const loadNodeFullResInputs = useWorkflowStore((state) => state.loadNodeFullResInputs);
   const { isExecuting } = useCanRun(id);
 
-  // Resolve the fg / fg_alpha pins by target handle — getConnectedInputs()
-  // aggregates every image pin into one array and can't tell them apart, so
-  // this goes straight to the lower-level resolver, same as CompNode.tsx.
   // useShallow keeps the returned object referentially stable across
   // unrelated store updates (e.g. dragging any node) as long as the resolved
   // fg/alpha strings themselves don't change.
   const overlayInputs = useWorkflowStore(
-    useShallow((s) => {
-      const fg: string[] = [];
-      let alpha: string | null = null;
-      for (const e of s.edges) {
-        if (e.target !== id) continue;
-        const src = s.nodes.find((n) => n.id === e.source);
-        if (!src) continue;
-        const out = getSourceOutput(src, e.sourceHandle, e.data as Record<string, unknown> | undefined);
-        if (out.type !== "image" || !out.value) continue;
-        if (e.targetHandle === "image-fg") fg.push(out.value);
-        else if (e.targetHandle === "image-fg_alpha") alpha = out.value;
-      }
-      return buildOverlayHandoff(fg, alpha);
-    }),
+    useShallow((s) => resolveOverlayInputs(id, s.nodes, s.edges)),
   );
 
   const viewerWindowRef = useRef<Window | null>(null);
@@ -312,7 +337,25 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     regenerateNode(id);
   }, [id, regenerateNode]);
 
-  const handleOpenViewer = useCallback(() => {
+  const handleOpenViewer = useCallback(async () => {
+    // Lazy loading leaves imageInput.image (and friends) null until something
+    // pulls the full-res file back from disk (hydrateNodeImages keeps only an
+    // inline thumb open on load — see src/utils/imageFieldMap.ts). Nothing else
+    // hydrates fg / fg_alpha's upstream before this runs: this node has no Run
+    // button, so "open project → Open Viewer" used to read a null overlay,
+    // build no handoff, and hit the else-branch below, which DELETED any
+    // handoff sessionStorage held from a previous session. The viewer opened
+    // with no plate and no error. "consumer" mode: this call wants to DISPLAY
+    // its inputs, not run the graph, so it stops at committed upstream output
+    // instead of dragging in the whole transitive closure.
+    await loadNodeFullResInputs(id);
+
+    // Re-resolve fg/fg_alpha AFTER hydration, from a fresh store read — not the
+    // `overlayInputs` selector value closed over when this callback was built,
+    // which is exactly the stale (pre-hydration) snapshot the bug above lived in.
+    const { nodes: liveNodes, edges: liveEdges } = useWorkflowStore.getState();
+    const overlay = resolveOverlayInputs(id, liveNodes, liveEdges);
+
     // Works with OR without a splat — opening empty lets the user load a saved
     // scene (sidecar JSON) from inside the viewer.
     const params = new URLSearchParams({
@@ -337,11 +380,10 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
     // off). When the source is image2GS, force a .ply name so the viewer applies
     // the PLY world rotation.
     if (nodeData.spzUrl) {
-      const { edges, nodes } = useWorkflowStore.getState();
-      const inEdge = edges.find(
+      const inEdge = liveEdges.find(
         (e) => e.target === id && (e.targetHandle === "3d" || (e.targetHandle ?? "").startsWith("3d")),
       );
-      const src = inEdge ? nodes.find((n) => n.id === inEdge.source) : undefined;
+      const src = inEdge ? liveNodes.find((n) => n.id === inEdge.source) : undefined;
       if (src?.type === "image2GS") {
         params.set("name", "splat.ply");
       }
@@ -365,22 +407,45 @@ export function SpzViewerNode({ id, data, selected }: NodeProps<SpzViewerNodeTyp
 
     // Hand the plate over the same way viewer state travels: sessionStorage, not
     // the URL, because these are full-res data URLs. A write failure (quota)
-    // must not block the viewer from opening — log and continue.
+    // must not block the viewer from opening — log and continue. It must also
+    // not leave a PREVIOUS plate's payload sitting under this key: the payload
+    // is two full-res data URLs against a ~5MB sessionStorage budget already
+    // shared with `splat-viewer-state-${id}`, so a quota failure is the expected
+    // case here, not exotic — and a stale key silently hands over the WRONG
+    // plate on the next open, which is worse than handing over none.
     try {
-      if (overlayInputs) {
-        sessionStorage.setItem(`splat-viewer-fg-${id}`, JSON.stringify(overlayInputs));
+      if (overlay) {
+        sessionStorage.setItem(`splat-viewer-fg-${id}`, JSON.stringify(overlay));
       } else {
         sessionStorage.removeItem(`splat-viewer-fg-${id}`);
       }
     } catch (err) {
       console.warn("[spzViewer] could not write overlay handoff:", err);
+      try {
+        sessionStorage.removeItem(`splat-viewer-fg-${id}`);
+      } catch { /* nothing more we can do */ }
     }
 
     const viewerUrl = `/viewer?${params.toString()}`;
     const w = window.open(viewerUrl, `spz-viewer-${id}`, "width=1280,height=720,alwaysOnTop=yes");
     viewerWindowRef.current = w;
+    // window.open() re-navigates an existing NAMED window in place rather than
+    // creating a new one, but sessionStorage is only copied into a browsing
+    // context at ITS CREATION — a reused window's storage was never refreshed by
+    // the write above, so it would otherwise keep showing whatever plate its
+    // FIRST open captured. postMessage the plate directly too, so a reused
+    // window is corrected here even if `viewerWindowRef` was lost (e.g. the
+    // node-editor tab reloaded while the viewer window survived — the interval
+    // effect above re-adopts `w` into the ref regardless). A genuinely new
+    // window still boots from the sessionStorage snapshot just written.
+    if (w) {
+      w.postMessage(
+        { type: "splat-viewer-fg", worldId: id, fg: overlay?.fg ?? null, alpha: overlay?.alpha ?? null },
+        window.location.origin,
+      );
+    }
     updateNodeData(id, { viewerOpen: true });
-  }, [id, nodeData.spzUrl, nodeData.filename, nodeData.cameraJsonFocal, nodeData.cameraJsonAperture, nodeData.viewerState, overlayInputs, saveDirectoryPath, updateNodeData]);
+  }, [id, nodeData.spzUrl, nodeData.filename, nodeData.cameraJsonFocal, nodeData.cameraJsonAperture, nodeData.viewerState, saveDirectoryPath, updateNodeData, loadNodeFullResInputs]);
 
   // Push plate changes into an already-open viewer rather than making the user
   // reopen it. worldId is always sent — the receiver's filter only rejects a
