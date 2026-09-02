@@ -15,6 +15,7 @@ import { useCanRun } from "@/hooks/useCanRun";
 import { CubicBezierEditor } from "@/components/CubicBezierEditor";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 import { evaluateRule } from "@/store/utils/ruleEvaluation";
+import { clearConversationPatch } from "@/store/utils/clearConversation";
 import { EASING_PRESETS, getPresetBezier, getEasingBezier } from "@/lib/easing-presets";
 import { getAllEasingNames, getEasingFunction } from "@/lib/easing-functions";
 import { getModelPageUrl, getProviderDisplayName } from "@/utils/providerUrls";
@@ -1363,7 +1364,7 @@ function LLMControls({ node }: { node: Node }) {
   const handleClearConversation = useCallback(() => {
     if (conversation.length === 0) return;
     if (!confirm("Clear all conversation history? (System prompt is kept.)")) return;
-    updateNodeData(node.id, { conversation: [], outputText: null });
+    updateNodeData(node.id, clearConversationPatch());
   }, [node.id, conversation.length, updateNodeData]);
 
   const handleReasoningChange = useCallback(

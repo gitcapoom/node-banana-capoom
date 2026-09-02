@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { Handle, Position, NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { clearConversationPatch } from "@/store/utils/clearConversation";
 import { LLMGenerateNodeData, LLMProvider, LLMModelType, ConversationTurn } from "@/types";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
@@ -134,7 +135,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
   const handleClearConversation = useCallback(() => {
     if (conversation.length === 0) return;
     if (!confirm("Clear all conversation history? (System prompt is kept.)")) return;
-    updateNodeData(id, { conversation: [], outputText: null });
+    updateNodeData(id, clearConversationPatch());
   }, [id, conversation.length, updateNodeData]);
 
   const handleRemoveTurn = useCallback(

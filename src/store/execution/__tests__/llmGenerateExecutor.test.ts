@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { executeLlmGenerate } from "../llmGenerateExecutor";
+import { clearConversationPatch } from "@/store/utils/clearConversation";
 import type { NodeExecutionContext } from "../types";
 import type { WorkflowNode } from "@/types";
 
@@ -248,5 +249,78 @@ describe("executeLlmGenerate", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.messages[0].text).toBe("stored llm prompt");
     expect(body.messages[0].images).toEqual(["data:image/png;base64,stored"]);
+  });
+});
+
+describe("clearConversationPatch (Clear history)", () => {
+  /** The state a node is in after a few exchanges. */
+  function makeUsedNode(patch: Record<string, unknown>): WorkflowNode {
+    return makeNode({
+      conversation: [
+        { role: "user", text: "same open channel below villa-covered hillside", timestamp: 1 },
+        { role: "assistant", text: "old answer", timestamp: 2 },
+      ],
+      outputText: "old answer",
+      inputPrompt: "same open channel below villa-covered hillside",
+      inputImages: ["data:image/png;base64,stored"],
+      ...patch,
+    });
+  }
+
+  /** Send with an empty compose box and nothing wired — the reported repro. */
+  function sendWithNothingWired(node: WorkflowNode) {
+    return makeCtx(node, {
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: [],
+        videos: [],
+        audio: [],
+        text: null,
+        dynamicInputs: {},
+        easeCurve: null,
+      }),
+    });
+  }
+
+  it("re-sent the previous message when only the transcript was cleared", async () => {
+    // Mutation check: the OLD patch. If this ever stops re-sending, the
+    // executor's stored fallback changed and the fix below is moot.
+    const node = makeUsedNode({ conversation: [], outputText: null });
+    const ctx = sendWithNothingWired(node);
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ success: true, text: "result" }),
+    });
+
+    await executeLlmGenerate(ctx, { useStoredFallback: true });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.messages[0].text).toBe("same open channel below villa-covered hillside");
+    expect(body.messages[0].images).toEqual(["data:image/png;base64,stored"]);
+  });
+
+  it("sends nothing after a full clear, on the Send path that uses stored fallbacks", async () => {
+    const node = makeUsedNode(clearConversationPatch());
+    const ctx = sendWithNothingWired(node);
+
+    await expect(
+      executeLlmGenerate(ctx, { useStoredFallback: true })
+    ).rejects.toThrow("Missing text input");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("covers every field the executor falls back to", () => {
+    // The executor reads `nodeData.inputPrompt` and `nodeData.inputImages`
+    // when the compose box is empty. A fallback field the patch does not
+    // clear is a message that survives "Clear history".
+    const patch = clearConversationPatch();
+    // Presence matters as much as the value: `updateNodeData` merges, so a
+    // key the patch omits keeps its old value rather than being cleared.
+    for (const field of ["conversation", "outputText", "inputPrompt", "inputImages"]) {
+      expect(Object.prototype.hasOwnProperty.call(patch, field)).toBe(true);
+    }
+    expect(patch.inputPrompt).toBeNull();
+    expect(patch.inputImages).toEqual([]);
+    expect(patch.conversation).toEqual([]);
+    expect(patch.outputText).toBeNull();
   });
 });
