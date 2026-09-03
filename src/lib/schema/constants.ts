@@ -47,8 +47,16 @@ export const IMAGE_INPUT_PATTERNS = [
   "init_image",
   "mask_image",
   "mask_url",
+  "mask_urls",
   "mask",
   "control_image",
+  // Plural / list forms. muapi ships `images_list` with NO description at all,
+  // so a name rule is the only signal available for it.
+  "images_list",
+  // wavespeed/replicate use a bare `reference`/`references` for image lists
+  // ("Optional reference images used to guide generation").
+  "reference",
+  "references",
 ];
 
 /** Property names we recognize as video inputs (exact match). */
@@ -60,6 +68,7 @@ export const VIDEO_INPUT_PATTERNS = [
   "video_input",
   "input_video",
   "source_video",
+  "videos_list",
 ];
 
 /** Property names we recognize as audio inputs (exact match). */
@@ -71,9 +80,16 @@ export const AUDIO_INPUT_PATTERNS = [
   "input_audio",
   "source_audio",
   "voice_audio",
+  "audios_list",
 ];
 
-/** Property names that LOOK like images but are actually config/dimension params. */
+/**
+ * Property names that LOOK like images but are actually config/dimension params.
+ *
+ * NOTE: the `_images` substring check in classifyImage is a SEPARATE guard aimed
+ * at counters (num_images, max_images). It must never fire on an array-of-string,
+ * or it kills real media lists like `reference_images` — see classify.ts.
+ */
 export const IMAGE_PREFIX_EXCLUSIONS = [
   "image_size", // union type (enum preset OR {width, height} object)
 ];

@@ -80,4 +80,4 @@ export interface CachedSchemaEntry {
 }
 
 /** Bump when extract.ts logic changes. Any cache entries with lower version are re-extracted. */
-export const SCHEMA_FORMAT_VERSION = 4; // v4: detect @-reference convention on repeatable groups too (Kling elements)
+export const SCHEMA_FORMAT_VERSION = 5; // v5: classify prefixed plural media lists (reference_video_urls / reference_audio_urls) as pins
