@@ -713,22 +713,29 @@ export function CompModal() {
   const rotDir = pieces ? (() => { const dx = topMid.x - center.x, dy = topMid.y - center.y; const len = Math.hypot(dx, dy) || 1; return { x: dx / len, y: dy / len }; })() : { x: 0, y: -1 };
   const rotHandle = { x: topMid.x + rotDir.x * hpx(28), y: topMid.y + rotDir.y * hpx(28) };
 
-  const applyScaleFromCorner = (P: Pt) => {
+  // Solve the TOTAL scale that puts source pixel `s` under the cursor, given
+  // that the image scales about the pivot: R^-1 (P - c) = (s - k) .* S.
+  // Divided by sx0sy0 to recover the user's delta over the reformat/align base.
+  //
+  // The lever arm is measured from the PIVOT, not from the image origin. With a
+  // centred pivot dragging the top-right corner now moves it half as far per
+  // unit of scale as it used to, because the opposite corner travels outward
+  // too — which is the visible half of scaling about the centre.
+  const solveScale = (P: Pt, sx: number, sy: number, axis?: "x" | "y") => {
     if (!pieces) return;
-    const c = { x: pieces.c[0], y: pieces.c[1] };
-    const local = invRot(P, c);
-    const lx = local.x - (pieces.t[0] - c.x);
-    const ly = local.y - (pieces.t[1] - c.y);
-    const sX = iw ? lx / iw : 0, sY = ih ? ly / ih : 0;
-    patchTransform({ scaleX: sx0sy0[0] ? sX / sx0sy0[0] : 1, scaleY: sx0sy0[1] ? sY / sx0sy0[1] : 1 });
+    const rel = invRot(P, { x: pieces.c[0], y: pieces.c[1] });
+    const dx = sx - pieces.k[0];
+    const dy = sy - pieces.k[1];
+    // A pivot sitting exactly on the handle gives no lever arm; leave that axis
+    // alone rather than dividing by zero and blowing the transform away.
+    const next: { scaleX?: number; scaleY?: number } = {};
+    if (axis !== "y" && dx !== 0 && sx0sy0[0]) next.scaleX = rel.x / dx / sx0sy0[0];
+    if (axis !== "x" && dy !== 0 && sx0sy0[1]) next.scaleY = rel.y / dy / sx0sy0[1];
+    if (next.scaleX !== undefined || next.scaleY !== undefined) patchTransform(next);
   };
-  const applyScaleAxis = (P: Pt, axis: "x" | "y") => {
-    if (!pieces) return;
-    const c = { x: pieces.c[0], y: pieces.c[1] };
-    const local = invRot(P, c);
-    if (axis === "x") { const lx = local.x - (pieces.t[0] - c.x); const sX = iw ? lx / iw : 0; patchTransform({ scaleX: sx0sy0[0] ? sX / sx0sy0[0] : 1 }); }
-    else { const ly = local.y - (pieces.t[1] - c.y); const sY = ih ? ly / ih : 0; patchTransform({ scaleY: sx0sy0[1] ? sY / sx0sy0[1] : 1 }); }
-  };
+  const applyScaleFromCorner = (P: Pt) => solveScale(P, iw, ih);
+  const applyScaleAxis = (P: Pt, axis: "x" | "y") =>
+    axis === "x" ? solveScale(P, iw, ih / 2, "x") : solveScale(P, iw / 2, ih, "y");
   const applyRotate = (P: Pt) => {
     if (!pieces) return;
     const c = { x: pieces.c[0], y: pieces.c[1] };
@@ -832,9 +839,20 @@ export function CompModal() {
                       onDragMove={(e) => {
                         if (!pieces || !pieces.sX || !pieces.sY) return;
                         const P = targetBL(e);
-                        // Store the SOURCE pixel under the handle so the pivot
-                        // locks to it as the image moves/scales.
-                        patchTransform({ centerAuto: false, centerX: (P.x - pieces.t[0]) / pieces.sX, centerY: (P.y - pieces.t[1]) / pieces.sY });
+                        // Put the pivot under the cursor. The pivot's output
+                        // position is k * base + translate, so the source pixel
+                        // that lands on P is k + (P - c) / base.
+                        //
+                        // Base scale, NOT the total: the pivot is the point the
+                        // user scale turns about, so it must not itself move
+                        // with that scale — that coupling is what stopped the
+                        // centre affecting scale at all.
+                        if (!sx0sy0[0] || !sx0sy0[1]) return;
+                        patchTransform({
+                          centerAuto: false,
+                          centerX: pieces.k[0] + (P.x - pieces.c[0]) / sx0sy0[0],
+                          centerY: pieces.k[1] + (P.y - pieces.c[1]) / sx0sy0[1],
+                        });
                       }}
                       onDblClick={(e) => { e.cancelBubble = true; patchTransform({ centerAuto: true }); }}
                     />

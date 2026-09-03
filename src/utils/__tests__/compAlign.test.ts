@@ -217,12 +217,18 @@ describe("computeAlignedPieces — user transform composes on top", () => {
     const p = computeAlignedPieces(user, b, CROP.width, CROP.height);
     expect(p.sX).toBeCloseTo(2, 9); // base 1 × user 2
     expect(p.sY).toBeCloseTo(2, 9);
+    // Scale pivots about the CENTRE, so the placed rect grows symmetrically
+    // about it rather than out of its bottom-left corner. H/V are still a pure
+    // delta: they move the centre, and the corners follow.
+    // centre = base + user translate + half the crop (300x200 -> 150,100).
+    const cx = RECT.left + 25 + 150;
+    const cy = RECT.bottom - 40 + 100;
     const bl = forwardPoint(p, 0, 0);
-    expect(bl.x).toBeCloseTo(RECT.left + 25, 9);
-    expect(bl.y).toBeCloseTo(RECT.bottom - 40, 9);
+    expect(bl.x).toBeCloseTo(cx - 300, 9); // half-width 150 x scale 2
+    expect(bl.y).toBeCloseTo(cy - 200, 9);
     const tr = forwardPoint(p, CROP.width, CROP.height);
-    expect(tr.x).toBeCloseTo(RECT.left + 25 + 300 * 2, 9);
-    expect(tr.y).toBeCloseTo(RECT.bottom - 40 + 200 * 2, 9);
+    expect(tr.x).toBeCloseTo(cx + 300, 9);
+    expect(tr.y).toBeCloseTo(cy + 200, 9);
   });
 
   it("multiplies the user scale into the base instead of replacing it", () => {
@@ -230,7 +236,9 @@ describe("computeAlignedPieces — user transform composes on top", () => {
     const b = base({ fgW: 150, fgH: 100 })!;
     const p = computeAlignedPieces(tf({ scaleX: 2, scaleY: 2 }), b, 150, 100);
     expect(p.sX).toBeCloseTo(4, 9);
-    expect(forwardPoint(p, 150, 100).x).toBeCloseTo(RECT.left + 600, 9);
+    // 150 px of source at total scale 4 = 600 px wide, centred on the base
+    // rect's centre (RECT.left + 150), so its right edge is at +300 from there.
+    expect(forwardPoint(p, 150, 100).x).toBeCloseTo(RECT.left + 150 + 300, 9);
   });
 
   it("leaves an identity user transform sitting exactly on the base", () => {
@@ -305,7 +313,12 @@ describe("computeFollowPieces — a followed FG_Alpha inherits the aligned place
     const withoutBase = computeFollowPieces(user, 150, 100, "fill", 600, 400);
     const identity = computeFollowPieces(user, 150, 100, "fill", 600, 400, { sX: 1, sY: 1, hPos: 0, vPos: 0 });
     expect(withoutBase).toEqual(identity);
-    expect(forwardPoint(withoutBase, 0, 0).x).toBeCloseTo(25, 9);
-    expect(forwardPoint(withoutBase, 0, 0).y).toBeCloseTo(-40, 9);
+    // The point of this test is the equality above — that omitting the base is
+    // the same as passing an identity one. The corner below just pins the
+    // concrete placement: FA reformats 600x400 onto FG's 150x100 (0.25), the
+    // user doubles it (total 0.5), and it pivots about FG's centre at
+    // (75+25, 50-40) = (100, 10), putting FA's origin 150/100 px away.
+    expect(forwardPoint(withoutBase, 0, 0).x).toBeCloseTo(100 - 150, 9);
+    expect(forwardPoint(withoutBase, 0, 0).y).toBeCloseTo(10 - 100, 9);
   });
 });

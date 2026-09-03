@@ -6,15 +6,30 @@
  * Convention: (0,0) = BOTTOM-LEFT of every image; output px space = BG px.
  * hPos+ = right, vPos+ = up, rotation = CCW degrees. A point is placed by:
  *   O = R * ( (s .* (sX,sY)) + t - c ) + c
- * where s = source px (bottom-left), R = CCW rotation, c = rotation/scale center.
+ * where s = source px (bottom-left), R = CCW rotation, c = the pivot in output
+ * px and t the translate that puts the pivot there. That shader-shaped form is
+ * equivalent to the way it actually reads:
+ *   O = R * ( (s - k) .* (sX,sY) ) + c
+ * i.e. scale and rotate about the SAME pivot k (source px), landing it at c.
+ * `t` is therefore a derived quantity (c - k .* S), not the user's hPos/vPos.
+ *
+ * Keeping the first form means the GPU shader's `invSample` and its uniforms
+ * (rot, c, t, invs, size) are untouched by the pivot behaviour.
  */
 
 import type { CompTransform, CompReformat } from "@/types";
 
 export interface CompPieces {
   rot: [number, number]; // cos, sin of the CCW angle
-  c: [number, number];   // center (output px)
-  t: [number, number];   // translate (output px)
+  c: [number, number];   // pivot, in output px — where the centre pixel lands
+  k: [number, number];   // the same pivot as a SOURCE px of this input
+  /**
+   * Derived translate (output px) = c - k .* (sX,sY). NOT the user's hPos/vPos:
+   * it is whatever makes the shader form above scale and rotate about `c`.
+   * Use `inversePoint`/`forwardPoint` to convert between spaces rather than
+   * reaching into this.
+   */
+  t: [number, number];
   sX: number;            // total X scale (user * reformat base)
   sY: number;
   iw: number;            // source pixel size
@@ -35,25 +50,36 @@ export function reformatScale(reformat: CompReformat, refW: number, refH: number
 
 function pieces(
   tr: CompTransform, sx0: number, sy0: number, iw: number, ih: number,
-  // optional absolute output-px center override (for FG_Alpha follow-FG)
-  centerOverride?: { c: [number, number] },
+  // optional pivot override (for FG_Alpha follow-FG): the pivot's output px `c`
+  // together with the SOURCE px `k` of this input that must land on it.
+  centerOverride?: { c: [number, number]; k: [number, number] },
 ): CompPieces {
   const sX = tr.scaleX * sx0;
   const sY = tr.scaleY * sy0;
   const ang = (tr.rotation * Math.PI) / 180;
+
+  // The pivot, as a SOURCE pixel. Auto = the image-centre pixel; manual
+  // (centerAuto=false) = the pixel the user assigned.
+  let k: [number, number];
   let c: [number, number];
   if (centerOverride) {
+    k = centerOverride.k;
     c = centerOverride.c;
   } else {
-    // The rotation/scale pivot is anchored to a SOURCE pixel of the image and
-    // forward-mapped (scale + translate), so it locks to that pixel as the image
-    // moves or scales. Auto = the image-centre pixel; manual (centerAuto=false) =
-    // the pixel the user assigned (centerX/centerY are in image/source px).
-    const scx = tr.centerAuto ? iw / 2 : tr.centerX;
-    const scy = tr.centerAuto ? ih / 2 : tr.centerY;
-    c = [scx * sX + tr.hPos, scy * sY + tr.vPos];
+    k = [tr.centerAuto ? iw / 2 : tr.centerX, tr.centerAuto ? ih / 2 : tr.centerY];
+    // Where that pixel LANDS. Only the reformat/align base scale (sx0) applies
+    // here, never the user scale: the base is the image's natural placement,
+    // and the user's scale is the thing that pivots about this point. Folding
+    // the user scale in (c = k * sX + t) is what made the pivot slide as you
+    // scaled — rotation still pivoted correctly, but scale ran about the source
+    // origin and the centre had no effect on it at all.
+    c = [k[0] * sx0 + tr.hPos, k[1] * sy0 + tr.vPos];
   }
-  return { rot: [Math.cos(ang), Math.sin(ang)], c, t: [tr.hPos, tr.vPos], sX, sY, iw, ih };
+
+  // Derived so that O = R * ((s - k) .* S) + c in the shader's form.
+  const t: [number, number] = [c[0] - k[0] * sX, c[1] - k[1] * sY];
+
+  return { rot: [Math.cos(ang), Math.sin(ang)], c, k, t, sX, sY, iw, ih };
 }
 
 /**
@@ -114,11 +140,16 @@ export function computeFollowPieces(
   // manually-assigned source pixel, forward-mapped into output px.
   const fcx = fg.centerAuto ? fgW / 2 : fg.centerX;
   const fcy = fg.centerAuto ? fgH / 2 : fg.centerY;
+  // FG's pivot lands here (base scale only — see `pieces`).
   const cFg: [number, number] = [
-    fcx * fg.scaleX * base.sX + fgAligned.hPos,
-    fcy * fg.scaleY * base.sY + fgAligned.vPos,
+    fcx * base.sX + fgAligned.hPos,
+    fcy * base.sY + fgAligned.vPos,
   ];
-  return pieces(fgAligned, sx0 * base.sX, sy0 * base.sY, faW, faH, { c: cFg });
+  // The same point expressed in FA's OWN source px. FA is reformatted onto FG's
+  // natural size by sx0/sy0, so FA pixel a corresponds to FG pixel a * sx0 —
+  // the FA pixel that must sit on FG's pivot is therefore fcx / sx0.
+  const kFa: [number, number] = [sx0 !== 0 ? fcx / sx0 : 0, sy0 !== 0 ? fcy / sy0 : 0];
+  return pieces(fgAligned, sx0 * base.sX, sy0 * base.sY, faW, faH, { c: cFg, k: kFa });
 }
 
 /** Forward-map a source px (bottom-left) → output px (bottom-left). */
@@ -127,6 +158,26 @@ export function forwardPoint(p: CompPieces, sx: number, sy: number): { x: number
   const px = sx * p.sX + p.t[0] - p.c[0];
   const py = sy * p.sY + p.t[1] - p.c[1];
   return { x: cos * px - sin * py + p.c[0], y: sin * px + cos * py + p.c[1] };
+}
+
+/**
+ * Output px → source px. The exact inverse of `forwardPoint`.
+ *
+ * Exists so UI code (dragging the centre or a scale handle) does not hand-roll
+ * the inverse from `t`/`sX`: `t` is a derived quantity and that arithmetic
+ * silently stopped being correct when the pivot semantics changed.
+ */
+export function inversePoint(p: CompPieces, ox: number, oy: number): { x: number; y: number } {
+  const [cos, sin] = p.rot;
+  const dx = ox - p.c[0];
+  const dy = oy - p.c[1];
+  // R^-1 (rotate by -angle)
+  const rx = cos * dx + sin * dy;
+  const ry = -sin * dx + cos * dy;
+  return {
+    x: p.sX !== 0 ? (rx + p.c[0] - p.t[0]) / p.sX : 0,
+    y: p.sY !== 0 ? (ry + p.c[1] - p.t[1]) / p.sY : 0,
+  };
 }
 
 /** The 4 corners of the placed input, in output px (bottom-left): BL, BR, TR, TL. */
