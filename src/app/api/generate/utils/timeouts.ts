@@ -19,5 +19,6 @@
  */
 export const GENERATION_MAX_WAIT_MS = 20 * 60 * 1000; // 20 minutes
 
-/** Same value in seconds, for route `maxDuration` declarations. */
-export const GENERATION_MAX_WAIT_SECONDS = GENERATION_MAX_WAIT_MS / 1000;
+// NOTE: there is deliberately no seconds-valued export for route `maxDuration`.
+// Next.js requires segment config to be a statically analysable literal, so the
+// route hardcodes its number; a drift test keeps the two in step.

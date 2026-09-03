@@ -95,6 +95,19 @@ function createGeminiTextResponse(text: string) {
   };
 }
 
+describe("route segment config", () => {
+  it("allows at least as long as the poll ceiling", async () => {
+    // maxDuration must be a literal (Next.js segment config is statically
+    // analysed — a computed value fails the PRODUCTION build only, which tsc,
+    // vitest and `next dev` all let through). That means it cannot import the
+    // constant, so this is what keeps the two from drifting apart. If the
+    // socket budget is shorter than the poll ceiling, a slow generation dies
+    // as a network error instead of reporting a clean timeout.
+    const mod = await import("../route");
+    expect(mod.maxDuration * 1000).toBeGreaterThanOrEqual(GENERATION_MAX_WAIT_MS);
+  });
+});
+
 describe("/api/generate route", () => {
   beforeEach(() => {
     vi.clearAllMocks();

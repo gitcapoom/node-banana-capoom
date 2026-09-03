@@ -11,7 +11,6 @@
  * Images are uploaded to fal CDN before submission to avoid payload size issues.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { GENERATION_MAX_WAIT_SECONDS } from "./utils/timeouts";
 import { GenerateRequest, GenerateResponse, ModelType, SelectedModel, ProviderType } from "@/types";
 import { GenerationInput, GenerationOutput, ModelCapability } from "@/lib/providers/types";
 import { generateWithGemini, generateWithGeminiVideo } from "./providers/gemini";
@@ -28,7 +27,12 @@ import { isImageSizeError } from "./utils/sizeErrorDetection";
 // Re-export for backward compatibility (test file imports from route)
 export const clearFalInputMappingCache = _clearFalInputMappingCache;
 
-export const maxDuration = GENERATION_MAX_WAIT_SECONDS + 60; // headroom over the poll ceiling
+// NOTE: Next.js route segment config must be a STATICALLY ANALYSABLE literal.
+// Deriving this from GENERATION_MAX_WAIT_SECONDS fails the production build
+// with "Invalid segment configuration export detected" — and only there: tsc,
+// vitest and `next dev` all accept it, so keep it a literal.
+// Must stay >= GENERATION_MAX_WAIT_MS (20 min) in src/app/api/generate/utils/timeouts.ts.
+export const maxDuration = 1260; // 21 min — the 20-min poll ceiling plus headroom
 export const dynamic = 'force-dynamic'; // Ensure this route is always dynamic
 
 
