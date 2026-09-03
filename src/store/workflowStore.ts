@@ -27,6 +27,8 @@ import {
   CanvasNavigationSettings,
   MatchMode,
   MODEL_DISPLAY_NAMES,
+  FavoriteModel,
+  favoriteKey,
 } from "@/types";
 import { useToast } from "@/components/Toast";
 import { logger } from "@/utils/logger";
@@ -43,6 +45,8 @@ import {
   saveProviderSettings,
   defaultProviderSettings,
   getRecentModels,
+  getFavoriteModels,
+  saveFavoriteModels,
   saveRecentModels,
   MAX_RECENT_MODELS,
   generateWorkflowId,
@@ -590,6 +594,9 @@ interface WorkflowStore {
 
   // Recent models state
   recentModels: RecentModel[];
+  favoriteModels: FavoriteModel[];
+  /** Star / unstar a model. Idempotent per (provider, modelId). */
+  toggleFavoriteModel: (model: { provider: ProviderType; modelId: string; displayName: string }) => void;
 
   // Recent models actions
   trackModelUsage: (model: { provider: ProviderType; modelId: string; displayName: string }) => void;
@@ -852,6 +859,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
   // Recent models initial state
   recentModels: getRecentModels(),
+  favoriteModels: getFavoriteModels(),
 
   // Comment navigation initial state
   viewedCommentNodeIds: new Set<string>(),
@@ -3413,6 +3421,18 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       modelSearchOpen: open,
       modelSearchProvider: provider ?? null,
     });
+  },
+
+  toggleFavoriteModel: (model: { provider: ProviderType; modelId: string; displayName: string }) => {
+    const key = favoriteKey(model.provider, model.modelId);
+    const current = get().favoriteModels;
+    const existing = current.some((f) => favoriteKey(f.provider, f.modelId) === key);
+    const updated = existing
+      ? current.filter((f) => favoriteKey(f.provider, f.modelId) !== key)
+      // Newest pin first, matching how the list reads top-down.
+      : [{ provider: model.provider, modelId: model.modelId, displayName: model.displayName }, ...current];
+    saveFavoriteModels(updated);
+    set({ favoriteModels: updated });
   },
 
   trackModelUsage: (model: { provider: ProviderType; modelId: string; displayName: string }) => {

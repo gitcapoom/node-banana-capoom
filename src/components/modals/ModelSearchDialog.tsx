@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { deduplicatedFetch, clearFetchCache } from "@/utils/deduplicatedFetch";
 import { useReactFlow } from "@xyflow/react";
-import { ProviderType, RecentModel } from "@/types";
+import { ProviderType, RecentModel, favoriteKey } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { setDisposableCache } from "@/utils/localStorageQuota";
 
@@ -175,6 +175,56 @@ interface ModelSearchDialogProps {
   initialCapabilityFilter?: CapabilityFilter;
 }
 
+/**
+ * Star toggle for a model card.
+ *
+ * Rendered as a SIBLING of the card's select button, absolutely positioned over
+ * it — never nested inside it. A <button> inside a <button> is invalid HTML and
+ * React warns about it at hydration; it also makes the click target ambiguous,
+ * which for a "pin this" control sitting on top of a "select this" control is
+ * exactly the bug you do not want.
+ */
+function FavoriteStar({
+  isFavorite,
+  onToggle,
+  className = "",
+}: {
+  isFavorite: boolean;
+  onToggle: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={isFavorite}
+      aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+      title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+      onClick={(e) => {
+        // The card underneath selects the model and closes the dialog.
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={`absolute top-1.5 right-1.5 z-10 p-1 rounded transition-colors
+        ${isFavorite ? "text-amber-400 hover:text-amber-300" : "text-neutral-500 hover:text-neutral-300"}
+        hover:bg-neutral-600/60 ${className}`}
+    >
+      <svg
+        className="w-4 h-4"
+        viewBox="0 0 24 24"
+        fill={isFavorite ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth={1.8}
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M11.48 3.5a.56.56 0 011.04 0l2.13 4.72 5.02.58c.47.05.66.64.31.96l-3.75 3.4 1.02 5.06a.56.56 0 01-.83.6L12 16.3l-4.42 2.52a.56.56 0 01-.83-.6l1.02-5.06-3.75-3.4a.56.56 0 01.31-.96l5.02-.58 2.13-4.72z"
+        />
+      </svg>
+    </button>
+  );
+}
+
 export function ModelSearchDialog({
   isOpen,
   onClose,
@@ -187,6 +237,8 @@ export function ModelSearchDialog({
     incrementModalCount,
     decrementModalCount,
     recentModels,
+    favoriteModels,
+    toggleFavoriteModel,
     trackModelUsage,
   } = useWorkflowStore();
   // Use stable selector for API keys to prevent unnecessary re-fetches
@@ -510,6 +562,47 @@ export function ModelSearchDialog({
       setProviderFilter("all");
     }
   }, [providerFilter, availableProviders]);
+
+  const favoriteKeys = useMemo(
+    () => new Set(favoriteModels.map((f) => favoriteKey(f.provider, f.modelId))),
+    [favoriteModels],
+  );
+
+  /**
+   * Does a pinned/recent entry belong under the dialog's current capability
+   * filter? Shared by both sections: they had one copy each of this logic and
+   * the second would have drifted from the first the moment a capability was
+   * added.
+   */
+  const matchesCapabilityFilter = useCallback(
+    (modelId: string): boolean => {
+      if (capabilityFilter === "all") return true;
+      const m = models.find((mm) => mm.id === modelId);
+      // Not loaded yet: cannot verify, so exclude while a filter is active
+      // (matches the existing behaviour for recents).
+      if (!m) return false;
+      const caps = m.capabilities;
+      if (capabilityFilter === "image")
+        return caps.some((c) => c === "text-to-image" || c === "image-to-image");
+      if (capabilityFilter === "video")
+        return caps.some(
+          (c) => c === "text-to-video" || c === "image-to-video" || c === "video-to-video",
+        );
+      if (capabilityFilter === "3d")
+        return caps.some((c) => c === "text-to-3d" || c === "image-to-3d");
+      if (capabilityFilter === "audio") return caps.some((c) => c === "text-to-audio");
+      return true;
+    },
+    [capabilityFilter, models],
+  );
+
+  // Favourites for the current capability filter. Unlike recents these are not
+  // capped: the user chose every one of them, so silently hiding some would be
+  // worse than a slightly taller section.
+  const filteredFavoriteModels = useMemo(
+    () => favoriteModels.filter((f) => matchesCapabilityFilter(f.modelId)),
+    [favoriteModels, matchesCapabilityFilter],
+  );
 
   // Filter recent models by capability
   const filteredRecentModels = useMemo(() => {
@@ -921,6 +1014,71 @@ export function ModelSearchDialog({
             </div>
           ) : (
             <div className="space-y-4">
+              {/* Favorites — pinned by the user, so shown above the automatic
+                  recency list. Hidden while searching, like Recently Used: the
+                  results are what the user is looking at then. */}
+              {filteredFavoriteModels.length > 0 && !searchQuery && (
+                <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
+                  <h3 className="text-xs font-medium text-amber-500/80 mb-2">
+                    Favorites
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {filteredFavoriteModels.map((fav) => {
+                      const matchingModel = models.find((m) => m.id === fav.modelId);
+                      const model: ProviderModel = matchingModel || {
+                        id: fav.modelId,
+                        name: fav.displayName,
+                        description: null,
+                        provider: fav.provider,
+                        capabilities: [],
+                      };
+                      return (
+                        <div key={`fav-${fav.provider}-${fav.modelId}`} className="relative">
+                          <button
+                            onClick={() => handleSelectModel(model)}
+                            className="w-full flex items-center gap-3 p-3 pr-8 bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600/30 hover:border-neutral-500 rounded-lg transition-colors text-left cursor-pointer"
+                          >
+                            <div className="w-10 h-10 rounded bg-neutral-600 overflow-hidden flex-shrink-0">
+                              {matchingModel?.coverImage ? (
+                                <img
+                                  src={matchingModel.coverImage}
+                                  alt={fav.displayName}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-neutral-500 text-xs">
+                                  ★
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-neutral-100 text-sm truncate">
+                                {fav.displayName}
+                              </div>
+                              <span
+                                className={`text-[10px] px-1.5 py-0.5 rounded ${getProviderBadgeColor(fav.provider)}`}
+                              >
+                                {getProviderDisplayName(fav.provider)}
+                              </span>
+                            </div>
+                          </button>
+                          <FavoriteStar
+                            isFavorite
+                            onToggle={() =>
+                              toggleFavoriteModel({
+                                provider: fav.provider,
+                                modelId: fav.modelId,
+                                displayName: fav.displayName,
+                              })
+                            }
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* Recently Used Section */}
               {filteredRecentModels.length > 0 && !searchQuery && (
                 <div className="bg-neutral-700/30 rounded-lg p-3">
@@ -941,10 +1099,10 @@ export function ModelSearchDialog({
                         capabilities: [],
                       };
                       return (
+                        <div key={`recent-${recent.modelId}`} className="relative">
                         <button
-                          key={`recent-${recent.modelId}`}
                           onClick={() => handleSelectModel(model)}
-                          className="flex items-center gap-3 p-3 bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600/30 hover:border-neutral-500 rounded-lg transition-colors text-left cursor-pointer group"
+                          className="w-full flex items-center gap-3 p-3 pr-8 bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600/30 hover:border-neutral-500 rounded-lg transition-colors text-left cursor-pointer group"
                         >
                           {/* Small cover image */}
                           <div className="w-10 h-10 rounded bg-neutral-600 overflow-hidden flex-shrink-0">
@@ -983,6 +1141,19 @@ export function ModelSearchDialog({
                             </span>
                           </div>
                         </button>
+                        {/* Starring from Recently Used is the natural gesture:
+                            this list is literally the models you keep using. */}
+                        <FavoriteStar
+                          isFavorite={favoriteKeys.has(favoriteKey(recent.provider, recent.modelId))}
+                          onToggle={() =>
+                            toggleFavoriteModel({
+                              provider: recent.provider,
+                              modelId: recent.modelId,
+                              displayName: recent.displayName,
+                            })
+                          }
+                        />
+                        </div>
                       );
                     })}
                   </div>
@@ -992,10 +1163,10 @@ export function ModelSearchDialog({
               {/* Main Model List */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {models.map((model) => (
+                <div key={`${model.provider}-${model.id}`} className="relative">
                 <button
-                  key={`${model.provider}-${model.id}`}
                   onClick={() => handleSelectModel(model)}
-                  className="flex items-start gap-3 p-4 bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600/50 hover:border-neutral-500 rounded-lg transition-colors text-left cursor-pointer group"
+                  className="w-full h-full flex items-start gap-3 p-4 pr-9 bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600/50 hover:border-neutral-500 rounded-lg transition-colors text-left cursor-pointer group"
                 >
                   {/* Cover Image - larger */}
                   <div className="w-20 h-20 rounded bg-neutral-600 overflow-hidden flex-shrink-0">
@@ -1101,6 +1272,17 @@ export function ModelSearchDialog({
                     </svg>
                   </div>
                 </button>
+                <FavoriteStar
+                  isFavorite={favoriteKeys.has(favoriteKey(model.provider, model.id))}
+                  onToggle={() =>
+                    toggleFavoriteModel({
+                      provider: model.provider,
+                      modelId: model.id,
+                      displayName: model.name,
+                    })
+                  }
+                />
+                </div>
               ))}
               </div>
             </div>

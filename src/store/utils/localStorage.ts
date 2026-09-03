@@ -3,6 +3,7 @@ import {
   WorkflowCostData,
   ProviderSettings,
   RecentModel,
+  FavoriteModel,
   NodeDefaultsConfig,
   GenerateImageNodeDefaults,
   GenerateVideoNodeDefaults,
@@ -18,6 +19,7 @@ export const COST_DATA_STORAGE_KEY = "node-banana-workflow-costs";
 export const GENERATE_IMAGE_DEFAULTS_KEY = "node-banana-nanoBanana-defaults";
 export const PROVIDER_SETTINGS_KEY = "node-banana-provider-settings";
 export const RECENT_MODELS_KEY = "node-banana-recent-models";
+export const FAVORITE_MODELS_KEY = "node-banana-favorite-models";
 export const NODE_DEFAULTS_KEY = "node-banana-node-defaults";
 export const CANVAS_NAVIGATION_KEY = "node-banana-canvas-navigation";
 
@@ -172,6 +174,30 @@ export const getRecentModels = (): RecentModel[] => {
 export const saveRecentModels = (models: RecentModel[]): void => {
   if (typeof window === "undefined") return;
   localStorage.setItem(RECENT_MODELS_KEY, JSON.stringify(models));
+};
+
+// Favourite models helpers
+export const getFavoriteModels = (): FavoriteModel[] => {
+  if (typeof window === "undefined") return [];
+  const stored = localStorage.getItem(FAVORITE_MODELS_KEY);
+  if (!stored) return [];
+  try {
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? (parsed as FavoriteModel[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * Written through `setItemReclaiming`: favourites are user data, not a
+ * rebuildable cache, so a full origin must drop a disposable cache rather than
+ * silently lose the user's pins. Recents deliberately keep the plain write —
+ * losing a recency list costs nothing.
+ */
+export const saveFavoriteModels = (models: FavoriteModel[]): void => {
+  if (typeof window === "undefined") return;
+  setItemReclaiming(FAVORITE_MODELS_KEY, JSON.stringify(models));
 };
 
 // Node defaults helpers

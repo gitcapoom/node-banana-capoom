@@ -16,6 +16,7 @@ const mockAddNode = vi.fn();
 const mockIncrementModalCount = vi.fn();
 const mockDecrementModalCount = vi.fn();
 const mockTrackModelUsage = vi.fn();
+const mockToggleFavoriteModel = vi.fn();
 const mockUseWorkflowStore = vi.fn();
 
 vi.mock("@/store/workflowStore", () => ({
@@ -138,6 +139,8 @@ describe("ModelSearchDialog", () => {
         decrementModalCount: mockDecrementModalCount,
         recentModels: [],
         trackModelUsage: mockTrackModelUsage,
+        favoriteModels: [],
+        toggleFavoriteModel: mockToggleFavoriteModel,
       };
       return selector(state);
     });
@@ -147,6 +150,104 @@ describe("ModelSearchDialog", () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
+
+  describe("Favorites", () => {
+    /** Re-mock the store with a given favourites list. */
+    function withFavorites(favorites: Array<{ provider: string; modelId: string; displayName: string }>) {
+      mockUseWorkflowStore.mockImplementation((selector: (s: unknown) => unknown) =>
+        selector({
+          providerSettings: defaultProviderSettings,
+          addNode: mockAddNode,
+          incrementModalCount: mockIncrementModalCount,
+          decrementModalCount: mockDecrementModalCount,
+          recentModels: [],
+          trackModelUsage: mockTrackModelUsage,
+          favoriteModels: favorites,
+          toggleFavoriteModel: mockToggleFavoriteModel,
+        }),
+      );
+    }
+
+    it("shows no Favorites section when nothing is pinned", async () => {
+      render(
+        <TestWrapper>
+          <ModelSearchDialog isOpen={true} onClose={vi.fn()} />
+        </TestWrapper>
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      expect(screen.queryByText("Favorites")).toBeNull();
+    });
+
+    it("lists pinned models in a Favorites section", async () => {
+      withFavorites([{ provider: "fal", modelId: "flux/dev", displayName: "FLUX.1 Dev" }]);
+      render(
+        <TestWrapper>
+          <ModelSearchDialog isOpen={true} onClose={vi.fn()} />
+        </TestWrapper>
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      expect(screen.getByText("Favorites")).toBeInTheDocument();
+    });
+
+    it("stars a model from the main list", async () => {
+      render(
+        <TestWrapper>
+          <ModelSearchDialog isOpen={true} onClose={vi.fn()} />
+        </TestWrapper>
+      );
+      await vi.advanceTimersByTimeAsync(100);
+
+      const stars = screen.getAllByLabelText("Add to favorites");
+      fireEvent.click(stars[0]);
+
+      expect(mockToggleFavoriteModel).toHaveBeenCalledWith(
+        expect.objectContaining({ modelId: "flux/dev", provider: "fal" }),
+      );
+    });
+
+    it("starring does not also select the model", async () => {
+      // The star sits ON TOP of the card, whose click selects the model and
+      // closes the dialog — so pinning must not also pick.
+      //
+      // Today this holds because the star is a SIBLING of the card button
+      // rather than nested inside it, so nothing bubbles; removing the
+      // handler's stopPropagation does not break this test, and that is
+      // expected. What this pins is the user-visible property, so that
+      // nesting the star inside the card later (the obvious "simplification")
+      // is caught here instead of in someone's workflow.
+      const onClose = vi.fn();
+      render(
+        <TestWrapper>
+          <ModelSearchDialog isOpen={true} onClose={onClose} />
+        </TestWrapper>
+      );
+      await vi.advanceTimersByTimeAsync(100);
+
+      fireEvent.click(screen.getAllByLabelText("Add to favorites")[0]);
+
+      expect(mockToggleFavoriteModel).toHaveBeenCalled();
+      expect(mockAddNode).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("offers un-starring for an already pinned model", async () => {
+      withFavorites([{ provider: "fal", modelId: "flux/dev", displayName: "FLUX.1 Dev" }]);
+      render(
+        <TestWrapper>
+          <ModelSearchDialog isOpen={true} onClose={vi.fn()} />
+        </TestWrapper>
+      );
+      await vi.advanceTimersByTimeAsync(100);
+
+      const remove = screen.getAllByLabelText("Remove from favorites");
+      expect(remove.length).toBeGreaterThan(0);
+      fireEvent.click(remove[0]);
+      expect(mockToggleFavoriteModel).toHaveBeenCalledWith(
+        expect.objectContaining({ modelId: "flux/dev" }),
+      );
+    });
+  });
+
 
   describe("Visibility", () => {
     it("should not render when isOpen is false", () => {

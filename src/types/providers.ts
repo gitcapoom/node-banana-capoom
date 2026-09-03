@@ -52,3 +52,22 @@ export interface RecentModel {
   displayName: string;
   timestamp: number;
 }
+
+/**
+ * A model the user has pinned. Unlike RecentModel this has no timestamp: it is
+ * ordered by when it was starred and only the user removes it.
+ *
+ * Identified by provider AND modelId. RecentModel keys on modelId alone, which
+ * would collide if two providers ever ship the same id; favourites are
+ * long-lived, so they use the same composite key the model list renders with.
+ */
+export interface FavoriteModel {
+  provider: ProviderType;
+  modelId: string;
+  displayName: string;
+}
+
+/** Stable identity for a favourite — provider-qualified, so ids cannot collide. */
+export function favoriteKey(provider: ProviderType, modelId: string): string {
+  return `${provider}:${modelId}`;
+}
