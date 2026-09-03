@@ -42,6 +42,7 @@ vi.mock("@/lib/images", () => ({
 }));
 
 import { POST, clearFalInputMappingCache } from "../route";
+import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
 
 // Store original env
 const originalEnv = { ...process.env };
@@ -1206,8 +1207,9 @@ describe("/api/generate route", () => {
       expect(data.error).toContain("NSFW content detected");
     });
 
-    it("should handle prediction timeout (5 min max)", async () => {
+    it("should handle prediction timeout at the shared generation ceiling", async () => {
       vi.useFakeTimers();
+      try {
 
       // Model info fetch
       mockFetch.mockResolvedValueOnce({
@@ -1250,10 +1252,15 @@ describe("/api/generate route", () => {
       // Start the POST request
       const responsePromise = POST(request);
 
-      // Advance time past the 5-minute timeout
-      // We need to run pending timers multiple times to simulate polling
-      for (let i = 0; i < 310; i++) {
-        await vi.advanceTimersByTimeAsync(1000);
+      // Advance past the shared ceiling. Derived from the constant rather than
+      // hardcoded: this test previously counted to 310 for a 5-minute limit, so
+      // raising the limit made it hang until vitest's 5s timeout — and because
+      // it then failed before restoring real timers, fake timers leaked into
+      // the following 20 tests and took them all down with it.
+      const stepMs = 10_000;
+      const steps = Math.ceil(GENERATION_MAX_WAIT_MS / stepMs) + 5;
+      for (let i = 0; i < steps; i++) {
+        await vi.advanceTimersByTimeAsync(stepMs);
       }
 
       const response = await responsePromise;
@@ -1262,8 +1269,10 @@ describe("/api/generate route", () => {
       expect(response.status).toBe(500);
       expect(data.success).toBe(false);
       expect(data.error).toContain("timed out");
-
-      vi.useRealTimers();
+      } finally {
+        // Never leave fake timers installed — see the comment above.
+        vi.useRealTimers();
+      }
     });
 
     it("should poll for prediction completion", async () => {

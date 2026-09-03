@@ -6,6 +6,7 @@
  */
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
+import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
 import { validateMediaUrl } from "@/utils/urlValidation";
 
 type WaveSpeedStatus = "created" | "pending" | "processing" | "completed" | "failed";
@@ -190,7 +191,7 @@ export async function generateWithWaveSpeed(
 
   // Poll for completion using the URL from the API response, or construct it
   // Status flow: created → processing → completed/failed
-  const maxWaitTime = 5 * 60 * 1000; // 5 minutes
+  const maxWaitTime = GENERATION_MAX_WAIT_MS;
   const pollInterval = 1000; // 1 second
   const startTime = Date.now();
   let lastStatus = "";

@@ -6,6 +6,7 @@
  */
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
+import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
 import { validateMediaUrl } from "@/utils/urlValidation";
 import { setAtPath } from "./deepSet";
 import {
@@ -480,7 +481,7 @@ export async function generateWithFalQueue(
   console.log(`[API:${requestId}] Queue request submitted: ${falRequestId}, status URL: ${statusUrl}`);
 
   // Poll for completion
-  const maxWaitTime = 10 * 60 * 1000; // 10 minutes for video
+  const maxWaitTime = GENERATION_MAX_WAIT_MS;
   const pollInterval = 1000; // 1 second (matches Replicate/WaveSpeed)
   const startTime = Date.now();
   let lastStatus = "";

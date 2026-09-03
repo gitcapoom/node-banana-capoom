@@ -11,6 +11,7 @@
  */
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
+import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
 import { validateMediaUrl } from "@/utils/urlValidation";
 import { uploadImageToFal } from "./fal";
 
@@ -153,7 +154,7 @@ export async function generateWithMuapi(
 
   // Poll for completion
   // Status flow: processing → completed | failed
-  const maxWaitTime = 20 * 60 * 1000; // 20 minutes (video models can be very slow)
+  const maxWaitTime = GENERATION_MAX_WAIT_MS;
   const pollInterval = 2000; // 2 seconds
   const startTime = Date.now();
   let lastStatus = "";

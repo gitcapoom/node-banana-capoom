@@ -5,6 +5,7 @@
  */
 
 import { NextResponse } from "next/server";
+import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
 import { GoogleGenAI } from "@google/genai";
 import { GenerateResponse, ModelType } from "@/types";
 import { GenerationOutput } from "@/lib/providers/types";
@@ -351,9 +352,9 @@ export async function generateWithGeminiVideo(
   try {
     operation = await ai.models.generateVideos(requestArgs as unknown as Parameters<typeof ai.models.generateVideos>[0]);
 
-    // Poll for completion (10s intervals, 5min timeout)
+    // Poll for completion (10s intervals)
     const POLL_INTERVAL = 10_000;
-    const TIMEOUT = 5 * 60 * 1000;
+    const TIMEOUT = GENERATION_MAX_WAIT_MS;
 
     while (!operation.done) {
       const elapsed = Date.now() - startTime;

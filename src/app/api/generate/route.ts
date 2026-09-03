@@ -11,6 +11,7 @@
  * Images are uploaded to fal CDN before submission to avoid payload size issues.
  */
 import { NextRequest, NextResponse } from "next/server";
+import { GENERATION_MAX_WAIT_SECONDS } from "./utils/timeouts";
 import { GenerateRequest, GenerateResponse, ModelType, SelectedModel, ProviderType } from "@/types";
 import { GenerationInput, GenerationOutput, ModelCapability } from "@/lib/providers/types";
 import { generateWithGemini, generateWithGeminiVideo } from "./providers/gemini";
@@ -27,7 +28,7 @@ import { isImageSizeError } from "./utils/sizeErrorDetection";
 // Re-export for backward compatibility (test file imports from route)
 export const clearFalInputMappingCache = _clearFalInputMappingCache;
 
-export const maxDuration = 300; // 5 minute timeout (Vercel hobby plan limit)
+export const maxDuration = GENERATION_MAX_WAIT_SECONDS + 60; // headroom over the poll ceiling
 export const dynamic = 'force-dynamic'; // Ensure this route is always dynamic
 
 

@@ -6,6 +6,7 @@
  */
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
+import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
 import { validateMediaUrl } from "@/utils/urlValidation";
 
 const MAX_MEDIA_SIZE = 500 * 1024 * 1024; // 500MB
@@ -299,7 +300,7 @@ export async function pollKieTaskCompletion(
   apiKey: string,
   taskId: string,
 ): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
-  const maxWaitTime = 10 * 60 * 1000; // 10 minutes for video
+  const maxWaitTime = GENERATION_MAX_WAIT_MS;
   const pollInterval = 2000; // 2 seconds
   const startTime = Date.now();
   let lastStatus = "";
@@ -361,7 +362,7 @@ export async function pollVeoTaskCompletion(
   apiKey: string,
   taskId: string,
 ): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
-  const maxWaitTime = 10 * 60 * 1000;
+  const maxWaitTime = GENERATION_MAX_WAIT_MS;
   const pollInterval = 2000;
   const startTime = Date.now();
   let lastStatus = -1;

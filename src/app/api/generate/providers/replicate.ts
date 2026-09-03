@@ -5,6 +5,7 @@
  */
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
+import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
 import { validateMediaUrl } from "@/utils/urlValidation";
 import {
   getParameterTypesFromSchema,
@@ -165,12 +166,15 @@ export async function generateWithReplicate(
   const prediction = await createResponse.json();
   console.log(`[API:${requestId}] Prediction created: ${prediction.id}`);
 
-  // Poll for completion — video models get a longer processing timeout.
-  // Queue wait time is NOT counted against the timeout so cold-start models
-  // (e.g. kfarr/sharp-ml) can sit in queue indefinitely without timing out.
-  // The server.js 10-minute request timeout acts as the outer safety net.
-  const isVideoModel = input.model.capabilities.some(c => c.includes("video"));
-  const maxProcessingTime = isVideoModel ? 10 * 60 * 1000 : 5 * 60 * 1000;
+  // Poll for completion. Queue wait time is NOT counted against the timeout so
+  // cold-start models (e.g. kfarr/sharp-ml) can sit in queue indefinitely
+  // without timing out; the clock starts when status becomes "processing".
+  // server.requestTimeout in server.js (25 min) is the outer safety net.
+  //
+  // Image and video share one budget now. Splitting them meant an image model
+  // that was merely slow got half the patience of a video model that was doing
+  // the same amount of work.
+  const maxProcessingTime = GENERATION_MAX_WAIT_MS;
   const pollInterval = 1000; // 1 second
   let processingStartTime: number | null = null;
 
