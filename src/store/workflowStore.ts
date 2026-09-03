@@ -494,6 +494,12 @@ interface WorkflowStore {
   pausedAtNodeId: string | null;
   maxConcurrentCalls: number;  // Configurable concurrency limit (1-10)
   _abortController: AbortController | null;  // Internal: for cancellation
+  /**
+   * Internal: one AbortController per in-flight node, so a single generation
+   * can be cancelled without stopping the rest of the run. Keyed by node id and
+   * always deleted by that node's finalizer.
+   */
+  _nodeAbortControllers: Map<string, AbortController>;
   _buildExecutionContext: (node: WorkflowNode, signal?: AbortSignal) => NodeExecutionContext;
   executeWorkflow: (startFromNodeId?: string) => Promise<void>;
   regenerateNode: (nodeId: string) => Promise<void>;
@@ -506,6 +512,8 @@ interface WorkflowStore {
   propagateFromNode: (nodeId: string) => Promise<void>;
   executeSelectedNodes: (nodeIds: string[]) => Promise<void>;
   stopWorkflow: () => void;
+  /** Cancel ONE in-flight node. No-op if that node isn't currently running. */
+  cancelNode: (nodeId: string) => void;
   setMaxConcurrentCalls: (value: number) => void;
 
   // Save/Load
@@ -814,6 +822,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   pausedAtNodeId: null,
   maxConcurrentCalls: loadConcurrencySetting(),  // Default 3, configurable 1-10
   _abortController: null,  // Internal: for cancellation
+  _nodeAbortControllers: new Map(),
   globalImageHistory: [],
 
   // Auto-save initial state
@@ -1797,7 +1806,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
           // Execute batch in parallel
           const results = await Promise.allSettled(
-            batch.map((node) => executeSingleNode(node, abortController.signal))
+            batch.map((node) =>
+              runNodeCancellable(node, abortController.signal, get()._nodeAbortControllers, executeSingleNode))
           );
 
           // Check for failures with node context (fail-fast behavior)
@@ -1853,7 +1863,23 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     if (controller) {
       controller.abort("user-cancelled");
     }
+    // Per-node controllers too, or a node started by regenerateNode keeps
+    // polling after the global Stop.
+    for (const c of get()._nodeAbortControllers.values()) c.abort(CANCEL_REASON);
+    get()._nodeAbortControllers.clear();
     set({ isRunning: false, currentNodeIds: [], _abortController: null });
+  },
+
+  cancelNode: (nodeId: string) => {
+    const controller = get()._nodeAbortControllers.get(nodeId);
+    if (!controller) return;
+    controller.abort(CANCEL_REASON);
+    // The executor's fetch rejects, the node's own finalizer clears
+    // currentNodeIds and deletes the controller. Marking status here rather
+    // than in the catch keeps the label correct even for an executor that
+    // swallows the abort instead of rethrowing.
+    get().updateNodeData(nodeId, { status: "idle", error: null });
+    logger.info('node.execution', 'Node cancelled by user', { nodeId });
   },
 
   setMaxConcurrentCalls: (value: number) => {
@@ -1886,6 +1912,12 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       return;
     }
 
+    // One controller for THIS node, so Cancel on it doesn't touch anything
+    // else in flight. Registered before the node is marked in-flight, so the
+    // Cancel button can never render without a controller behind it.
+    const nodeAbort = new AbortController();
+    get()._nodeAbortControllers.set(nodeId, nodeAbort);
+
     // Add this node to the in-flight set without disturbing other runs.
     // `isRunning` is derived: true when any node is executing. We cleanup
     // in the matching try/finally below.
@@ -1896,6 +1928,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     // Inline finalizer used by every exit path below — removes this node
     // from currentNodeIds and updates isRunning based on what's left.
     const finalize = () => {
+      get()._nodeAbortControllers.delete(nodeId);
       set((s) => {
         const remaining = s.currentNodeIds.filter((id) => id !== nodeId);
         return { isRunning: remaining.length > 0, currentNodeIds: remaining };
@@ -1942,7 +1975,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       // so its lazily-loaded fields are still null — see the same correction in
       // executeWorkflow's level loop.
       const node = get().nodes.find((n) => n.id === nodeId) ?? staleNode;
-      const executionCtx = get()._buildExecutionContext(node);
+      const executionCtx = get()._buildExecutionContext(node, nodeAbort.signal);
 
       const regenOptions = { useStoredFallback: true };
 
@@ -2045,6 +2078,21 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       saveLogSession();
       await logger.endSession();
     } catch (error) {
+      // A user cancel surfaces here as an AbortError. It is not a failure:
+      // painting the node red (and logging a stack trace) for something the
+      // user deliberately did is just noise. cancelNode has already set the
+      // idle status; leave it alone.
+      if (isCancellation(error, nodeAbort.signal)) {
+        logger.info('node.execution', 'Node regeneration cancelled', { nodeId });
+        finalize();
+        try {
+          saveLogSession();
+          await logger.endSession();
+        } catch (teardownErr) {
+          console.error('[regenerateNode] log-session teardown failed:', teardownErr);
+        }
+        return;
+      }
       // Log full stack trace to browser console for debugging
       console.error('[regenerateNode] failed:', error);
       logger.error('node.error', 'Node regeneration failed', {
@@ -2306,7 +2354,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           });
 
           const results = await Promise.allSettled(
-            batch.map((node) => executeNode(node, abortController.signal))
+            batch.map((node) =>
+              runNodeCancellable(node, abortController.signal, get()._nodeAbortControllers, executeNode))
           );
 
           // Collect per-node failures (excluding user-cancel AbortErrors) but
@@ -3629,6 +3678,50 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   },
 
 });
+
+/**
+ * Run one node under its OWN AbortController, chained to the run-level signal.
+ *
+ * Registering per node is what lets a single generation be cancelled without
+ * stopping the rest of the run. The chain is one-way: aborting the run aborts
+ * every node, but cancelling one node leaves the run alone — and the batch
+ * runners already ignore AbortError rejections, so the other nodes in the
+ * level keep going.
+ */
+async function runNodeCancellable(
+  node: WorkflowNode,
+  runSignal: AbortSignal,
+  controllers: Map<string, AbortController>,
+  exec: (node: WorkflowNode, signal: AbortSignal) => Promise<void>,
+): Promise<void> {
+  const nodeAbort = new AbortController();
+  const relay = () => nodeAbort.abort(runSignal.reason);
+  if (runSignal.aborted) nodeAbort.abort(runSignal.reason);
+  else runSignal.addEventListener("abort", relay, { once: true });
+  controllers.set(node.id, nodeAbort);
+  try {
+    await exec(node, nodeAbort.signal);
+  } finally {
+    // Always drop the listener: the run signal outlives the node, so leaving it
+    // attached leaks one closure per node per run.
+    runSignal.removeEventListener("abort", relay);
+    controllers.delete(node.id);
+  }
+}
+
+/**
+ * Reason passed to `AbortController.abort()` for a deliberate user cancel, so
+ * the catch can tell "the user pressed Cancel" apart from a network failure and
+ * avoid painting the node red for something the user chose.
+ */
+const CANCEL_REASON = "user-cancelled";
+
+/** Did this rejection come from a cancel (ours or the browser's AbortError)? */
+function isCancellation(err: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  if (err instanceof DOMException && err.name === "AbortError") return true;
+  return err instanceof Error && err.name === "AbortError";
+}
 
 export const useWorkflowStore = create<WorkflowStore>()(workflowStoreImpl);
 

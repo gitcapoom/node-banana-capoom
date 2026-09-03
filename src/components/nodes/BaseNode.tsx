@@ -9,6 +9,7 @@ import { getMediaDimensions, calculateAspectFitSize } from "@/utils/nodeDimensio
 import { MediaResolutionBadge } from "./MediaResolutionBadge";
 import { useThumbnailPending } from "@/lib/thumbnailSize";
 import type { MediaType } from "@/components/MediaOverlay";
+import { isCancellableNodeType } from "@/lib/cancellableNodes";
 
 const DEFAULT_NODE_DIMENSION = 300;
 
@@ -76,6 +77,7 @@ export function BaseNode({
 }: BaseNodeProps) {
   const currentNodeIds = useWorkflowStore((state) => state.currentNodeIds);
   const setHoveredNodeId = useWorkflowStore((state) => state.setHoveredNodeId);
+  const cancelNode = useWorkflowStore((state) => state.cancelNode);
   const isCurrentlyExecuting = currentNodeIds.includes(id);
   const { getNodes, setNodes } = useReactFlow();
 
@@ -363,6 +365,26 @@ export function BaseNode({
         }}
       >
         <div ref={contentRef} className={contentClassName ?? (fullBleed ? "flex-1 min-h-0 relative" : "px-3 pb-4 flex-1 min-h-0 overflow-hidden flex flex-col")}>{children}</div>
+        {/* Cancel — only while THIS node is actually in flight, and only for
+            node types that hand work to a remote API. `currentNodeIds` is the
+            reactive source of truth; the controller map is mutated in place and
+            deliberately does not trigger re-renders. */}
+        {(isCurrentlyExecuting || isExecuting) && isCancellableNodeType(nodeData?.type) && (
+          <button
+            type="button"
+            className="nodrag nopan absolute top-1.5 right-1.5 z-20 rounded px-2 py-0.5 text-[10px] font-medium
+                       bg-neutral-900/85 text-neutral-200 border border-neutral-600
+                       hover:bg-red-600 hover:border-red-500 hover:text-white transition-colors"
+            title="Cancel this generation"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              cancelNode(id);
+            }}
+          >
+            Cancel
+          </button>
+        )}
         {/* Resolution readout — every node that shows media gets one, since
             aspectFitMedia is already the node's displayed image/video. */}
         <MediaResolutionBadge
