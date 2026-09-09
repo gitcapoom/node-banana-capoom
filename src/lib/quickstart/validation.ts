@@ -55,6 +55,7 @@ const VALID_NODE_TYPES: NodeType[] = [
   "hsvCorrect",
   "contrastAdjust",
   "blur",
+  "dilate",
   "viewer",
   "dot",
   "panoShift",
@@ -110,6 +111,7 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   hsvCorrect: { width: 280, height: 380 },
   contrastAdjust: { width: 280, height: 380 },
   blur: { width: 280, height: 420 },
+  dilate: { width: 280, height: 420 },
   viewer: { width: 360, height: 300 },
   dot: { width: 14, height: 14 },
   panoShift: { width: 320, height: 280 },
@@ -685,6 +687,15 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
       };
     case "dot":
       return {};
+    case "dilate":
+      return {
+        sourceImage: null,
+        matteImage: null,
+        size: 0,
+        invertMatte: false,
+        mixAmount: 1,
+        outputImage: null,
+      };
     case "blur":
       return {
         sourceImage: null,

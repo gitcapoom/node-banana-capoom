@@ -930,6 +930,18 @@ async function externalizeNodeImages(
     // unset — which OUTPUT_REF_FIELD (compSignature) says blur has — so every
     // downstream comp pin degraded to a `u:` URL token and re-composited on
     // open, and the run pre-pass could never stop at a blur.
+    case "dilate": {
+      const d = data as import("@/types").DilateNodeData;
+      const next: Record<string, unknown> = { ...d };
+      // Same reasoning as blur: the two input mirrors are re-derived from the
+      // connected upstream on open/run and the node clears their refs each time
+      // it re-mirrors, so externalizing them re-saves a fresh copy every save.
+      next.sourceImage = null; next.sourceImageRef = undefined;
+      next.matteImage = null; next.matteImageRef = undefined;
+      await externalizeDisplayField(d, next, "outputImage", "outputImageRef", "outputImageThumb", workflowPath, savedImageIds, "inputs", "png");
+      newData = next as import("@/types").DilateNodeData;
+      break;
+    }
     case "blur": {
       const d = data as import("@/types").BlurNodeData;
       const next: Record<string, unknown> = { ...d };
@@ -1385,6 +1397,7 @@ async function hydrateNodeImages(
     case "reformat":
     case "comp":
     case "blur":
+    case "dilate":
     case "panoShift": {
       newData = data;
       break;

@@ -694,6 +694,60 @@ export async function executeBlur(ctx: NodeExecutionContext): Promise<void> {
 }
 
 /**
+ * Dilate node: grow or shrink by a signed pixel amount, gated by an optional
+ * matte. Structurally identical to executeBlur — same lazy-hydration pre-pass
+ * (a matte that is still null on open would silently apply the effect to the
+ * whole frame), same two-handle resolve, same commit path.
+ */
+export async function executeDilate(ctx: NodeExecutionContext): Promise<void> {
+  const { node, updateNodeData, getEdges, getNodes, saveDirectoryPath } = ctx;
+  try {
+    const data = node.data as import("@/types").DilateNodeData;
+    try {
+      await ensureFullResForNodes([node.id], getNodes(), getEdges(), updateNodeData, saveDirectoryPath);
+    } catch { /* best-effort */ }
+    const edges = getEdges();
+    const nodes = getNodes();
+    let src: string | null = null, srcId: string | null = null;
+    let mt: string | null = null, mtId: string | null = null;
+    for (const e of edges) {
+      if (e.target !== node.id) continue;
+      const s = nodes.find((n) => n.id === e.source);
+      if (!s) continue;
+      const out = getSourceOutput(s, e.sourceHandle, e.data as Record<string, unknown> | undefined);
+      if (out.type !== "image" || !out.value) continue;
+      if (e.targetHandle === "image" || e.targetHandle == null) { src = out.value; srcId = s.id; }
+      else if (e.targetHandle === "image-dilate_matte") { mt = out.value; mtId = s.id; }
+    }
+    updateNodeData(node.id, {
+      sourceImage: src, sourceImageRef: undefined, matteImage: mt, matteImageRef: undefined,
+    });
+    if (!src) {
+      if (data.outputImage !== null) await commitProcessorOutput(updateNodeData, node.id, null);
+      return;
+    }
+    const { commitDilateNode } = await import("@/utils/colorChain");
+    const { resolveInputRef } = await import("@/utils/compComposite");
+    const output = await commitDilateNode(
+      resolveInputRef(src, srcId),
+      resolveInputRef(mt, mtId),
+      {
+        size: data.size ?? 0,
+        invertMatte: !!data.invertMatte,
+        mixAmount: data.mixAmount ?? 1,
+      },
+      node.id,
+      src,
+    );
+    await commitProcessorOutput(updateNodeData, node.id, output, { error: null });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[Workflow] Dilate node ${node.id} failed:`, message);
+    updateNodeData(node.id, { error: message });
+  }
+}
+
+/**
  * Viewer node: mirror the connected image so a workflow RUN leaves the same
  * state the live in-node selector produces. The node is normally kept current
  * by its own reactive subscription; this covers headless/offscreen runs, where

@@ -32,6 +32,7 @@ import {
   executeHsvCorrect,
   executeContrastAdjust,
   executeBlur,
+  executeDilate,
   executeViewer,
   executePanoShift,
 } from "./simpleNodeExecutors";
@@ -190,6 +191,9 @@ export async function executeNode(
     case "blur":
       await executeBlur(ctx);
       break;
+    case "dilate":
+      await executeDilate(ctx);
+      break;
     case "viewer":
       await executeViewer(ctx);
       break;
@@ -217,6 +221,7 @@ export const LOCAL_PROCESSOR_TYPES: ReadonlySet<string> = new Set([
   "hsvCorrect",
   "contrastAdjust",
   "blur",
+  "dilate",
   "viewer",
   "panoShift",
   "maskPainter",

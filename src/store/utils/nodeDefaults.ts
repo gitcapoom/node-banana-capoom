@@ -103,6 +103,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   hsvCorrect: { width: 280, height: 380 },
   contrastAdjust: { width: 280, height: 380 },
   blur: { width: 280, height: 420 },
+  dilate: { width: 280, height: 420 },
   viewer: { width: 360, height: 300 },
   dot: { width: 14, height: 14 },
   panoShift: { width: 320, height: 280 },
@@ -585,6 +586,15 @@ export const createDefaultNodeData = (type: NodeType): WorkflowNodeData => {
         mixAmount: 1,
         outputImage: null,
       } as import("@/types").BlurNodeData;
+    case "dilate":
+      return {
+        sourceImage: null,
+        matteImage: null,
+        size: 0,
+        invertMatte: false,
+        mixAmount: 1,
+        outputImage: null,
+      } as import("@/types").DilateNodeData;
     case "panoShift":
       return {
         sourceImage: null,

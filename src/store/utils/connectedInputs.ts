@@ -247,6 +247,9 @@ export function getSourceOutput(
   } else if (sourceNode.type === "blur") {
     const bData = sourceNode.data as import("@/types").BlurNodeData;
     return { type: "image", value: processorOutput(bData as unknown as Record<string, unknown>) };
+  } else if (sourceNode.type === "dilate") {
+    const dData = sourceNode.data as import("@/types").DilateNodeData;
+    return { type: "image", value: processorOutput(dData as unknown as Record<string, unknown>) };
   } else if (sourceNode.type === "panoShift") {
     const psData = sourceNode.data as import("@/types").PanoShiftNodeData;
     return { type: "image", value: processorOutput(psData as unknown as Record<string, unknown>) };

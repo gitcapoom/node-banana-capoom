@@ -74,6 +74,7 @@ export type NodeType =
   | "hsvCorrect"
   | "contrastAdjust"
   | "blur"
+  | "dilate"
   | "viewer"
   | "dot"
   | "panoShift"
@@ -315,6 +316,30 @@ export interface ContrastAdjustNodeData extends BaseNodeData {
  * motion / zoom / spin) and an optional grayscale matte input that gates
  * where the blur lands (white = blurred). Chainable in the float pipeline.
  */
+/**
+ * Morphological grow/shrink. ONE signed knob, following Nuke's Dilate: positive
+ * grows, negative shrinks. Erode is dilation of the complement, and any comp
+ * that grows a matte sooner or later wants to shrink one, so two nodes would
+ * only mean two places to fix.
+ */
+export interface DilateNodeData extends BaseNodeData {
+  sourceImage: string | null;
+  sourceImageRef?: string;
+  matteImage: string | null;
+  matteImageRef?: string;
+  /** Pixels. > 0 dilates (grows), < 0 erodes (shrinks), 0 is a pass-through. */
+  size: number;
+  /** Flip the matte (apply where it is black instead of white). */
+  invertMatte: boolean;
+  /** 0..1 blend between source (0) and filtered (1). */
+  mixAmount: number;
+  outputImage: string | null;
+  outputImageRef?: string;
+  outputImageThumb?: string;
+  outputImageThumbKey?: string | null;
+  error?: string | null;
+}
+
 export interface BlurNodeData extends BaseNodeData {
   sourceImage: string | null;
   sourceImageRef?: string;

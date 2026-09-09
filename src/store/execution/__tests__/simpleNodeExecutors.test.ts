@@ -8,6 +8,7 @@ import {
   executeImageCompare,
   executeGlbViewer,
   executeBlur,
+  executeDilate,
   executeComp,
   executeImageCrop,
 } from "../simpleNodeExecutors";
@@ -15,7 +16,11 @@ import {
 // executeBlur's GPU commit + run-hydration are environment-bound — stub them.
 vi.mock("@/utils/colorChain", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/utils/colorChain")>();
-  return { ...actual, commitBlurNode: vi.fn().mockResolvedValue("data:image/png;base64,BLURRED") };
+  return {
+    ...actual,
+    commitBlurNode: vi.fn().mockResolvedValue("data:image/png;base64,BLURRED"),
+    commitDilateNode: vi.fn().mockResolvedValue("data:image/png;base64,DILATED"),
+  };
 });
 vi.mock("@/store/execution/hydrateForRun", () => ({
   ensureFullResForNodes: vi.fn().mockResolvedValue(undefined),
@@ -731,6 +736,87 @@ describe("executeBlur", () => {
 
     expect(ctx.updateNodeData).toHaveBeenCalledWith("blur1", { outputImage: null, outputImageRef: undefined, outputImageThumbKey: null });
     expect(commitBlurNode).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeDilate", () => {
+  const IMG = "data:image/png;base64,SRC";
+  const MASK = "data:image/png;base64,MASK";
+
+  it("routes primary + mask handles, mirrors inputs, and commits the signed size", async () => {
+    const { commitDilateNode } = await import("@/utils/colorChain");
+    vi.mocked(commitDilateNode).mockClear();
+    const node = makeNode("dil1", "dilate", {
+      sourceImage: null, matteImage: null, size: -6, invertMatte: true,
+      mixAmount: 0.5, outputImage: null,
+    });
+    const src = makeNode("in1", "imageInput", { image: IMG });
+    const mk = makeNode("in2", "imageInput", { image: MASK });
+    const ctx = makeCtx(node, {
+      getEdges: vi.fn().mockReturnValue([
+        { id: "e1", source: "in1", target: "dil1", targetHandle: "image" } as WorkflowEdge,
+        { id: "e2", source: "in2", target: "dil1", targetHandle: "image-dilate_matte" } as WorkflowEdge,
+      ]),
+      getNodes: vi.fn().mockReturnValue([node, src, mk]),
+    });
+
+    await executeDilate(ctx);
+
+    expect(ctx.updateNodeData).toHaveBeenCalledWith("dil1", {
+      sourceImage: IMG, sourceImageRef: undefined, matteImage: MASK, matteImageRef: undefined,
+    });
+    // The negative size must survive to the GPU layer — that sign is the whole
+    // erode half of the node.
+    expect(commitDilateNode).toHaveBeenCalledWith(
+      { url: IMG },
+      { url: MASK },
+      { size: -6, invertMatte: true, mixAmount: 0.5 },
+      "dil1",
+      IMG,
+    );
+    expect(ctx.updateNodeData).toHaveBeenCalledWith("dil1", {
+      outputImage: "data:image/png;base64,DILATED", outputImageRef: undefined, outputImageThumbKey: null, error: null,
+    });
+  });
+
+  it("runs with no mask connected", async () => {
+    const { commitDilateNode } = await import("@/utils/colorChain");
+    vi.mocked(commitDilateNode).mockClear();
+    const node = makeNode("dil1", "dilate", {
+      sourceImage: null, matteImage: null, size: 10, invertMatte: false,
+      mixAmount: 1, outputImage: null,
+    });
+    const src = makeNode("in1", "imageInput", { image: IMG });
+    const ctx = makeCtx(node, {
+      getEdges: vi.fn().mockReturnValue([
+        { id: "e1", source: "in1", target: "dil1", targetHandle: "image" } as WorkflowEdge,
+      ]),
+      getNodes: vi.fn().mockReturnValue([node, src]),
+    });
+
+    await executeDilate(ctx);
+
+    expect(commitDilateNode).toHaveBeenCalledWith(
+      { url: IMG }, null, { size: 10, invertMatte: false, mixAmount: 1 }, "dil1", IMG,
+    );
+  });
+
+  it("clears a stale output when the source is disconnected", async () => {
+    const { commitDilateNode } = await import("@/utils/colorChain");
+    vi.mocked(commitDilateNode).mockClear();
+    const node = makeNode("dil1", "dilate", {
+      sourceImage: IMG, matteImage: null, size: 4, invertMatte: false,
+      mixAmount: 1, outputImage: "data:image/png;base64,OLD",
+    });
+    const ctx = makeCtx(node, {
+      getEdges: vi.fn().mockReturnValue([]),
+      getNodes: vi.fn().mockReturnValue([node]),
+    });
+
+    await executeDilate(ctx);
+
+    expect(ctx.updateNodeData).toHaveBeenCalledWith("dil1", { outputImage: null, outputImageRef: undefined, outputImageThumbKey: null });
+    expect(commitDilateNode).not.toHaveBeenCalled();
   });
 });
 

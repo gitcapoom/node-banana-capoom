@@ -39,7 +39,7 @@ export type ShaderInput = { url: string } | { floatNodeId: string };
 /** Node types that participate in the float color chain. `comp` joins so its
  *  inputs read upstream float textures and its output is published as a float
  *  texture (see renderComp below); `blur` likewise (see renderBlurNode). */
-export const COLOR_NODE_TYPES = new Set<string>(["colorGrade", "hsvCorrect", "contrastAdjust", "comp", "blur"]);
+export const COLOR_NODE_TYPES = new Set<string>(["colorGrade", "hsvCorrect", "contrastAdjust", "comp", "blur", "dilate"]);
 
 // u_flipY: 1.0 for canvas-targeted passes (the browser presents the
 // default framebuffer top-left, and uploaded images are GL bottom-left,
@@ -1416,10 +1416,18 @@ export async function renderCompPreviewToCanvas(
 
 export type BlurPassParams = CompInputFilter;
 
-/** Blur-node params: pass params + matte handling + global mix. */
-export interface BlurNodeParams extends CompInputFilter {
+/** How a filter node gates its result: matte polarity + global mix. */
+export interface FilterGateParams {
   invertMatte: boolean;
   mixAmount: number; // 0..1
+}
+
+/** Blur-node params: pass params + matte handling + global mix. */
+export interface BlurNodeParams extends CompInputFilter, FilterGateParams {}
+
+/** Dilate-node params: signed size in px (+ grow / - shrink) + the same gate. */
+export interface DilateNodeParams extends FilterGateParams {
+  size: number;
 }
 
 // Separable pass (gaussian / box). 33 taps max; u_half bounds the live taps,
@@ -1491,6 +1499,53 @@ void main() {
 }
 `;
 
+/**
+ * Run `fn` with `tex` temporarily forced to a given filter, restoring whatever
+ * it had. Blur wants LINEAR (it samples between texels); morphology wants
+ * NEAREST (a max/min over blended samples is not a max/min). Source textures
+ * arrive either way — registry float textures are NEAREST, comp URL uploads and
+ * the pass pool are LINEAR — so neither can assume.
+ */
+function withTexFilter(gl: WebGL2RenderingContext, tex: WebGLTexture, filter: number, fn: () => boolean): boolean {
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  const prevMin = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER) as number;
+  const prevMag = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER) as number;
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  const ok = fn();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, prevMin);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, prevMag);
+  return ok;
+}
+
+/**
+ * Separable morphological pass: max over a 1-D run of texels (dilate) or min
+ * (erode). Taps land on whole texels and the texture is sampled NEAREST, so the
+ * result is a true max/min rather than a max over interpolated samples.
+ *
+ * GLSL ES needs constant loop bounds, so one pass reaches 16 texels either way.
+ * Larger sizes are reached by repeating the pass — exact, not an approximation:
+ * for a flat (box) structuring element dilation composes, dilate(a) then
+ * dilate(b) == dilate(a+b). Sampling sparsely instead, the way the blur passes
+ * do for large radii, would leave gaps between taps and shred a matte edge.
+ */
+const MORPH_FRAG = `
+uniform vec2 u_stepUv;
+uniform float u_half;
+uniform float u_erode;
+void main() {
+  vec4 acc = texture2D(u_tex, v_uv);
+  for (int i = -16; i <= 16; i++) {
+    float fi = float(i);
+    if (abs(fi) > u_half + 0.5) continue;
+    vec4 s = texture2D(u_tex, v_uv + u_stepUv * fi);
+    acc = (u_erode > 0.5) ? min(acc, s) : max(acc, s);
+  }
+  gl_FragColor = acc;
+}
+`;
+
 /** Pooled pass targets, keyed `${nodeId}:${slot}` (freed by releaseColorNode). */
 const blurTexPool = new Map<string, FloatTex>();
 
@@ -1557,6 +1612,68 @@ export function isBlurIdentity(f: CompInputFilter | undefined | null): boolean {
  * Blur `src` into pooled textures under `poolKey`. Returns `src` unchanged for
  * identity params or on pass failure. NOT locked — internal use only.
  */
+/**
+ * Grow (size > 0) or shrink (size < 0) by `size` pixels, separably.
+ *
+ * One signed knob rather than two nodes, matching Nuke's Dilate: erode is
+ * dilation of the complement, and every comp workflow that grows a matte also
+ * wants to shrink one.
+ */
+/**
+ * Split a requested pixel size into per-round half-extents.
+ *
+ * One GLSL pass reaches MORPH_MAX_TAP texels (the loop bound is a compile-time
+ * constant). Bigger sizes are reached by repeating the pass, which is EXACT
+ * rather than an approximation only because the steps sum to the request:
+ * for a flat structuring element dilate(a) then dilate(b) == dilate(a+b).
+ * Exported so that property can be tested without a GL context.
+ */
+export const MORPH_MAX_TAP = 16;
+
+export function morphRounds(size: number): number[] {
+  const total = Math.round(Math.abs(size));
+  const rounds: number[] = [];
+  let remaining = total;
+  while (remaining > 0) {
+    const step = Math.min(MORPH_MAX_TAP, remaining);
+    rounds.push(step);
+    remaining -= step;
+  }
+  return rounds;
+}
+
+function morphIntoUnlocked(c: Ctx, src: FloatTex, size: number, poolKey: string): FloatTex {
+  const rounds = morphRounds(size);
+  if (rounds.length === 0) return src;
+  const erode = size < 0;
+  const { gl } = c;
+  const { w, h } = src;
+  const prog = getProgram(gl, MORPH_FRAG);
+  const a = ensureBlurTex(c, `${poolKey}:a`, w, h);
+  const b = ensureBlurTex(c, `${poolKey}:b`, w, h);
+
+  const pass = (from: WebGLTexture, to: FloatTex, dirUv: [number, number], half: number): boolean =>
+    withTexFilter(gl, from, gl.NEAREST, () => {
+      gl.useProgram(prog);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, from);
+      gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
+      setUniforms(gl, prog, { u_stepUv: dirUv, u_half: half, u_erode: erode ? 1 : 0 });
+      return drawPassInto(c, prog, to);
+    });
+
+  // Ping-pong src -> a -> b, then b -> a -> b for each further round. A round
+  // never reads and writes the same texture, so there is no feedback loop.
+  let cur = src;
+  let ok = true;
+  for (const step of rounds) {
+    if (!ok) break;
+    ok = pass(cur.tex, a, [1 / w, 0], step) && pass(a.tex, b, [0, 1 / h], step);
+    cur = b;
+  }
+  return ok ? cur : src;
+}
+
 function blurIntoUnlocked(c: Ctx, src: FloatTex, f: CompInputFilter, poolKey: string): FloatTex {
   if (isBlurIdentity(f)) return src;
   const { gl } = c;
@@ -1564,18 +1681,8 @@ function blurIntoUnlocked(c: Ctx, src: FloatTex, f: CompInputFilter, poolKey: st
 
   // Sample the source LINEAR for the pass, restoring its own filter after
   // (registry float textures are NEAREST; comp URL uploads are LINEAR).
-  const withLinear = (tex: WebGLTexture, run: () => boolean): boolean => {
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    const prevMin = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER) as number;
-    const prevMag = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER) as number;
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    const ok = run();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, prevMin);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, prevMag);
-    return ok;
-  };
+  const withLinear = (tex: WebGLTexture, run: () => boolean): boolean =>
+    withTexFilter(gl, tex, gl.LINEAR, run);
 
   const bindSrc = (prog: WebGLProgram, tex: WebGLTexture) => {
     gl.activeTexture(gl.TEXTURE0);
@@ -1738,11 +1845,21 @@ function colorIntoUnlocked(c: Ctx, src: FloatTex, col: CompLayerColor | undefine
 
 /** Internal: render the blur node into its output texture. Returns the output
  *  entry (registry float texture when supported, else a pooled 8-bit one). */
-async function renderBlurNodeUnlocked(
+/**
+ * Shared body of every "filter one image, gate it with a matte" node.
+ *
+ * Blur and Dilate differ only in the pass that produces the filtered texture;
+ * everything after it — the float-registry output texture, the matte lerp, the
+ * mix — is identical. Keeping one copy is deliberate: this file already grew
+ * two copies of a grade control and let `blur` fall out of sync between
+ * imageFieldMap and imageStorage, and the matte/float half is the fiddly part.
+ */
+async function renderFilterNodeUnlocked(
   c: Ctx,
   srcInput: CompResolvable | null,
   matteInput: CompResolvable | null,
-  params: BlurNodeParams,
+  gate: FilterGateParams,
+  makeFiltered: (c: Ctx, src: FloatTex) => FloatTex,
   destNodeId: string,
 ): Promise<FloatTex | null> {
   const { gl } = c;
@@ -1751,7 +1868,7 @@ async function renderBlurNodeUnlocked(
   const mt = await resolveComp(gl, matteInput);
   const { w, h } = src;
 
-  const blurred = blurIntoUnlocked(c, src, params, `${destNodeId}:blur`);
+  const blurred = makeFiltered(c, src);
 
   // Output: registry float texture when supported (joins the chain), else a
   // pooled RGBA8 target (blit/PNG still work; chain falls back to 8-bit URLs).
@@ -1788,8 +1905,8 @@ async function renderBlurNodeUnlocked(
   bind(2, mt ? mt.tex : dummy, "u_mt");
   setUniforms(gl, prog, {
     u_mt_has: mt ? 1 : 0,
-    u_invert: params.invertMatte ? 1 : 0,
-    u_mix: Math.max(0, Math.min(1, params.mixAmount ?? 1)),
+    u_invert: gate.invertMatte ? 1 : 0,
+    u_mix: Math.max(0, Math.min(1, gate.mixAmount ?? 1)),
   });
   if (!drawPassInto(c, prog, out)) {
     if (c.floatOK) floatRegistry.delete(destNodeId);
@@ -1836,7 +1953,32 @@ export function renderBlurNodeToCanvas(
   return withLock(async () => {
     const c = getCtx();
     if (!c) return false;
-    const out = await renderBlurNodeUnlocked(c, srcInput, matteInput, params, destNodeId);
+    const out = await renderFilterNodeUnlocked(
+      c, srcInput, matteInput, params,
+      (cc, src) => blurIntoUnlocked(cc, src, params, `${destNodeId}:blur`),
+      destNodeId,
+    );
+    if (!out) return false;
+    return blitEntryToCanvasUnlocked(c, out, destCanvas);
+  });
+}
+
+/** Render the dilate node and blit the result to a visible canvas. */
+export function renderDilateNodeToCanvas(
+  srcInput: CompResolvable | null,
+  matteInput: CompResolvable | null,
+  params: DilateNodeParams,
+  destNodeId: string,
+  destCanvas: HTMLCanvasElement,
+): Promise<boolean> {
+  return withLock(async () => {
+    const c = getCtx();
+    if (!c) return false;
+    const out = await renderFilterNodeUnlocked(
+      c, srcInput, matteInput, params,
+      (cc, src) => morphIntoUnlocked(cc, src, params.size, `${destNodeId}:morph`),
+      destNodeId,
+    );
     if (!out) return false;
     return blitEntryToCanvasUnlocked(c, out, destCanvas);
   });
@@ -1847,6 +1989,52 @@ export function renderBlurNodeToCanvas(
  * publish the float texture when supported) and return the 8-bit PNG display
  * URL. Never throws — returns `fallbackUrl` on any failure.
  */
+/**
+ * Render a Dilate node and return a PNG data URL, publishing its float texture
+ * into the chain on the way (so a downstream grade/comp gets the unclamped
+ * result rather than the 8-bit round-trip).
+ */
+export async function commitDilateNode(
+  srcInput: CompResolvable | null,
+  matteInput: CompResolvable | null,
+  params: DilateNodeParams,
+  destNodeId: string,
+  fallbackUrl: string,
+): Promise<string> {
+  try {
+    return await withLock(async () => {
+      const c = getCtx();
+      if (!c) return fallbackUrl;
+      const out = await renderFilterNodeUnlocked(
+        c, srcInput, matteInput, params,
+        (cc, src) => morphIntoUnlocked(cc, src, params.size, `${destNodeId}:morph`),
+        destNodeId,
+      );
+      if (!out) return fallbackUrl;
+      const { gl, quad, canvas } = c;
+      const { tex, w, h } = out;
+      if (canvas.width !== w) canvas.width = w;
+      if (canvas.height !== h) canvas.height = h;
+      const prog = getProgram(gl, DISPLAY_CLAMP_SHADER);
+      gl.useProgram(prog);
+      bindQuad(gl, prog, quad);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(gl.getUniformLocation(prog, "u_tex"), 0);
+      gl.uniform1f(gl.getUniformLocation(prog, "u_flipY"), 1.0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, w, h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+      return canvas.toDataURL("image/png");
+    });
+  } catch (err) {
+    console.error("commitDilateNode failed:", err);
+    return fallbackUrl;
+  }
+}
+
 export async function commitBlurNode(
   srcInput: CompResolvable | null,
   matteInput: CompResolvable | null,
@@ -1858,7 +2046,11 @@ export async function commitBlurNode(
     return await withLock(async () => {
       const c = getCtx();
       if (!c) return fallbackUrl;
-      const out = await renderBlurNodeUnlocked(c, srcInput, matteInput, params, destNodeId);
+      const out = await renderFilterNodeUnlocked(
+        c, srcInput, matteInput, params,
+        (cc, src) => blurIntoUnlocked(cc, src, params, `${destNodeId}:blur`),
+        destNodeId,
+      );
       if (!out) return fallbackUrl;
       const { gl, quad, canvas } = c;
       const { tex, w, h } = out;

@@ -70,6 +70,7 @@ import {
   HsvCorrectNode,
   ContrastAdjustNode,
   BlurNode,
+  DilateNode,
   ViewerNode,
   DotNode,
   PanoShiftNode,
@@ -156,6 +157,7 @@ const nodeTypes: NodeTypes = {
   hsvCorrect: HsvCorrectNode,
   contrastAdjust: ContrastAdjustNode,
   blur: BlurNode,
+  dilate: DilateNode,
   viewer: ViewerNode,
   dot: DotNode,
   panoShift: PanoShiftNode,
@@ -311,6 +313,8 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["image"], outputs: ["image"] };
     case "blur":
       return { inputs: ["image", "image-blur_matte"], outputs: ["image"] };
+    case "dilate":
+      return { inputs: ["image", "image-dilate_matte"], outputs: ["image"] };
     case "viewer":
       return { inputs: ["image"], outputs: [] };
     case "dot":
@@ -626,6 +630,7 @@ export function WorkflowCanvas() {
     hsvCorrect: 'HSV Color Correct',
     contrastAdjust: 'Contrast Adjust',
     blur: 'Blur',
+    dilate: 'Dilate',
     viewer: 'Viewer',
     dot: 'Dot',
     panoShift: 'Pano Shift',
@@ -1912,6 +1917,7 @@ export function WorkflowCanvas() {
             hsvCorrect: { width: 280, height: 380 },
             contrastAdjust: { width: 280, height: 380 },
             blur: { width: 280, height: 420 },
+            dilate: { width: 280, height: 420 },
             viewer: { width: 360, height: 300 },
             dot: { width: 14, height: 14 },
             panoShift: { width: 320, height: 280 },
@@ -2652,6 +2658,8 @@ export function WorkflowCanvas() {
                 return "#2dd4bf"; // teal-400 (composite / float)
               case "blur":
                 return "#a78bfa"; // violet-400 (blur / defocus)
+              case "dilate":
+                return "#c084fc"; // purple-400 (morphology, next to blur)
               case "viewer":
                 return "#22d3ee"; // cyan-400 (live viewer tap)
               case "dot":

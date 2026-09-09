@@ -56,6 +56,7 @@ const OUTPUT_REF_FIELD: Partial<Record<NodeType, string>> = {
   contrastAdjust: "outputImageRef",
   comp: "outputImageRef",
   blur: "outputImageRef",
+  dilate: "outputImageRef",
   panoEditor: "outputImageRef",
   sphereLightRender: "outputImageRef",
   maskPainter: "outputMaskRef",
