@@ -35,10 +35,13 @@ import {
   MaskPainterNodeData,
   VideoInputNodeData,
   ImageCropNodeData,
+  NodeType,
+  ModelInputDef,
 } from "@/types";
 import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { parseDynPin } from "@/lib/dynamicPinId";
 import { translateReferenceTokens, replaceNamedTokens, slotToLetter, ordinalPhrase } from "@/lib/refTokens";
+import { modelTakesPrompt } from "@/lib/modelInputs";
 
 /**
  * Return type for getConnectedInputs
@@ -823,31 +826,29 @@ export function validateWorkflowPure(
     return { valid: false, errors };
   }
 
-  // Check each Nano Banana node has required inputs (text required, image optional)
-  nodes
-    .filter((n) => n.type === "nanoBanana")
-    .forEach((node) => {
-      const textConnected = edges.some(
-        (e) => e.target === node.id &&
-               (e.targetHandle === "text" || e.targetHandle?.startsWith("text-"))
-      );
-      if (!textConnected) {
-        errors.push(`Generate node "${node.id}" missing text input`);
-      }
-    });
+  // Generator nodes need a text input only when the SELECTED MODEL has one.
+  // fal's image utilities (imageutils/marigold-depth, background removal,
+  // upscalers) declare a single image input and no prompt field, so a blanket
+  // rule reported a missing input that the model does not accept and the node
+  // offers no pin for. An unread schema still counts as "wants a prompt" —
+  // see modelTakesPrompt.
+  const requireTextEdge = (type: NodeType, label: string) =>
+    nodes
+      .filter((n) => n.type === type)
+      .forEach((node) => {
+        const schema = (node.data as { inputSchema?: ModelInputDef[] }).inputSchema;
+        if (!modelTakesPrompt(schema)) return;
+        const textConnected = edges.some(
+          (e) => e.target === node.id &&
+                 (e.targetHandle === "text" || e.targetHandle?.startsWith("text-"))
+        );
+        if (!textConnected) {
+          errors.push(`${label} node "${node.id}" missing text input`);
+        }
+      });
 
-  // Check generateVideo nodes have required text input
-  nodes
-    .filter((n) => n.type === "generateVideo")
-    .forEach((node) => {
-      const textConnected = edges.some(
-        (e) => e.target === node.id &&
-               (e.targetHandle === "text" || e.targetHandle?.startsWith("text-"))
-      );
-      if (!textConnected) {
-        errors.push(`Video node "${node.id}" missing text input`);
-      }
-    });
+  requireTextEdge("nanoBanana", "Generate");
+  requireTextEdge("generateVideo", "Video");
 
   // Check annotation nodes have image input (either connected or manually loaded)
   nodes

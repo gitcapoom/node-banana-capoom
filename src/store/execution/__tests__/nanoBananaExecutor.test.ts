@@ -345,3 +345,84 @@ describe("executeNanoBanana", () => {
     expect(ctx.appendOutputGalleryImage).toHaveBeenCalledWith("gal-1", "data:image/png;base64,result");
   });
 });
+
+describe("models that take no prompt", () => {
+  /**
+   * fal's image utilities — imageutils/marigold-depth, background removal,
+   * upscalers — declare ONE image input and no prompt field at all. The
+   * executor demanded a prompt unconditionally, so running one failed with
+   * "Missing text input" for an input the model does not have and the node
+   * gives you nowhere to connect.
+   */
+  const DEPTH_SCHEMA = [
+    { name: "image_url", type: "image", required: true, label: "Image URL" },
+  ];
+
+  function depthNode(extra: Record<string, unknown> = {}) {
+    return makeNode({
+      selectedModel: {
+        provider: "fal",
+        modelId: "fal-ai/imageutils/marigold-depth",
+        displayName: "Marigold Depth",
+      },
+      inputSchema: DEPTH_SCHEMA,
+      ...extra,
+    });
+  }
+
+  function imageOnlyCtx(node: WorkflowNode) {
+    return makeCtx(node, {
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: ["data:image/png;base64,src"],
+        videos: [],
+        audio: [],
+        text: null,
+        dynamicInputs: { image_url: "data:image/png;base64,src" },
+        easeCurve: null,
+      }),
+    });
+  }
+
+  it("runs without a prompt when the schema declares no text input", async () => {
+    const node = depthNode();
+    const ctx = imageOnlyCtx(node);
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ success: true, image: "data:image/png;base64,out" }),
+    );
+
+    await expect(executeNanoBanana(ctx)).resolves.not.toThrow();
+    expect(mockFetch).toHaveBeenCalled();
+  });
+
+  it("still refuses when nothing at all is connected", async () => {
+    // No prompt is fine; no prompt AND no image is not — that would send an
+    // empty request and get a cryptic provider error back.
+    const node = depthNode();
+    const ctx = makeCtx(node, {
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: [], videos: [], audio: [], text: null, dynamicInputs: {}, easeCurve: null,
+      }),
+    });
+    await expect(executeNanoBanana(ctx)).rejects.toThrow();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("still demands a prompt for a model whose schema has one", async () => {
+    const node = makeNode({
+      inputSchema: [
+        { name: "prompt", type: "text", required: true, label: "Prompt" },
+        { name: "image_url", type: "image", required: false, label: "Image URL" },
+      ],
+    });
+    const ctx = imageOnlyCtx(node);
+    await expect(executeNanoBanana(ctx)).rejects.toThrow("Missing text input");
+  });
+
+  it("still demands a prompt when the schema has not loaded", async () => {
+    // Unknown schema must keep the old, stricter behaviour rather than
+    // silently firing off a promptless request.
+    const node = makeNode({ inputSchema: undefined });
+    const ctx = imageOnlyCtx(node);
+    await expect(executeNanoBanana(ctx)).rejects.toThrow("Missing text input");
+  });
+});

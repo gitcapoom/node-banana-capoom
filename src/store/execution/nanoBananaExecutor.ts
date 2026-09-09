@@ -11,6 +11,7 @@ import type {
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
 import { consumeGenerateSSE, isSSEResponse } from "@/utils/generateSSE";
 import type { NodeExecutionContext } from "./types";
+import { modelTakesPrompt, hasAnyMediaInput } from "@/lib/modelInputs";
 
 export interface NanoBananaOptions {
   /** When true, falls back to stored inputImages/inputPrompt if no connections provide them. */
@@ -71,11 +72,26 @@ export async function executeNanoBanana(
   }
 
   if (!promptText) {
-    updateNodeData(node.id, {
-      status: "error",
-      error: "Missing text input",
-    });
-    throw new Error("Missing text input");
+    // Only models that actually declare a prompt may demand one. fal's image
+    // utilities (imageutils/marigold-depth, background removal, upscalers)
+    // declare a single image input and no prompt field, so requiring text here
+    // asked for an input that does not exist and has no pin to connect to.
+    if (modelTakesPrompt(nodeData.inputSchema)) {
+      updateNodeData(node.id, {
+        status: "error",
+        error: "Missing text input",
+      });
+      throw new Error("Missing text input");
+    }
+    // No prompt wanted — but something still has to be wired up, or we would
+    // fire an empty request and surface a cryptic provider error instead.
+    if (!hasAnyMediaInput(images, dynamicInputs)) {
+      updateNodeData(node.id, {
+        status: "error",
+        error: "Connect an image — this model takes no prompt.",
+      });
+      throw new Error("Missing image input");
+    }
   }
 
   updateNodeData(node.id, {
@@ -111,7 +127,12 @@ export async function executeNanoBanana(
 
   const requestPayload = {
     images,
-    prompt: promptText,
+    // A prompt-less model (depth, background removal, upscaler) legitimately
+    // has none. Normalise to "" so the string guard below keeps doing its real
+    // job — catching arrays/objects that leaked in from corrupted node data —
+    // without treating "no prompt" as corruption. The provider drops it: the
+    // model's schema has no prompt field to map it onto.
+    prompt: promptText ?? "",
     aspectRatio: nodeData.aspectRatio,
     resolution: nodeData.resolution,
     model: nodeData.model,
@@ -223,7 +244,9 @@ export async function executeNanoBanana(
         addToGlobalHistory({
           image: item.image,
           timestamp: item.timestamp,
-          prompt: promptText,
+          // Prompt-less models (depth, background removal, upscalers) have no
+          // text to record; history wants a string, so store an empty one.
+          prompt: promptText ?? "",
           aspectRatio: nodeData.aspectRatio,
           model: nodeData.model,
         });

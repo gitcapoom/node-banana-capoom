@@ -576,6 +576,60 @@ describe("workflowStore integration tests", () => {
       });
     });
 
+    describe("models that take no prompt", () => {
+      /**
+       * fal image utilities (imageutils/marigold-depth, background removal,
+       * upscalers) declare one image input and no prompt field. Validation used
+       * to demand a text edge from every nanoBanana/generateVideo node, so
+       * these reported a missing input the model does not accept and the node
+       * gives no pin for.
+       */
+      const IMAGE_ONLY = [
+        { name: "image_url", type: "image", required: true, label: "Image URL" },
+      ];
+
+      it("does not demand text when the model's schema has none", () => {
+        useWorkflowStore.setState({
+          nodes: [createTestNode("nanoBanana-1", "nanoBanana", { inputSchema: IMAGE_ONLY })],
+          edges: [],
+        });
+        const result = useWorkflowStore.getState().validateWorkflow();
+        expect(result.errors).not.toContain('Generate node "nanoBanana-1" missing text input');
+      });
+
+      it("does not demand text on a prompt-less video model either", () => {
+        useWorkflowStore.setState({
+          nodes: [createTestNode("video-1", "generateVideo", { inputSchema: IMAGE_ONLY })],
+          edges: [],
+        });
+        const result = useWorkflowStore.getState().validateWorkflow();
+        expect(result.errors).not.toContain('Video node "video-1" missing text input');
+      });
+
+      it("still demands text when the schema declares a prompt", () => {
+        useWorkflowStore.setState({
+          nodes: [createTestNode("nanoBanana-1", "nanoBanana", {
+            inputSchema: [
+              { name: "prompt", type: "text", required: true, label: "Prompt" },
+              ...IMAGE_ONLY,
+            ],
+          })],
+          edges: [],
+        });
+        const result = useWorkflowStore.getState().validateWorkflow();
+        expect(result.errors).toContain('Generate node "nanoBanana-1" missing text input');
+      });
+
+      it("still demands text when no schema has loaded", () => {
+        useWorkflowStore.setState({
+          nodes: [createTestNode("nanoBanana-1", "nanoBanana", {})],
+          edges: [],
+        });
+        const result = useWorkflowStore.getState().validateWorkflow();
+        expect(result.errors).toContain('Generate node "nanoBanana-1" missing text input');
+      });
+    });
+
     describe("nanoBanana node validation", () => {
       it("should return error when nanoBanana node missing text input", () => {
         useWorkflowStore.setState({
