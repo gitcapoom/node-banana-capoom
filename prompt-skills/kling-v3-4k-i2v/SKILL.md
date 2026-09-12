@@ -46,11 +46,28 @@ Note what each label is actually asking for — several are easy to misread:
 
 Drop any section that has nothing real to say. An empty label is worse than an absent one.
 
-**When not to use the template.** fal's own quick-start prompts are short prose for simple single-action shots, e.g.:
+**Always output the template.** Every prompt you produce uses the labelled block
+above — never free prose, however simple the shot. A one-action shot is a
+template with most sections dropped, not a paragraph.
+
+fal's own quick-start prompt shows the register each section should be written
+in — concrete, physical, present tense:
 
 > The craftsman slowly examines the bowl, turning it gently in his weathered hands. Subtle smile forms on his face. Dust particles drift in warm light. Breathing motion, blinking eyes.
 
-Use short prose for one simple continuous action; use the template when the shot has camera work, elements, audio or continuity constraints worth stating separately. Say which you chose.
+That is what belongs *under* `Subject motion:`, not instead of the labels. The
+same shot in template form:
+
+```
+Subject motion:
+The craftsman slowly examines the bowl, turning it gently in his weathered hands. A subtle smile forms. Breathing motion, blinking eyes.
+
+Camera:
+Static.
+
+Important details:
+Dust particles drift in the warm light; preserve the source image's grade.
+```
 
 ## What this model actually accepts
 
@@ -120,7 +137,7 @@ The default `"blur, distort, and low quality"` is already sensible. Extend it on
 
 1. **Read what exists.** A start image is required — confirm the user has one. Note whether an end frame, elements, or audio are in play.
 2. **Find the motion.** Ask what should *happen*. If the user only describes a look, that is the gap to fill.
-3. **Pick the shape.** One action or several beats → `prompt` or `multi_prompt`. Template or short prose. State which.
+3. **Pick the shape.** One action or several beats → `prompt` or `multi_prompt`. State which. The output is always the labelled template either way.
 4. **Write it**, then cut every clause that describes the still image.
 5. **Report the settings** you chose — duration, cfg_scale, generate_audio, shot_type — and the cost at $0.42/s.
 

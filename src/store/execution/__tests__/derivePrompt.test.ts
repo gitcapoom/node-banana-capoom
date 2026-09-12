@@ -107,3 +107,43 @@ describe("instructions", () => {
     expect(tagInstruction(false)).toMatch(/ONLY the prompt/);
   });
 });
+
+
+describe("a loaded prompt skill owns the output format", () => {
+  /**
+   * The Kling v3 skill ships fal's labelled template (Scene: / Subject motion:
+   * / Camera: ...). The default tag instruction tells the model to write
+   * "comma-separated descriptive phrases", so the model wrote the template in
+   * its reply and then flattened it inside <prompt> — and the block is the part
+   * that is actually used, so the format was lost exactly where it mattered.
+   */
+  it("drops the comma-separated form rule when a skill defines the format", () => {
+    expect(tagInstruction(false)).toMatch(/comma-separated/);
+    expect(tagInstruction(false, true)).not.toMatch(/comma-separated/);
+  });
+
+  it("tells the model to keep the skill's labels and line breaks", () => {
+    const t = tagInstruction(false, true);
+    expect(t).toMatch(/EXACTLY the prompt format/);
+    expect(t).toMatch(/verbatim/);
+    expect(t).toMatch(/not flatten it into/i);
+  });
+
+  it("still asks for the block delimiters either way", () => {
+    expect(tagInstruction(false, true)).toContain("<prompt></prompt>");
+    expect(tagInstruction(true, true)).toContain("negative_prompt");
+  });
+
+  it("repeats the format rule on the retry", () => {
+    // The retry hands the model its own reply back; without the rule the second
+    // attempt reverts to prose, undoing the fix on the requests that needed it.
+    expect(retryInstruction(false, true)).toMatch(/verbatim/);
+    expect(retryInstruction(false)).not.toMatch(/verbatim/);
+  });
+
+  it("leaves the no-skill behaviour untouched", () => {
+    // Default arg: existing callers and bare generators keep today's wording.
+    expect(tagInstruction(false)).toBe(tagInstruction(false, false));
+    expect(retryInstruction(true)).toBe(retryInstruction(true, false));
+  });
+});

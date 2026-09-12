@@ -12,29 +12,60 @@ import { shrinkToLimit, type ShrinkCall } from "./shrinkPrompt";
  * with a warning attached.
  */
 
-/** The instruction appended to the system prompt when this is switched on. */
-export function tagInstruction(wantNegative: boolean): string {
+/**
+ * The instruction appended to the system prompt when this is switched on.
+ *
+ * `skillDefinesFormat` is the whole reason this takes a second argument. The
+ * default text dictates the SHAPE of the prompt — "comma-separated descriptive
+ * phrases" — which is right for a bare image generator and flatly wrong for a
+ * loaded prompt skill that ships its own output format. The Kling v3 skill, for
+ * one, specifies fal's labelled block (Scene: / Subject motion: / Camera: ...);
+ * with the default text appended after it the model dutifully wrote the
+ * template in its reply and then flattened it into comma-separated prose inside
+ * <prompt> — and the block is the part that is actually used, so the format was
+ * lost exactly where it mattered.
+ *
+ * When a skill is loaded it owns the format and this supplies only delimiters.
+ */
+export function tagInstruction(wantNegative: boolean, skillDefinesFormat = false): string {
+  const form = skillDefinesFormat
+    ? [
+        "Inside that block put ONLY the prompt itself: no preamble, no commentary,",
+        "no quotes. Use EXACTLY the prompt format the instructions above specify —",
+        "keep its labels, sections and line breaks verbatim. Do not flatten it into",
+        "prose and do not restyle it.",
+      ]
+    : [
+        "Inside that block put ONLY the prompt: no preamble,",
+        "no commentary, no markdown, no quotes. Write it as a generator expects —",
+        "comma-separated descriptive phrases, not a sentence addressed to anyone.",
+      ];
   return [
     "",
     "---",
     "After your reply, output a generator-ready image prompt inside a single",
-    "<prompt></prompt> block. Inside that block put ONLY the prompt: no preamble,",
-    "no commentary, no markdown, no quotes. Write it as a generator expects —",
-    "comma-separated descriptive phrases, not a sentence addressed to anyone.",
+    "<prompt></prompt> block.",
+    ...form,
     ...(wantNegative
       ? [
           "Then output a <negative_prompt></negative_prompt> block containing only",
-          "the things that must NOT appear, in the same comma-separated form.",
+          "the things that must NOT appear.",
         ]
       : []),
   ].join("\n");
 }
 
 /** The retry sent when the reply came back without a <prompt> block. */
-export function retryInstruction(wantNegative: boolean): string {
+export function retryInstruction(wantNegative: boolean, skillDefinesFormat = false): string {
+  // The retry hands the model its own reply back and asks for the block alone,
+  // so it has to repeat the format rule — otherwise the second attempt reverts
+  // to prose and quietly undoes the fix on exactly the requests that needed it.
+  const keep = skillDefinesFormat
+    ? " Keep the prompt format from the instructions above exactly: labels, sections and line breaks verbatim."
+    : "";
   return wantNegative
-    ? "Return ONLY the <prompt></prompt> and <negative_prompt></negative_prompt> blocks for that answer. No other text."
-    : "Return ONLY the <prompt></prompt> block for that answer. No other text.";
+    ? `Return ONLY the <prompt></prompt> and <negative_prompt></negative_prompt> blocks for that answer. No other text.${keep}`
+    : `Return ONLY the <prompt></prompt> block for that answer. No other text.${keep}`;
 }
 
 export interface DeriveOptions {
