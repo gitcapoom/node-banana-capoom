@@ -9,6 +9,7 @@ import type { LLMGenerateNodeData, ConversationTurn } from "@/types";
 import { buildLlmHeaders } from "@/store/utils/buildApiHeaders";
 import type { NodeExecutionContext } from "./types";
 import { loadMediaById } from "@/utils/mediaStorage";
+import { cheapUrlKey } from "@/utils/renderSignature";
 import { derivePrompt, tagInstruction, retryInstruction } from "./derivePrompt";
 
 export interface LlmGenerateOptions {
@@ -16,6 +17,54 @@ export interface LlmGenerateOptions {
   useStoredFallback?: boolean;
 }
 
+
+/**
+ * Send each distinct image at most ONCE per request, at its earliest position.
+ *
+ * A still-connected image pin re-sent the same picture on every turn, so a
+ * ten-turn chat uploaded it ten times: ten times the tokens and latency, and a
+ * fast route to Anthropic's >20-image threshold (which downsamples every image
+ * in the request to 2000px). Disconnecting the pin avoids it, but nobody
+ * remembers to, and the bill shows up as a context-limit error many turns later.
+ *
+ * This runs over the whole outgoing array — history AND the new turn — rather
+ * than filtering only the new turn, and the transcript keeps every turn's own
+ * copy. That distinction matters: anchoring an image to the single turn that
+ * first sent it made the conversation fragile, because deleting that one turn
+ * (the transcript's per-turn X) while the pin was disconnected erased the image
+ * from every later request and from the save. Here each turn stays
+ * self-sufficient on disk and only the wire is thinned, so whichever turns
+ * survive, the earliest one still carries the picture.
+ *
+ * Keyed off `turn.images` only — never `imageRefs`. A ref is a pointer to a
+ * file; if its load failed upstream the turn goes out text-only and the image
+ * is NOT in the payload. Counting refs would suppress a later copy on the
+ * strength of one that was never sent, which is the one way this can corrupt a
+ * conversation rather than merely fail to save bandwidth.
+ *
+ * Missing a match only costs a redundant upload; a false match loses an image.
+ * So it errs toward sending: different encodings of one picture key
+ * differently and are both sent.
+ */
+export function dedupeImagesAcrossTurns(messages: ConversationTurn[]): ConversationTurn[] {
+  const seen = new Set<string>();
+  return messages.map((turn) => {
+    if (!turn.images?.length) return turn;
+    const keep = turn.images.filter((url) => {
+      if (!url) return false;
+      const key = cheapUrlKey(url);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (keep.length === turn.images.length) return turn;
+    if (keep.length > 0) return { ...turn, images: keep };
+    // Drop the key entirely rather than sending `images: []`, so the turn looks
+    // exactly like one that never had an image.
+    const { images: _dropped, ...rest } = turn;
+    return rest as ConversationTurn;
+  });
+}
 
 export async function executeLlmGenerate(
   ctx: NodeExecutionContext,
@@ -108,17 +157,6 @@ export async function executeLlmGenerate(
     );
   }
 
-  // Build the new user turn. In one-shot mode this becomes the only
-  // turn the API sees; in conversation mode it gets appended to the
-  // saved transcript before sending.
-  const newUserTurn: ConversationTurn = {
-    role: "user",
-    text,
-    ...(images.length > 0 ? { images } : {}),
-    ...(videos.length > 0 ? { videos } : {}),
-    timestamp: Date.now(),
-  };
-
   const useConversation = nodeData.rememberTurns === true;
   const priorConversation = nodeData.conversation ?? [];
 
@@ -150,8 +188,21 @@ export async function executeLlmGenerate(
     );
   }
 
+  // The turn RECORDED in the transcript always carries the full set, so every
+  // turn stands on its own if a neighbour is later deleted.
+  const newUserTurn: ConversationTurn = {
+    role: "user",
+    text,
+    ...(images.length > 0 ? { images } : {}),
+    ...(videos.length > 0 ? { videos } : {}),
+    timestamp: Date.now(),
+  };
+
+  // Only the WIRE is thinned, and only once the window is sliced and hydrated —
+  // what is worth sending depends on what this particular request contains.
+  // One-shot mode has no history, so there is nothing to dedupe against.
   const outboundMessages: ConversationTurn[] = useConversation
-    ? [...historyToSend, newUserTurn]
+    ? dedupeImagesAcrossTurns([...historyToSend, newUserTurn])
     : [newUserTurn];
 
   // In conversation mode, immediately persist the new user turn so the
@@ -184,8 +235,12 @@ export async function executeLlmGenerate(
   // The tag instruction rides along with the user's own system prompt rather
   // than replacing it — their instructions still govern the reply; this only
   // says what to append to it.
+  // A loaded prompt skill defines its own output format (the Kling v3 skill
+  // ships fal's labelled block). Telling the model to write comma-separated
+  // phrases on top of that flattened the skill's template inside <prompt>.
+  const skillDefinesFormat = !!nodeData.promptSkillName;
   const effectiveSystem = generatorFriendly
-    ? `${nodeData.systemPrompt ?? ""}${tagInstruction(wantNegative)}`
+    ? `${nodeData.systemPrompt ?? ""}${tagInstruction(wantNegative, skillDefinesFormat)}`
     : nodeData.systemPrompt;
 
   /** One request to the model, returning its text. Used for the derivation's
@@ -274,7 +329,7 @@ export async function executeLlmGenerate(
                 [
                   ...outboundMessages,
                   { role: "assistant", text: failedReply, timestamp: Date.now() },
-                  { role: "user", text: retryInstruction(wantNegative), timestamp: Date.now() },
+                  { role: "user", text: retryInstruction(wantNegative, skillDefinesFormat), timestamp: Date.now() },
                 ],
                 effectiveSystem,
               ),
