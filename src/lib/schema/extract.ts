@@ -32,6 +32,9 @@ function propertyToParameter(prop: NormalizedProperty): ModelParameter {
   };
 
   if (prop.enum) param.enum = prop.enum;
+  // Suggestions ride along beside enum. A property that has BOTH keeps the
+  // enum as the authority — the picker is closed in that case.
+  if (prop.examples && prop.examples.length > 0) param.examples = prop.examples;
   if (typeof prop.minimum === "number") param.minimum = prop.minimum;
   if (typeof prop.maximum === "number") param.maximum = prop.maximum;
 

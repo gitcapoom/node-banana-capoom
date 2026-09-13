@@ -10,7 +10,7 @@ import { setDisposableCache } from "@/utils/localStorageQuota";
 // localStorage cache for model schemas (persists across dev server restarts)
 // Bump SCHEMA_CACHE_VERSION when schema extraction logic changes to auto-invalidate
 const SCHEMA_CACHE_KEY = "node-banana-schema-cache";
-const SCHEMA_CACHE_VERSION = 11; // v11: prefixed plural media lists (reference_video_urls / reference_audio_urls) classify as pins
+const SCHEMA_CACHE_VERSION = 12; // v12: parameters carry `examples` for preset-style pickers
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {
@@ -431,6 +431,45 @@ function ParameterInputInner({ param, name, value, onChange }: ParameterInputPro
             </option>
           ))}
         </select>
+      </div>
+    );
+  }
+
+  // Preset-style string: the schema offers `examples` but no `enum`, so the
+  // values are suggestions rather than a closed set. fal marks these
+  // `ui.field: "presets"` — `prompt_expansion_mode` is one, with
+  // fast/balanced/quality — and rendering it as a bare text box left nothing to
+  // pick from. A datalist gives the choices while still accepting a typed
+  // value, which an enum <select> would not.
+  if (
+    param.type === "string" &&
+    (!param.enum || param.enum.length === 0) &&
+    param.examples &&
+    param.examples.length > 0
+  ) {
+    const listId = `param-examples-${param.name}`;
+    const suggestions = param.examples.map((e) => String(e));
+    return (
+      <div className="flex items-center gap-2">
+        <label
+          className="text-[11px] text-neutral-400 shrink-0"
+          title={param.description || undefined}
+        >
+          {displayName}
+        </label>
+        <input
+          type="text"
+          list={listId}
+          value={(value as string) ?? ""}
+          placeholder={param.default !== undefined ? String(param.default) : suggestions[0]}
+          onChange={(e) => handleChange(e.target.value === "" ? undefined : e.target.value)}
+          className="nodrag nopan flex-1 min-w-0 text-[11px] py-1 px-2 rounded-md bg-[#1a1a1a] focus:outline-none focus:ring-1 focus:ring-neutral-600 text-white"
+        />
+        <datalist id={listId}>
+          {suggestions.map((opt) => (
+            <option key={opt} value={opt} />
+          ))}
+        </datalist>
       </div>
     );
   }

@@ -21,6 +21,14 @@ export interface NormalizedProperty {
   format?: string;                               // e.g. "uri", "binary", "data-uri"
   default?: unknown;
   enum?: unknown[];
+  /**
+   * Suggested values, from the schema's `examples`. NOT an enum: a closed set
+   * is `enum`, these are hints and other values remain legal. fal uses this for
+   * fields it renders as presets — `prompt_expansion_mode` declares
+   * examples fast/balanced/quality with no enum, so dropping these left the
+   * panel with a bare text box and nothing to pick from.
+   */
+  examples?: unknown[];
   minimum?: number;
   maximum?: number;
   /** For type="array" */
@@ -80,4 +88,4 @@ export interface CachedSchemaEntry {
 }
 
 /** Bump when extract.ts logic changes. Any cache entries with lower version are re-extracted. */
-export const SCHEMA_FORMAT_VERSION = 5; // v5: classify prefixed plural media lists (reference_video_urls / reference_audio_urls) as pins
+export const SCHEMA_FORMAT_VERSION = 6; // v6: carry schema `examples` so preset-style string params are pickable

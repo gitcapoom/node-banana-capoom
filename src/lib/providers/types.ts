@@ -32,6 +32,9 @@ export interface ModelParameter {
   minimum?: number;
   maximum?: number;
   enum?: unknown[];
+  /** Suggested values (schema `examples`). Unlike `enum` these are not
+   *  exhaustive, so the UI offers them while still allowing a typed value. */
+  examples?: unknown[];
   required?: boolean;
   /** For type="object" — describes sub-fields */
   properties?: ModelParameter[];

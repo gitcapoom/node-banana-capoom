@@ -34,6 +34,23 @@ function resolveRef(
 }
 
 /**
+ * Pickable values from a schema's `examples`.
+ *
+ * Only scalars: an example OBJECT is a sample payload, not a choice —
+ * `camera_trajectory` ships a whole trajectory array as its example, which would
+ * render as "[object Object]" in a picker.
+ *
+ * Returns undefined when there is nothing usable, so callers can spread it away.
+ */
+function scalarExamples(raw: Record<string, unknown>): unknown[] | undefined {
+  if (!Array.isArray(raw.examples)) return undefined;
+  const scalars = raw.examples.filter(
+    (e) => typeof e === "string" || typeof e === "number" || typeof e === "boolean",
+  );
+  return scalars.length > 0 ? scalars : undefined;
+}
+
+/**
  * Normalize a raw OpenAPI property (may contain $ref, anyOf, oneOf, allOf) into
  * the flat NormalizedProperty shape.
  *
@@ -119,9 +136,13 @@ export function normalizeProperty(
         ...only,
         name,
         nullable,
-        // Preserve top-level description/default from raw
+        // Preserve top-level description/default/examples from raw. fal writes
+        // `prompt_expansion_mode` as anyOf:[string,null] with the examples on
+        // the OUTER object, so reading them only on the direct-type path missed
+        // exactly the shape this exists for.
         description: (raw.description as string) ?? only.description,
         default: raw.default ?? only.default,
+        ...(scalarExamples(raw) ? { examples: scalarExamples(raw) } : {}),
       };
     }
 
@@ -131,6 +152,7 @@ export function normalizeProperty(
       type: "union",
       description: raw.description as string | undefined,
       default: raw.default,
+      ...(scalarExamples(raw) ? { examples: scalarExamples(raw) } : {}),
       unionVariants: normalizedVariants,
       nullable,
       source,
@@ -158,6 +180,9 @@ export function normalizeProperty(
 
   // Enum
   if (Array.isArray(raw.enum) && raw.enum.length > 0) out.enum = raw.enum;
+  // Suggestions, not a closed set — see NormalizedProperty.examples.
+  const directExamples = scalarExamples(raw);
+  if (directExamples) out.examples = directExamples;
 
   // Numeric constraints: OpenAPI min/max + Pydantic ge/le/gt/lt
   const min =
