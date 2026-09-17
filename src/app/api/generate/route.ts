@@ -20,6 +20,7 @@ import { generateWithKie } from "./providers/kie";
 import { generateWithWaveSpeed } from "./providers/wavespeed";
 import { generateWithMuapi } from "./providers/muapi";
 import { wantsSSE, createSSEStream, SSE_HEADERS } from "./utils/sse";
+import { resolveMediaRefs, hasMediaRefs } from "./utils/resolveMediaRefs";
 import { calculateGenerationCost } from "@/utils/costCalculator";
 import { compressAllImages, compressLargeImages } from "./utils/imageCompression";
 import { isImageSizeError } from "./utils/sizeErrorDetection";
@@ -44,6 +45,11 @@ interface MultiProviderGenerateRequest extends GenerateRequest {
   parameters?: Record<string, unknown>;
   /** Dynamic inputs from schema-based connections (e.g., image_url, tail_image_url, prompt) */
   dynamicInputs?: Record<string, string | string[]>;
+  /**
+   * Project directory, sent only so `nbfile:` media references can be resolved
+   * from disk. Validated before use — see resolveMediaRefs.
+   */
+  mediaDirectory?: string;
 }
 
 
@@ -163,7 +169,29 @@ export async function POST(request: NextRequest) {
       selectedModel,
       parameters,
       mediaType,
+      mediaDirectory,
     } = body;
+
+    // Media too large to inline arrives as an `nbfile:<id>` reference instead
+    // of a base64 data URL — the file is already in the project folder, so the
+    // bytes never had to pass through the browser's JSON body (which is what
+    // used to crash the tab). Resolve those to CDN URLs before any provider
+    // sees the payload, so every branch below is unaware of the mechanism.
+    if (hasMediaRefs(dynamicInputs) || hasMediaRefs(images)) {
+      const uploadKey = request.headers.get("X-Fal-API-Key") || process.env.FAL_API_KEY || null;
+      const cache = new Map<string, string>();
+      try {
+        dynamicInputs = await resolveMediaRefs(dynamicInputs, mediaDirectory, uploadKey, cache);
+        images = await resolveMediaRefs(images, mediaDirectory, uploadKey, cache);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`[API] media reference resolution failed:`, message);
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: message },
+          { status: 400 },
+        );
+      }
+    }
 
     // Prompt is required unless:
     // - Provided via dynamicInputs

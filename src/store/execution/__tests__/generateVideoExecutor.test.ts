@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { executeGenerateVideo } from "../generateVideoExecutor";
 import type { NodeExecutionContext } from "../types";
-import type { WorkflowNode } from "@/types";
+import type { WorkflowNode, WorkflowEdge } from "@/types";
 
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -370,5 +370,110 @@ describe("oversized inline media", () => {
 
     await executeGenerateVideo(ctx).catch(() => { /* not under test */ });
     expect(mockFetch).toHaveBeenCalled();
+  });
+});
+
+
+describe("oversized media is sent by disk reference", () => {
+  function hugeDataUrl(mb: number): string {
+    return `data:video/quicktime;base64,${"A".repeat(Math.ceil((mb * 1024 * 1024) / 3) * 4)}`;
+  }
+
+  /** A videoInput node that has been saved, so it has a file on disk. */
+  function savedVideoSource(id: string, value: string): WorkflowNode {
+    return {
+      id: "vin-1",
+      type: "videoInput",
+      position: { x: 0, y: 0 },
+      data: { videoFile: value, videoFileRef: id },
+    } as WorkflowNode;
+  }
+
+  it("sends nbfile: and the project directory instead of the bytes", async () => {
+    const clip = hugeDataUrl(120);
+    const node = makeNode({
+      selectedModel: { provider: "muapi", modelId: "seedance-v2.0-video-edit", displayName: "Seedance" },
+    });
+    const src = savedVideoSource("img-abc123", clip);
+    const ctx = makeCtx(node, {
+      saveDirectoryPath: "C:/proj",
+      getEdges: vi.fn().mockReturnValue([
+        { id: "e1", source: "vin-1", target: "vid-1", targetHandle: "image-video_urls" } as WorkflowEdge,
+      ]),
+      getNodes: vi.fn().mockReturnValue([node, src]),
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: [], videos: [], audio: [], text: "edit",
+        dynamicInputs: { video_urls: [clip] },
+        easeCurve: null,
+      }),
+    });
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({ success: true, videoUrl: "https://x/v.mp4" }),
+    });
+
+    await executeGenerateVideo(ctx).catch(() => { /* downstream not under test */ });
+
+    expect(mockFetch).toHaveBeenCalled();
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.dynamicInputs.video_urls).toEqual(["nbfile:img-abc123"]);
+    expect(body.mediaDirectory).toBe("C:/proj");
+    // The whole point: the bytes never enter the request.
+    expect(JSON.stringify(body)).not.toContain("data:video/quicktime");
+  });
+
+  it("leaves a small clip inline, with no directory needed", async () => {
+    const small = hugeDataUrl(2);
+    const node = makeNode({
+      selectedModel: { provider: "muapi", modelId: "seedance-v2.0-video-edit", displayName: "Seedance" },
+    });
+    const ctx = makeCtx(node, {
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: [], videos: [], audio: [], text: "edit",
+        dynamicInputs: { video_urls: [small] },
+        easeCurve: null,
+      }),
+    });
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({ success: true, videoUrl: "https://x/v.mp4" }),
+    });
+
+    await executeGenerateVideo(ctx).catch(() => { /* not under test */ });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.dynamicInputs.video_urls[0].startsWith("data:")).toBe(true);
+  });
+
+  it("still refuses when the clip is oversized AND unsaved", async () => {
+    // No ref on the source: nothing on disk to point at, so there is no way to
+    // send it at all. Better a clear error than a crashed tab.
+    const clip = hugeDataUrl(120);
+    const node = makeNode({
+      selectedModel: { provider: "muapi", modelId: "seedance-v2.0-video-edit", displayName: "Seedance" },
+    });
+    const unsaved = {
+      id: "vin-1", type: "videoInput", position: { x: 0, y: 0 },
+      data: { videoFile: clip },
+    } as WorkflowNode;
+    const ctx = makeCtx(node, {
+      getEdges: vi.fn().mockReturnValue([
+        { id: "e1", source: "vin-1", target: "vid-1", targetHandle: "image-video_urls" } as WorkflowEdge,
+      ]),
+      getNodes: vi.fn().mockReturnValue([node, unsaved]),
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: [], videos: [], audio: [], text: "edit",
+        dynamicInputs: { video_urls: [clip] },
+        easeCurve: null,
+      }),
+    });
+    mockFetch.mockClear();
+
+    await expect(executeGenerateVideo(ctx)).rejects.toThrow(/video_urls/);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

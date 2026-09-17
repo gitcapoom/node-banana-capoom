@@ -9,7 +9,9 @@ import type { GenerateVideoNodeData } from "@/types";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
 import { consumeGenerateSSE, isSSEResponse } from "@/utils/generateSSE";
 import type { NodeExecutionContext } from "./types";
-import { findOversizedInlineMedia, oversizedMediaMessage } from "@/lib/inlineMediaLimits";
+import { oversizedMediaMessage } from "@/lib/inlineMediaLimits";
+import { swapOversizedForRefs } from "@/lib/mediaRefs";
+import { findMediaRefForValue } from "./mediaRefLookup";
 
 export interface GenerateVideoOptions {
   /** When true, falls back to stored inputImages/inputPrompt if no connections provide them. */
@@ -30,6 +32,8 @@ export async function executeGenerateVideo(
     addIncurredCost,
     generationsPath,
     getNodes,
+    getEdges,
+    saveDirectoryPath,
     trackSaveGeneration,
   } = ctx;
 
@@ -92,28 +96,39 @@ export async function executeGenerateVideo(
   const provider = nodeData.selectedModel.provider;
   const headers = buildGenerateHeaders(provider, providerSettings);
 
-  const requestPayload = {
+  // Media too large to inline is sent BY REFERENCE, not as base64.
+  //
+  // Building the request body allocates a second copy of every inline data URL,
+  // so a large clip takes the renderer out with an OOM — a tab crash, not an
+  // error anything can catch or report. The bytes are already in the project's
+  // inputs/ folder, so the server reads that file and uploads it to the
+  // provider directly, and the browser never holds a second copy.
+  //
+  // Only OVERSIZED values are swapped: small media keeps travelling inline, so
+  // the common path needs no project directory and no extra upload.
+  const refSwap = swapOversizedForRefs(
+    dynamicInputs ?? {},
     images,
-    prompt: text,
-    selectedModel: nodeData.selectedModel,
-    parameters: nodeData.parameters,
-    dynamicInputs,
-    mediaType: "video" as const,
-  };
-
-  // Refuse oversized media BEFORE JSON.stringify below. Building the body
-  // allocates a second copy of every inline data URL, so a large clip takes the
-  // renderer out with an OOM — a tab crash, not a catchable error. Reported as
-  // a normal node error instead.
-  const oversized = findOversizedInlineMedia({
-    ...dynamicInputs,
-    images,
-  });
-  if (oversized) {
-    const message = oversizedMediaMessage(oversized);
+    (value) => findMediaRefForValue(value, node.id, getEdges(), getNodes()),
+  );
+  if (refSwap.unresolved) {
+    // Oversized AND not on disk — usually a clip loaded before the project had
+    // a directory, so there is no file to point at and nothing can send it.
+    const message = oversizedMediaMessage(refSwap.unresolved);
     updateNodeData(node.id, { status: "error", error: message });
     throw new Error(message);
   }
+
+  const requestPayload = {
+    images: refSwap.images,
+    prompt: text,
+    selectedModel: nodeData.selectedModel,
+    parameters: nodeData.parameters,
+    dynamicInputs: refSwap.dynamicInputs,
+    // Only needed to resolve the references above; the route validates it.
+    ...(saveDirectoryPath ? { mediaDirectory: saveDirectoryPath } : {}),
+    mediaType: "video" as const,
+  };
 
   try {
     // SSE: server streams queue position / phase changes during the

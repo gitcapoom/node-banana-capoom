@@ -202,6 +202,69 @@ async function fetchWithRetry(
  * Returns the CDN URL to use in API requests instead of inline base64.
  * If the input is already a URL (not base64), returns it as-is.
  */
+/**
+ * Upload a file that is ALREADY ON DISK to the fal CDN, and return its URL.
+ *
+ * Same two-step signed PUT as `uploadImageToFal`, minus the base64 round trip:
+ * the bytes go from the file straight into the request body. That is the whole
+ * point — base64 is what forced MAX_UPLOAD_SIZE, because a big data URL cannot
+ * survive being built, held and re-stringified as a JS string. A Buffer lives
+ * outside the string heap and carries no such limit, so there is deliberately
+ * no size cap here; the provider's own limit is the real one.
+ *
+ * `contentType` should match the file; it is what the provider sees.
+ */
+export async function uploadFileToFal(
+  filePath: string,
+  contentType: string,
+  apiKey: string | null,
+): Promise<string> {
+  const { readFile } = await import("node:fs/promises");
+  const nodePath = await import("node:path");
+
+  const binaryData = await readFile(filePath);
+
+  const authHeaders: Record<string, string> = {};
+  if (apiKey) authHeaders["Authorization"] = `Key ${apiKey}`;
+
+  const ext = nodePath.extname(filePath).replace(/^\./, "") || "bin";
+  const initiateResponse = await fetchWithRetry(
+    "https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders },
+      body: JSON.stringify({
+        content_type: contentType,
+        file_name: `${Date.now()}.${ext}`,
+      }),
+    },
+    "Failed to initiate fal CDN upload",
+  );
+
+  const { upload_url: uploadUrl, file_url: fileUrl } = await initiateResponse.json();
+  if (!uploadUrl || !fileUrl) {
+    throw new Error("fal CDN initiate response missing upload_url or file_url");
+  }
+
+  // Same SSRF checks as the base64 path — the signed URLs come from a response.
+  const uploadUrlCheck = validateMediaUrl(uploadUrl);
+  if (!uploadUrlCheck.valid || !uploadUrl.startsWith("https://")) {
+    throw new Error(`fal CDN upload_url failed validation: ${uploadUrlCheck.error || "not HTTPS"}`);
+  }
+  const fileUrlCheck = validateMediaUrl(fileUrl);
+  if (!fileUrlCheck.valid || !fileUrl.startsWith("https://")) {
+    throw new Error(`fal CDN file_url failed validation: ${fileUrlCheck.error || "not HTTPS"}`);
+  }
+
+  await fetchWithRetry(
+    uploadUrl,
+    { method: "PUT", headers: { "Content-Type": contentType }, body: binaryData },
+    "Failed to upload to fal CDN",
+  );
+
+  return fileUrl;
+}
+
 export async function uploadImageToFal(base64DataUrl: string, apiKey: string | null): Promise<string> {
   // Already a URL, not base64
   if (!base64DataUrl.startsWith("data:")) return base64DataUrl;
