@@ -9,6 +9,7 @@ import type { VideoStitchNodeData, EaseCurveNodeData, VideoTrimNodeData, VideoFr
 import { revokeBlobUrl } from "@/store/utils/executionUtils";
 import { ensureVideoInputs } from "./hydrateForRun";
 import type { NodeExecutionContext } from "./types";
+import { grabVideoFrameDataUrl } from "@/utils/mediaCapture";
 
 /**
  * VideoStitch: combines multiple video clips into a single output.
@@ -393,36 +394,35 @@ export async function executeVideoFrameGrab(ctx: NodeExecutionContext): Promise<
       };
 
       video.onloadedmetadata = () => {
-        // For "first" frame, seek to 0.001 (not exactly 0 to ensure a decoded frame)
-        // For "last" frame, seek to duration - small epsilon
+        // "first" is 0, not 0.001. The epsilon existed only to dodge a no-op
+        // seek — setting currentTime to where the video already sits fires no
+        // `seeked`, so the old handler waited for an event that never came.
+        // grabVideoFrameDataUrl handles that case directly, and also waits for
+        // a frame to be PRESENTED before drawing (a completed seek is not a
+        // painted frame) and refuses to hand back a blank 0x0 canvas.
+        //
+        // `video.duration` is NaN for some blob sources; `|| 0` keeps the
+        // target finite, and resolveSeekTarget clamps it against the real
+        // duration once known.
         const seekTime = nodeData.framePosition === "first"
-          ? 0.001
-          : Math.max(0, video.duration - 0.1);
-        video.currentTime = seekTime;
+          ? 0
+          : Math.max(0, (video.duration || 0) - 0.1);
 
         timeoutId = setTimeout(() => {
           if (blobUrl) URL.revokeObjectURL(blobUrl);
           reject(new Error("Frame extraction timed out"));
         }, FRAME_EXTRACTION_TIMEOUT);
-      };
 
-      video.onseeked = () => {
-        cleanup();
-        try {
-          const canvas = document.createElement("canvas");
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          const ctx2d = canvas.getContext("2d");
-          if (!ctx2d) {
-            reject(new Error("Could not get canvas 2d context"));
-            return;
-          }
-          ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const frameDataUrl = canvas.toDataURL("image/png");
-          resolve(frameDataUrl);
-        } catch (err) {
-          reject(err instanceof Error ? err : new Error("Frame extraction failed"));
-        }
+        void grabVideoFrameDataUrl(video, { time: seekTime })
+          .then((url) => {
+            cleanup();
+            if (url) resolve(url);
+            else reject(new Error("Frame extraction produced no drawable frame"));
+          })
+          .catch((err) => {
+            cleanup();
+            reject(err instanceof Error ? err : new Error("Frame extraction failed"));
+          });
       };
 
       video.onerror = () => {

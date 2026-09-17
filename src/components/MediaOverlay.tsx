@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { ThreeModelViewer } from "@/components/ThreeModelViewer";
 import { ZoomPanView } from "@/components/ZoomPanView";
 import { useViewerNodes, ViewerSourceSwitcher } from "@/components/ViewerFeed";
+import { grabVideoFrameDataUrl } from "@/utils/mediaCapture";
 import {
   SENSOR_PRESETS,
   LENS_FOCAL_LENGTHS,
@@ -124,24 +125,27 @@ export function MediaOverlay({
   );
 
   // Frame grab: capture current video frame or 3D viewport as PNG
-  const handleFrameGrab = useCallback(() => {
+  const handleFrameGrab = useCallback(async () => {
     if (!onFrameGrab) return;
 
     if (mediaType === "video") {
       const video = videoRef.current;
       if (!video) return;
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext("2d");
-        if (ctx) {
-          ctx.drawImage(video, 0, 0);
-          const dataUrl = canvas.toDataURL("image/png");
-          onFrameGrab(dataUrl);
-        }
-      } catch (err) {
-        console.warn("Video frame grab failed:", err);
+      // Was: build a canvas from videoWidth/videoHeight and draw immediately.
+      // Before metadata those are 0, so it produced a 0x0 canvas whose
+      // toDataURL is a valid-looking blank — the grab "worked" and returned
+      // nothing. And drawing without waiting for a painted frame yields black
+      // while the element is still seeking or buffering. Hence: sometimes.
+      // No `time` here — capture wherever the user paused it.
+      const dataUrl = await grabVideoFrameDataUrl(video);
+      if (dataUrl) {
+        onFrameGrab(dataUrl);
+      } else {
+        console.warn("Video frame grab failed: no drawable frame", {
+          readyState: video.readyState,
+          w: video.videoWidth,
+          h: video.videoHeight,
+        });
       }
     } else if (mediaType === "3d") {
       // Capture from Three.js viewport

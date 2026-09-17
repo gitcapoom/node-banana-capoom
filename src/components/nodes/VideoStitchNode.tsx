@@ -9,6 +9,7 @@ import { VideoStitchNodeData } from "@/types";
 import { checkEncoderSupport } from "@/hooks/useStitchVideos";
 import { useVideoBlobUrl } from "@/hooks/useVideoBlobUrl";
 import { useVideoAutoplay } from "@/hooks/useVideoAutoplay";
+import { seekVideoTo, waitForPaintedFrame } from "@/utils/mediaCapture";
 
 type VideoStitchNodeType = Node<VideoStitchNodeData, "videoStitch">;
 
@@ -179,17 +180,13 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
 
           if (cancelled) { cleanupVideo(video); return; }
 
-          const seekTime = video.duration * 0.25;
-          video.currentTime = seekTime;
-
-          await Promise.race([
-            new Promise<void>((resolve) => {
-              video.onseeked = () => resolve();
-            }),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error("Seek timeout")), 10_000)
-            ),
-          ]);
+          // seekVideoTo attaches its listener BEFORE writing currentTime.
+          // This used to set currentTime first and subscribe afterwards, so an
+          // already-buffered seek completed before the handler existed and the
+          // race fell through to "Seek timeout" — intermittently, depending on
+          // whether the clip happened to be buffered.
+          await seekVideoTo(video, (video.duration || 0) * 0.25);
+          await waitForPaintedFrame(video);
 
           if (cancelled) { cleanupVideo(video); return; }
 
