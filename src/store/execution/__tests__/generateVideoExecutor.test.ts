@@ -275,3 +275,100 @@ describe("executeGenerateVideo", () => {
     expect(videoHistory.length).toBe(50); // capped at 50
   });
 });
+
+
+describe("oversized inline media", () => {
+  /**
+   * A large .mov wired to a muapi seedance video model crashed the UI. The clip
+   * rides in dynamicInputs as a base64 data URL and the request body is built
+   * with JSON.stringify IN THE BROWSER, which allocates a second copy — past
+   * V8's max string length that throws, and before it the renderer OOMs, which
+   * is a tab crash no catch block can turn into an error message.
+   */
+  function hugeDataUrl(mb: number): string {
+    return `data:video/quicktime;base64,${"A".repeat(Math.ceil((mb * 1024 * 1024) / 3) * 4)}`;
+  }
+
+  it("refuses to send, and never calls fetch", async () => {
+    const node = makeNode({
+      selectedModel: { provider: "muapi", modelId: "seedance-v2.0-video-edit", displayName: "Seedance" },
+    });
+    const ctx = makeCtx(node, {
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: [], videos: [], audio: [], text: "edit this",
+        dynamicInputs: { video_urls: [hugeDataUrl(120)] },
+        easeCurve: null,
+      }),
+    });
+    mockFetch.mockClear();
+
+    await expect(executeGenerateVideo(ctx)).rejects.toThrow(/video_urls/);
+    // The whole point: the payload is never built.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("reports it on the node instead of dying silently", async () => {
+    const node = makeNode({
+      selectedModel: { provider: "muapi", modelId: "seedance-v2.0-extend", displayName: "Seedance" },
+    });
+    const ctx = makeCtx(node, {
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: [], videos: [], audio: [], text: "extend",
+        dynamicInputs: { video_files: [hugeDataUrl(200)] },
+        easeCurve: null,
+      }),
+    });
+
+    await expect(executeGenerateVideo(ctx)).rejects.toThrow();
+
+    const errorPatch = vi.mocked(ctx.updateNodeData).mock.calls
+      .map((c) => c[1] as { status?: string; error?: string })
+      .find((p) => p.status === "error");
+    expect(errorPatch?.error).toMatch(/200 MB/);
+    expect(errorPatch?.error).toMatch(/20 MB/);
+  });
+
+  it("still sends a clip that fits", async () => {
+    const node = makeNode({
+      selectedModel: { provider: "muapi", modelId: "seedance-v2.0-video-edit", displayName: "Seedance" },
+    });
+    const ctx = makeCtx(node, {
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: [], videos: [], audio: [], text: "edit",
+        dynamicInputs: { video_urls: [hugeDataUrl(2)] },
+        easeCurve: null,
+      }),
+    });
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({ success: true, videoUrl: "https://x/v.mp4" }),
+    });
+
+    await executeGenerateVideo(ctx).catch(() => { /* downstream handling is not under test */ });
+    expect(mockFetch).toHaveBeenCalled();
+  });
+
+  it("ignores a hosted URL of any size", async () => {
+    const node = makeNode({
+      selectedModel: { provider: "muapi", modelId: "seedance-v2.0-video-edit", displayName: "Seedance" },
+    });
+    const ctx = makeCtx(node, {
+      getConnectedInputs: vi.fn().mockReturnValue({
+        images: [], videos: [], audio: [], text: "edit",
+        dynamicInputs: { video_urls: ["https://cdn.example.com/huge.mov"] },
+        easeCurve: null,
+      }),
+    });
+    mockFetch.mockClear();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ "content-type": "application/json" }),
+      json: () => Promise.resolve({ success: true, videoUrl: "https://x/v.mp4" }),
+    });
+
+    await executeGenerateVideo(ctx).catch(() => { /* not under test */ });
+    expect(mockFetch).toHaveBeenCalled();
+  });
+});

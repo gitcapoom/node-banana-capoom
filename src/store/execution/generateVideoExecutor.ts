@@ -9,6 +9,7 @@ import type { GenerateVideoNodeData } from "@/types";
 import { buildGenerateHeaders } from "@/store/utils/buildApiHeaders";
 import { consumeGenerateSSE, isSSEResponse } from "@/utils/generateSSE";
 import type { NodeExecutionContext } from "./types";
+import { findOversizedInlineMedia, oversizedMediaMessage } from "@/lib/inlineMediaLimits";
 
 export interface GenerateVideoOptions {
   /** When true, falls back to stored inputImages/inputPrompt if no connections provide them. */
@@ -99,6 +100,20 @@ export async function executeGenerateVideo(
     dynamicInputs,
     mediaType: "video" as const,
   };
+
+  // Refuse oversized media BEFORE JSON.stringify below. Building the body
+  // allocates a second copy of every inline data URL, so a large clip takes the
+  // renderer out with an OOM — a tab crash, not a catchable error. Reported as
+  // a normal node error instead.
+  const oversized = findOversizedInlineMedia({
+    ...dynamicInputs,
+    images,
+  });
+  if (oversized) {
+    const message = oversizedMediaMessage(oversized);
+    updateNodeData(node.id, { status: "error", error: message });
+    throw new Error(message);
+  }
 
   try {
     // SSE: server streams queue position / phase changes during the
