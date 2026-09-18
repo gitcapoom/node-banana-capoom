@@ -8,6 +8,8 @@
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
 import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
 import { validateMediaUrl } from "@/utils/urlValidation";
+import { isArraySchemaProperty } from "../schemaUtils";
+import { fetchWaveSpeedRaw } from "@/lib/schema/normalize/wavespeed";
 
 type WaveSpeedStatus = "created" | "pending" | "processing" | "completed" | "failed";
 
@@ -67,6 +69,47 @@ interface WaveSpeedPredictionResponse {
 }
 
 /**
+ * Which of this model's inputs are LISTS, according to its own schema.
+ *
+ * WaveSpeed publishes a JSON Schema per model at
+ * `api_schema.api_schemas[0].request_schema`; `fetchWaveSpeedRaw` serves it
+ * from the shared cache and falls back to the models endpoint. Its schemas are
+ * flat — plain `type: "array"`, no $ref and no nullable unions — so the shared
+ * property test is applied directly to the raw properties.
+ *
+ * Before this, the reshape below hardcoded the single field name "images".
+ * Across the 1048 models WaveSpeed publishes, 275 declare at least one array
+ * input: 132 of those occurrences are called "images" and 242 are not —
+ * `loras`, `reference_images`, `reference_audios`, `reference_videos`,
+ * `multi_prompt`, `element_list` and more. Every one of those was reduced to
+ * its first element on the way out.
+ *
+ * Returns schemaLoaded:false when the schema could not be read, which keeps
+ * the caller from treating an empty set as "everything here is scalar".
+ */
+async function getWaveSpeedArrayParams(
+  modelId: string,
+  apiKey: string
+): Promise<{ schemaArrayParams: Set<string>; schemaLoaded: boolean }> {
+  const schemaArrayParams = new Set<string>();
+  try {
+    const raw = await fetchWaveSpeedRaw(modelId, apiKey);
+    const requestSchema = raw?.api_schemas?.[0]?.request_schema as
+      | Record<string, unknown>
+      | undefined;
+    const properties = requestSchema?.properties as Record<string, unknown> | undefined;
+    if (!properties) return { schemaArrayParams, schemaLoaded: false };
+
+    for (const [name, prop] of Object.entries(properties)) {
+      if (isArraySchemaProperty(name, prop)) schemaArrayParams.add(name);
+    }
+    return { schemaArrayParams, schemaLoaded: true };
+  } catch {
+    return { schemaArrayParams, schemaLoaded: false };
+  }
+}
+
+/**
  * Generate image/video using WaveSpeed API
  * Uses async task submission + polling
  */
@@ -100,15 +143,27 @@ export async function generateWithWaveSpeed(
   };
 
   // Apply dynamic inputs (schema-mapped connections)
-  // These have the correct parameter names from the schema (e.g., "images" for edit models)
+  // These carry the model's own parameter names, so the model's own schema
+  // decides which of them hold a list.
   if (hasDynamicInputs) {
+    const { schemaArrayParams, schemaLoaded } = await getWaveSpeedArrayParams(modelId, apiKey);
+    if (!schemaLoaded) {
+      // Schema unavailable (no key, offline, unknown model). "images" is the
+      // one array name this provider has always known, so keep wrapping it —
+      // but with schemaLoaded false nothing gets unwrapped, because we have no
+      // grounds to call any other field scalar.
+      schemaArrayParams.add("images");
+    }
+    console.log(
+      `[API:${requestId}] WaveSpeed array params (schema ${schemaLoaded ? "loaded" : "UNAVAILABLE"}): ${[...schemaArrayParams].join(", ") || "none"}`
+    );
+
     for (const [key, value] of Object.entries(input.dynamicInputs!)) {
       if (value !== null && value !== undefined && value !== '') {
-        // If the key is "images" and value is not an array, wrap it
-        if (key === "images" && !Array.isArray(value)) {
+        if (schemaArrayParams.has(key) && !Array.isArray(value)) {
           payload[key] = [value];
-        } else if (key !== "images" && Array.isArray(value)) {
-          // Unwrap array to single value for non-array params
+        } else if (schemaLoaded && !schemaArrayParams.has(key) && Array.isArray(value)) {
+          // Unwrap only when the schema was read AND positively says scalar.
           payload[key] = value[0];
         } else {
           payload[key] = value;

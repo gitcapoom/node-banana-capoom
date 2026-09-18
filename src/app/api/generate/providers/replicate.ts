@@ -77,15 +77,19 @@ export async function generateWithReplicate(
   if (hasDynamicInputs) {
     // Apply coerced parameters first, then dynamic inputs override
     Object.assign(predictionInput, coerceParameterTypes(input.parameters, parameterTypes));
-    const { paramMap, schemaArrayParams } = getInputMappingFromSchema(schema);
+    const { paramMap, schemaArrayParams, schemaLoaded } = getInputMappingFromSchema(schema);
 
     // Apply array wrapping based on schema type
     for (const [key, value] of Object.entries(input.dynamicInputs!)) {
       if (value !== null && value !== undefined && value !== '') {
         if (schemaArrayParams.has(key) && !Array.isArray(value)) {
           predictionInput[key] = [value];  // Wrap in array
-        } else if (!schemaArrayParams.has(key) && Array.isArray(value)) {
-          predictionInput[key] = value[0];  // Unwrap array to single value
+        } else if (schemaLoaded && !schemaArrayParams.has(key) && Array.isArray(value)) {
+          // Unwrap only when the schema was read AND positively says scalar.
+          // `openapi_schema` is optional on a Replicate version, so without the
+          // guard a model that simply publishes no schema had every array it
+          // was sent silently reduced to its first element.
+          predictionInput[key] = value[0];
         } else {
           predictionInput[key] = value;
         }

@@ -84,6 +84,13 @@ export interface InputMapping {
   arrayParams: Set<string>;
   // Track actual schema param names that expect array types (e.g., "image_urls")
   schemaArrayParams: Set<string>;
+  /**
+   * Did we actually read a schema? Every failure below returns EMPTY sets,
+   * which a caller cannot tell apart from "the schema says none of these are
+   * arrays". Callers that RESHAPE values on a negative answer (unwrapping an
+   * array to its first element) must check this first: unknown is not scalar.
+   */
+  schemaLoaded: boolean;
 }
 
 /**
@@ -177,8 +184,9 @@ export function getInputMappingFromSchema(schema: Record<string, unknown> | unde
   const paramMap: Record<string, string> = {};
   const arrayParams = new Set<string>();
   const schemaArrayParams = new Set<string>();
+  let schemaLoaded = false;
 
-  if (!schema) return { paramMap, arrayParams, schemaArrayParams };
+  if (!schema) return { paramMap, arrayParams, schemaArrayParams, schemaLoaded };
 
   try {
     // Navigate to input schema properties
@@ -188,7 +196,7 @@ export function getInputMappingFromSchema(schema: Record<string, unknown> | unde
     const input = schemas?.Input as Record<string, unknown> | undefined;
     const properties = input?.properties as Record<string, unknown> | undefined;
 
-    if (!properties) return { paramMap, arrayParams, schemaArrayParams };
+    if (!properties) return { paramMap, arrayParams, schemaArrayParams, schemaLoaded };
 
     // First pass: detect all array-typed properties by their actual schema name
     for (const [propName, prop] of Object.entries(properties)) {
@@ -234,9 +242,11 @@ export function getInputMappingFromSchema(schema: Record<string, unknown> | unde
         }
       }
     }
+    schemaLoaded = true;
   } catch {
-    // Schema parsing failed
+    // Schema parsing failed — leave schemaLoaded false so callers do not treat
+    // a partially-built schemaArrayParams as authoritative.
   }
 
-  return { paramMap, arrayParams, schemaArrayParams };
+  return { paramMap, arrayParams, schemaArrayParams, schemaLoaded };
 }

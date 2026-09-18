@@ -22,14 +22,9 @@ import {
  */
 interface FalInputMapping extends InputMapping {
   parameterTypes: ParameterTypeInfo;
-  /**
-   * Did we actually read this model's schema? Every failure path below returns
-   * EMPTY sets, which the reshape in generateWithFal() cannot tell apart from
-   * "the schema says none of these are arrays" — so a transient fetch failure
-   * silently unwrapped every array the client sent. The reshape now only
-   * trusts a negative answer when this is true.
-   */
-  schemaLoaded: boolean;
+  // `schemaLoaded` is inherited from InputMapping — every failure path below
+  // returns EMPTY sets, which the reshape in generateWithFal() cannot tell
+  // apart from "the schema says none of these are arrays".
 }
 
 /**

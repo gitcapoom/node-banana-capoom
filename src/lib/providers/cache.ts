@@ -274,6 +274,18 @@ export function setCachedWaveSpeedSchemas(
 }
 
 /**
+ * Drop every cached WaveSpeed schema.
+ *
+ * The cache is module-level and therefore shared across tests in a file; a
+ * schema stored by one case is visible to the next, which can make a test
+ * about the NO-schema path quietly exercise the has-schema path instead.
+ * Mirrors clearFalInputMappingCache().
+ */
+export function clearWaveSpeedSchemaCache(): void {
+  wavespeedSchemaCache.clear();
+}
+
+/**
  * Get WaveSpeed schema cache statistics (for debugging)
  */
 export function getWaveSpeedSchemaCacheStats(): { size: number; modelIds: string[] } {
