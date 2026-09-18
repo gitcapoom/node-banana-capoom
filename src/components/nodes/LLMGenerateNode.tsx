@@ -10,7 +10,6 @@ import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
-import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { DynamicInputHandles } from "./DynamicInputHandles";
 import { PromptSkillPicker } from "./PromptSkillPicker";
 import { LLMChatPanel } from "./LLMChatPanel";
@@ -40,7 +39,6 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
-  const dynamicPinsOn = useDynamicPinsEnabled();
 
   const handleRegenerate = useCallback(() => {
     regenerateNode(id);
@@ -335,20 +333,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
         </InlineParameterPanel>
       ) : undefined}
     >
-      {dynamicPinsOn ? (
-        <DynamicInputHandles nodeId={id} />
-      ) : (
-        <>
-          {/* Image input - optional */}
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="image"
-            style={{ top: "35%" }}
-            data-handletype="image"
-          />
-        </>
-      )}
+      {<DynamicInputHandles nodeId={id} />}
       {/* Video input — Gemini models only (the route rejects other providers
           with a clear error). Rendered in BOTH pin modes (like image-feedback)
           so a video edge can never point at an unrendered handle. */}

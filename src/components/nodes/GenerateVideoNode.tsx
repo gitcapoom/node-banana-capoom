@@ -10,7 +10,6 @@ import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
 import { deduplicatedFetch } from "@/utils/deduplicatedFetch";
 import { GenerateVideoNodeData, ProviderType, SelectedModel, ModelInputDef } from "@/types";
-import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { DynamicInputHandles } from "./DynamicInputHandles";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
@@ -72,7 +71,6 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
-  const dynamicPinsOn = useDynamicPinsEnabled();
   const updateNodeInternals = useUpdateNodeInternals();
 
   // Tell React Flow to recalculate handle positions when schema changes
@@ -558,179 +556,7 @@ export function GenerateVideoNode({ id, data, selected }: NodeProps<GenerateVide
       ) : undefined}
     >
       {/* Dynamic input handles based on model schema */}
-      {dynamicPinsOn ? (
-        <DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />
-      ) : nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
-        // Render handles from schema, sorted by type (images first, text second)
-        // IMPORTANT: Always render "image" and "text" handles to maintain connection
-        // compatibility. Schema may only have text inputs (text-to-video models) but
-        // we still need the image handle to preserve connections made before model selection.
-        (() => {
-          const imageInputs = nodeData.inputSchema!.filter(i => i.type === "image");
-          const textInputs = nodeData.inputSchema!.filter(i => i.type === "text");
-          const videoInputs = nodeData.inputSchema!.filter(i => i.type === "video");
-          const audioInputs = nodeData.inputSchema!.filter(i => i.type === "audio");
-
-          // Always include at least one image and one text handle for connection stability
-          const hasImageInput = imageInputs.length > 0;
-          const hasTextInput = textInputs.length > 0;
-
-          // Build the handles array: schema inputs + fallback defaults if missing
-          type HandleType = "image" | "text" | "video" | "audio";
-          const handles: Array<{
-            id: string;
-            type: HandleType;
-            label: string;
-            schemaName: string | null;
-            description: string | null;
-            isPlaceholder: boolean;
-          }> = [];
-
-          // Helper to add handles for a given type
-          const addHandles = (inputs: typeof imageInputs, handleType: HandleType) => {
-            inputs.forEach((input, index) => {
-              handles.push({
-                id: index === 0 ? handleType : `${handleType}-${index}`,
-                type: handleType,
-                label: input.label,
-                schemaName: input.name,
-                description: input.description || null,
-                isPlaceholder: false,
-              });
-            });
-          };
-
-          // Add image handles from schema, or a placeholder if none exist
-          if (hasImageInput) {
-            addHandles(imageInputs, "image");
-          } else {
-            handles.push({
-              id: "image",
-              type: "image",
-              label: "Image",
-              schemaName: null,
-              description: "Not used by this model",
-              isPlaceholder: true,
-            });
-          }
-
-          // Add video handles from schema (no placeholder — not all models need video)
-          addHandles(videoInputs, "video");
-
-          // Add audio handles from schema
-          addHandles(audioInputs, "audio");
-
-          // Add text handles from schema, or a placeholder if none exist
-          if (hasTextInput) {
-            addHandles(textInputs, "text");
-          } else {
-            handles.push({
-              id: "text",
-              type: "text",
-              label: "Prompt",
-              schemaName: null,
-              description: "Not used by this model",
-              isPlaceholder: true,
-            });
-          }
-
-          // Calculate positions — group order: image, video, audio, gap, text
-          const handleColors: Record<HandleType, string> = {
-            image: "var(--handle-color-image, #3b82f6)",
-            video: "var(--handle-color-video, #0d9488)",
-            audio: "var(--handle-color-audio, #8b5cf6)",
-            text: "var(--handle-color-text, #f59e0b)",
-          };
-          const mediaHandles = handles.filter(h => h.type !== "text");
-          const textHandles = handles.filter(h => h.type === "text");
-          const totalSlots = mediaHandles.length + textHandles.length + 1; // +1 for gap
-
-          const renderedHandles = handles.map((handle) => {
-            const isText = handle.type === "text";
-            const typeGroup = isText ? textHandles : mediaHandles;
-            const typeIndex = typeGroup.findIndex(h => h.id === handle.id);
-            const adjustedIndex = isText ? mediaHandles.length + 1 + typeIndex : typeIndex;
-            const topPercent = ((adjustedIndex + 1) / (totalSlots + 1)) * 100;
-
-            return (
-              <React.Fragment key={handle.id}>
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id={handle.id}
-                  style={{
-                    top: `${topPercent}%`,
-                    opacity: handle.isPlaceholder ? 0.3 : 1,
-                    zIndex: 10,
-                  }}
-                  data-handletype={handle.type}
-                  data-schema-name={handle.schemaName || undefined}
-                  isConnectable={true}
-                  title={handle.description || handle.label}
-                />
-                {/* Handle label - positioned outside node, above the connector */}
-                <div
-                  className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-                  style={{
-                    right: `calc(100% + 8px)`,
-                    top: `calc(${topPercent}% - 18px)`,
-                    color: handleColors[handle.type],
-                    opacity: handle.isPlaceholder ? 0.3 : 1,
-                    zIndex: 10,
-                  }}
-                >
-                  {handle.label}
-                </div>
-              </React.Fragment>
-            );
-          });
-
-          return <>{renderedHandles}</>;
-        })()
-      ) : (
-        // Default handles when no schema
-        <>
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="image"
-            style={{ top: "35%", zIndex: 10 }}
-            data-handletype="image"
-            isConnectable={true}
-          />
-          {/* Default image label */}
-          <div
-            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-            style={{
-              right: `calc(100% + 8px)`,
-              top: "calc(35% - 18px)",
-              color: "var(--handle-color-image)",
-              zIndex: 10,
-            }}
-          >
-            Image
-          </div>
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="text"
-            style={{ top: "65%", zIndex: 10 }}
-            data-handletype="text"
-          />
-          {/* Default text label */}
-          <div
-            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-            style={{
-              right: `calc(100% + 8px)`,
-              top: "calc(65% - 18px)",
-              color: "var(--handle-color-text)",
-              zIndex: 10,
-            }}
-          >
-            Prompt
-          </div>
-        </>
-      )}
+      {<DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />}
       {/* Video output */}
       <Handle
         type="source"

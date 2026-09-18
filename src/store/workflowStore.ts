@@ -71,7 +71,6 @@ import { getConnectedInputsPure, validateWorkflowPure } from "./utils/connectedI
 import { migrateEdgeHandles, conformEdgesToRenderablePins, DYNAMIC_PIN_NODE_TYPES } from "./utils/pinMigration";
 import { migrateLlmNodes } from "./utils/llmNodeMigration";
 
-import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { isDynPin } from "@/lib/dynamicPinId";
 import { ensureFullResForNodes } from "./execution/hydrateForRun";
 import { refreshUpstreamProcessors, refreshDownstreamProcessors } from "./execution/executeNode";
@@ -524,7 +523,6 @@ interface WorkflowStore {
   saveWorkflow: (name?: string) => void;
   loadWorkflow: (workflow: WorkflowFile, workflowPath?: string, options?: { preserveSnapshot?: boolean }) => Promise<void>;
   /** Remap edge handles between the classic and dynamic-pin schemes when the flag toggles. */
-  migratePinMode: (enabled: boolean) => void;
   importWorkflow: (workflow: WorkflowFile, dropPosition?: { x: number; y: number }) => void;
   clearWorkflow: () => void;
 
@@ -805,7 +803,6 @@ function migrateLegacyIndexedHandles(nodes: WorkflowNode[], edges: WorkflowEdge[
  * One rule set for every node type: conformEdgesToRenderablePins.
  */
 function sweepGhostEdges(nodes: WorkflowNode[], edges: WorkflowEdge[]): WorkflowEdge[] {
-  if (!getDynamicPinsEnabled()) return edges;
   let out = edges;
   for (const n of nodes) {
     if (!DYNAMIC_PIN_NODE_TYPES.has(n.type as string)) continue;
@@ -989,8 +986,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     if (
       "inputSchema" in data &&
       node &&
-      DYNAMIC_PIN_NODE_TYPES.has(node.type as string) &&
-      getDynamicPinsEnabled()
+      DYNAMIC_PIN_NODE_TYPES.has(node.type as string)
     ) {
       const freshNode = get().nodes.find((n) => n.id === nodeId);
       if (freshNode) {
@@ -1096,7 +1092,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       const normalizedAll = migrateEdgeHandles(
         state.nodes,
         [...state.edges, newEdge],
-        getDynamicPinsEnabled() ? "dynamic" : "classic",
+        "dynamic",
       );
       newEdge = normalizedAll[normalizedAll.length - 1];
       const priorEdges = normalizedAll.slice(0, -1);
@@ -1113,12 +1109,11 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       // One rule set for what may anchor where: conform the target node's
       // edges to its rendered pins (collapses onto scalar slot 0 with
       // replacement, retargets unmappable fields, drops the truly homeless).
-      if (getDynamicPinsEnabled()) {
-        const targetNode = state.nodes.find((n) => n.id === newEdge.target);
-        if (targetNode) {
-          nextEdges = conformEdgesToRenderablePins(targetNode, nextEdges) ?? nextEdges;
-        }
+      const targetNode = state.nodes.find((n) => n.id === newEdge.target);
+      if (targetNode) {
+        nextEdges = conformEdgesToRenderablePins(targetNode, nextEdges) ?? nextEdges;
       }
+      
       return {
         edges: nextEdges,
         hasUnsavedChanges: true,
@@ -1345,7 +1340,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       edges: migrateEdgeHandles(
         allNodesAfterPaste,
         [...edges, ...internalEdges, ...inputEdges],
-        getDynamicPinsEnabled() ? "dynamic" : "classic",
+        "dynamic",
       ),
       hasUnsavedChanges: true,
     });
@@ -2493,14 +2488,6 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     URL.revokeObjectURL(url);
   },
 
-  migratePinMode: (enabled: boolean) => {
-    const { nodes, edges } = get();
-    const migrated = migrateEdgeHandles(nodes, edges, enabled ? "dynamic" : "classic");
-    // migrateEdgeHandles reuses unchanged edge refs, so a cheap identity check
-    // tells us whether anything actually moved (avoids needless re-render / churn).
-    const changed = migrated.length !== edges.length || migrated.some((e, i) => e !== edges[i]);
-    if (changed) set({ edges: migrated });
-  },
 
   loadWorkflow: async (workflow: WorkflowFile, workflowPath?: string, options?: { preserveSnapshot?: boolean }) => {
     // Free old workflow data before loading new one to reduce peak memory
@@ -2671,7 +2658,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       migrateEdgeHandles(
         hydratedWorkflow.nodes,
         hydratedWorkflow.edges,
-        getDynamicPinsEnabled() ? "dynamic" : "classic"
+        "dynamic"
       )
     );
 

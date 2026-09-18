@@ -73,14 +73,19 @@ describe("LLMGenerateNode", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("no longer renders a text INPUT handle — the compose box replaced it", () => {
+    it("renders a prompt INPUT pin alongside the compose box", () => {
+      // The classic renderer dropped this handle on the grounds that the
+      // compose box replaced it. The two are not alternatives: the executor
+      // resolves `composed || inputs.text || inputPrompt`, so a wired Prompt
+      // node is a real, supported way to drive this node — and it is what the
+      // dynamic scheme has always offered.
       const { container } = render(
         <TestWrapper>
           <LLMGenerateNode {...createNodeProps()} />
         </TestWrapper>
       );
 
-      expect(container.querySelector('[data-handletype="text"][class*="target"]')).toBeNull();
+      expect(container.querySelector('[data-handletype="text"]')).toBeInTheDocument();
     });
 
     it("should render image input handle on left", () => {

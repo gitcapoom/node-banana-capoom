@@ -8,7 +8,6 @@ import { CostIndicator } from "./CostIndicator";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
 import { FileOpenDialog } from "./FileOpenDialog";
 import { useToast } from "./Toast";
-import { useDynamicPinsEnabled, setDynamicPinsEnabled } from "@/lib/dynamicPins";
 import {
   useThumbnailMaxDim,
   useThumbnailProgress,
@@ -131,35 +130,6 @@ function ThumbnailProgressIndicator() {
     </span>
   );
 }
-
-function DynamicPinsToggle() {
-  const enabled = useDynamicPinsEnabled();
-  const migratePinMode = useWorkflowStore((state) => state.migratePinMode);
-  return (
-    <button
-      onClick={() => {
-        const next = !enabled;
-        setDynamicPinsEnabled(next);
-        migratePinMode(next);
-      }}
-      className={`p-1.5 rounded transition-colors ${
-        enabled
-          ? "text-blue-400 bg-blue-500/15 hover:bg-blue-500/25"
-          : "text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800"
-      }`}
-      title={`Dynamic input pins: ${enabled ? "ON" : "OFF"} (experimental — one labeled pin per input). Toggle off to restore classic pins.`}
-    >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-        {/* three pins fanning into a node */}
-        <circle cx="4" cy="6" r="1.6" />
-        <circle cx="4" cy="12" r="1.6" />
-        <circle cx="4" cy="18" r="1.6" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M5.6 6h4.4m-4.4 6h4.4m-4.4 6h4.4M10 6v12a1.5 1.5 0 0 0 1.5 1.5H18a1.5 1.5 0 0 0 1.5-1.5V6A1.5 1.5 0 0 0 18 4.5h-6.5A1.5 1.5 0 0 0 10 6Z" />
-      </svg>
-    </button>
-  );
-}
-
 
 /**
  * Reclaim media that no node references any more.
@@ -597,7 +567,6 @@ export function Header() {
             </button>
           )}
           <ThumbnailSizeSelect />
-          <DynamicPinsToggle />
           <CommentsNavigationIcon />
           <span className="text-neutral-400">
             {isProjectConfigured ? (

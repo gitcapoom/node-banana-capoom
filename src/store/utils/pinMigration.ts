@@ -5,7 +5,12 @@
  * schemaless node), "text", "image-{name}", etc.
  * Dynamic handles:  "dynpin__{type}__{field}__{slot}".
  *
- * When the dynamic-pins flag flips (or a saved workflow loads while it's on),
+ * Dynamic pins are now the only scheme, so `toMode` is always "dynamic" from
+ * the app — but the classic->dynamic direction is exactly what a workflow saved
+ * before the switch needs on load, which is why this still exists. The reverse
+ * direction is kept for symmetry and is no longer reached from the app.
+ *
+ * When a saved workflow loads,
  * we rewrite the targetHandle of edges feeding the affected generator nodes so
  * they re-anchor to the active scheme — instead of floating detached. The remap
  * is a round-trip for classic-origin edges; dynamic-only edges (nested element

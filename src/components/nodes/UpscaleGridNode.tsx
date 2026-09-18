@@ -19,7 +19,6 @@ import {
   ModelInputDef,
 } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
-import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { DynamicInputHandles } from "./DynamicInputHandles";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useToast } from "@/components/Toast";
@@ -65,7 +64,6 @@ export function UpscaleGridNode({ id, data, selected }: NodeProps<UpscaleGridNod
   const [isLoadingFull, setIsLoadingFull] = useState(false);
 
   const { inlineParametersEnabled } = useInlineParameters();
-  const dynamicPinsOn = useDynamicPinsEnabled();
   const updateNodeInternals = useUpdateNodeInternals();
   const { setNodes } = useReactFlow();
 
@@ -470,82 +468,7 @@ export function UpscaleGridNode({ id, data, selected }: NodeProps<UpscaleGridNod
         ) : undefined}
       >
         {/* Dynamic input handles based on model schema */}
-        {dynamicPinsOn ? (
-          <DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />
-        ) : nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
-          (() => {
-            const imageInputs = nodeData.inputSchema!.filter((i) => i.type === "image");
-            const videoInputs = nodeData.inputSchema!.filter((i) => i.type === "video");
-            const audioInputs = nodeData.inputSchema!.filter((i) => i.type === "audio");
-
-            type HandleType = "image" | "text" | "video" | "audio";
-            const handles: Array<{ id: string; type: HandleType; label: string; schemaName: string | null }> = [];
-
-            if (imageInputs.length > 0) {
-              imageInputs.forEach((input, index) =>
-                handles.push({ id: index === 0 ? "image" : `image-${index}`, type: "image", label: index === 0 ? "Image" : input.label, schemaName: input.name })
-              );
-            } else {
-              handles.push({ id: "image", type: "image", label: "Image", schemaName: null });
-            }
-            videoInputs.forEach((input, index) =>
-              handles.push({ id: index === 0 ? "video" : `video-${index}`, type: "video", label: input.label, schemaName: input.name })
-            );
-            audioInputs.forEach((input, index) =>
-              handles.push({ id: index === 0 ? "audio" : `audio-${index}`, type: "audio", label: input.label, schemaName: input.name })
-            );
-            handles.push({ id: "text", type: "text", label: "Prompt", schemaName: null });
-
-            const handleColors: Record<HandleType, string> = {
-              image: "var(--handle-color-image, #3b82f6)",
-              video: "var(--handle-color-video, #0d9488)",
-              audio: "var(--handle-color-audio, #8b5cf6)",
-              text: "var(--handle-color-text, #f59e0b)",
-            };
-            const mediaHandles = handles.filter((h) => h.type !== "text");
-            const textHandles = handles.filter((h) => h.type === "text");
-            const totalSlots = mediaHandles.length + textHandles.length + 1;
-
-            return (
-              <>
-                {handles.map((handle) => {
-                  const isText = handle.type === "text";
-                  const typeGroup = isText ? textHandles : mediaHandles;
-                  const typeIndex = typeGroup.findIndex((h) => h.id === handle.id);
-                  const adjustedIndex = isText ? mediaHandles.length + 1 + typeIndex : typeIndex;
-                  const topPercent = ((adjustedIndex + 1) / (totalSlots + 1)) * 100;
-                  return (
-                    <React.Fragment key={handle.id}>
-                      <Handle
-                        type="target"
-                        position={Position.Left}
-                        id={handle.id}
-                        style={{ top: `${topPercent}%`, zIndex: 10 }}
-                        data-handletype={handle.type}
-                        data-schema-name={handle.schemaName || undefined}
-                        isConnectable={true}
-                        title={handle.label}
-                      />
-                      <div
-                        className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-                        style={{ right: `calc(100% + 8px)`, top: `calc(${topPercent}% - 18px)`, color: handleColors[handle.type], zIndex: 10 }}
-                      >
-                        {handle.label}
-                      </div>
-                    </React.Fragment>
-                  );
-                })}
-              </>
-            );
-          })()
-        ) : (
-          <>
-            <Handle type="target" position={Position.Left} id="image" style={{ top: "35%", zIndex: 10 }} data-handletype="image" isConnectable={true} />
-            <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right" style={{ right: `calc(100% + 8px)`, top: "calc(35% - 18px)", color: "var(--handle-color-image)", zIndex: 10 }}>Image</div>
-            <Handle type="target" position={Position.Left} id="text" style={{ top: "65%", zIndex: 10 }} data-handletype="text" isConnectable={true} />
-            <div className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right" style={{ right: `calc(100% + 8px)`, top: "calc(65% - 18px)", color: "var(--handle-color-text)", zIndex: 10 }}>Prompt</div>
-          </>
-        )}
+        {<DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />}
 
         {/* Output handle */}
         <Handle type="source" position={Position.Right} id="image" style={{ top: "50%", zIndex: 10 }} data-handletype="image" />

@@ -1,6 +1,6 @@
 /**
  * Handle-id scheme for the dynamic input-pin model (gated by the dynamic-pins
- * feature flag — see ./dynamicPins).
+ * pin scheme).
  *
  * A "dyn pin" is one value-slot of an input field. Multi-value fields render
  * several slots (one per connection + a trailing empty one); scalar fields

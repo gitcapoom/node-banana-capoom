@@ -9,7 +9,6 @@ import { ModelParameters } from "./ModelParameters";
 import { useWorkflowStore, useProviderApiKeys } from "@/store/workflowStore";
 import { useCanRun } from "@/hooks/useCanRun";
 import { Generate3DNodeData, ProviderType, SelectedModel, ModelInputDef } from "@/types";
-import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { DynamicInputHandles } from "./DynamicInputHandles";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
@@ -102,7 +101,6 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
-  const dynamicPinsOn = useDynamicPinsEnabled();
 
   // Register browse callback for floating header button
   useEffect(() => {
@@ -498,151 +496,7 @@ export function Generate3DNode({ id, data, selected }: NodeProps<Generate3DNodeT
       ) : undefined}
     >
       {/* Dynamic input handles based on model schema */}
-      {dynamicPinsOn ? (
-        <DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />
-      ) : nodeData.inputSchema && nodeData.inputSchema.length > 0 ? (
-        (() => {
-          const imageInputs = nodeData.inputSchema!.filter(i => i.type === "image");
-          const textInputs = nodeData.inputSchema!.filter(i => i.type === "text");
-          const videoInputs = nodeData.inputSchema!.filter(i => i.type === "video");
-          const audioInputs = nodeData.inputSchema!.filter(i => i.type === "audio");
-
-          const hasImageInput = imageInputs.length > 0;
-          const hasTextInput = textInputs.length > 0;
-
-          type HandleType = "image" | "text" | "video" | "audio";
-          const handles: Array<{
-            id: string;
-            type: HandleType;
-            label: string;
-            schemaName: string | null;
-            description: string | null;
-            isPlaceholder: boolean;
-          }> = [];
-
-          const addHandles = (inputs: typeof imageInputs, handleType: HandleType) => {
-            inputs.forEach((input, index) => {
-              handles.push({
-                id: index === 0 ? handleType : `${handleType}-${index}`,
-                type: handleType,
-                label: input.label,
-                schemaName: input.name,
-                description: input.description || null,
-                isPlaceholder: false,
-              });
-            });
-          };
-
-          if (hasImageInput) {
-            addHandles(imageInputs, "image");
-          } else {
-            handles.push({
-              id: "image", type: "image", label: "Image",
-              schemaName: null, description: "Not used by this model", isPlaceholder: true,
-            });
-          }
-
-          addHandles(videoInputs, "video");
-          addHandles(audioInputs, "audio");
-
-          if (hasTextInput) {
-            addHandles(textInputs, "text");
-          } else {
-            handles.push({
-              id: "text", type: "text", label: "Prompt",
-              schemaName: null, description: "Not used by this model", isPlaceholder: true,
-            });
-          }
-
-          const handleColors: Record<HandleType, string> = {
-            image: "var(--handle-color-image, #3b82f6)",
-            video: "var(--handle-color-video, #0d9488)",
-            audio: "var(--handle-color-audio, #8b5cf6)",
-            text: "var(--handle-color-text, #f59e0b)",
-          };
-          const mediaHandles = handles.filter(h => h.type !== "text");
-          const textHandles = handles.filter(h => h.type === "text");
-          const totalSlots = mediaHandles.length + textHandles.length + 1;
-
-          const renderedHandles = handles.map((handle) => {
-            const isText = handle.type === "text";
-            const typeGroup = isText ? textHandles : mediaHandles;
-            const typeIndex = typeGroup.findIndex(h => h.id === handle.id);
-            const adjustedIndex = isText ? mediaHandles.length + 1 + typeIndex : typeIndex;
-            const topPercent = ((adjustedIndex + 1) / (totalSlots + 1)) * 100;
-
-            return (
-              <React.Fragment key={handle.id}>
-                <Handle
-                  type="target"
-                  position={Position.Left}
-                  id={handle.id}
-                  style={{
-                    top: `${topPercent}%`,
-                    opacity: handle.isPlaceholder ? 0.3 : 1,
-                  }}
-                  data-handletype={handle.type}
-                  data-schema-name={handle.schemaName || undefined}
-                  isConnectable={true}
-                  title={handle.description || handle.label}
-                />
-                <div
-                  className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-                  style={{
-                    right: `calc(100% + 8px)`,
-                    top: `calc(${topPercent}% - 18px)`,
-                    color: handleColors[handle.type],
-                    opacity: handle.isPlaceholder ? 0.3 : 1,
-                  }}
-                >
-                  {handle.label}
-                </div>
-              </React.Fragment>
-            );
-          });
-
-          return <>{renderedHandles}</>;
-        })()
-      ) : (
-        // Default handles when no schema
-        <>
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="image"
-            style={{ top: "35%" }}
-            data-handletype="image"
-            isConnectable={true}
-          />
-          <div
-            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-            style={{
-              right: `calc(100% + 8px)`,
-              top: "calc(35% - 18px)",
-              color: "var(--handle-color-image)",
-            }}
-          >
-            Image
-          </div>
-          <Handle
-            type="target"
-            position={Position.Left}
-            id="text"
-            style={{ top: "65%" }}
-            data-handletype="text"
-          />
-          <div
-            className="absolute text-[10px] font-medium whitespace-nowrap pointer-events-none text-right"
-            style={{
-              right: `calc(100% + 8px)`,
-              top: "calc(65% - 18px)",
-              color: "var(--handle-color-text)",
-            }}
-          >
-            Prompt
-          </div>
-        </>
-      )}
+      {<DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} />}
 
       {/* Background image input handle — always present, positioned at bottom of node */}
       <Handle

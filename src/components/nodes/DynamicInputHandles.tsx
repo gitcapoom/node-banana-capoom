@@ -1,5 +1,7 @@
 /**
- * Dynamic input-pin renderer (feature-flagged — see @/lib/dynamicPins).
+ * Dynamic input-pin renderer — the only pin scheme. It was behind a flag
+ * (@/lib/dynamicPins) until that was removed and dynamic pins became the
+ * default; the classic per-node handle blocks went with it.
  *
  * Renders one labeled target Handle per input value-slot:
  *   - scalar fields  → a single labeled pin

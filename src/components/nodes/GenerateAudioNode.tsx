@@ -15,7 +15,6 @@ import { ModelSearchDialog } from "@/components/modals/ModelSearchDialog";
 import { useAudioVisualization } from "@/hooks/useAudioVisualization";
 import { useAudioPlayback } from "@/hooks/useAudioPlayback";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
-import { useDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { DynamicInputHandles, PROMPT_ONLY_FALLBACK } from "./DynamicInputHandles";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { browseRegistry } from "@/utils/browseRegistry";
@@ -33,7 +32,6 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
 
   // Inline parameters infrastructure
   const { inlineParametersEnabled } = useInlineParameters();
-  const dynamicPinsOn = useDynamicPinsEnabled();
 
   // Register browse callback for floating header button
   useEffect(() => {
@@ -423,25 +421,7 @@ export function GenerateAudioNode({ id, data, selected }: NodeProps<GenerateAudi
           </div>
         )}
 
-        {dynamicPinsOn ? (
-          <DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} fallback={PROMPT_ONLY_FALLBACK} />
-        ) : (
-          <>
-            {/* Dynamic handles from schema */}
-            {dynamicHandles}
-
-            {/* Default prompt handle (if no dynamic schema) */}
-            {(!nodeData.inputSchema || nodeData.inputSchema.length === 0) && (
-              <Handle
-                type="target"
-                position={Position.Left}
-                id="text"
-                data-handletype="text"
-                style={{ background: "rgb(251, 191, 36)" }}
-              />
-            )}
-          </>
-        )}
+        {<DynamicInputHandles nodeId={id} inputSchema={nodeData.inputSchema} fallback={PROMPT_ONLY_FALLBACK} />}
 
         {/* Output audio handle */}
         <Handle

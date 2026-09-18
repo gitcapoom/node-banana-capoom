@@ -38,7 +38,6 @@ import {
   NodeType,
   ModelInputDef,
 } from "@/types";
-import { getDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { parseDynPin } from "@/lib/dynamicPinId";
 import { translateReferenceTokens, replaceNamedTokens, slotToLetter, ordinalPhrase } from "@/lib/refTokens";
 import { modelTakesPrompt } from "@/lib/modelInputs";
@@ -295,7 +294,6 @@ export function getConnectedInputsPure(
   let text: string | null = null;
   let feedbackImage: string | null = null;
   const dynamicInputs: Record<string, string | string[]> = {};
-  const dynamicPinsOn = getDynamicPinsEnabled();
   let easeCurve: ConnectedInputs["easeCurve"] = null;
 
   // Get the target node to check for inputSchema
@@ -390,20 +388,19 @@ export function getConnectedInputsPure(
   // top-to-bottom (so position 1 = topmost pin = @Image1). Same-field dyn-pin
   // edges sort by slot; everything else keeps its original relative order.
   const incomingEdges = edges.filter((edge) => edge.target === nodeId);
-  if (dynamicPinsOn) {
-    incomingEdges.sort((a, b) => {
-      const da = parseDynPin(a.targetHandle);
-      const db = parseDynPin(b.targetHandle);
-      if (da && db && da.type === db.type && da.field === db.field) return da.slot - db.slot;
-      return 0;
-    });
-  }
+  incomingEdges.sort((a, b) => {
+    const da = parseDynPin(a.targetHandle);
+    const db = parseDynPin(b.targetHandle);
+    if (da && db && da.type === db.type && da.field === db.field) return da.slot - db.slot;
+    return 0;
+  });
+  
 
   // Repeatable groups (e.g. Kling `elements`): map each connected item index to
   // its DENSE rank so the assembled array has no holes and @Element{n} lines up
   // with array position. Item indices are stable; ranks are positional.
   const groupItemRanks = new Map<string, Map<number, number>>();
-  if (dynamicPinsOn && inputSchema) {
+  if (inputSchema) {
     for (const input of inputSchema) {
       if (!input.repeatable) continue;
       const prefix = `${input.name}.`;
@@ -442,12 +439,11 @@ export function getConnectedInputsPure(
   // same field: arraying ghost + live values made providers unwrap [0], the
   // stale ghost. Live pins categorically outrank legacy-handle mappings.
   const dynFedFields = new Set<string>();
-  if (dynamicPinsOn) {
-    for (const e of incomingEdges) {
-      const d = parseDynPin(e.targetHandle);
-      if (d && d.field !== "primary") dynFedFields.add(remapFieldPath(d.field));
-    }
+  for (const e of incomingEdges) {
+    const d = parseDynPin(e.targetHandle);
+    if (d && d.field !== "primary") dynFedFields.add(remapFieldPath(d.field));
   }
+  
 
   incomingEdges
     .forEach((edge) => {
@@ -662,40 +658,39 @@ export function getConnectedInputsPure(
       // one value of a (possibly array) field. Route it back into the same
       // images[]/dynamicInputs[field] arrays the rest of the pipeline expects,
       // so executors and the API layer are unchanged.
-      if (dynamicPinsOn) {
-        const dyn = parseDynPin(handleId);
-        if (dyn) {
-          if (dyn.field !== "primary") {
-            const fieldKey = remapFieldPath(dyn.field);
-            const existing = dynamicInputs[fieldKey];
-            if (isKnownScalarPath(fieldKey)) {
-              // Schema says SCALAR: only slot 0 renders a pin, so multiple
-              // slots are rewire leftovers (ghost edges — React Flow #008).
-              // Edges are slot-sorted above → last write = highest slot = the
-              // newest wiring. Arraying them made providers unwrap [0], the
-              // stale ghost.
-              dynamicInputs[fieldKey] = value;
-            } else if (existing !== undefined) {
-              // A second slot's value for this field — it must be an array.
-              dynamicInputs[fieldKey] = Array.isArray(existing)
-                ? [...existing, value]
-                : [existing, value];
-            } else if (isArrayPath(fieldKey)) {
-              dynamicInputs[fieldKey] = [value];
-            } else {
-              // Scalar field (single slot) — keep the raw value so the provider
-              // receives a string, not a 1-element array.
-              dynamicInputs[fieldKey] = value;
-            }
+      const dyn = parseDynPin(handleId);
+      if (dyn) {
+        if (dyn.field !== "primary") {
+          const fieldKey = remapFieldPath(dyn.field);
+          const existing = dynamicInputs[fieldKey];
+          if (isKnownScalarPath(fieldKey)) {
+            // Schema says SCALAR: only slot 0 renders a pin, so multiple
+            // slots are rewire leftovers (ghost edges — React Flow #008).
+            // Edges are slot-sorted above → last write = highest slot = the
+            // newest wiring. Arraying them made providers unwrap [0], the
+            // stale ghost.
+            dynamicInputs[fieldKey] = value;
+          } else if (existing !== undefined) {
+            // A second slot's value for this field — it must be an array.
+            dynamicInputs[fieldKey] = Array.isArray(existing)
+              ? [...existing, value]
+              : [existing, value];
+          } else if (isArrayPath(fieldKey)) {
+            dynamicInputs[fieldKey] = [value];
+          } else {
+            // Scalar field (single slot) — keep the raw value so the provider
+            // receives a string, not a 1-element array.
+            dynamicInputs[fieldKey] = value;
           }
-          if (dyn.type === "3d") model3d = value;
-          else if (dyn.type === "video") videos.push(value);
-          else if (dyn.type === "audio") audio.push(value);
-          else if (dyn.type === "text") text = typeof value === "string" ? value : String(value);
-          else images.push(value);
-          return;
         }
+        if (dyn.type === "3d") model3d = value;
+        else if (dyn.type === "video") videos.push(value);
+        else if (dyn.type === "audio") audio.push(value);
+        else if (dyn.type === "text") text = typeof value === "string" ? value : String(value);
+        else images.push(value);
+        return;
       }
+      
 
       // Map normalized handle ID to schema name for dynamicInputs. Skipped
       // when a live dyn-pin edge already feeds this field — legacy-handle
@@ -751,7 +746,7 @@ export function getConnectedInputsPure(
   // Stable reference tokens (e.g. @ImageA) → positional tokens (@Image1) for the
   // OUTGOING prompt, based on each input's CURRENT position. The authored prompt
   // node text is never modified — only the resolved text sent to generation.
-  if (dynamicPinsOn && text && inputSchema) {
+  if (text && inputSchema) {
     let resolved: string = text;
     for (const input of inputSchema) {
       // Router-fed array field: resolve the prompt's router tokens (@A / @Hero)

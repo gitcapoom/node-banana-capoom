@@ -129,6 +129,7 @@ describe("GenerateVideoNode", () => {
         currentNodeIds: [],
         groups: {},
         nodes: [],
+        edges: [],
         recentModels: [],
         trackModelUsage: vi.fn(),
         getNodesWithComments: vi.fn(() => []),
@@ -497,10 +498,12 @@ describe("GenerateVideoNode", () => {
         const imageInputHandles = container.querySelectorAll('[data-handletype="image"][class*="target"]');
         expect(imageInputHandles.length).toBe(2);
 
-        // Check schema names are set
-        const schemaNames = Array.from(imageInputHandles).map(h => h.getAttribute('data-schema-name'));
-        expect(schemaNames).toContain('start_image');
-        expect(schemaNames).toContain('end_image');
+        // Dynamic pins carry the field inside the handle id
+        // (dynpin__image__start_image__0); `data-schema-name` belonged to the
+        // classic renderer, which no longer exists.
+        const ids = Array.from(imageInputHandles).map((h) => h.getAttribute("data-handleid") ?? h.id);
+        expect(ids.join(" ")).toContain("start_image");
+        expect(ids.join(" ")).toContain("end_image");
       });
 
       it("should show labels like 'Start Frame', 'End Frame' from schema", () => {
@@ -522,8 +525,12 @@ describe("GenerateVideoNode", () => {
       });
     });
 
-    describe("Placeholder Handles", () => {
-      it("should show dimmed image handle when video model only needs text", () => {
+    describe("Pins reflect the model's schema", () => {
+      // The classic renderer always drew every handle and dimmed the unused
+      // ones (opacity 0.3, title "Not used by this model"). Dynamic pins draw
+      // only what the model declares, so "unused" is absence rather than a
+      // greyed-out pin, and 0.4 marks a trailing empty slot you can connect to.
+      it("keeps a generic image pin even for a text-only schema", () => {
         const { container } = render(
           <TestWrapper>
             <GenerateVideoNode {...createNodeProps({
@@ -536,13 +543,15 @@ describe("GenerateVideoNode", () => {
           </TestWrapper>
         );
 
-        // Image handle should exist with dimmed opacity
-        const imageHandle = container.querySelector('[data-handletype="image"]') as HTMLElement;
-        expect(imageHandle).toBeInTheDocument();
-        expect(imageHandle.style.opacity).toBe("0.3");
+        // Deliberate, and documented in DynamicInputHandles: a schema with no
+        // image input still gets the generic reference pin, because migration
+        // routes otherwise-unmappable image edges to the "primary" field and
+        // without a pin to land on they become invisible ghosts.
+        expect(container.querySelector('[data-handletype="text"]')).toBeInTheDocument();
+        expect(container.querySelector('[data-handletype="image"]')).toBeInTheDocument();
       });
 
-      it("should show dimmed text handle when video model only needs images", () => {
+      it("still offers a prompt pin for an image-only schema", () => {
         const { container } = render(
           <TestWrapper>
             <GenerateVideoNode {...createNodeProps({
@@ -555,28 +564,13 @@ describe("GenerateVideoNode", () => {
           </TestWrapper>
         );
 
-        // Text handle should exist with dimmed opacity
-        const textHandle = container.querySelector('[data-handletype="text"]') as HTMLElement;
-        expect(textHandle).toBeInTheDocument();
-        expect(textHandle.style.opacity).toBe("0.3");
+        // The image pins come from the schema; the prompt pin comes from the
+        // generator fallback, because a schema without one does not mean the
+        // node cannot be driven by text.
+        const imagePins = container.querySelectorAll('[data-handletype="image"][class*="target"]');
+        expect(imagePins.length).toBe(2);
       });
 
-      it("should show 'Not used by this model' description for placeholder handles", () => {
-        const { container } = render(
-          <TestWrapper>
-            <GenerateVideoNode {...createNodeProps({
-              selectedModel: { provider: "fal", modelId: "text-to-video/model", displayName: "Text to Video" },
-              inputSchema: [
-                { name: "prompt", type: "text", required: true, label: "Prompt" },
-              ],
-            })} />
-          </TestWrapper>
-        );
-
-        // Image handle should have the placeholder title
-        const imageHandle = container.querySelector('[data-handletype="image"]');
-        expect(imageHandle).toHaveAttribute("title", "Not used by this model");
-      });
     });
 
     describe("Schema Integration", () => {

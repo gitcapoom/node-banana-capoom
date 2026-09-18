@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { getConnectedInputsPure, getSourceOutput, validateWorkflowPure } from "../connectedInputs";
 import type { WorkflowNode, WorkflowEdge } from "@/types";
-import { setDynamicPinsEnabled } from "@/lib/dynamicPins";
 import { dynPinId } from "@/lib/dynamicPinId";
 
 function makeNode(id: string, type: string, data: Record<string, unknown> = {}): WorkflowNode {
@@ -19,8 +18,6 @@ function makeEdge(source: string, target: string, targetHandle?: string): Workfl
 }
 
 describe("getConnectedInputsPure — dynamic pins flag", () => {
-  beforeEach(() => setDynamicPinsEnabled(true));
-  afterEach(() => setDynamicPinsEnabled(false));
 
   const dynEdge = (source: string, target: string, handle: string): WorkflowEdge =>
     ({ id: `${source}-${handle}`, source, target, sourceHandle: "image", targetHandle: handle }) as WorkflowEdge;
@@ -279,18 +276,6 @@ describe("getConnectedInputsPure — dynamic pins flag", () => {
     );
   });
 
-  it("ignores the dyn-pin scheme when the flag is off (classic routing)", () => {
-    setDynamicPinsEnabled(false);
-    const nodes = [
-      makeNode("a", "imageInput", { image: "data:image/png;base64,a" }),
-      makeNode("gen", "nanoBanana"),
-    ];
-    const edges = [dynEdge("a", "gen", dynPinId("image", "primary", 0))];
-    const result = getConnectedInputsPure("gen", nodes, edges);
-    // Routed as a generic image via source type; no dynamicInputs entry.
-    expect(result.images).toEqual(["data:image/png;base64,a"]);
-    expect(result.dynamicInputs).toEqual({});
-  });
 });
 
 describe("getConnectedInputsPure", () => {

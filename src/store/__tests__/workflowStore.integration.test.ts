@@ -2374,7 +2374,7 @@ describe("workflowStore integration tests", () => {
     });
 
     describe("legacy indexed handle migration (image-0/text-0)", () => {
-      it("should rewrite image-0/text-0 edges targeting generator nodes to bare handles on load", async () => {
+      it("should rewrite image-0/text-0 edges targeting generator nodes onto dynamic pins on load", async () => {
         const store = useWorkflowStore.getState();
         await store.loadWorkflow({
           version: 1,
@@ -2403,10 +2403,22 @@ describe("workflowStore integration tests", () => {
         const edges = useWorkflowStore.getState().edges;
         const handlesFor = (target: string) =>
           edges.filter((e) => e.target === target).map((e) => e.targetHandle).sort();
-        expect(handlesFor("nanoBanana-1")).toEqual(["image", "text"]);
-        expect(handlesFor("generateVideo-1")).toEqual(["image", "text"]);
-        expect(handlesFor("generate3d-1")).toEqual(["image", "text"]);
-        expect(handlesFor("upscaleGrid-1")).toEqual(["image"]);
+        // Legacy indexed handles land on DYNAMIC pins now that those are the
+        // only scheme — this is the load-time migration that lets a workflow
+        // saved under classic pins keep its connections.
+        expect(handlesFor("nanoBanana-1")).toEqual([
+          "dynpin__image__primary__0",
+          "dynpin__text__prompt__0",
+        ]);
+        expect(handlesFor("generateVideo-1")).toEqual([
+          "dynpin__image__primary__0",
+          "dynpin__text__prompt__0",
+        ]);
+        expect(handlesFor("generate3d-1")).toEqual([
+          "dynpin__image__primary__0",
+          "dynpin__text__prompt__0",
+        ]);
+        expect(handlesFor("upscaleGrid-1")).toEqual(["dynpin__image__primary__0"]);
       });
 
       it("should rewrite image-0 edges when importing a workflow", () => {
@@ -2884,14 +2896,8 @@ describe("workflowStore integration tests", () => {
 });
 
 describe("onConnect handle normalization (dynamic pins)", () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     resetStore();
-    const { setDynamicPinsEnabled } = await import("@/lib/dynamicPins");
-    setDynamicPinsEnabled(true);
-  });
-  afterEach(async () => {
-    const { setDynamicPinsEnabled } = await import("@/lib/dynamicPins");
-    setDynamicPinsEnabled(false);
   });
 
   it("converts a programmatic classic 'image' connect into a dyn-pin edge (no birth ghosts)", () => {
