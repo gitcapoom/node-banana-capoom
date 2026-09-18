@@ -63,6 +63,7 @@ const defaultProviderSettings: ProviderSettings = {
     wavespeed: { id: "wavespeed", name: "WaveSpeed", enabled: false, apiKey: null },
     worldlabs: { id: "worldlabs", name: "World Labs", enabled: false, apiKey: null },
     muapi: { id: "muapi", name: "muapi.ai", enabled: false, apiKey: null },
+    luma: { id: "luma" as const, name: "Luma Agents", enabled: false, apiKey: null, apiKeyEnvVar: "LUMALABS_API_KEY" },
   },
 };
 

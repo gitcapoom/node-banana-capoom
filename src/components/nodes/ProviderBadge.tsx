@@ -1,9 +1,15 @@
 import React from "react";
 import { ProviderType } from "@/types";
+import { getProviderDisplayName } from "@/utils/providerUrls";
 
 /** Provider badge component - shows provider icon for all providers */
 export function ProviderBadge({ provider }: { provider: ProviderType }) {
-  const providerName = provider === "gemini" ? "Gemini" : provider === "replicate" ? "Replicate" : provider === "kie" ? "Kie.ai" : provider === "wavespeed" ? "WaveSpeed" : "fal.ai";
+  // Was a ternary chain ending in `: "fal.ai"`, so every provider it did not
+  // name — muapi, worldlabs, openai, anthropic, and now luma — claimed to be
+  // fal in its tooltip. The shared helper already knows these names.
+  // (The ICON below still falls back to the fal mark; that is a visual gap,
+  // not a wrong label.)
+  const providerName = getProviderDisplayName(provider);
 
   return (
     <span className="text-neutral-500 shrink-0" title={providerName}>

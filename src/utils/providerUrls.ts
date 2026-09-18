@@ -21,6 +21,10 @@ export function getModelPageUrl(
       return `https://docs.kie.ai/`;
     case "wavespeed":
       return `https://wavespeed.ai`;
+    case "luma":
+      // Luma exposes no per-model page; its models are (model, type) pairs
+      // documented together on one page.
+      return `https://docs.agents.lumalabs.ai/guides/model/`;
     default:
       return null;
   }
@@ -41,6 +45,16 @@ export function getProviderDisplayName(provider: ProviderType): string {
       return "Kie.ai";
     case "wavespeed":
       return "WaveSpeed";
+    case "luma":
+      return "Luma Agents";
+    case "worldlabs":
+      return "World Labs";
+    case "muapi":
+      return "muapi.ai";
+    case "openai":
+      return "OpenAI";
+    case "anthropic":
+      return "Anthropic";
     default:
       return provider;
   }

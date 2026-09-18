@@ -25,6 +25,7 @@ function ProviderIcon({ provider }: { provider: ProviderType }) {
     wavespeed: { bg: "bg-purple-500/20", text: "text-purple-300" },
     worldlabs: { bg: "bg-cyan-500/20", text: "text-cyan-300" },
     muapi: { bg: "bg-cyan-500/20", text: "text-cyan-300" },
+    luma: { bg: "bg-rose-500/20", text: "text-rose-300" },
   };
 
   const labels: Record<ProviderType, string> = {
@@ -37,6 +38,7 @@ function ProviderIcon({ provider }: { provider: ProviderType }) {
     wavespeed: "W",
     worldlabs: "WL",
     muapi: "mu",
+    luma: "L",
   };
 
   const color = colors[provider] || colors.gemini;
@@ -62,6 +64,7 @@ function getProviderDisplayName(provider: ProviderType): string {
     wavespeed: "WaveSpeed",
     worldlabs: "World Labs",
     muapi: "muapi.ai",
+    luma: "Luma Agents",
   };
   return names[provider] || provider;
 }

@@ -20,6 +20,7 @@ const PROVIDER_HEADER_MAP: Record<ProviderType, string> = {
   anthropic: "X-Anthropic-API-Key",
   worldlabs: "X-WorldLabs-Key",
   muapi: "X-Muapi-API-Key",
+  luma: "X-Luma-Key",
 };
 
 /**
