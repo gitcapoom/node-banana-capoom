@@ -5,6 +5,45 @@
  * from OpenAPI schemas used by multi-provider generation.
  */
 
+import { normalizeProperty } from "@/lib/schema/normalize/openapi";
+
+/**
+ * Does this raw OpenAPI property hold a LIST?
+ *
+ * Not the same question as `prop.type === "array"`. fal writes an *optional*
+ * array as a nullable union — `anyOf: [{type:"array",...}, {type:"null"}]` —
+ * which carries no top-level `type` at all, so the direct read says "not an
+ * array" for 43 of the 220 fal models that have a connectable array input
+ * (every Kling o1/o3 reference/edit endpoint, every Ideogram v3 endpoint, …).
+ * $ref and allOf hide arrays the same way.
+ *
+ * Rather than re-derive that, this delegates to `normalizeProperty` — the same
+ * flattening the canvas already uses to draw the pins — and then applies the
+ * client's own isArray rule verbatim (src/lib/schema/extract.ts). Client and
+ * server therefore agree by construction: the shape the canvas builds is the
+ * shape the provider expects. The rule was already copied four times across
+ * this directory and all four copies were wrong; this is the one test.
+ *
+ * Note the near-miss it must NOT catch: fal also writes nullable SCALARS as
+ * `anyOf:[{type:"string"},{type:"null"}]` (e.g. kling v2.5-turbo's
+ * `tail_image_url`). Treating "any union" as an array would wrap those and
+ * produce the mirror 422 — "Input should be a valid string".
+ *
+ * @param components `components.schemas` from the spec, for $ref resolution.
+ */
+export function isArraySchemaProperty(
+  name: string,
+  raw: unknown,
+  components?: Record<string, unknown>
+): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const prop = normalizeProperty(name, raw as Record<string, unknown>, components);
+  return (
+    prop.type === "array" ||
+    (prop.type === "union" && !!prop.unionVariants?.some((v) => v.type === "array"))
+  );
+}
+
 /**
  * Input parameter patterns - maps generic input types to possible schema parameter names
  */
@@ -145,6 +184,7 @@ export function getInputMappingFromSchema(schema: Record<string, unknown> | unde
     // Navigate to input schema properties
     const components = schema.components as Record<string, unknown> | undefined;
     const schemas = components?.schemas as Record<string, unknown> | undefined;
+    const componentSchemas = schemas;
     const input = schemas?.Input as Record<string, unknown> | undefined;
     const properties = input?.properties as Record<string, unknown> | undefined;
 
@@ -152,8 +192,7 @@ export function getInputMappingFromSchema(schema: Record<string, unknown> | unde
 
     // First pass: detect all array-typed properties by their actual schema name
     for (const [propName, prop] of Object.entries(properties)) {
-      const property = prop as Record<string, unknown>;
-      if (property?.type === "array") {
+      if (isArraySchemaProperty(propName, prop, componentSchemas)) {
         schemaArrayParams.add(propName);
       }
     }
@@ -188,8 +227,7 @@ export function getInputMappingFromSchema(schema: Record<string, unknown> | unde
         if (matchedParam) {
           paramMap[genericName] = matchedParam;
           // Check if this property expects an array type
-          const property = properties[matchedParam] as Record<string, unknown>;
-          if (property?.type === "array") {
+          if (isArraySchemaProperty(matchedParam, properties[matchedParam], componentSchemas)) {
             arrayParams.add(genericName);
           }
           break;

@@ -14,6 +14,7 @@ import {
   InputMapping,
   ParameterTypeInfo,
   coerceParameterTypes,
+  isArraySchemaProperty,
 } from "../schemaUtils";
 
 /**
@@ -21,6 +22,14 @@ import {
  */
 interface FalInputMapping extends InputMapping {
   parameterTypes: ParameterTypeInfo;
+  /**
+   * Did we actually read this model's schema? Every failure path below returns
+   * EMPTY sets, which the reshape in generateWithFal() cannot tell apart from
+   * "the schema says none of these are arrays" — so a transient fetch failure
+   * silently unwrapped every array the client sent. The reshape now only
+   * trusts a negative answer when this is true.
+   */
+  schemaLoaded: boolean;
 }
 
 /**
@@ -49,6 +58,7 @@ async function getFalInputMapping(modelId: string, apiKey: string | null): Promi
   const arrayParams = new Set<string>();
   const schemaArrayParams = new Set<string>();
   const parameterTypes: ParameterTypeInfo = {};
+  let schemaLoaded = false;
 
   try {
     // Use fal.ai Model Search API with OpenAPI expansion
@@ -61,13 +71,13 @@ async function getFalInputMapping(modelId: string, apiKey: string | null): Promi
     const response = await fetch(url, { headers });
 
     if (!response.ok) {
-      return { paramMap, arrayParams, schemaArrayParams, parameterTypes };
+      return { paramMap, arrayParams, schemaArrayParams, parameterTypes, schemaLoaded };
     }
 
     const data = await response.json();
     const modelData = data.models?.[0];
     if (!modelData?.openapi) {
-      return { paramMap, arrayParams, schemaArrayParams, parameterTypes };
+      return { paramMap, arrayParams, schemaArrayParams, parameterTypes, schemaLoaded };
     }
 
     // Extract input schema from OpenAPI spec (same logic as /api/models/[modelId])
@@ -94,17 +104,21 @@ async function getFalInputMapping(modelId: string, apiKey: string | null): Promi
     }
 
     if (!inputSchema) {
-      return { paramMap, arrayParams, schemaArrayParams, parameterTypes };
+      return { paramMap, arrayParams, schemaArrayParams, parameterTypes, schemaLoaded };
     }
 
     const properties = inputSchema.properties as Record<string, unknown> | undefined;
-    if (!properties) return { paramMap, arrayParams, schemaArrayParams, parameterTypes };
+    if (!properties) return { paramMap, arrayParams, schemaArrayParams, parameterTypes, schemaLoaded };
+    // For $ref resolution inside isArraySchemaProperty (e.g. Kling's `elements`,
+    // an array of $ref'd element objects).
+    const componentSchemas = (spec.components as Record<string, unknown> | undefined)
+      ?.schemas as Record<string, unknown> | undefined;
 
     // First pass: detect all array-typed properties and extract parameter types
     // This is used for dynamicInputs which use schema names directly
     for (const [propName, prop] of Object.entries(properties)) {
       const property = prop as Record<string, unknown>;
-      if (property?.type === "array") {
+      if (isArraySchemaProperty(propName, prop, componentSchemas)) {
         schemaArrayParams.add(propName);
       }
       // Extract parameter type for type coercion
@@ -137,8 +151,7 @@ async function getFalInputMapping(modelId: string, apiKey: string | null): Promi
         if (matchedParam) {
           paramMap[genericName] = matchedParam;
           // Check if this property expects an array type
-          const property = properties[matchedParam] as Record<string, unknown>;
-          if (property?.type === "array") {
+          if (isArraySchemaProperty(matchedParam, properties[matchedParam], componentSchemas)) {
             arrayParams.add(genericName);
           }
           break;
@@ -146,12 +159,13 @@ async function getFalInputMapping(modelId: string, apiKey: string | null): Promi
       }
     }
 
-    const result = { paramMap, arrayParams, schemaArrayParams, parameterTypes };
+    schemaLoaded = true;
+    const result = { paramMap, arrayParams, schemaArrayParams, parameterTypes, schemaLoaded };
     falInputMappingCache.set(modelId, { result, timestamp: Date.now() });
     return result;
   } catch {
     // Schema parsing failed - return defaults without caching so next call retries
-    return { paramMap, arrayParams, schemaArrayParams, parameterTypes };
+    return { paramMap, arrayParams, schemaArrayParams, parameterTypes, schemaLoaded };
   }
 }
 
@@ -371,7 +385,7 @@ export async function generateWithFalQueue(
   console.log(`[API:${requestId}] Dynamic inputs: ${hasDynamicInputs ? Object.keys(input.dynamicInputs!).join(", ") : "none"}, API key: ${apiKey ? "yes" : "no"}`);
 
   // Fetch schema for type coercion and input mapping (cached)
-  const { paramMap, arrayParams, schemaArrayParams, parameterTypes } = await getFalInputMapping(modelId, apiKey);
+  const { paramMap, arrayParams, schemaArrayParams, parameterTypes, schemaLoaded } = await getFalInputMapping(modelId, apiKey);
 
   // Build request body - parameters are applied per-path below to avoid double-spreading
   const requestBody: Record<string, unknown> = {};
@@ -409,8 +423,13 @@ export async function generateWithFalQueue(
       // Top-level field: reshape according to the model's declared schema.
       if (schemaArrayParams.has(key) && !Array.isArray(processedValue)) {
         processedValue = [processedValue];
-      } else if (!schemaArrayParams.has(key) && Array.isArray(processedValue)) {
-        // Unwrap array to single value if schema expects a string (e.g. image_url)
+      } else if (schemaLoaded && !schemaArrayParams.has(key) && Array.isArray(processedValue)) {
+        // Unwrap to a single value when the schema says this field is scalar
+        // (e.g. image_url). Gated on schemaLoaded: without it, ANY failure to
+        // fetch the schema — a 500, a network blip — left schemaArrayParams
+        // empty and this branch threw away every array the client had
+        // deliberately built from the model's own isArray. Unknown is not the
+        // same as scalar; when we do not know, send what the client shaped.
         if (processedValue.length > 0) processedValue = processedValue[0];
         else continue;
       }
