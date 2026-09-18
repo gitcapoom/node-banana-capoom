@@ -8,6 +8,45 @@ const edge = (id: string, target: string, targetHandle: string): WorkflowEdge =>
   ({ id, source: "s", target, sourceHandle: "image", targetHandle }) as WorkflowEdge;
 const handles = (edges: WorkflowEdge[]) => edges.map((e) => e.targetHandle);
 
+describe("llmGenerate video input", () => {
+  // Video is the one generic (schema-less) VIDEO sink in the app: Gemini reads
+  // video with no model schema to name the field. It used to be exempted from
+  // migration entirely, which is what kept it an unlabelled bare handle.
+  it("migrates the legacy `video` handle onto a video pin", () => {
+    const nodes = [node("llm", "llmGenerate")];
+    const edges = [edge("e1", "llm", "video")];
+    expect(handles(migrateEdgeHandles(nodes, edges, "dynamic"))).toEqual([
+      "dynpin__video__primary__0",
+    ]);
+  });
+
+  it("fans several legacy video edges out to separate slots", () => {
+    const nodes = [node("llm", "llmGenerate")];
+    const edges = [edge("e1", "llm", "video"), edge("e2", "llm", "video")];
+    expect(handles(migrateEdgeHandles(nodes, edges, "dynamic"))).toEqual([
+      "dynpin__video__primary__0",
+      "dynpin__video__primary__1",
+    ]);
+  });
+
+  it("keeps migrated video edges instead of conforming them away", () => {
+    // The migration above is only safe because conformance recognises the pin.
+    // If it did not, every migrated edge would be dropped on the next pass —
+    // the exact failure the old exemption existed to avoid.
+    const n = node("llm", "llmGenerate");
+    const edges = [edge("e1", "llm", "dynpin__video__primary__0")];
+    expect(conformEdgesToRenderablePins(n, edges)).toBeNull();
+  });
+
+  it("drops a video pin on a node whose fallback has no video sink", () => {
+    // nanoBanana has no generic video input, so such an edge has no home and
+    // must not linger as a ghost.
+    const n = node("gen", "nanoBanana");
+    const edges = [edge("e1", "gen", "dynpin__video__primary__0")];
+    expect(conformEdgesToRenderablePins(n, edges)).toEqual([]);
+  });
+});
+
 describe("migrateEdgeHandles", () => {
   it("classic → dynamic for a schemaless generator (primary image + prompt)", () => {
     const nodes = [node("gen", "nanoBanana")];

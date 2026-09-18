@@ -56,6 +56,23 @@ export const IMAGE_ONLY_FALLBACK: Descriptor[] = [
   { type: "image", field: "primary", label: "Image", multi: true },
 ];
 
+/**
+ * llmGenerate: images, a prompt, and video.
+ *
+ * Video used to be a bare <Handle> bolted onto the node at a hardcoded 85%,
+ * outside this renderer — so it was the one input with no label, no slot
+ * growth, and a colour borrowed from audio. It is an ordinary pin now.
+ *
+ * The pin renders for every provider on purpose, even though only Gemini
+ * accepts video: a missing pin reads as "this feature does not exist", whereas
+ * a wired pin plus the route's named error tells you to switch model.
+ */
+export const LLM_FALLBACK: Descriptor[] = [
+  { type: "image", field: "primary", label: "Image", multi: true },
+  { type: "text", field: "prompt", label: "Prompt", multi: false },
+  { type: "video", field: "primary", label: "Video", multi: true },
+];
+
 export function DynamicInputHandles({
   nodeId,
   inputSchema,

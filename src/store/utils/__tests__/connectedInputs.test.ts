@@ -22,6 +22,26 @@ describe("getConnectedInputsPure — dynamic pins flag", () => {
   const dynEdge = (source: string, target: string, handle: string): WorkflowEdge =>
     ({ id: `${source}-${handle}`, source, target, sourceHandle: "image", targetHandle: handle }) as WorkflowEdge;
 
+  it("delivers videoInput clips to an llmGenerate node's videos[]", () => {
+    // The whole point of the video pin: Gemini reads the clip. If this lands
+    // anywhere but videos[], the executor never forwards it and the node
+    // silently answers about nothing.
+    const nodes = [
+      makeNode("v1", "videoInput", { videoFile: "data:video/mp4;base64,one" }),
+      makeNode("v2", "videoInput", { videoFile: "data:video/mp4;base64,two" }),
+      makeNode("llm", "llmGenerate"),
+    ];
+    const edges = [
+      dynEdge("v1", "llm", dynPinId("video", "primary", 0)),
+      dynEdge("v2", "llm", dynPinId("video", "primary", 1)),
+    ];
+    const result = getConnectedInputsPure("llm", nodes, edges);
+    expect(result.videos).toEqual(["data:video/mp4;base64,one", "data:video/mp4;base64,two"]);
+    // "primary" is generic — it must not leak into dynamicInputs and become a
+    // stray provider parameter.
+    expect(result.dynamicInputs).toEqual({});
+  });
+
   it("aggregates primary-image dyn-pin slots into images[]", () => {
     const nodes = [
       makeNode("a", "imageInput", { image: "data:image/png;base64,a" }),

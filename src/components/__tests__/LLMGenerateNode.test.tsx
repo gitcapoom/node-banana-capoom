@@ -99,6 +99,24 @@ describe("LLMGenerateNode", () => {
       expect(imageHandle).toBeInTheDocument();
     });
 
+    it("renders a labelled video input pin", () => {
+      // Gemini reads video directly. This was once a bare <Handle> pinned at a
+      // hardcoded 85% with no label — the only input on the node you could not
+      // read. It is an ordinary fallback pin now, so it carries a label like
+      // the rest.
+      const { container } = render(
+        <TestWrapper>
+          <LLMGenerateNode {...createNodeProps()} />
+        </TestWrapper>
+      );
+
+      const videoHandle = container.querySelector('[data-handletype="video"][class*="target"]');
+      expect(videoHandle).toBeInTheDocument();
+      // React Flow exposes the handle id as data-handleid, not the DOM id.
+      expect(videoHandle?.getAttribute("data-handleid")).toMatch(/^dynpin__video__primary__\d+$/);
+      expect(container.textContent).toContain("Video");
+    });
+
     it("no longer renders a text OUTPUT handle — prompt nodes replaced it", () => {
       // The reply reaches the canvas as a real prompt node now, via the
       // Send/Update buttons, rather than being emitted straight into an edge.

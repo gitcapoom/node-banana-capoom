@@ -137,10 +137,6 @@ export function migrateEdgeHandles(
     // field and gets rewritten to a plain reference pin on the classic→dynamic
     // pass that runs at load, so the feedback connection is lost after restart.
     if (handle === "image-feedback" || handle === "image-bg") return e;
-    // llmGenerate's static `video` handle (Gemini video input) is rendered in
-    // BOTH pin modes and has no dyn-pin equivalent — migrating it would send
-    // the edge to a video dyn-pin that conformance then drops (no schema).
-    if (handle === "video" && node.type === "llmGenerate") return e;
 
     // Router: image-first bundle. Only image edges convert; in classic mode they
     // collapse back to the single multi-edge "image" handle (no image-N).
@@ -182,12 +178,14 @@ export function migrateEdgeHandles(
  * — mirrors each component's DynamicInputHandles fallback. Missing entry =
  * bespoke pin rendering (router) → conformance skips the node.
  */
-const FALLBACK_CAPS: Record<string, { image?: boolean; text?: boolean }> = {
+const FALLBACK_CAPS: Record<string, { image?: boolean; text?: boolean; video?: boolean }> = {
   nanoBanana: { image: true, text: true },
   generateVideo: { image: true, text: true },
   generate3d: { image: true, text: true },
   upscaleGrid: { image: true, text: true },
-  llmGenerate: { image: true, text: true },
+  // llmGenerate is the only node with a generic VIDEO sink: Gemini reads video
+  // directly, with no model schema to name the field (see LLM_FALLBACK).
+  llmGenerate: { image: true, text: true, video: true },
   generateAudio: { text: true },
   outputGallery: { image: true },
 };
@@ -202,16 +200,17 @@ const FALLBACK_CAPS: Record<string, { image?: boolean; text?: boolean }> = {
  *  - schema present: every schema field (scalar = slot 0 only, arrays = any
  *    slot, repeatable groups = their children), PLUS the generic reference
  *    (primary) image pins when the schema has no image-type input;
- *  - no schema: the node type's fallback pins (primary image multi and/or
- *    scalar "prompt").
+ *  - no schema: the node type's fallback pins (primary image multi, scalar
+ *    "prompt", and — llmGenerate only — primary video multi).
  *
  * Conformance rules:
  *  - surviving families keep their slots (stable ids — @ImageA tokens);
  *  - scalar families collapse to ONE edge: the highest slot (= newest wiring)
  *    wins and is renumbered to slot 0;
  *  - unmappable image/text edges retarget to the first schema field of their
- *    type, else to the fallback pin, else drop; video/audio without a schema
- *    field drop (no generic sink);
+ *    type, else to the fallback pin, else drop; audio without a schema field
+ *    drops (no generic sink), and so does video except on llmGenerate, whose
+ *    fallback provides one;
  *  - image-feedback / image-bg / non-dyn handles are untouched.
  *
  * Returns the new edges array, or null when nothing needed to change.
@@ -243,6 +242,9 @@ export function conformEdgesToRenderablePins(
   }
   const primaryImageRenderable = !!caps.image && (!schemaMode || !schemaHasImage);
   const fallbackPromptRenderable = !!caps.text && !schemaMode;
+  // The generic video sink is a fallback pin only: a node WITH a schema names
+  // its video fields, so a primary video edge there belongs to a named field.
+  const primaryVideoRenderable = !!caps.video && !schemaMode;
 
   // Classify every dyn edge into a target family: { field, scalar } | drop.
   type Fam = { field: string; scalar: boolean; type: DynPinType };
@@ -253,6 +255,7 @@ export function conformEdgesToRenderablePins(
         const f = firstOfType.get("image");
         if (f) return { field: f.name, scalar: !f.isArray, type: "image" };
       }
+      if (dyn.type === "video" && primaryVideoRenderable) return { field: "primary", scalar: false, type: "video" };
       return null;
     }
     const known = byName.get(dyn.field);
@@ -269,6 +272,7 @@ export function conformEdgesToRenderablePins(
     }
     if (dyn.type === "image" && primaryImageRenderable) return { field: "primary", scalar: false, type: "image" };
     if (dyn.type === "text" && fallbackPromptRenderable) return { field: "prompt", scalar: true, type: "text" };
+    if (dyn.type === "video" && primaryVideoRenderable) return { field: "primary", scalar: false, type: "video" };
     return null;
   };
 

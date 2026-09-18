@@ -75,9 +75,12 @@ describe("ConnectionDropMenu", () => {
 
       expect(screen.getByText("Generate Video")).toBeInTheDocument();
       expect(screen.getByText("Output")).toBeInTheDocument();
-      // Should NOT show image/text-only nodes
+      // The LLM node belongs here: Gemini analyses video directly, so a video
+      // output has somewhere real to go. It was excluded while the node's video
+      // input existed only as an unlabelled bare handle.
+      expect(screen.getByText("LLM Generate")).toBeInTheDocument();
+      // Should NOT show image-only nodes
       expect(screen.queryByText("Annotate")).not.toBeInTheDocument();
-      expect(screen.queryByText("LLM Generate")).not.toBeInTheDocument();
     });
 
     it("should show 3D-accepting nodes when dragging from 3D output", () => {

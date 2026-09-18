@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, useRef, useEffect } from "react";
-import { Handle, Position, NodeProps, Node } from "@xyflow/react";
+import { NodeProps, Node } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { clearConversationPatch } from "@/store/utils/clearConversation";
@@ -10,7 +10,7 @@ import { useInlineParameters } from "@/hooks/useInlineParameters";
 import { InlineParameterPanel } from "./InlineParameterPanel";
 import { useLlmModelLists, FALLBACK_MODELS } from "@/hooks/useLlmModelLists";
 import { useCanRun } from "@/hooks/useCanRun";
-import { DynamicInputHandles } from "./DynamicInputHandles";
+import { DynamicInputHandles, LLM_FALLBACK } from "./DynamicInputHandles";
 import { PromptSkillPicker } from "./PromptSkillPicker";
 import { LLMChatPanel } from "./LLMChatPanel";
 import { LLMGeneratorControls } from "./LLMGeneratorControls";
@@ -333,19 +333,7 @@ export function LLMGenerateNode({ id, data, selected }: NodeProps<LLMGenerateNod
         </InlineParameterPanel>
       ) : undefined}
     >
-      {<DynamicInputHandles nodeId={id} />}
-      {/* Video input — Gemini models only (the route rejects other providers
-          with a clear error). Rendered in BOTH pin modes (like image-feedback)
-          so a video edge can never point at an unrendered handle. */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id="video"
-        style={{ top: "85%" }}
-        data-handletype="video"
-        className="!bg-violet-500 !border-violet-700"
-        title="Video input — analyzed by Gemini models (not supported by OpenAI/Claude)"
-      />
+      {<DynamicInputHandles nodeId={id} fallback={LLM_FALLBACK} />}
       <div className="relative w-full h-full min-h-0 overflow-hidden rounded-lg">
         <LLMChatPanel
           conversation={conversation}

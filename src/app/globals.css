@@ -103,6 +103,19 @@ body {
   background: #f97316;
 }
 
+/* Video / audio handles. These had no rule at all, so every video and audio
+   pin fell back to the base handle colour while its label was drawn in the
+   type colour from HANDLE_COLORS — dot and label disagreeing on the same pin.
+   Values match HANDLE_COLORS. (image/text differ between the two palettes;
+   that predates this and is left alone rather than restyled in passing.) */
+.react-flow__handle[data-handletype="video"] {
+  background: #0d9488;
+}
+
+.react-flow__handle[data-handletype="audio"] {
+  background: #8b5cf6;
+}
+
 .react-flow__edge-path {
   stroke: #94a3b8;
   stroke-width: 3;

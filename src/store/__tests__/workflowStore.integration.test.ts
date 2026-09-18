@@ -2923,6 +2923,53 @@ describe("onConnect handle normalization (dynamic pins)", () => {
     expect(edges[0].targetHandle).toBe("dynpin__image__image_urls__0");
   });
 
+  it("routes a classic 'video' connect on llmGenerate onto the video pin", () => {
+    // This is the drop-menu path: picking "LLM Generate" from a video output
+    // creates targetHandle "video", a handle the node no longer renders. It
+    // must land on the rendered pin rather than being born a ghost.
+    const store = useWorkflowStore.getState();
+    act(() => {
+      useWorkflowStore.setState({
+        nodes: [
+          createTestNode("src", "videoInput", {}),
+          createTestNode("llm", "llmGenerate", {}),
+        ],
+        edges: [],
+      });
+      store.onConnect({ source: "src", sourceHandle: "video", target: "llm", targetHandle: "video" });
+    });
+    const edges = useWorkflowStore.getState().edges;
+    expect(edges).toHaveLength(1);
+    expect(edges[0].targetHandle).toBe("dynpin__video__primary__0");
+  });
+
+  it("gives a second video source its own slot on llmGenerate", () => {
+    const store = useWorkflowStore.getState();
+    act(() => {
+      useWorkflowStore.setState({
+        nodes: [
+          createTestNode("a", "videoInput", {}),
+          createTestNode("b", "videoInput", {}),
+          createTestNode("llm", "llmGenerate", {}),
+        ],
+        edges: [],
+      });
+      store.onConnect({ source: "a", sourceHandle: "video", target: "llm", targetHandle: "video" });
+    });
+    act(() => {
+      useWorkflowStore
+        .getState()
+        .onConnect({ source: "b", sourceHandle: "video", target: "llm", targetHandle: "video" });
+    });
+    const edges = useWorkflowStore.getState().edges;
+    // Video is a multi field: the second clip adds a slot instead of evicting
+    // the first, which is what lets Gemini compare two clips in one turn.
+    expect(edges.map((e) => e.targetHandle).sort()).toEqual([
+      "dynpin__video__primary__0",
+      "dynpin__video__primary__1",
+    ]);
+  });
+
   it("schema-less new node: classic connect lands on a rendered reference (primary) pin", () => {
     const store = useWorkflowStore.getState();
     act(() => {
