@@ -19,6 +19,7 @@ import { clearFalInputMappingCache as _clearFalInputMappingCache, generateWithFa
 import { generateWithKie } from "./providers/kie";
 import { generateWithWaveSpeed } from "./providers/wavespeed";
 import { generateWithMuapi } from "./providers/muapi";
+import { generateWithLuma } from "./providers/luma";
 import { wantsSSE, createSSEStream, SSE_HEADERS } from "./utils/sse";
 import { resolveMediaRefs, hasMediaRefs } from "./utils/resolveMediaRefs";
 import { calculateGenerationCost } from "@/utils/costCalculator";
@@ -657,6 +658,79 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      return buildMediaResponse(output, result.outputs);
+    }
+
+    // Luma Agents provider
+    if (provider === "luma") {
+      if (!selectedModel?.modelId || !selectedModel?.displayName) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "selectedModel with modelId and displayName is required for Luma" },
+          { status: 400 }
+        );
+      }
+
+      const lumaApiKey = request.headers.get("X-Luma-Key") || process.env.LUMALABS_API_KEY;
+      if (!lumaApiKey) {
+        return NextResponse.json<GenerateResponse>(
+          {
+            success: false,
+            error: "Luma API key not configured. Add LUMALABS_API_KEY to .env.local or configure in Settings.",
+          },
+          { status: 401 }
+        );
+      }
+
+      // Keep data URIs as-is: Luma accepts inline base64 with a media_type, and
+      // localhost URLs are not reachable from their side.
+      const processedImages: string[] = images ? [...images] : [];
+
+      let processedDynamicInputs: Record<string, string | string[]> | undefined = undefined;
+      if (dynamicInputs) {
+        processedDynamicInputs = {};
+        for (const key of Object.keys(dynamicInputs)) {
+          const value = dynamicInputs[key];
+          if (value === null || value === undefined || value === '') continue;
+          processedDynamicInputs[key] = value;
+        }
+      }
+
+      const genInput: GenerationInput = {
+        model: {
+          id: selectedModel.modelId,
+          name: selectedModel.displayName,
+          provider: "luma",
+          capabilities: capabilitiesForMediaType(mediaType),
+          description: null,
+        },
+        prompt: prompt || "",
+        images: processedImages,
+        parameters,
+        dynamicInputs: processedDynamicInputs,
+      };
+
+      const result = await retryWithCompressedImages(
+        requestId, processedImages, processedDynamicInputs,
+        (imgs, dynIn) => generateWithLuma(requestId, lumaApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
+      );
+
+      if (!result.success) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: result.error || "Generation failed" },
+          { status: 500 }
+        );
+      }
+
+      const output = result.outputs?.[0];
+      if (!output?.data && !output?.url) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "No output in generation result" },
+          { status: 500 }
+        );
+      }
+
+      // Pass the whole array: type=layering returns up to ten plates, and the
+      // layering node needs all of them, not just the frontmost.
       return buildMediaResponse(output, result.outputs);
     }
 
