@@ -21,6 +21,8 @@
 
 import type { ProviderType } from "@/types";
 import type { ExtractedResult } from "./types";
+import { getLumaApiRef } from "@/lib/luma/modelFetcher";
+import { buildLumaSchema } from "@/lib/luma/schema";
 import { extractFromNormalized } from "./extract";
 import { mergePlaygroundFields } from "./merge";
 import { scrapePlayground, type PlaygroundScrapeResult } from "./playground";
@@ -137,6 +139,16 @@ export async function warmModelSchema(
         const normalized = await fetchAndNormalizeMuapi(modelId);
         if (normalized) extracted = extractFromNormalized(normalized);
         if (!extracted) extracted = getMuapiSlugSchema(modelId);
+        break;
+      }
+      case "luma": {
+        // Built straight from Luma's documented body parameters. Deliberately
+        // NOT routed through normalizeOpenApiSchema + extractFromNormalized:
+        // the classifier reads the bare name "video" as a video INPUT, and
+        // Luma's `video` is the options object holding resolution, duration
+        // and hdr — see src/lib/luma/schema.ts.
+        const apiRef = await getLumaApiRef();
+        extracted = buildLumaSchema(apiRef, modelId);
         break;
       }
       case "kie":

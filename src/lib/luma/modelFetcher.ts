@@ -225,9 +225,30 @@ export async function getLumaModels(): Promise<ProviderModel[]> {
   return inFlight;
 }
 
+/**
+ * The API-reference markdown, cached for a day.
+ *
+ * Shared with the schema builder so selecting a model and drawing its pins do
+ * not fetch the same page twice.
+ */
+let cachedApiRef: string | null = null;
+let cachedApiRefAt = 0;
+
+export async function getLumaApiRef(): Promise<string | null> {
+  if (cachedApiRef && Date.now() - cachedApiRefAt < CACHE_TTL) return cachedApiRef;
+  const md = await fetchDoc(API_REF);
+  if (md) {
+    cachedApiRef = md;
+    cachedApiRefAt = Date.now();
+  }
+  return md ?? cachedApiRef;
+}
+
 /** Drop the in-memory catalogue (tests; also lets a restart pick up doc edits). */
 export function clearLumaModelCache(): void {
   cached = null;
   cachedAt = 0;
   inFlight = null;
+  cachedApiRef = null;
+  cachedApiRefAt = 0;
 }
