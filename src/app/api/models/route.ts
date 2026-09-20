@@ -32,6 +32,7 @@ import { ProviderType } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers";
 import { MUAPI_MODELS } from "@/lib/providers/muapi";
 import { getMuapiModels } from "@/lib/providers/muapiModelFetcher";
+import { getLumaModels } from "@/lib/luma/modelFetcher";
 import { createPageBudget } from "@/lib/providers/pageBudget";
 import {
   getCachedModels,
@@ -987,6 +988,7 @@ export async function GET(
   const kieKey = request.headers.get("X-Kie-Key") || process.env.KIE_API_KEY || null;
   const wavespeedKey = request.headers.get("X-WaveSpeed-Key") || process.env.WAVESPEED_API_KEY || null;
   const muapiKey = request.headers.get("X-Muapi-API-Key") || process.env.MUAPI_API_KEY || null;
+  const lumaKey = request.headers.get("X-Luma-Key") || process.env.LUMALABS_API_KEY || null;
 
   // Build list of all available providers (have keys from env or client headers)
   const availableProviders: string[] = ["gemini"]; // Gemini always available
@@ -995,12 +997,14 @@ export async function GET(
   if (kieKey) availableProviders.push("kie");
   if (wavespeedKey) availableProviders.push("wavespeed");
   if (muapiKey) availableProviders.push("muapi");
+  if (lumaKey) availableProviders.push("luma");
 
   // Determine which providers to fetch from (excluding gemini/kie - handled separately as hardcoded)
   const providersToFetch: ProviderType[] = [];
   let includeGemini = false;
   let includeKie = false;
   let includeMuapi = false;
+  let includeLuma = false;
 
   if (providerFilter) {
     if (providerFilter === "gemini") {
@@ -1043,6 +1047,15 @@ export async function GET(
           { status: 400 }
         );
       }
+    } else if (providerFilter === "luma") {
+      if (lumaKey) {
+        includeLuma = true;
+      } else {
+        return NextResponse.json<ModelsErrorResponse>(
+          { success: false, error: "Luma API key required. Add LUMALABS_API_KEY to .env.local or configure in Settings." },
+          { status: 400 }
+        );
+      }
     } else if (providerFilter === "replicate" && replicateKey) {
       providersToFetch.push("replicate");
     } else if (providerFilter === "fal" && falKey) {
@@ -1053,6 +1066,7 @@ export async function GET(
     includeGemini = true; // Gemini always available
     includeKie = kieKey ? true : false; // Kie only if API key is configured
     includeMuapi = muapiKey ? true : false; // muapi only if API key is configured
+    includeLuma = lumaKey ? true : false; // Luma only if API key is configured
     if (wavespeedKey) {
       providersToFetch.push("wavespeed"); // WaveSpeed if key is configured
     }
@@ -1065,7 +1079,7 @@ export async function GET(
   }
 
   // Gemini, Kie, and muapi are hardcoded — don't fail if no external API providers
-  if (providersToFetch.length === 0 && !includeGemini && !includeKie && !includeMuapi) {
+  if (providersToFetch.length === 0 && !includeGemini && !includeKie && !includeMuapi && !includeLuma) {
     return NextResponse.json<ModelsErrorResponse>(
       {
         success: false,
@@ -1124,6 +1138,22 @@ export async function GET(
     providerResults["muapi"] = {
       success: true,
       count: muapiModels.length,
+      cached: true,
+    };
+    anyFromCache = true;
+  }
+
+  // Luma models are derived at runtime from Luma's own docs (no models
+  // endpoint exists), with an in-memory day-long cache and a snapshot fallback.
+  if (includeLuma) {
+    let lumaModels = await getLumaModels();
+    if (searchQuery) {
+      lumaModels = filterModelsBySearch([...lumaModels], searchQuery);
+    }
+    allModels.push(...lumaModels);
+    providerResults["luma"] = {
+      success: true,
+      count: lumaModels.length,
       cached: true,
     };
     anyFromCache = true;
