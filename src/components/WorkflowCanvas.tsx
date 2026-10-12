@@ -81,6 +81,7 @@ const GLBViewerNode = dynamic(() => import("./nodes/GLBViewerNode").then(mod => 
 import { EditableEdge, ReferenceEdge, SharedEdgeGradients } from "./edges";
 import { DOT_SIZE } from "./nodes/DotNode";
 import { MenuAction } from "./ConnectionDropMenu";
+import { canConnect } from "./canvas/connectionRules";
 import { NodeSearchPalette } from "./NodeSearchPalette";
 import { MultiSelectToolbar } from "./MultiSelectToolbar";
 import { EdgeToolbar } from "./EdgeToolbar";
@@ -761,98 +762,21 @@ export function WorkflowCanvas() {
   // Defined inside component to have access to nodes array for video validation
   const isValidConnection = useCallback(
     (connection: Connection | Edge): boolean => {
-      const sourceType = getHandleType(connection.sourceHandle);
-      const targetType = getHandleType(connection.targetHandle);
-
+      // The rule itself lives in canvas/connectionRules.ts as a pure function.
+      // It used to be inline here, closed over `nodes`, which made it
+      // untestable — and an untested branch is how llmGenerate ended up with a
+      // video pin the canvas refused every edge into.
+      //
       // Note: dynamic-pin slots hold one edge each, but dropping onto an
       // occupied slot is allowed — onConnect replaces the existing edge (keeps
       // the pin/slot, swaps the source). So no occupancy rejection here.
-
-      // Switch input: accept any type (generic-input handle)
-      const targetNode = nodes.find((n) => n.id === connection.target);
-      const sourceNode = nodes.find((n) => n.id === connection.source);
-      if (targetNode?.type === "switch" && connection.targetHandle === "generic-input") return true;
-
-      // Switch output: the type is determined by inputType stored in node data
-      if (sourceNode?.type === "switch") {
-        const switchData = sourceNode.data as { inputType?: string | null };
-        if (switchData.inputType && targetType) {
-          return switchData.inputType === targetType;
-        }
-        // If inputType not set yet, allow connection (will be resolved)
-        return true;
-      }
-
-      // Conditional Switch: text input only, text outputs only
-      if (targetNode?.type === "conditionalSwitch") {
-        return sourceType === "text";
-      }
-      if (sourceNode?.type === "conditionalSwitch") {
-        return targetType === "text";
-      }
-
-      // If we can't determine types, allow the connection
-      if (!sourceType || !targetType) return true;
-
-      // Universal handle (output node) accepts any media type
-      if (targetType === "universal") return sourceType !== "text";
-      if (sourceType === "universal") return true;
-
-      // EaseCurve connections: only between easeCurve nodes (or router)
-      if (sourceType === "easeCurve" || targetType === "easeCurve") {
-        const targetNode = nodes.find((n) => n.id === connection.target);
-        const sourceNode = nodes.find((n) => n.id === connection.source);
-        if (targetNode?.type === "router" || sourceNode?.type === "router") return true;
-        if (sourceType !== "easeCurve" || targetType !== "easeCurve") return false;
-        return targetNode?.type === "easeCurve";
-      }
-
-      // Video connections have special rules
-      if (sourceType === "video") {
-        const targetNode = nodes.find((n) => n.id === connection.target);
-        if (!targetNode) return false;
-
-        const targetNodeType = targetNode.type;
-        // Video can connect to video processing nodes, output, router
-        if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "videoCompare" || targetNodeType === "easeCurve" || targetNodeType === "videoTrim" || targetNodeType === "videoFrameGrab" || targetNodeType === "output" || targetNodeType === "router") {
-          return true;
-        }
-        // Video can also connect to nanoBanana/generate3d if the model has video-type schema inputs
-        if (targetNodeType === "nanoBanana" || targetNodeType === "generate3d") {
-          const targetData = targetNode.data as { inputSchema?: Array<{ type: string }> };
-          if (targetData.inputSchema?.some(i => i.type === "video")) return true;
-        }
-        return false;
-      }
-
-      // Audio connections: can connect to generate nodes with audio-type schema inputs
-      if (sourceType === "audio") {
-        const targetNode = nodes.find((n) => n.id === connection.target);
-        if (!targetNode) return false;
-
-        const targetNodeType = targetNode.type;
-        if (targetNodeType === "output" || targetNodeType === "router" || targetNodeType === "generateAudio") return true;
-        // Audio can connect to any generate node with audio-type schema inputs
-        if (targetNodeType === "nanoBanana" || targetNodeType === "generateVideo" || targetNodeType === "generate3d") {
-          const targetData = targetNode.data as { inputSchema?: Array<{ type: string }> };
-          if (targetData.inputSchema?.some(i => i.type === "audio")) return true;
-        }
-        return false;
-      }
-
-      // 3D connections: 3d handles can connect to matching 3d handles, router, or output nodes
-      if (sourceType === "3d" || targetType === "3d") {
-        const sourceNode = nodes.find((n) => n.id === connection.source);
-        const targetNode = nodes.find((n) => n.id === connection.target);
-        if (sourceNode?.type === "router" || targetNode?.type === "router") return true;
-        // Allow 3d output to connect to output node's 3d handle
-        if (sourceType === "3d" && targetNode?.type === "output") return true;
-        return sourceType === "3d" && targetType === "3d";
-      }
-
-      // Standard type matching for image and text
-      // Image handles connect to image handles, text handles connect to text handles
-      return sourceType === targetType;
+      return canConnect({
+        sourceType: getHandleType(connection.sourceHandle),
+        targetType: getHandleType(connection.targetHandle),
+        sourceNode: nodes.find((n) => n.id === connection.source),
+        targetNode: nodes.find((n) => n.id === connection.target),
+        targetHandle: connection.targetHandle,
+      });
     },
     [nodes]
   );
