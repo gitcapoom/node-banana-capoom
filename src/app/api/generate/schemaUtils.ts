@@ -45,6 +45,42 @@ export function isArraySchemaProperty(
 }
 
 /**
+ * Could this property hold a media URL?
+ *
+ * The provider matchers fall back to a SUBSTRING match when no property is
+ * named exactly like a known pattern, and substrings are indiscriminate: with
+ * the pattern "image", the property `num_images` matches, so a wired image URL
+ * was written into a counter and fal replied
+ *   422 num_images: "Input should be a valid integer, unable to parse string"
+ * `image_size` matches the same way and would take a URL just as happily.
+ *
+ * Rather than keep a blocklist of such names, ask the schema what the field can
+ * hold. A media URL is a string, or a list of strings. Two things disqualify a
+ * candidate:
+ *   - a non-string type (`num_images` is an integer), and
+ *   - an enum, since a closed set of values is never a URL (`image_size` is a
+ *     string, but one of "square" | "landscape_4_3" | ...).
+ */
+export function canHoldMediaUrl(
+  name: string,
+  raw: unknown,
+  components?: Record<string, unknown>
+): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const prop = normalizeProperty(name, raw as Record<string, unknown>, components);
+  if (prop.enum?.length) return false;
+  if (prop.type === "string") return true;
+  if (prop.type === "array") return !prop.items || prop.items.type === "string";
+  // A true union counts when any branch is a plain string or string list.
+  if (prop.type === "union") {
+    return !!prop.unionVariants?.some(
+      (v) => v.type === "string" || (v.type === "array" && (!v.items || v.items.type === "string"))
+    );
+  }
+  return false;
+}
+
+/**
  * Input parameter patterns - maps generic input types to possible schema parameter names
  */
 export const INPUT_PATTERNS: Record<string, string[]> = {
@@ -220,6 +256,9 @@ export function getInputMappingFromSchema(schema: Record<string, unknown> | unde
           const patternLower = pattern.toLowerCase();
           const match = propertyNames.find(name => {
             const nameLower = name.toLowerCase();
+            // Same type gate as the fal matcher: a substring hit onto a counter
+            // or an enum is not a media field. See canHoldMediaUrl.
+            if (!canHoldMediaUrl(name, properties[name], componentSchemas)) return false;
             // Property name contains the pattern (intended direction)
             if (nameLower.includes(patternLower)) return true;
             // Pattern contains the property name — only allow for longer patterns

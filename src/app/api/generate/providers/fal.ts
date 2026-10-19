@@ -15,6 +15,7 @@ import {
   ParameterTypeInfo,
   coerceParameterTypes,
   isArraySchemaProperty,
+  canHoldMediaUrl,
 } from "../schemaUtils";
 
 /**
@@ -133,10 +134,14 @@ async function getFalInputMapping(modelId: string, apiKey: string | null): Promi
         if (properties[pattern]) {
           matchedParam = pattern;
         } else {
-          // Check for case-insensitive partial match
+          // Case-insensitive partial match, but only onto a property that could
+          // actually hold a URL. Without the type gate, pattern "image" matches
+          // `num_images` and the image is written into a counter — fal then
+          // answers 422 "num_images: Input should be a valid integer".
           const match = propertyNames.find(name =>
-            name.toLowerCase().includes(pattern.toLowerCase()) ||
-            pattern.toLowerCase().includes(name.toLowerCase())
+            (name.toLowerCase().includes(pattern.toLowerCase()) ||
+             pattern.toLowerCase().includes(name.toLowerCase())) &&
+            canHoldMediaUrl(name, properties[name], componentSchemas)
           );
           if (match) {
             matchedParam = match;
