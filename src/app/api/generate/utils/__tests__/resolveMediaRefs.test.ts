@@ -22,11 +22,18 @@ vi.mock("../../providers/fal", () => ({
 
 // The real validator only accepts an allow-list of roots, which a temp dir is
 // not. Path SAFETY is still exercised below, via the id checks.
+//
+// The mock must normalise separators the way the real validator does — it
+// returns forward slashes ("C:/Users/...", "//server/share/...") even on
+// Windows. The earlier mock returned path.resolve() verbatim, i.e. backslashes,
+// and that single difference hid a bug that broke findMediaFile for EVERY
+// Windows project: the containment check compared a backslash candidate
+// against a forward-slash root and rejected everything.
 vi.mock("@/utils/pathValidation", () => ({
   validateWorkflowPath: (p: string) =>
     p.includes("..")
       ? { valid: false, resolved: "", error: "traversal" }
-      : { valid: true, resolved: path.resolve(p) },
+      : { valid: true, resolved: path.resolve(p).replace(/\\/g, "/") },
 }));
 
 import { resolveMediaRefs, hasMediaRefs, findMediaFile } from "../resolveMediaRefs";

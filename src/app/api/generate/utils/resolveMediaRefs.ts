@@ -44,6 +44,28 @@ const CONTENT_TYPES: Record<string, string> = {
   exr: "image/x-exr",
 };
 
+/**
+ * Is `candidate` inside `root`?
+ *
+ * Not a string prefix test. validateWorkflowPath returns its resolved path with
+ * FORWARD slashes ("C:/Users/..." , "//server/share/..."), while path.join
+ * builds candidates with backslashes on Windows. Comparing the two with
+ * startsWith is false for every Windows path, drive-letter and UNC alike, which
+ * made findMediaFile reject files that were sitting right there and report
+ * "not found in the project's inputs folder".
+ *
+ * path.relative normalises both sides, so this is a containment test rather
+ * than a text comparison: the candidate is inside when the route from root to
+ * it neither climbs out (`..`) nor restarts from an absolute path (a different
+ * drive or share).
+ */
+export function isInsideRoot(root: string, candidate: string): boolean {
+  const rel = path.relative(root, candidate);
+  if (rel === "") return true;
+  if (path.isAbsolute(rel)) return false;
+  return rel !== ".." && !rel.startsWith(".." + path.sep) && !rel.startsWith("../");
+}
+
 /** Locate a media id on disk, or null. */
 export async function findMediaFile(
   mediaDirectory: string,
@@ -66,7 +88,7 @@ export async function findMediaFile(
       const candidate = path.join(folder, `${safeId}.${ext}`);
       // Belt and braces: the resolved candidate must still sit inside the
       // project, whatever the id contained.
-      if (!candidate.startsWith(validation.resolved)) continue;
+      if (!isInsideRoot(validation.resolved, candidate)) continue;
       try {
         await fs.access(candidate);
         return { filePath: candidate, contentType: CONTENT_TYPES[ext] ?? "application/octet-stream" };
