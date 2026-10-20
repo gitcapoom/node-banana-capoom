@@ -21,7 +21,7 @@ import { generateWithWaveSpeed } from "./providers/wavespeed";
 import { generateWithMuapi } from "./providers/muapi";
 import { generateWithLuma } from "./providers/luma";
 import { wantsSSE, createSSEStream, SSE_HEADERS } from "./utils/sse";
-import { resolveMediaRefs, hasMediaRefs } from "./utils/resolveMediaRefs";
+import { resolveMediaRefs, hasMediaRefs, recompressRefImages, hasRefImages, type RefOrigins } from "./utils/resolveMediaRefs";
 import { calculateGenerationCost } from "@/utils/costCalculator";
 import { compressAllImages, compressLargeImages } from "./utils/imageCompression";
 import { isImageSizeError } from "./utils/sizeErrorDetection";
@@ -103,17 +103,30 @@ function buildMediaResponse(
  */
 async function retryWithCompressedImages(
   requestId: string,
+  refs: RefRetryContext,
   images: string[],
   dynamicInputs: Record<string, string | string[]> | undefined,
   generateFn: (imgs: string[], dynInputs: Record<string, string | string[]> | undefined) => Promise<GenerationOutput>,
 ): Promise<GenerationOutput> {
-  // Check if there are any compressible images (data:image/ URLs)
+  // Compressible: inline image data URLs, and images that were sent by
+  // reference — those are URLs by now, but their files are still on disk.
   const hasImages = images.some(img => img.startsWith("data:image/"));
   const hasDynImages = dynamicInputs && Object.values(dynamicInputs).some(v =>
     typeof v === "string" ? v.startsWith("data:image/") :
     Array.isArray(v) ? v.some(item => typeof item === "string" && item.startsWith("data:image/")) : false
   );
-  const canCompress = hasImages || hasDynImages;
+  const hasRefImgs = hasRefImages(images, refs.origins) || hasRefImages(dynamicInputs, refs.origins);
+  const canCompress = hasImages || hasDynImages || hasRefImgs;
+
+  const compressForRetry = async () => {
+    const inline = await compressAllImages(images, dynamicInputs);
+    if (!hasRefImgs) return inline;
+    const memo = new Map<string, string>();
+    return {
+      images: await recompressRefImages(inline.images, refs.origins, refs.uploadKey, memo),
+      dynamicInputs: await recompressRefImages(inline.dynamicInputs, refs.origins, refs.uploadKey, memo),
+    };
+  };
 
   // First attempt — original images
   let result: GenerationOutput;
@@ -123,7 +136,7 @@ async function retryWithCompressedImages(
     const msg = error instanceof Error ? error.message : String(error);
     if (canCompress && isImageSizeError(msg)) {
       console.log(`[API:${requestId}] Size error (thrown): "${msg.substring(0, 100)}". Compressing images and retrying...`);
-      const compressed = await compressAllImages(images, dynamicInputs);
+      const compressed = await compressForRetry();
       return generateFn(compressed.images, compressed.dynamicInputs);
     }
     // Not a size error — log the full stack so non-obvious failures (e.g. a
@@ -135,11 +148,17 @@ async function retryWithCompressedImages(
   // Check returned error
   if (!result.success && result.error && canCompress && isImageSizeError(result.error)) {
     console.log(`[API:${requestId}] Size error (returned): "${result.error.substring(0, 100)}". Compressing images and retrying...`);
-    const compressed = await compressAllImages(images, dynamicInputs);
+    const compressed = await compressForRetry();
     return generateFn(compressed.images, compressed.dynamicInputs);
   }
 
   return result;
+}
+
+/** Per-request state the size-retry needs to reach images sent by reference. */
+interface RefRetryContext {
+  origins: RefOrigins;
+  uploadKey: string | null;
 }
 
 function capabilitiesForMediaType(mediaType?: string): ModelCapability[] {
@@ -178,12 +197,16 @@ export async function POST(request: NextRequest) {
     // bytes never had to pass through the browser's JSON body (which is what
     // used to crash the tab). Resolve those to CDN URLs before any provider
     // sees the payload, so every branch below is unaware of the mechanism.
+    const refRetry: RefRetryContext = {
+      origins: new Map(),
+      uploadKey: request.headers.get("X-Fal-API-Key") || process.env.FAL_API_KEY || null,
+    };
     if (hasMediaRefs(dynamicInputs) || hasMediaRefs(images)) {
-      const uploadKey = request.headers.get("X-Fal-API-Key") || process.env.FAL_API_KEY || null;
+      const uploadKey = refRetry.uploadKey;
       const cache = new Map<string, string>();
       try {
-        dynamicInputs = await resolveMediaRefs(dynamicInputs, mediaDirectory, uploadKey, cache);
-        images = await resolveMediaRefs(images, mediaDirectory, uploadKey, cache);
+        dynamicInputs = await resolveMediaRefs(dynamicInputs, mediaDirectory, uploadKey, cache, refRetry.origins);
+        images = await resolveMediaRefs(images, mediaDirectory, uploadKey, cache, refRetry.origins);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[API] media reference resolution failed:`, message);
@@ -302,7 +325,7 @@ export async function POST(request: NextRequest) {
       };
 
       const result = await retryWithCompressedImages(
-        requestId, processedImages, processedDynamicInputs,
+        requestId, refRetry, processedImages, processedDynamicInputs,
         (imgs, dynIn) => generateWithReplicate(requestId, replicateApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
       );
 
@@ -391,7 +414,7 @@ export async function POST(request: NextRequest) {
           try {
             onStatus({ phase: "submitting" });
             const result = await retryWithCompressedImages(
-              requestId, processedImages, processedDynamicInputs,
+              requestId, refRetry, processedImages, processedDynamicInputs,
               (imgs, dynIn) => generateWithFalQueue(
                 requestId, falApiKey,
                 { ...genInput, images: imgs, dynamicInputs: dynIn },
@@ -422,7 +445,7 @@ export async function POST(request: NextRequest) {
 
       // ── Legacy blocking path (no Accept: text/event-stream) ────
       const result = await retryWithCompressedImages(
-        requestId, processedImages, processedDynamicInputs,
+        requestId, refRetry, processedImages, processedDynamicInputs,
         (imgs, dynIn) => generateWithFalQueue(requestId, falApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
       );
 
@@ -500,7 +523,7 @@ export async function POST(request: NextRequest) {
       };
 
       const result = await retryWithCompressedImages(
-        requestId, processedImages, processedDynamicInputs,
+        requestId, refRetry, processedImages, processedDynamicInputs,
         (imgs, dynIn) => generateWithKie(requestId, kieApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
       );
 
@@ -578,7 +601,7 @@ export async function POST(request: NextRequest) {
       };
 
       const result = await retryWithCompressedImages(
-        requestId, processedImages, processedDynamicInputs,
+        requestId, refRetry, processedImages, processedDynamicInputs,
         (imgs, dynIn) => generateWithWaveSpeed(requestId, wavespeedApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
       );
 
@@ -645,7 +668,7 @@ export async function POST(request: NextRequest) {
       };
 
       const result = await retryWithCompressedImages(
-        requestId, processedImages, processedDynamicInputs,
+        requestId, refRetry, processedImages, processedDynamicInputs,
         (imgs, dynIn) => generateWithMuapi(requestId, muapiApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }, falApiKeyForUpload),
       );
 
@@ -716,7 +739,7 @@ export async function POST(request: NextRequest) {
       };
 
       const result = await retryWithCompressedImages(
-        requestId, processedImages, processedDynamicInputs,
+        requestId, refRetry, processedImages, processedDynamicInputs,
         (imgs, dynIn) => generateWithLuma(requestId, lumaApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }),
       );
 
@@ -785,7 +808,7 @@ export async function POST(request: NextRequest) {
         if (neg) veoParams.negativePrompt = neg;
       }
       const result = await retryWithCompressedImages(
-        requestId, images || [], undefined,
+        requestId, refRetry, images || [], undefined,
         (imgs) => generateWithGeminiVideo(requestId, geminiApiKey, selectedModel.modelId, resolvedPrompt || "", imgs, veoParams),
       );
 

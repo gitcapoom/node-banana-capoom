@@ -114,6 +114,16 @@ describe("resolveMediaRefs", () => {
     expect(mockUpload).not.toHaveBeenCalled();
   });
 
+  it("records which file each uploaded URL came from", async () => {
+    // Needed by the size retry: once uploaded, the payload holds only a URL,
+    // and compressing it means going back to this file.
+    const origins = new Map<string, { filePath: string; contentType: string }>();
+    await resolveMediaRefs({ video_urls: ["nbfile:img-abc"] }, DIR, "key", new Map(), origins);
+    const origin = origins.get("https://cdn.fal.ai/uploaded.mov");
+    expect(origin?.filePath.endsWith("img-abc.mov")).toBe(true);
+    expect(origin?.contentType).toBe("video/quicktime");
+  });
+
   it("explains a reference whose file is gone", async () => {
     await expect(
       resolveMediaRefs({ video_urls: ["nbfile:img-missing"] }, DIR, "key"),

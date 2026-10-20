@@ -17,7 +17,8 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { validateWorkflowPath } from "@/utils/pathValidation";
 import { parseMediaRef } from "@/lib/mediaRefs";
-import { uploadFileToFal } from "../providers/fal";
+import { uploadFileToFal, uploadImageToFal } from "../providers/fal";
+import { compressImage } from "./imageCompression";
 
 /** Extensions searched, in order, for a bare media id. */
 const MEDIA_EXTENSIONS = [
@@ -111,6 +112,7 @@ export async function resolveMediaRefs<T>(
   mediaDirectory: string | null | undefined,
   falApiKey: string | null,
   cache: Map<string, string> = new Map(),
+  origins?: RefOrigins,
 ): Promise<T> {
   const walk = async (v: unknown): Promise<unknown> => {
     const id = parseMediaRef(v);
@@ -128,6 +130,9 @@ export async function resolveMediaRefs<T>(
       }
       const url = await uploadFileToFal(found.filePath, found.contentType, falApiKey);
       cache.set(id, url);
+      // Remember where this URL came from: once uploaded it is just a link, and
+      // a size refusal later can only be answered by going back to the file.
+      origins?.set(url, found);
       return url;
     }
     if (Array.isArray(v)) return Promise.all(v.map(walk));
@@ -156,4 +161,60 @@ export function hasMediaRefs(value: unknown): boolean {
     return Object.values(value as Record<string, unknown>).some(hasMediaRefs);
   }
   return false;
+}
+
+/** Uploaded URL -> the file on disk it was uploaded from. */
+export type RefOrigins = Map<string, { filePath: string; contentType: string }>;
+
+function isRefImage(v: unknown, origins: RefOrigins): v is string {
+  return typeof v === "string" && !!origins.get(v)?.contentType.startsWith("image/");
+}
+
+/** Does `value` contain any URL that was uploaded from an image on disk? */
+export function hasRefImages(value: unknown, origins: RefOrigins): boolean {
+  if (!origins.size) return false;
+  if (isRefImage(value, origins)) return true;
+  if (Array.isArray(value)) return value.some((v) => hasRefImages(v, origins));
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).some((v) => hasRefImages(v, origins));
+  }
+  return false;
+}
+
+/**
+ * Compress images that were sent by reference, for a retry after a size refusal.
+ *
+ * Media over the browser's inline threshold reaches the server as a reference
+ * and is uploaded to the CDN before the provider is called, so by the time a
+ * provider answers "too large" the request holds only a URL — there is nothing
+ * to compress. This goes back to the file on disk, compresses it the same way
+ * an inline image would be (imageCompression.compressImage), uploads the
+ * smaller copy and swaps its URL in. Videos and non-ref values are untouched.
+ */
+export async function recompressRefImages<T>(
+  value: T,
+  origins: RefOrigins,
+  falApiKey: string | null,
+  memo: Map<string, string> = new Map(),
+): Promise<T> {
+  const walk = async (v: unknown): Promise<unknown> => {
+    if (isRefImage(v, origins)) {
+      const done = memo.get(v);
+      if (done) return done;
+      const { filePath, contentType } = origins.get(v)!;
+      const bytes = await fs.readFile(filePath);
+      const smaller = await compressImage(`data:${contentType};base64,${bytes.toString("base64")}`);
+      const url = await uploadImageToFal(smaller, falApiKey);
+      memo.set(v, url);
+      return url;
+    }
+    if (Array.isArray(v)) return Promise.all(v.map(walk));
+    if (v && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, item] of Object.entries(v as Record<string, unknown>)) out[k] = await walk(item);
+      return out;
+    }
+    return v;
+  };
+  return (await walk(value)) as T;
 }
