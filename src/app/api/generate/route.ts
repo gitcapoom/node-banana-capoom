@@ -218,20 +218,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Proactively shrink oversized images BEFORE dispatch so very large inputs
-    // don't blow inline-payload limits / cause provider deadlines (Gemini sends
-    // images inline). Only images above the threshold are touched; on failure
-    // we keep the originals (the reactive size-error retry still applies).
-    const PROACTIVE_MAX_BYTES = Number(process.env.GENERATE_IMAGE_MAX_BYTES) || 8 * 1024 * 1024;
-    try {
-      const pre = await compressLargeImages(images || [], dynamicInputs, PROACTIVE_MAX_BYTES);
-      if (pre.compressedCount > 0) {
-        console.log(`[API:${requestId}] Proactively compressed ${pre.compressedCount} oversized image(s) (> ${(PROACTIVE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB)`);
-        images = pre.images;
-        dynamicInputs = pre.dynamicInputs;
+    // Proactive image shrinking is OFF unless GENERATE_IMAGE_MAX_BYTES is set.
+    //
+    // It used to run by default at 8 MB, which silently re-encoded every large
+    // input before the provider saw it — a server-side cap in all but name. The
+    // provider is the authority on what it accepts: images go as they are, and
+    // only when a provider answers "too large" does the reactive
+    // retryWithCompressedImages path shrink them and try again. Setting the env
+    // var restores the old pre-emptive behaviour at that threshold.
+    const PROACTIVE_MAX_BYTES = Number(process.env.GENERATE_IMAGE_MAX_BYTES) || 0;
+    if (PROACTIVE_MAX_BYTES > 0) {
+      try {
+        const pre = await compressLargeImages(images || [], dynamicInputs, PROACTIVE_MAX_BYTES);
+        if (pre.compressedCount > 0) {
+          console.log(`[API:${requestId}] Proactively compressed ${pre.compressedCount} oversized image(s) (> ${(PROACTIVE_MAX_BYTES / 1024 / 1024).toFixed(0)} MB)`);
+          images = pre.images;
+          dynamicInputs = pre.dynamicInputs;
+        }
+      } catch (e) {
+        console.warn(`[API:${requestId}] Proactive image compression skipped (continuing with originals): ${e instanceof Error ? e.message : String(e)}`);
       }
-    } catch (e) {
-      console.warn(`[API:${requestId}] Proactive image compression skipped (continuing with originals): ${e instanceof Error ? e.message : String(e)}`);
     }
 
     // Determine which provider to use

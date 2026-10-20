@@ -18,10 +18,12 @@
  * "Invalid string length" crash. This is the mirror of that rule for the
  * REQUEST side, which had no limit at all.
  *
- * 20 MB is not an arbitrary number: `uploadImageToFal` — the server's only
- * route from a data URL to a provider-visible URL — rejects anything larger.
- * So a bigger clip cannot succeed even if the browser survives building the
- * request; it just fails later, and less clearly.
+ * This is a BROWSER threshold, not a size limit. Media over it is not refused:
+ * it is sent as a reference to the file already on disk, and the server
+ * uploads that file to the provider itself (multipart on the fal CDN for
+ * anything over 90 MiB — verified with a 200 MiB file). It only keeps a large
+ * clip out of the renderer's JSON.stringify, which is what used to crash the
+ * tab. The server imposes no cap of its own; the provider decides.
  */
 
 /** Largest single inline media value, in bytes of the DECODED file. */
