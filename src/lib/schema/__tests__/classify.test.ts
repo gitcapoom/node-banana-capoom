@@ -239,3 +239,26 @@ describe("classifyInput", () => {
     expect(classifyInput(list("file_urls", "URLs of files to include as assets in the video (images, videos, audio, PDFs)."))).toBeNull();
   });
 });
+
+describe("arrays of objects", () => {
+  it("are never a media pin, even when the description mentions image URLs", () => {
+    // Unifically's Veo `reference_characters`: an array of character objects
+    // whose description says "...image URLs across images and character
+    // `image_urls`". Classifying it as an image list sent bare URLs where
+    // objects belong, and stopped the repeatable-group path from running.
+    expect(
+      classifyInput({
+        name: "reference_characters",
+        type: "array",
+        items: { name: "item", type: "object" },
+        description: "Character references. Max 3 total expanded image URLs across images and character `image_urls`.",
+      })
+    ).toBeNull();
+  });
+
+  it("still lets a list of strings named like images through", () => {
+    expect(
+      classifyInput({ name: "reference_image_urls", type: "array", items: { name: "item", type: "string" } })?.kind
+    ).toBe("image");
+  });
+});

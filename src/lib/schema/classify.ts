@@ -254,6 +254,14 @@ export function classifyText(prop: NormalizedProperty): ClassifyDecision | null 
  * Returns null if this property is a regular parameter (not a connectable input).
  */
 export function classifyInput(prop: NormalizedProperty): ClassifyDecision | null {
+  // A list of OBJECTS is never a single media pin, whatever its name or
+  // description says. Unifically's Veo `reference_characters` describes itself
+  // as "...image URLs across images and character `image_urls`", which the
+  // image description rule read as an image list — so wired images would be
+  // sent as bare URLs where character objects belong. Declining here also lets
+  // extractFromNormalized reach buildRepeatableGroup, which is the right shape
+  // for an array of objects that carry their own media fields.
+  if (prop.type === "array" && prop.items?.type === "object") return null;
   return (
     classifyVideo(prop) ||
     classifyAudio(prop) ||
