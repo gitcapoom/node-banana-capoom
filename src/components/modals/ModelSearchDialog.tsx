@@ -8,6 +8,7 @@ import { useReactFlow } from "@xyflow/react";
 import { ProviderType, RecentModel, favoriteKey } from "@/types";
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
 import { setDisposableCache } from "@/utils/localStorageQuota";
+import { getProviderDisplayName as providerDisplayName } from "@/utils/providerUrls";
 
 // localStorage cache for models (persists across dev server restarts)
 // Bump version when model data shape changes (e.g., adding pricing fields)
@@ -242,7 +243,7 @@ export function ModelSearchDialog({
     trackModelUsage,
   } = useWorkflowStore();
   // Use stable selector for API keys to prevent unnecessary re-fetches
-  const { replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, muapiApiKey } = useProviderApiKeys();
+  const { replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, muapiApiKey, lumaApiKey, unificallyApiKey } = useProviderApiKeys();
   const { screenToFlowPosition } = useReactFlow();
 
   // State
@@ -351,6 +352,12 @@ export function ModelSearchDialog({
       if (muapiApiKey) {
         headers["X-Muapi-API-Key"] = muapiApiKey;
       }
+      if (lumaApiKey) {
+        headers["X-Luma-Key"] = lumaApiKey;
+      }
+      if (unificallyApiKey) {
+        headers["X-Unifically-Key"] = unificallyApiKey;
+      }
 
       const response = await deduplicatedFetch(`/api/models?${params.toString()}`, {
         headers,
@@ -388,7 +395,7 @@ export function ModelSearchDialog({
         setIsLoading(false);
       }
     }
-  }, [debouncedSearch, providerFilter, capabilityFilter, replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey]);
+  }, [debouncedSearch, providerFilter, capabilityFilter, replicateApiKey, falApiKey, kieApiKey, wavespeedApiKey, muapiApiKey, lumaApiKey, unificallyApiKey]);
 
   // Fetch models when filters change
   useEffect(() => {
@@ -518,28 +525,20 @@ export function ModelSearchDialog({
         return "bg-orange-500/20 text-orange-300";
       case "wavespeed":
         return "bg-purple-500/20 text-purple-300";
+      case "muapi":
+        return "bg-cyan-500/20 text-cyan-300";
+      case "luma":
+        return "bg-rose-500/20 text-rose-300";
+      case "unifically":
+        return "bg-lime-500/20 text-lime-300";
       default:
         return "bg-neutral-500/20 text-neutral-300";
     }
   };
 
-  // Get provider display name
-  const getProviderDisplayName = (provider: ProviderType) => {
-    switch (provider) {
-      case "gemini":
-        return "Gemini";
-      case "replicate":
-        return "Replicate";
-      case "fal":
-        return "fal.ai";
-      case "kie":
-        return "Kie.ai";
-      case "wavespeed":
-        return "WaveSpeed";
-      default:
-        return provider;
-    }
-  };
+  // Provider display name: the shared helper, rather than a local copy that
+  // stopped at wavespeed and showed newer providers by their raw id.
+  const getProviderDisplayName = (provider: ProviderType) => providerDisplayName(provider);
 
   // Compute which providers are available based on client API keys + server env vars
   const availableProviders = useMemo(() => {
@@ -549,12 +548,14 @@ export function ModelSearchDialog({
     if (kieApiKey) providers.add("kie");
     if (wavespeedApiKey) providers.add("wavespeed");
     if (muapiApiKey) providers.add("muapi");
+    if (lumaApiKey) providers.add("luma");
+    if (unificallyApiKey) providers.add("unifically");
     // Server-side keys (from env vars, reported by /api/models)
     for (const p of serverAvailableProviders) {
       providers.add(p as ProviderType);
     }
     return providers;
-  }, [replicateApiKey, kieApiKey, wavespeedApiKey, muapiApiKey, serverAvailableProviders]);
+  }, [replicateApiKey, kieApiKey, wavespeedApiKey, muapiApiKey, lumaApiKey, unificallyApiKey, serverAvailableProviders]);
 
   // Reset provider filter if current selection becomes unavailable
   useEffect(() => {
@@ -895,6 +896,32 @@ export function ModelSearchDialog({
                   }`}
                 >
                   mu
+                </button>
+              )}
+              {availableProviders.has("luma") && (
+                <button
+                  onClick={() => setProviderFilter("luma")}
+                  title="Luma Agents"
+                  className={`px-2 py-1.5 text-[10px] font-bold rounded transition-colors ${
+                    providerFilter === "luma"
+                      ? "bg-rose-500/20 text-rose-300"
+                      : "text-neutral-400 hover:text-rose-300 hover:bg-neutral-700"
+                  }`}
+                >
+                  Luma
+                </button>
+              )}
+              {availableProviders.has("unifically") && (
+                <button
+                  onClick={() => setProviderFilter("unifically")}
+                  title="Unifically"
+                  className={`px-2 py-1.5 text-[10px] font-bold rounded transition-colors ${
+                    providerFilter === "unifically"
+                      ? "bg-lime-500/20 text-lime-300"
+                      : "text-neutral-400 hover:text-lime-300 hover:bg-neutral-700"
+                  }`}
+                >
+                  Uni
                 </button>
               )}
             </div>
