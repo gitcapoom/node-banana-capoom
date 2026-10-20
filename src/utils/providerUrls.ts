@@ -25,6 +25,8 @@ export function getModelPageUrl(
       // Luma exposes no per-model page; its models are (model, type) pairs
       // documented together on one page.
       return `https://docs.agents.lumalabs.ai/guides/model/`;
+    case "unifically":
+      return `https://unifically.com/models`;
     default:
       return null;
   }
@@ -47,6 +49,8 @@ export function getProviderDisplayName(provider: ProviderType): string {
       return "WaveSpeed";
     case "luma":
       return "Luma Agents";
+    case "unifically":
+      return "Unifically";
     case "worldlabs":
       return "World Labs";
     case "muapi":

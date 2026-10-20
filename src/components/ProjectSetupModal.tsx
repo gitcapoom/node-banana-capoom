@@ -169,6 +169,7 @@ export function ProjectSetupModal({
     worldlabs: false,
     muapi: false,
     luma: false,
+    unifically: false,
   });
   const [overrideActive, setOverrideActive] = useState<Record<ProviderType, boolean>>({
     gemini: false,
@@ -181,6 +182,7 @@ export function ProjectSetupModal({
     worldlabs: false,
     muapi: false,
     luma: false,
+    unifically: false,
   });
   const [envStatus, setEnvStatus] = useState<EnvStatusResponse | null>(null);
 
@@ -212,7 +214,7 @@ export function ProjectSetupModal({
 
       // Sync local providers state
       setLocalProviders(providerSettings);
-      setShowApiKey({ gemini: false, openai: false, anthropic: false, replicate: false, fal: false, kie: false, wavespeed: false, worldlabs: false, muapi: false, luma: false });
+      setShowApiKey({ gemini: false, openai: false, anthropic: false, replicate: false, fal: false, kie: false, wavespeed: false, worldlabs: false, muapi: false, luma: false, unifically: false });
       // Initialize override as active if user already has a key set
       setOverrideActive({
         gemini: !!providerSettings.providers.gemini?.apiKey,
@@ -225,6 +227,7 @@ export function ProjectSetupModal({
         worldlabs: !!providerSettings.providers.worldlabs?.apiKey,
         muapi: !!providerSettings.providers.muapi?.apiKey,
         luma: !!providerSettings.providers.luma?.apiKey,
+        unifically: !!providerSettings.providers.unifically?.apiKey,
       });
       setError(null);
 

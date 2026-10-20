@@ -21,6 +21,7 @@ const PROVIDER_HEADER_MAP: Record<ProviderType, string> = {
   worldlabs: "X-WorldLabs-Key",
   muapi: "X-Muapi-API-Key",
   luma: "X-Luma-Key",
+  unifically: "X-Unifically-Key",
 };
 
 /**
