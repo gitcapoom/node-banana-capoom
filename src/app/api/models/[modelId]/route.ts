@@ -29,7 +29,7 @@ import { warmModelSchema } from "@/lib/schema/warmer";
 export const runtime = "nodejs";
 
 const CACHE_TTL_MS = 48 * 60 * 60 * 1000; // 48 hours
-const VALID_PROVIDERS: ProviderType[] = ["replicate", "fal", "kie", "wavespeed", "gemini", "muapi", "luma"];
+const VALID_PROVIDERS: ProviderType[] = ["replicate", "fal", "kie", "wavespeed", "gemini", "muapi", "luma", "unifically"];
 
 interface SchemaSuccessResponse {
   success: true;

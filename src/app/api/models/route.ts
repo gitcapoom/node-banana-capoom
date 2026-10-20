@@ -33,6 +33,7 @@ import { ProviderModel, ModelCapability } from "@/lib/providers";
 import { MUAPI_MODELS } from "@/lib/providers/muapi";
 import { getMuapiModels } from "@/lib/providers/muapiModelFetcher";
 import { getLumaModels } from "@/lib/luma/modelFetcher";
+import { getUnificallyModels } from "@/lib/unifically/modelFetcher";
 import { createPageBudget } from "@/lib/providers/pageBudget";
 import {
   getCachedModels,
@@ -989,6 +990,7 @@ export async function GET(
   const wavespeedKey = request.headers.get("X-WaveSpeed-Key") || process.env.WAVESPEED_API_KEY || null;
   const muapiKey = request.headers.get("X-Muapi-API-Key") || process.env.MUAPI_API_KEY || null;
   const lumaKey = request.headers.get("X-Luma-Key") || process.env.LUMALABS_API_KEY || null;
+  const unificallyKey = request.headers.get("X-Unifically-Key") || process.env.UNIFICALLY_API_KEY || null;
 
   // Build list of all available providers (have keys from env or client headers)
   const availableProviders: string[] = ["gemini"]; // Gemini always available
@@ -998,6 +1000,7 @@ export async function GET(
   if (wavespeedKey) availableProviders.push("wavespeed");
   if (muapiKey) availableProviders.push("muapi");
   if (lumaKey) availableProviders.push("luma");
+  if (unificallyKey) availableProviders.push("unifically");
 
   // Determine which providers to fetch from (excluding gemini/kie - handled separately as hardcoded)
   const providersToFetch: ProviderType[] = [];
@@ -1005,6 +1008,7 @@ export async function GET(
   let includeKie = false;
   let includeMuapi = false;
   let includeLuma = false;
+  let includeUnifically = false;
 
   if (providerFilter) {
     if (providerFilter === "gemini") {
@@ -1047,6 +1051,15 @@ export async function GET(
           { status: 400 }
         );
       }
+    } else if (providerFilter === "unifically") {
+      if (unificallyKey) {
+        includeUnifically = true;
+      } else {
+        return NextResponse.json<ModelsErrorResponse>(
+          { success: false, error: "Unifically API key required. Add UNIFICALLY_API_KEY to .env.local or configure in Settings." },
+          { status: 400 }
+        );
+      }
     } else if (providerFilter === "luma") {
       if (lumaKey) {
         includeLuma = true;
@@ -1067,6 +1080,7 @@ export async function GET(
     includeKie = kieKey ? true : false; // Kie only if API key is configured
     includeMuapi = muapiKey ? true : false; // muapi only if API key is configured
     includeLuma = lumaKey ? true : false; // Luma only if API key is configured
+    includeUnifically = unificallyKey ? true : false; // Unifically only if API key is configured
     if (wavespeedKey) {
       providersToFetch.push("wavespeed"); // WaveSpeed if key is configured
     }
@@ -1079,7 +1093,7 @@ export async function GET(
   }
 
   // Gemini, Kie, and muapi are hardcoded — don't fail if no external API providers
-  if (providersToFetch.length === 0 && !includeGemini && !includeKie && !includeMuapi && !includeLuma) {
+  if (providersToFetch.length === 0 && !includeGemini && !includeKie && !includeMuapi && !includeLuma && !includeUnifically) {
     return NextResponse.json<ModelsErrorResponse>(
       {
         success: false,
@@ -1156,6 +1170,17 @@ export async function GET(
       count: lumaModels.length,
       cached: true,
     };
+    anyFromCache = true;
+  }
+
+  // Unifically: the live catalogue from its own /v1/models — nothing hardcoded.
+  if (includeUnifically && unificallyKey) {
+    let unificallyModels = await getUnificallyModels(unificallyKey);
+    if (searchQuery) {
+      unificallyModels = filterModelsBySearch([...unificallyModels], searchQuery);
+    }
+    allModels.push(...unificallyModels);
+    providerResults["unifically"] = { success: true, count: unificallyModels.length, cached: true };
     anyFromCache = true;
   }
 

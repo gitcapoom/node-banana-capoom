@@ -23,6 +23,7 @@ import type { ProviderType } from "@/types";
 import type { ExtractedResult } from "./types";
 import { getLumaApiRef } from "@/lib/luma/modelFetcher";
 import { buildLumaSchema } from "@/lib/luma/schema";
+import { getUnificallySchema } from "@/lib/unifically/modelFetcher";
 import { extractFromNormalized } from "./extract";
 import { mergePlaygroundFields } from "./merge";
 import { scrapePlayground, type PlaygroundScrapeResult } from "./playground";
@@ -151,6 +152,11 @@ export async function warmModelSchema(
         extracted = buildLumaSchema(apiRef, modelId);
         break;
       }
+      case "unifically":
+        // Parsed from Unifically's own docs (llms-full.txt); null for the few
+        // live models with no docs page, which then get generic pins.
+        extracted = await getUnificallySchema(modelId);
+        break;
       case "kie":
         extracted = getKieStaticSchema(modelId);
         break;

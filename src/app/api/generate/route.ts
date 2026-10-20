@@ -20,6 +20,7 @@ import { generateWithKie } from "./providers/kie";
 import { generateWithWaveSpeed } from "./providers/wavespeed";
 import { generateWithMuapi } from "./providers/muapi";
 import { generateWithLuma } from "./providers/luma";
+import { generateWithUnifically } from "./providers/unifically";
 import { wantsSSE, createSSEStream, SSE_HEADERS } from "./utils/sse";
 import { resolveMediaRefs, hasMediaRefs, recompressRefImages, hasRefImages, type RefOrigins } from "./utils/resolveMediaRefs";
 import { calculateGenerationCost } from "@/utils/costCalculator";
@@ -760,6 +761,78 @@ export async function POST(request: NextRequest) {
 
       // Pass the whole array: type=layering returns up to ten plates, and the
       // layering node needs all of them, not just the frontmost.
+      return buildMediaResponse(output, result.outputs);
+    }
+
+    // Unifically provider
+    if (provider === "unifically") {
+      if (!selectedModel?.modelId || !selectedModel?.displayName) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "selectedModel with modelId and displayName is required for Unifically" },
+          { status: 400 }
+        );
+      }
+
+      const unificallyApiKey = request.headers.get("X-Unifically-Key") || process.env.UNIFICALLY_API_KEY;
+      if (!unificallyApiKey) {
+        return NextResponse.json<GenerateResponse>(
+          {
+            success: false,
+            error: "Unifically API key not configured. Add UNIFICALLY_API_KEY to .env.local or configure in Settings.",
+          },
+          { status: 401 }
+        );
+      }
+
+      // Inputs must be public URLs. The fal CDN is preferred for that, as for
+      // muapi; Unifically's own storage is the fallback inside the provider.
+      const falApiKeyForUpload = request.headers.get("X-Fal-API-Key") || process.env.FAL_API_KEY || null;
+
+      const processedImages: string[] = images ? [...images] : [];
+      let processedDynamicInputs: Record<string, string | string[]> | undefined = undefined;
+      if (dynamicInputs) {
+        processedDynamicInputs = {};
+        for (const key of Object.keys(dynamicInputs)) {
+          const value = dynamicInputs[key];
+          if (value === null || value === undefined || value === '') continue;
+          processedDynamicInputs[key] = value;
+        }
+      }
+
+      const genInput: GenerationInput = {
+        model: {
+          id: selectedModel.modelId,
+          name: selectedModel.displayName,
+          provider: "unifically",
+          capabilities: capabilitiesForMediaType(mediaType),
+          description: null,
+        },
+        prompt: prompt || "",
+        images: processedImages,
+        parameters,
+        dynamicInputs: processedDynamicInputs,
+      };
+
+      const result = await retryWithCompressedImages(
+        requestId, refRetry, processedImages, processedDynamicInputs,
+        (imgs, dynIn) => generateWithUnifically(requestId, unificallyApiKey, { ...genInput, images: imgs, dynamicInputs: dynIn }, { falApiKey: falApiKeyForUpload }),
+      );
+
+      if (!result.success) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: result.error || "Generation failed" },
+          { status: 500 }
+        );
+      }
+
+      const output = result.outputs?.[0];
+      if (!output?.data && !output?.url) {
+        return NextResponse.json<GenerateResponse>(
+          { success: false, error: "No output in generation result" },
+          { status: 500 }
+        );
+      }
+
       return buildMediaResponse(output, result.outputs);
     }
 
