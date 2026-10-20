@@ -17,6 +17,19 @@ describe("isImageSizeError", () => {
     expect(isImageSizeError("the image is too big")).toBe(true);
   });
 
+  it("detects WaveSpeed's byte-limit refusal", () => {
+    // The real deploy error: 8 reference images, no retry, job failed.
+    expect(isImageSizeError(
+      'WaveSpeed submit failed: 400 - Invalid request body: field "reference_images" must not exceed 50MB, got 57.99MB; please reduce the payload size'
+    )).toBe(true);
+    expect(isImageSizeError("file must not exceed 30 MB")).toBe(true);
+  });
+
+  it("does not take a duration or count limit for a size limit", () => {
+    expect(isImageSizeError("combined duration must not exceed 15 s")).toBe(false);
+    expect(isImageSizeError("image count must not exceed 9")).toBe(false);
+  });
+
   it("returns false for unrelated errors", () => {
     expect(isImageSizeError("Deadline expired before operation could complete")).toBe(false);
     expect(isImageSizeError("Invalid API key")).toBe(false);

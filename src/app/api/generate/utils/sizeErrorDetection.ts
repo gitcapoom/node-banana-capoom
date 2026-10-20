@@ -20,6 +20,11 @@ const SIZE_ERROR_PATTERNS = [
   /too.*big/i,
   /exceeds.*max/i,
   /over.*limit/i,
+  // WaveSpeed: 'field "reference_images" must not exceed 50MB, got 57.99MB;
+  // please reduce the payload size'. "exceed" (not "exceeds") next to a byte
+  // size, so a duration or count limit ("exceed 15 s") does not match.
+  /\bexceed(?:s|ed)?\b[^;.]*\d\s*[KMG]i?B\b/i,
+  /reduce the (?:payload|file|image|upload) size/i,
 ];
 
 /**
