@@ -185,18 +185,71 @@ function toType(raw: string, name: string): Pick<NormalizedProperty, "type" | "i
   return { type: "string" };
 }
 
-/** Closed value set from a description's `Allowed: ...` sentence, if any. */
-function allowedValues(description: string): string[] | undefined {
-  const m = /Allowed(?: values)?:\s*([^.]*(?:\.\d[^.]*)*)/i.exec(description);
-  if (!m) return undefined;
-  const vals = [...m[1].matchAll(/`"?([^`"]+)"?`/g)].map((x) => x[1]);
-  return vals.length ? vals : undefined;
+interface DescribedValues {
+  enum?: string[];
+  examples?: string[];
+  default?: string;
+}
+
+const TICKED = /`"?([^`"]+)"?`/g;
+/** One listed value, optionally annotated: `pro`, `pro` (1080p), `5` (default). */
+const LIST_ITEM = /`[^`]+`(?:\s*\([^)]*\))?/.source;
+/** Two or more listed values and nothing else, bar a trailing unit. */
+const PURE_LIST = new RegExp(
+  `^${LIST_ITEM}(?:\\s*(?:,\\s*or|,|or|\\|)\\s*${LIST_ITEM})+\\s*(?:seconds?|s|px)?\\s*\\.?$`,
+  "i"
+);
+/** A sentence opener that introduces a closed list: "Allowed:", "One of", "Output container:". */
+const LIST_LEAD = /^(?:(?:allowed(?: values)?|available|one of|options|valid values|supported values)\s*:?|[^`:]*(?:`[^`]*`[^`:]*)*:)\s*/i;
+
+/**
+ * Value sets in a description. The docs have no enum column and phrase a
+ * closed set a dozen ways — "`720p`, `1080p`, `4k`", "`5` or `10` seconds",
+ * "One of `mp4`, `webm`", "Allowed: `16:9`, `9:16`", "`std` (default) or
+ * `pro`" — so a sentence counts as one when, after an optional lead-in, it is
+ * nothing but two or more backticked values. Reading only "Allowed:" left most
+ * of these as free-text boxes that took any typo.
+ *
+ * "e.g." lists are examples, never a closed set. A list naming other fields of
+ * the same table ("provide exactly one of `text`, `ssml`") is not a value set.
+ */
+export function describedValues(description: string, fieldNames: ReadonlySet<string> = new Set()): DescribedValues {
+  const out: DescribedValues = {};
+  // Sentence breaks; a dot inside a value (`1.5`) is never followed by a space,
+  // and "e.g." does not end a sentence.
+  for (const raw of description.split(/(?<=\.)(?<!\b(?:e\.g|i\.e|etc|vs)\.)\s+/i)) {
+    let s = raw.replace(/^[*\\]+/, "").trim();
+    const def = /\(default:?\s*`"?([^`"]+)"?`\)|^default:?\s*`"?([^`"]+)"?`/i.exec(s);
+    if (def && out.default === undefined) out.default = def[1] ?? def[2];
+    s = s.replace(/\s*\(default:?\s*`[^`]+`\)/i, "").trim();
+    const values = [...s.matchAll(TICKED)].map((m) => m[1]);
+    if (/\b(e\.g\.|for example|such as)/i.test(s)) {
+      if (values.length >= 2 && !out.examples) out.examples = values;
+      continue;
+    }
+    const marked = /`"?([^`"]+)"?`\s*\(default\)/i.exec(s);
+    if (marked && out.default === undefined) out.default = marked[1];
+    if (out.enum) continue;
+    // A trailing aside ("; see Pricing") does not stop a list being one.
+    const body = s.replace(LIST_LEAD, "").replace(/\s*;.*$/, "");
+    const isList = PURE_LIST.test(body) || /^`[^`]+`\s+only\.?$/i.test(body);
+    // Values from the list alone: a lead-in can name a model ("`suno-ai/mp3` only:").
+    const listed = [...body.matchAll(TICKED)].map((m) => m[1]);
+    if (isList && !listed.every((v) => fieldNames.has(v))) out.enum = listed;
+  }
+  return out;
+}
+
+function typedValue(v: string, type: NormalizedProperty["type"]): unknown {
+  if (type !== "integer" && type !== "number") return v;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function toDefault(raw: string | undefined, type: NormalizedProperty["type"]): unknown {
   if (!raw) return undefined;
   const v = unquote(raw);
-  if (!v || v === "-" || /^(random|none|auto-generated|n\/a)$/i.test(v)) return undefined;
+  if (!v || v === "-" || /^(random|none|null|auto-generated|n\/a|—|–)$/i.test(v)) return undefined;
   if (type === "integer" || type === "number") {
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
@@ -233,6 +286,7 @@ function tableProperties(t: Table, into: Record<string, NormalizedProperty>, req
   const iReq = col("required");
   const iDef = col("default");
   const iDesc = col("description");
+  const fieldNames = new Set(t.rows.map((r) => unquote(r[0] ?? "")));
   for (const r of t.rows) {
     const name = unquote(r[0] ?? "");
     if (!/^[a-z_][a-z0-9_]*$/i.test(name) || into[name]) continue;
@@ -240,9 +294,20 @@ function tableProperties(t: Table, into: Record<string, NormalizedProperty>, req
     const description = iDesc >= 0 ? r[iDesc] : undefined;
     const prop: NormalizedProperty = { name, ...shape, source: "static" };
     if (description) prop.description = description;
-    const enumVals = description && shape.type === "string" ? allowedValues(description) : undefined;
+    const scalar = shape.type === "string" || shape.type === "integer" || shape.type === "number";
+    const described = description && scalar ? describedValues(description, fieldNames) : {};
+    const asType = (vs: string[] | undefined) => {
+      const typed = vs?.map((v) => typedValue(v, shape.type));
+      // A number field listing a non-number is prose, not a value set.
+      return typed && typed.every((v) => v !== undefined) ? typed : undefined;
+    };
+    const enumVals = asType(described.enum);
     if (enumVals) prop.enum = enumVals;
-    const def = toDefault(iDef >= 0 ? r[iDef] : undefined, shape.type);
+    const examples = asType(described.examples);
+    if (examples && !enumVals) prop.examples = examples;
+    const def =
+      toDefault(iDef >= 0 ? r[iDef] : undefined, shape.type) ??
+      (described.default !== undefined ? typedValue(described.default, shape.type) : undefined);
     if (def !== undefined) prop.default = def;
     if (iReq >= 0 && /^yes\b/i.test(r[iReq] ?? "")) {
       prop.required = true;

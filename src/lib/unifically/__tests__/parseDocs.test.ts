@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { buildSchemaIndex, splitModelPages, modelIdsOnPage, parsePageSchemas } from "../parseDocs";
+import { buildSchemaIndex, splitModelPages, modelIdsOnPage, parsePageSchemas, describedValues } from "../parseDocs";
 
 const VEO = `# Veo 3.1
 Source: https://docs.unifically.com/models/video/google/veo-3.1
@@ -201,5 +201,66 @@ describe("property details", () => {
 describe("parsePageSchemas", () => {
   it("returns nothing for a page with no Parameters table", () => {
     expect(parsePageSchemas("# X\nSource: https://docs.unifically.com/models/video/a/b\n\nno table").size).toBe(0);
+  });
+});
+
+describe("describedValues", () => {
+  // Every phrasing below is copied from the real docs. Reading only
+  // "Allowed:" left Seedance's resolution and dozens more as free text.
+  it("reads a bare backticked list as a closed set", () => {
+    expect(describedValues("`720p`, `1080p`, `4k`").enum).toEqual(["720p", "1080p", "4k"]);
+    expect(describedValues('`"none"`, `"word"`, or `"character"`').enum).toEqual(["none", "word", "character"]);
+    expect(describedValues("`5` or `10` seconds (default: `5`)")).toEqual({ enum: ["5", "10"], default: "5" });
+  });
+
+  it("reads lead-ins, annotations and trailing asides", () => {
+    expect(describedValues("Output frame rate. One of `24`, `25`, `30`. Does not change the price").enum).toEqual(["24", "25", "30"]);
+    expect(describedValues("Output container: `mp3`, `wav`, `pcm`").enum).toEqual(["mp3", "wav", "pcm"]);
+    expect(describedValues('`"std"` (720p) or `"pro"` (1080p); see [Pricing](#pricing). 4K is rejected').enum).toEqual(["std", "pro"]);
+    expect(describedValues("`768p` (default) or `1080p`")).toEqual({ enum: ["768p", "1080p"], default: "768p" });
+    expect(describedValues("`1K` only").enum).toEqual(["1K"]);
+  });
+
+  it("keeps a model id in the lead-in out of the values", () => {
+    expect(describedValues("`suno-ai/mp3` only: `mp3` (default) or `m4a`").enum).toEqual(["mp3", "m4a"]);
+  });
+
+  it("treats e.g. lists as suggestions, not a closed set", () => {
+    // "e.g." must not end the sentence, or the list after it looks bare.
+    expect(describedValues('Output-dimension multiplier, e.g. `2`, `2.5`, `"4x"`. Omit to keep the source size'))
+      .toEqual({ examples: ["2", "2.5", "4x"] });
+  });
+
+  it("does not take a list of sibling fields for values", () => {
+    const fields = new Set(["input", "text", "dialog"]);
+    expect(describedValues("Text to speak. \*Provide exactly one of `input`, `text`, or `dialog`", fields).enum).toBeUndefined();
+    // …but a value that merely shares a field's name is still a value.
+    expect(describedValues('Reference strategy: `"restyle"`, `"elements"`', new Set(["elements"])).enum).toEqual(["restyle", "elements"]);
+  });
+
+  it("ignores ranges and prose", () => {
+    expect(describedValues("Clarity, `0`–`1`").enum).toBeUndefined();
+    expect(describedValues("Mutually exclusive with `voice_id`").enum).toBeUndefined();
+  });
+
+  it("types values for number fields and drops placeholder defaults", () => {
+    const page = `# M
+Source: https://docs.unifically.com/models/video/x/m
+
+## Parameters
+
+| Parameter | Type | Required | Default | Description |
+| - | - | - | - | - |
+| \`duration\` | integer | No | - | \`6\` (default) or \`10\` seconds |
+| \`ratio\` | string | No | \`null\` | Aspect ratio (T2V only): \`"16:9"\`, \`"9:16"\` |
+
+\`\`\`bash
+curl -d '{ "model": "x/m" }'
+\`\`\`
+`;
+    const s = parsePageSchemas(page).get("x/m")!;
+    expect(s.properties.duration).toMatchObject({ enum: [6, 10], default: 6 });
+    expect(s.properties.ratio.enum).toEqual(["16:9", "9:16"]);
+    expect(s.properties.ratio.default).toBeUndefined();
   });
 });

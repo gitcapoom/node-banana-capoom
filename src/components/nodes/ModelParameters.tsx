@@ -10,7 +10,7 @@ import { setDisposableCache } from "@/utils/localStorageQuota";
 // localStorage cache for model schemas (persists across dev server restarts)
 // Bump SCHEMA_CACHE_VERSION when schema extraction logic changes to auto-invalidate
 const SCHEMA_CACHE_KEY = "node-banana-schema-cache";
-const SCHEMA_CACHE_VERSION = 12; // v12: parameters carry `examples` for preset-style pickers
+const SCHEMA_CACHE_VERSION = 13; // v13: Unifically enums read from every docs phrasing, not just "Allowed:"
 const SCHEMA_CACHE_TTL = 48 * 60 * 60 * 1000; // 48 hours
 
 interface SchemaCacheEntry {

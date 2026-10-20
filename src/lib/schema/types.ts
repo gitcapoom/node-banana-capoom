@@ -88,4 +88,4 @@ export interface CachedSchemaEntry {
 }
 
 /** Bump when extract.ts logic changes. Any cache entries with lower version are re-extracted. */
-export const SCHEMA_FORMAT_VERSION = 6; // v6: carry schema `examples` so preset-style string params are pickable
+export const SCHEMA_FORMAT_VERSION = 7; // v7: Unifically enums from every docs phrasing (Seedance resolution was free text)
