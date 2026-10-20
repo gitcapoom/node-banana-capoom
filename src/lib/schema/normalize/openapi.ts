@@ -180,6 +180,9 @@ export function normalizeProperty(
 
   // Enum
   if (Array.isArray(raw.enum) && raw.enum.length > 0) out.enum = raw.enum;
+  // `const` is a one-value enum (fal Seedance 2.5 image-to-video: aspect_ratio
+  // is always "auto"); left as free text it invited values the API rejects.
+  else if (raw.const !== undefined && raw.const !== null && typeof raw.const !== "object") out.enum = [raw.const];
   // Suggestions, not a closed set — see NormalizedProperty.examples.
   const directExamples = scalarExamples(raw);
   if (directExamples) out.examples = directExamples;

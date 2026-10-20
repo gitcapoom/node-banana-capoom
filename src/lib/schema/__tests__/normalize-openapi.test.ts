@@ -76,6 +76,13 @@ describe("normalizeOpenApiSchema", () => {
     expect(prop.description).toBe("URL of an image");
   });
 
+  it("reads const as a one-value enum", () => {
+    // fal Seedance 2.5 image-to-video: aspect_ratio is always "auto".
+    const prop = normalizeProperty("aspect_ratio", { type: "string", const: "auto", default: "auto" });
+    expect(prop.enum).toEqual(["auto"]);
+    expect(normalizeProperty("x", { type: "string", enum: ["a", "b"], const: "a" }).enum).toEqual(["a", "b"]);
+  });
+
   it("converts pydantic ge/le into minimum/maximum", () => {
     const prop = normalizeProperty("guidance", { type: "number", ge: 0, le: 20 });
     expect(prop.minimum).toBe(0);
