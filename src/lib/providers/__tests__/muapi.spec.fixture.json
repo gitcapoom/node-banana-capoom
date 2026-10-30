@@ -1,0 +1,638 @@
+{
+ "paths": {
+  "/api/v1/seedance-2.0-omni-reference": {
+   "post": {
+    "tags": [
+     "Video: Image-to-Video"
+    ],
+    "summary": "sd-2-omni-reference (best)",
+    "operationId": "seedance_2_omni_reference_api_v1_seedance_2_0_omni_reference_post",
+    "parameters": [
+     {
+      "name": "webhook",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "Webhook"
+      }
+     },
+     {
+      "name": "team_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Team Id"
+      }
+     },
+     {
+      "name": "x-api-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "X-Api-Key"
+      }
+     },
+     {
+      "name": "x-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Embed-Code"
+      }
+     },
+     {
+      "name": "x-agent-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Agent-Embed-Code"
+      }
+     },
+     {
+      "name": "x-whitelabel-studio",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Whitelabel-Studio"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/Seedance2OmniReferenceBaseRequest"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/seedance-2.5-text-to-video-4k": {
+   "post": {
+    "tags": [
+     "Video: Text-to-Video"
+    ],
+    "summary": "Seedance 2 5 Text To Video 4K",
+    "operationId": "seedance_2_5_text_to_video_4k_api_v1_seedance_2_5_text_to_video_4k_post",
+    "parameters": [
+     {
+      "name": "webhook",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "Webhook"
+      }
+     },
+     {
+      "name": "team_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Team Id"
+      }
+     },
+     {
+      "name": "x-api-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "X-Api-Key"
+      }
+     },
+     {
+      "name": "x-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Embed-Code"
+      }
+     },
+     {
+      "name": "x-agent-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Agent-Embed-Code"
+      }
+     },
+     {
+      "name": "x-whitelabel-studio",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Whitelabel-Studio"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/Seedance25T2V4kRequest"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/flux-dev-image": {
+   "post": {
+    "tags": [
+     "Image: Text-to-Image"
+    ],
+    "summary": "flux-dev (balanced)",
+    "operationId": "generate_flux_dev_image_api_v1_flux_dev_image_post",
+    "parameters": [
+     {
+      "name": "webhook",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "Webhook"
+      }
+     },
+     {
+      "name": "team_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Team Id"
+      }
+     },
+     {
+      "name": "x-api-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "X-Api-Key"
+      }
+     },
+     {
+      "name": "x-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Embed-Code"
+      }
+     },
+     {
+      "name": "x-agent-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Agent-Embed-Code"
+      }
+     },
+     {
+      "name": "x-whitelabel-studio",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Whitelabel-Studio"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ImageRequest"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/auth/login": {
+   "post": {
+    "tags": [
+     "Auth"
+    ],
+    "summary": "Login",
+    "operationId": "login_auth_login_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RegisterLoginRequest"
+       }
+      }
+     },
+     "required": true
+    }
+   }
+  },
+  "/api/v1/seo-google-serp": {
+   "post": {
+    "tags": [
+     "LLM / Multimodal"
+    ],
+    "summary": "seo-google-serp (balanced)",
+    "operationId": "seo_google_serp_api_v1_seo_google_serp_post",
+    "parameters": [
+     {
+      "name": "webhook",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "Webhook"
+      }
+     },
+     {
+      "name": "team_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Team Id"
+      }
+     },
+     {
+      "name": "x-api-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "X-Api-Key"
+      }
+     },
+     {
+      "name": "x-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Embed-Code"
+      }
+     },
+     {
+      "name": "x-agent-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Agent-Embed-Code"
+      }
+     },
+     {
+      "name": "x-whitelabel-studio",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Whitelabel-Studio"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SeoGoogleSerpRequest"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/feedback/{feedback_id}": {
+   "get": {
+    "tags": [
+     "Feedback"
+    ],
+    "summary": "Get Feedback",
+    "operationId": "get_feedback_api_v1_feedback__feedback_id__get",
+    "parameters": [
+     {
+      "name": "feedback_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Feedback Id"
+      }
+     }
+    ]
+   }
+  },
+  "/api/v1/tripo3d-p1-text-to-3d": {
+   "post": {
+    "tags": [
+     "3D Generation"
+    ],
+    "summary": "tripo3d-p1-text-to-3d (fast)",
+    "operationId": "tripo3d_p1_text_to_3d_api_v1_tripo3d_p1_text_to_3d_post",
+    "parameters": [
+     {
+      "name": "webhook",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "Webhook"
+      }
+     },
+     {
+      "name": "team_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Team Id"
+      }
+     },
+     {
+      "name": "x-api-key",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "title": "X-Api-Key"
+      }
+     },
+     {
+      "name": "x-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Embed-Code"
+      }
+     },
+     {
+      "name": "x-agent-embed-code",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Agent-Embed-Code"
+      }
+     },
+     {
+      "name": "x-whitelabel-studio",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Whitelabel-Studio"
+      }
+     },
+     {
+      "name": "authorization",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/TripoP1T23DRequest"
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+}

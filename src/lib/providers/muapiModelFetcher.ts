@@ -1,18 +1,17 @@
 /**
  * muapi.ai Dynamic Model Fetcher
  *
- * Fetches the complete model list from https://muapi.ai/playground
- * by scraping the server-rendered HTML. The playground page contains
- * <a> tags with href="/playground/{slug}" and a <span> with the
- * category label (e.g. "Text to Image", "Video to Video").
+ * The model list comes from muapi's OpenAPI spec (see listModelsFromSpec).
+ * If the spec is unreachable it falls back to scraping
+ * https://muapi.ai/playground, then to the hardcoded MUAPI_MODELS list.
  *
- * Used server-side by /api/models route. Falls back to the hardcoded
- * MUAPI_MODELS list if the fetch fails.
+ * Used server-side by /api/models route.
  *
  * Cache: refreshes every 24 hours.
  */
 
 import { ProviderModel, ModelCapability } from "@/lib/providers/types";
+import { fetchMuapiOpenApiSpec } from "@/lib/schema/normalize/muapi";
 
 const PLAYGROUND_URL = "https://muapi.ai/playground";
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
@@ -149,6 +148,73 @@ function parsePlaygroundHtml(html: string): ProviderModel[] {
 }
 
 /**
+ * OpenAPI tag → capability. The spec tags every endpoint; tags not listed
+ * here (LLM, Auth, Dashboard, Storyboard, …) are not generation models this
+ * app renders a node for.
+ */
+const SPEC_TAG_MAP: Record<string, ModelCapability> = {
+  "Video: Text-to-Video": "text-to-video",
+  "Video: Image-to-Video": "image-to-video",
+  "Video: Edit & Effects": "video-to-video",
+  "Video: Lipsync": "video-to-video",
+  "Video: Avatars": "image-to-video",
+  "Image: Text-to-Image": "text-to-image",
+  "Image: Edit & Reference": "image-to-image",
+  "Image: Enhance": "image-to-image",
+  Audio: "text-to-audio",
+  "3D Generation": "image-to-3d",
+};
+
+/**
+ * The catalogue from muapi's OpenAPI spec — the same document the schemas
+ * come from, so a listed id always has its real schema.
+ *
+ * The playground scrape this replaces read an undocumented page that keeps
+ * changing shape (2026-10: 21 models parsed, so the app fell back to a
+ * hardcoded list from March whose ids muapi had since renamed —
+ * `seedance-v2.0-omni-reference` is now `seedance-2.0-omni-reference` — and
+ * which lacked every Seedance 2.5 and 1080p/4K endpoint). A missing spec
+ * path also sent the schema lookup to a slug guess, which read
+ * "omni-reference" as an IMAGE model: 1k/2k/4k, no duration.
+ */
+export function listModelsFromSpec(spec: Record<string, unknown>): ProviderModel[] {
+  const paths = (spec.paths ?? {}) as Record<string, Record<string, Record<string, unknown>>>;
+  const models: ProviderModel[] = [];
+  for (const [path, ops] of Object.entries(paths)) {
+    const slug = /^\/api\/v1\/([a-z0-9][a-z0-9._-]*)$/i.exec(path)?.[1];
+    const post = ops?.post;
+    if (!slug || !post) continue;
+    const body = (post.requestBody as { content?: Record<string, unknown> } | undefined)?.content;
+    if (!body?.["application/json"]) continue; // not a generation call
+    const tags = (post.tags as string[] | undefined) ?? [];
+    const capability = tags.map((t) => SPEC_TAG_MAP[t]).find(Boolean);
+    if (!capability) continue;
+    models.push({
+      id: slug,
+      name: slugToName(slug),
+      provider: "muapi",
+      capabilities: [
+        capability === "image-to-3d" && /text/i.test(slug) ? "text-to-3d" : capability,
+      ],
+      description: typeof post.summary === "string" ? post.summary : null,
+    });
+  }
+  return models;
+}
+
+async function fetchModelsFromSpec(): Promise<ProviderModel[] | null> {
+  const spec = await fetchMuapiOpenApiSpec();
+  if (!spec) return null;
+  const models = listModelsFromSpec(spec);
+  if (models.length < 50) {
+    console.warn(`[muapi] Only ${models.length} models in the OpenAPI spec — trying the playground`);
+    return null;
+  }
+  console.log(`[muapi] ${models.length} models from the OpenAPI spec`);
+  return models;
+}
+
+/**
  * Fetch models from muapi.ai playground.
  * Returns the model list, or null if fetch fails.
  */
@@ -200,7 +266,7 @@ export async function getMuapiModels(fallbackModels: ProviderModel[]): Promise<P
   if (!fetchPromise) {
     fetchPromise = (async () => {
       try {
-        const freshModels = await fetchModelsFromPlayground();
+        const freshModels = (await fetchModelsFromSpec()) ?? (await fetchModelsFromPlayground());
         if (freshModels) {
           cachedModels = freshModels;
           cacheTimestamp = Date.now();

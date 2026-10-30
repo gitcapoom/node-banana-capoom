@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
-import { parseModels } from "../muapiModelFetcher";
+import { parseModels, listModelsFromSpec } from "../muapiModelFetcher";
 
 /**
  * A fragment cut from the real muapi.ai/playground page on 2026-08-21.
@@ -56,5 +56,34 @@ describe("muapi model parsing", () => {
     for (const m of parseModels(fixture)) {
       for (const c of m.capabilities) expect(allowed.has(c)).toBe(true);
     }
+  });
+});
+
+/**
+ * Paths cut from the real https://api.muapi.ai/openapi.json (2026-10-30), with
+ * descriptions and responses trimmed. The playground scrape had dropped to 21
+ * models, so the app served a March list whose Seedance ids muapi had renamed.
+ */
+const spec = JSON.parse(readFileSync(join(__dirname, "muapi.spec.fixture.json"), "utf8"));
+
+describe("muapi catalogue from the OpenAPI spec", () => {
+  const models = listModelsFromSpec(spec);
+  const byId = Object.fromEntries(models.map((m) => [m.id, m]));
+
+  it("lists generation endpoints under their real ids, typed by tag", () => {
+    expect(byId["seedance-2.0-omni-reference"].capabilities).toEqual(["image-to-video"]);
+    expect(byId["seedance-2.5-text-to-video-4k"].capabilities).toEqual(["text-to-video"]);
+    expect(byId["flux-dev-image"].capabilities).toEqual(["text-to-image"]);
+    expect(byId["tripo3d-p1-text-to-3d"].capabilities).toEqual(["text-to-3d"]);
+  });
+
+  it("skips non-generation endpoints", () => {
+    // An LLM call, a GET with a path parameter, and an auth route.
+    expect(Object.keys(byId).sort()).toEqual([
+      "flux-dev-image",
+      "seedance-2.0-omni-reference",
+      "seedance-2.5-text-to-video-4k",
+      "tripo3d-p1-text-to-3d",
+    ]);
   });
 });
