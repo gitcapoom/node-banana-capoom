@@ -79,9 +79,12 @@ export function findOversizedInlineMedia(
 /** Human-readable refusal naming the field and both sizes. */
 export function oversizedMediaMessage(hit: OversizedMedia): string {
   const mb = (n: number) => `${(n / 1024 / 1024).toFixed(0)} MB`;
+  // Media over the limit normally goes from the project's inputs/ folder, at
+  // any size. This only fires when the file is not there yet, so the fix is
+  // saving, not shrinking the clip — which the old wording told people to do.
   return (
-    `"${hit.field}" is ${mb(hit.bytes)}, over the ${mb(INLINE_MEDIA_MAX_BYTES)} limit for ` +
-    `media sent with a generation request. Trim or compress the clip, or use a ` +
-    `shorter section — larger files cannot reach the provider and would crash the tab.`
+    `"${hit.field}" is ${mb(hit.bytes)} and is not saved in the project yet. Media over ` +
+    `${mb(INLINE_MEDIA_MAX_BYTES)} is sent from the project's inputs folder, so save the ` +
+    `workflow and run again.`
   );
 }

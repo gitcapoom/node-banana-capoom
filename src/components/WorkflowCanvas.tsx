@@ -20,6 +20,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { useWorkflowStore, WorkflowFile, generateWorkflowId } from "@/store/workflowStore";
+import { saveMediaImmediately } from "@/utils/mediaStorage";
 import { useShallow } from "zustand/shallow";
 import { parseDynPin } from "@/lib/dynamicPinId";
 import { useToast } from "@/components/Toast";
@@ -2281,6 +2282,16 @@ export function WorkflowCanvas() {
               });
             };
             tempVideo.src = dataUrl;
+
+            // Save to inputs/ now, as the node's own file picker does. Without
+            // a ref a clip over 20 MB cannot be sent from disk, so a Run before
+            // the next autosave refused it as too large.
+            const dir = useWorkflowStore.getState().saveDirectoryPath;
+            if (dir) {
+              saveMediaImmediately(dataUrl, dir, "inputs").then((ref) => {
+                if (ref) updateNodeData(nodeId, { videoFileRef: ref });
+              });
+            }
           };
           reader.readAsDataURL(file);
         });

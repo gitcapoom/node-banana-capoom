@@ -33,6 +33,7 @@ import {
 import { useToast } from "@/components/Toast";
 import { logger } from "@/utils/logger";
 import { resetCommitSignatureCaches } from "@/utils/renderSignature";
+import { mergeExternalizedRefs } from "@/store/utils/mergeExternalizedRefs";
 import { externalizeWorkflowImages, hydrateWorkflowImages } from "@/utils/imageStorage";
 import { relocalizeNodeImageRefs } from "@/utils/mediaStorage";
 import { EditOperation, applyEditOperations as executeEditOps } from "@/lib/chat/editOperations";
@@ -3170,51 +3171,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           // snapshot captured at save start). This prevents the async save from
           // overwriting node data that was updated while externalization was in progress
           // (e.g. a video generation completing during save).
-          const latestNodes = get().nodes;
-          const nodesWithRefs = latestNodes.map((node) => {
-            // Find the matching externalized node by ID (not index — nodes may have been
-            // added/removed during the async save)
-            const externalizedNode = workflow.nodes.find((en) => en.id === node.id);
-            if (!externalizedNode) {
-              return node; // Node was added after save started — keep as-is
-            }
-
-            // Copy refs from externalized node while keeping current image data
-            // Use type assertion to access ref fields that may exist on various node types
-            const mergedData = { ...node.data } as Record<string, unknown>;
-            const extData = externalizedNode.data as Record<string, unknown>;
-
-            // Copy ref fields based on node type
-            if (extData.imageRef && typeof extData.imageRef === 'string') {
-              mergedData.imageRef = extData.imageRef;
-            }
-            if (extData.sourceImageRef && typeof extData.sourceImageRef === 'string') {
-              mergedData.sourceImageRef = extData.sourceImageRef;
-            }
-            if (extData.outputImageRef && typeof extData.outputImageRef === 'string') {
-              mergedData.outputImageRef = extData.outputImageRef;
-            }
-            if (extData.inputImageRefs && Array.isArray(extData.inputImageRefs)) {
-              mergedData.inputImageRefs = extData.inputImageRefs;
-            }
-            // GLB file ref (created during externalization fallback for glbViewer nodes)
-            if (extData.glbFileRef && typeof extData.glbFileRef === 'string') {
-              mergedData.glbFileRef = extData.glbFileRef;
-            }
-            // Video refs (generateVideo nodes)
-            if (extData.outputVideoRef && typeof extData.outputVideoRef === 'string') {
-              mergedData.outputVideoRef = extData.outputVideoRef;
-            }
-            if (extData.thumbnailImageRef && typeof extData.thumbnailImageRef === 'string') {
-              mergedData.thumbnailImageRef = extData.thumbnailImageRef;
-            }
-            // Audio ref (generateAudio nodes)
-            if (extData.outputAudioRef && typeof extData.outputAudioRef === 'string') {
-              mergedData.outputAudioRef = extData.outputAudioRef;
-            }
-
-            return { ...node, data: mergedData as WorkflowNodeData } as WorkflowNode;
-          });
+          const nodesWithRefs = mergeExternalizedRefs(get().nodes, workflow.nodes);
 
           set({
             nodes: nodesWithRefs,
