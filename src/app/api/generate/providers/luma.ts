@@ -21,6 +21,7 @@
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
 import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
+import { waitUnlessCancelled, cancelledOutput } from "../utils/cancellation";
 import { validateMediaUrl } from "@/utils/urlValidation";
 import { setAtPath } from "./deepSet";
 
@@ -244,7 +245,8 @@ export async function generateWithLuma(
   let result: LumaGeneration | null = null;
 
   while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, pollIntervalMs));
+    // Luma has no cancel endpoint: stop polling, the job still runs and bills.
+    if (await waitUnlessCancelled(pollIntervalMs, input.signal)) return cancelledOutput(requestId, "Luma", false);
     let poll: Response;
     try {
       poll = await fetch(`${LUMA_API_BASE}/generations/${generationId}`, {

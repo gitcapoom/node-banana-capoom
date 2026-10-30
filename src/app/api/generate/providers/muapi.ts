@@ -12,6 +12,7 @@
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
 import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
+import { waitUnlessCancelled, cancelUpstream, cancelledOutput } from "../utils/cancellation";
 import { validateMediaUrl } from "@/utils/urlValidation";
 import { uploadImageToFal } from "./fal";
 
@@ -179,7 +180,16 @@ export async function generateWithMuapi(
       return { success: false, error: `${input.model.name}: Generation timed out after 10 minutes` };
     }
 
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    if (await waitUnlessCancelled(pollInterval, input.signal)) {
+      // The spec lists this under "Dashboard" — it may want a session rather
+      // than an API key, so it is best effort; cancelUpstream logs the outcome.
+      await cancelUpstream(requestId, "muapi", () =>
+        fetch(`https://api.muapi.ai/app/cancel_prediction/${encodeURIComponent(taskId)}`, {
+          method: "POST",
+          headers: { "x-api-key": apiKey },
+        }));
+      return cancelledOutput(requestId, "muapi", true);
+    }
 
     try {
       const pollUrl = `${MUAPI_BASE}/predictions/${taskId}/result`;

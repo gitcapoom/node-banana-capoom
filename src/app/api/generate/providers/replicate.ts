@@ -6,6 +6,7 @@
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
 import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
+import { waitUnlessCancelled, cancelUpstream, cancelledOutput } from "../utils/cancellation";
 import { validateMediaUrl } from "@/utils/urlValidation";
 import {
   getParameterTypesFromSchema,
@@ -202,7 +203,14 @@ export async function generateWithReplicate(
       };
     }
 
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    if (await waitUnlessCancelled(pollInterval, input.signal)) {
+      await cancelUpstream(requestId, "Replicate", () =>
+        fetch(`${REPLICATE_API_BASE}/predictions/${currentPrediction.id}/cancel`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${apiKey}` },
+        }));
+      return cancelledOutput(requestId, "Replicate", true);
+    }
 
     const pollResponse = await fetch(
       `${REPLICATE_API_BASE}/predictions/${currentPrediction.id}`,

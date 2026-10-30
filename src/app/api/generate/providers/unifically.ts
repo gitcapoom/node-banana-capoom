@@ -19,6 +19,7 @@
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
 import type { NormalizedSchema } from "@/lib/schema/types";
 import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
+import { waitUnlessCancelled, cancelledOutput } from "../utils/cancellation";
 import { validateMediaUrl } from "@/utils/urlValidation";
 import { uploadImageToFal } from "./fal";
 import { UNIFICALLY_API_BASE, getUnificallyNormalizedSchema } from "@/lib/unifically/modelFetcher";
@@ -192,7 +193,8 @@ export async function generateWithUnifically(
     if (Date.now() > deadline) {
       return { success: false, error: `${input.model.name}: Timed out after ${Math.round(GENERATION_MAX_WAIT_MS / 60000)} minutes` };
     }
-    await new Promise((r) => setTimeout(r, interval));
+    // Unifically has no cancel endpoint: stop polling, the job still runs and bills.
+    if (await waitUnlessCancelled(interval, input.signal)) return cancelledOutput(requestId, "Unifically", false);
     let json: { success?: boolean; data?: { status?: string; output?: unknown; error_message?: string; message?: string } } | null;
     let status: number;
     try {

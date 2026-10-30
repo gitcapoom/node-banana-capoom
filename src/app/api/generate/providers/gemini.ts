@@ -6,6 +6,7 @@
 
 import { NextResponse } from "next/server";
 import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
+import { waitUnlessCancelled, cancelledOutput } from "../utils/cancellation";
 import { GoogleGenAI } from "@google/genai";
 import { GenerateResponse, ModelType } from "@/types";
 import { GenerationOutput } from "@/lib/providers/types";
@@ -280,6 +281,7 @@ export async function generateWithGeminiVideo(
   prompt: string,
   images: string[],
   parameters: Record<string, unknown> = {},
+  signal?: AbortSignal,
 ): Promise<GenerationOutput> {
   const apiModelId = VEO_MODEL_MAP[modelId];
   if (!apiModelId) {
@@ -364,7 +366,8 @@ export async function generateWithGeminiVideo(
       }
 
       console.log(`[API:${requestId}] Veo polling... (${(elapsed / 1000).toFixed(0)}s elapsed)`);
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+      // Veo operations have no cancel: stop polling, the job still runs and bills.
+      if (await waitUnlessCancelled(POLL_INTERVAL, signal)) return cancelledOutput(requestId, "Gemini Veo", false);
       operation = await ai.operations.getVideosOperation({ operation });
     }
   } catch (error) {

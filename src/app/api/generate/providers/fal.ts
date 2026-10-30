@@ -7,6 +7,7 @@
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
 import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
+import { waitUnlessCancelled, cancelUpstream, cancelledOutput } from "../utils/cancellation";
 import { validateMediaUrl } from "@/utils/urlValidation";
 import { setAtPath } from "./deepSet";
 import {
@@ -595,7 +596,16 @@ export async function generateWithFalQueue(
       };
     }
 
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    if (await waitUnlessCancelled(pollInterval, input.signal)) {
+      // fal doesn't bill a request canceled while queued; one already
+      // running gets the cancel too, and fal stops it where the model allows.
+      await cancelUpstream(requestId, "fal", () =>
+        fetch(`${responseUrl}/cancel`, {
+          method: "PUT",
+          headers: apiKey ? { "Authorization": `Key ${apiKey}` } : {},
+        }));
+      return cancelledOutput(requestId, "fal", true);
+    }
 
     const statusResponse = await fetch(
       statusUrl,

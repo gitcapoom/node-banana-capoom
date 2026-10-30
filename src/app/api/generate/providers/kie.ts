@@ -7,6 +7,7 @@
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
 import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
+import { waitUnlessCancelled, cancelledOutput } from "../utils/cancellation";
 import { validateMediaUrl } from "@/utils/urlValidation";
 
 const MAX_MEDIA_SIZE = 500 * 1024 * 1024; // 500MB
@@ -299,6 +300,7 @@ export async function pollKieTaskCompletion(
   requestId: string,
   apiKey: string,
   taskId: string,
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
   const maxWaitTime = GENERATION_MAX_WAIT_MS;
   const pollInterval = 2000; // 2 seconds
@@ -312,7 +314,8 @@ export async function pollKieTaskCompletion(
       return { success: false, error: "Generation timed out after 10 minutes" };
     }
 
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    // Kie has no cancel endpoint: stop polling, the job still runs and bills.
+    if (await waitUnlessCancelled(pollInterval, signal)) return cancelledOutput(requestId, "Kie", false);
 
     const response = await fetch(pollUrl, {
       headers: {
@@ -361,6 +364,7 @@ export async function pollVeoTaskCompletion(
   requestId: string,
   apiKey: string,
   taskId: string,
+  signal?: AbortSignal,
 ): Promise<{ success: boolean; data?: Record<string, unknown>; error?: string }> {
   const maxWaitTime = GENERATION_MAX_WAIT_MS;
   const pollInterval = 2000;
@@ -373,7 +377,8 @@ export async function pollVeoTaskCompletion(
     if (Date.now() - startTime > maxWaitTime) {
       return { success: false, error: "Generation timed out after 10 minutes" };
     }
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    // Kie has no cancel endpoint: stop polling, the job still runs and bills.
+    if (await waitUnlessCancelled(pollInterval, signal)) return cancelledOutput(requestId, "Kie", false);
 
     const response = await fetch(pollUrl, {
       headers: { "Authorization": `Bearer ${apiKey}` },
@@ -566,7 +571,7 @@ export async function generateWithKie(
     console.log(`[API:${requestId}] Veo task created: ${taskId}`);
 
     // Poll with Veo-specific polling
-    const pollResult = await pollVeoTaskCompletion(requestId, apiKey, taskId);
+    const pollResult = await pollVeoTaskCompletion(requestId, apiKey, taskId, input.signal);
     if (!pollResult.success) {
       return { success: false, error: `${input.model.name}: ${pollResult.error}` };
     }
@@ -716,7 +721,7 @@ export async function generateWithKie(
   console.log(`[API:${requestId}] Kie task created: ${taskId}`);
 
   // Poll for completion
-  const pollResult = await pollKieTaskCompletion(requestId, apiKey, taskId);
+  const pollResult = await pollKieTaskCompletion(requestId, apiKey, taskId, input.signal);
 
   if (!pollResult.success) {
     return {

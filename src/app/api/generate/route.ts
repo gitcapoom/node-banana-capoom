@@ -323,6 +323,7 @@ export async function POST(request: NextRequest) {
         images: processedImages,
         parameters,
         dynamicInputs: processedDynamicInputs,
+        signal: request.signal,
       };
 
       const result = await retryWithCompressedImages(
@@ -397,6 +398,7 @@ export async function POST(request: NextRequest) {
         images: processedImages,
         parameters,
         dynamicInputs: processedDynamicInputs,
+        signal: request.signal,
       };
 
       // ── SSE streaming path ──────────────────────────────────
@@ -521,6 +523,7 @@ export async function POST(request: NextRequest) {
         images: processedImages,
         parameters,
         dynamicInputs: processedDynamicInputs,
+        signal: request.signal,
       };
 
       const result = await retryWithCompressedImages(
@@ -599,6 +602,7 @@ export async function POST(request: NextRequest) {
         images: processedImages,
         parameters,
         dynamicInputs: processedDynamicInputs,
+        signal: request.signal,
       };
 
       const result = await retryWithCompressedImages(
@@ -666,6 +670,7 @@ export async function POST(request: NextRequest) {
         images: processedImages,
         parameters,
         dynamicInputs: processedDynamicInputs,
+        signal: request.signal,
       };
 
       const result = await retryWithCompressedImages(
@@ -737,6 +742,7 @@ export async function POST(request: NextRequest) {
         images: processedImages,
         parameters,
         dynamicInputs: processedDynamicInputs,
+        signal: request.signal,
       };
 
       const result = await retryWithCompressedImages(
@@ -811,6 +817,7 @@ export async function POST(request: NextRequest) {
         images: processedImages,
         parameters,
         dynamicInputs: processedDynamicInputs,
+        signal: request.signal,
       };
 
       const result = await retryWithCompressedImages(
@@ -882,7 +889,7 @@ export async function POST(request: NextRequest) {
       }
       const result = await retryWithCompressedImages(
         requestId, refRetry, images || [], undefined,
-        (imgs) => generateWithGeminiVideo(requestId, geminiApiKey, selectedModel.modelId, resolvedPrompt || "", imgs, veoParams),
+        (imgs) => generateWithGeminiVideo(requestId, geminiApiKey, selectedModel.modelId, resolvedPrompt || "", imgs, veoParams, request.signal),
       );
 
       if (!result.success) {

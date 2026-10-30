@@ -109,6 +109,8 @@ export interface GenerationInput {
   parameters?: Record<string, unknown>;
   /** Dynamic inputs mapped from schema (e.g., { "image_url": "data:...", "tail_image_url": "data:..." }) */
   dynamicInputs?: Record<string, string | string[]>;
+  /** Aborts when the client cancels the request; providers stop polling (and cancel upstream where they can). */
+  signal?: AbortSignal;
 }
 
 /**

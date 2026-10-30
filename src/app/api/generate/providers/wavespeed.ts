@@ -7,6 +7,7 @@
 
 import { GenerationInput, GenerationOutput } from "@/lib/providers/types";
 import { GENERATION_MAX_WAIT_MS } from "../utils/timeouts";
+import { waitUnlessCancelled, cancelledOutput } from "../utils/cancellation";
 import { validateMediaUrl } from "@/utils/urlValidation";
 import { isArraySchemaProperty } from "../schemaUtils";
 import { fetchWaveSpeedRaw } from "@/lib/schema/normalize/wavespeed";
@@ -262,7 +263,9 @@ export async function generateWithWaveSpeed(
       };
     }
 
-    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+    // WaveSpeed has no cancel endpoint (only delete, which its docs warn
+    // against for running jobs): stop polling, the job still runs and bills.
+    if (await waitUnlessCancelled(pollInterval, input.signal)) return cancelledOutput(requestId, "WaveSpeed", false);
 
     try {
       // Use provided poll URL if available, otherwise construct it
